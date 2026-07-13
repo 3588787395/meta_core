@@ -1,0 +1,157 @@
+﻿
+=================================== ERRORS ====================================
+______________ ERROR collecting meta_core/tests/test_callback.py ______________
+ImportError while importing test module 'H:\new_tdx_mock\PYPlugins\meta_core\tests\test_callback.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+D:\Python\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+meta_core\tests\test_callback.py:13: in <module>
+    from conftest import (
+E   ImportError: cannot import name 'make_tdx_simple_pool' from 'conftest' (H:\new_tdx_mock\PYPlugins\meta_core\tests\conftest.py)
+______________ ERROR collecting meta_core/tests/test_dzh_ttl.py _______________
+ImportError while importing test module 'H:\new_tdx_mock\PYPlugins\meta_core\tests\test_dzh_ttl.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+D:\Python\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+meta_core\tests\test_dzh_ttl.py:14: in <module>
+    from conftest import (
+E   ImportError: cannot import name 'make_dzh_simple_pool' from 'conftest' (H:\new_tdx_mock\PYPlugins\meta_core\tests\conftest.py)
+________________ ERROR collecting meta_core/tests/test_e2e.py _________________
+ImportError while importing test module 'H:\new_tdx_mock\PYPlugins\meta_core\tests\test_e2e.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+D:\Python\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+meta_core\tests\test_e2e.py:8: in <module>
+    from conftest import (
+E   ImportError: cannot import name 'make_tdx_simple_pool' from 'conftest' (H:\new_tdx_mock\PYPlugins\meta_core\tests\conftest.py)
+________________ ERROR collecting meta_core/tests/test_edge.py ________________
+ImportError while importing test module 'H:\new_tdx_mock\PYPlugins\meta_core\tests\test_edge.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+D:\Python\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+meta_core\tests\test_edge.py:10: in <module>
+    from conftest import (
+E   ImportError: cannot import name 'make_tdx_simple_pool' from 'conftest' (H:\new_tdx_mock\PYPlugins\meta_core\tests\conftest.py)
+____________ ERROR collecting meta_core/tests/test_engine_real.py _____________
+ImportError while importing test module 'H:\new_tdx_mock\PYPlugins\meta_core\tests\test_engine_real.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+D:\Python\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+meta_core\tests\test_engine_real.py:67: in <module>
+    from HQChartPy2 import GetVersion, GetAuthorizeInfo, LoadAuthorizeInfo, Run as _Run, SetLog
+meta_core\vendor\HQChartPy2\__init__.py:10: in <module>
+    from HQChartPy2.HQChartPy2 import LoadAuthorizeInfo, Run, GetAuthorizeInfo, GetVersion, SetLog
+E   ImportError: DLL load failed while importing HQChartPy2: 找不到指定的模块。
+------------------------------- Captured stdout -------------------------------
+============================================================
+1. 加载真实K线数据 + 引擎初始化
+============================================================
+  股票: 000001.sh (上证指数), 7556 条, 19901219~20211119
+_______________ ERROR collecting meta_core/tests/test_events.py _______________
+ImportError while importing test module 'H:\new_tdx_mock\PYPlugins\meta_core\tests\test_events.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+D:\Python\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+meta_core\tests\test_events.py:8: in <module>
+    from conftest import (
+E   ImportError: cannot import name 'make_tdx_simple_pool' from 'conftest' (H:\new_tdx_mock\PYPlugins\meta_core\tests\conftest.py)
+_______________ ERROR collecting meta_core/tests/test_filter.py _______________
+ImportError while importing test module 'H:\new_tdx_mock\PYPlugins\meta_core\tests\test_filter.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+D:\Python\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+meta_core\tests\test_filter.py:16: in <module>
+    from conftest import (
+E   ImportError: cannot import name 'make_tdx_simple_pool' from 'conftest' (H:\new_tdx_mock\PYPlugins\meta_core\tests\conftest.py)
+________________ ERROR collecting meta_core/tests/test_gate.py ________________
+ImportError while importing test module 'H:\new_tdx_mock\PYPlugins\meta_core\tests\test_gate.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+D:\Python\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+meta_core\tests\test_gate.py:17: in <module>
+    from conftest import (
+E   ImportError: cannot import name 'make_tdx_simple_pool' from 'conftest' (H:\new_tdx_mock\PYPlugins\meta_core\tests\conftest.py)
+________________ ERROR collecting meta_core/tests/test_init.py ________________
+ImportError while importing test module 'H:\new_tdx_mock\PYPlugins\meta_core\tests\test_init.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+D:\Python\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+meta_core\tests\test_init.py:10: in <module>
+    from conftest import (
+E   ImportError: cannot import name 'make_tdx_simple_pool' from 'conftest' (H:\new_tdx_mock\PYPlugins\meta_core\tests\conftest.py)
+_____________ ERROR collecting meta_core/tests/test_propagate.py ______________
+ImportError while importing test module 'H:\new_tdx_mock\PYPlugins\meta_core\tests\test_propagate.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+D:\Python\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+meta_core\tests\test_propagate.py:14: in <module>
+    from conftest import (
+E   ImportError: cannot import name 'make_tdx_simple_pool' from 'conftest' (H:\new_tdx_mock\PYPlugins\meta_core\tests\conftest.py)
+_______________ ERROR collecting meta_core/tests/test_quick.py ________________
+ImportError while importing test module 'H:\new_tdx_mock\PYPlugins\meta_core\tests\test_quick.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+D:\Python\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+meta_core\tests\test_quick.py:3: in <module>
+    from HQChartPy2 import Run as _Run
+meta_core\vendor\HQChartPy2\__init__.py:10: in <module>
+    from HQChartPy2.HQChartPy2 import LoadAuthorizeInfo, Run, GetAuthorizeInfo, GetVersion, SetLog
+E   ImportError: DLL load failed while importing HQChartPy2: 找不到指定的模块。
+______________ ERROR collecting meta_core/tests/test_tracker.py _______________
+ImportError while importing test module 'H:\new_tdx_mock\PYPlugins\meta_core\tests\test_tracker.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+D:\Python\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+meta_core\tests\test_tracker.py:7: in <module>
+    from conftest import (
+E   ImportError: cannot import name 'make_tdx_simple_pool' from 'conftest' (H:\new_tdx_mock\PYPlugins\meta_core\tests\conftest.py)
+________________ ERROR collecting meta_core/tests/test_ttl.py _________________
+ImportError while importing test module 'H:\new_tdx_mock\PYPlugins\meta_core\tests\test_ttl.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+D:\Python\Lib\importlib\__init__.py:126: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+meta_core\tests\test_ttl.py:15: in <module>
+    from conftest import (
+E   ImportError: cannot import name 'make_tdx_simple_pool' from 'conftest' (H:\new_tdx_mock\PYPlugins\meta_core\tests\conftest.py)
+=========================== short test summary info ===========================
+ERROR meta_core/tests/test_callback.py
+ERROR meta_core/tests/test_dzh_ttl.py
+ERROR meta_core/tests/test_e2e.py
+ERROR meta_core/tests/test_edge.py
+ERROR meta_core/tests/test_engine_real.py
+ERROR meta_core/tests/test_events.py
+ERROR meta_core/tests/test_filter.py
+ERROR meta_core/tests/test_gate.py
+ERROR meta_core/tests/test_init.py
+ERROR meta_core/tests/test_propagate.py
+ERROR meta_core/tests/test_quick.py
+ERROR meta_core/tests/test_tracker.py
+ERROR meta_core/tests/test_ttl.py
+!!!!!!!!!!!!!!!!!! Interrupted: 13 errors during collection !!!!!!!!!!!!!!!!!!!
+13 errors in 3.08s

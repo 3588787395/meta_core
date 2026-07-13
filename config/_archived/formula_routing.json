@@ -1,0 +1,60 @@
+{
+  "version": "1.0",
+  "description": "公式引擎路由决策规则表，驱动通用 _resolve_engine 路由器",
+  "engine_routing": [
+    {
+      "id": "python_simple",
+      "condition": {
+        "complexity": "simple",
+        "period_in": [
+          "1m",
+          "tick"
+        ]
+      },
+      "engine": "python"
+    },
+    {
+      "id": "hqchart",
+      "condition": {
+        "hqchart_available": true
+      },
+      "engine": "hqchart"
+    },
+    {
+      "id": "python_fallback",
+      "condition": {
+        "complexity": "simple",
+        "period_in": [
+          "1m",
+          "tick"
+        ]
+      },
+      "engine": "python"
+    },
+    {
+      "id": "python_simple_no_hqchart",
+      "condition": {
+        "complexity": "simple",
+        "hqchart_available": false
+      },
+      "engine": "python"
+    },
+    {
+      "id": "default",
+      "condition": "default",
+      "engine": "error"
+    }
+  ],
+  "engine_methods": {
+    "python": {
+      "eval": "_eval_python",
+      "eval_outvars": "_eval_python",
+      "eval_batch": "_eval_python_batch"
+    },
+    "hqchart": {
+      "eval": "_eval_hqchart",
+      "eval_outvars": "_eval_hqchart_outvars",
+      "eval_batch": "_eval_hqchart_batch"
+    }
+  }
+}

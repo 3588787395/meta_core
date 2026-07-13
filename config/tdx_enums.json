@@ -1,0 +1,444 @@
+{
+  "version": "2.0",
+  "description": "TDX枚举值配置表（完整版，基于通达信客户端截图逆向）",
+  "enums": {
+    "nset": [
+      {
+        "value": 0,
+        "label": "技术指标公式",
+        "desc": "使用自定义或系统技术指标公式进行选股"
+      },
+      {
+        "value": 1,
+        "label": "条件选股公式",
+        "desc": "使用条件选股公式（返回0/1信号）"
+      },
+      {
+        "value": 2,
+        "label": "专家系统公式",
+        "desc": "使用专家系统（买卖点组合）"
+      },
+      {
+        "value": 3,
+        "label": "最新财务选股",
+        "desc": "基于最新财务数据指标筛选"
+      },
+      {
+        "value": 4,
+        "label": "实时行情选股",
+        "desc": "基于实时行情数据筛选（涨幅/量比等）"
+      },
+      {
+        "value": 5,
+        "label": "逻辑运算选股",
+        "desc": "直接转移/逻辑运算"
+      }
+    ],
+    "noperate": [
+      {
+        "value": 0,
+        "label": "等于",
+        "desc": "指标值等于目标值时通过"
+      },
+      {
+        "value": 1,
+        "label": "大于",
+        "desc": "指标值大于目标值时通过"
+      },
+      {
+        "value": 2,
+        "label": "小于",
+        "desc": "指标值小于目标值时通过"
+      },
+      {
+        "value": 3,
+        "label": "上穿(金叉)",
+        "desc": "短线上穿长线（如MA5上穿MA20）"
+      },
+      {
+        "value": 4,
+        "label": "下破(死叉)",
+        "desc": "短线跌破长线"
+      },
+      {
+        "value": 5,
+        "label": "排名为",
+        "desc": "精确排名等于目标名次"
+      },
+      {
+        "value": 6,
+        "label": "排名前N",
+        "desc": "排名在目标名次之前"
+      },
+      {
+        "value": 7,
+        "label": "排名后N",
+        "desc": "排名在目标名次之后"
+      },
+      {
+        "value": 8,
+        "label": "上拐",
+        "desc": "曲线由降转升的拐点检测"
+      },
+      {
+        "value": 9,
+        "label": "下拐",
+        "desc": "曲线由升转降的拐点检测"
+      }
+    ],
+    "nperiod": [
+      {
+        "value": 0,
+        "label": "分笔成交"
+      },
+      {
+        "value": 1,
+        "label": "1分钟"
+      },
+      {
+        "value": 2,
+        "label": "5分钟"
+      },
+      {
+        "value": 3,
+        "label": "15分钟"
+      },
+      {
+        "value": 4,
+        "label": "日线"
+      },
+      {
+        "value": 5,
+        "label": "周线"
+      },
+      {
+        "value": 6,
+        "label": "月线"
+      }
+    ],
+    "ndeltype": [
+      {
+        "value": 0,
+        "label": "天 (days)",
+        "desc": "股票入池N天后自动删除（×86400秒），适合长期持仓策略"
+      },
+      {
+        "value": 1,
+        "label": "小时 (hours)",
+        "desc": "股票入池N小时后自动删除（×3600秒），适合日内短线"
+      },
+      {
+        "value": 2,
+        "label": "分钟 (minutes)",
+        "desc": "股票入池N分钟后自动删除（×60秒），适合实时监控"
+      },
+      {
+        "value": 3,
+        "label": "秒 (seconds)",
+        "desc": "股票入池N秒后自动删除（×1秒），适合高频即时池"
+      }
+    ],
+    "nsoundtype": [
+      {
+        "value": 0,
+        "label": "系统声音",
+        "desc": "使用通达信内置系统提示音"
+      },
+      {
+        "value": 1,
+        "label": "自定义文件",
+        "desc": "使用用户指定的WAV声音文件路径"
+      }
+    ],
+    "bclearblock": [
+      {
+        "value": 0,
+        "label": "追加模式",
+        "desc": "将当前池股票追加到目标板块已有股票之后"
+      },
+      {
+        "value": 1,
+        "label": "覆盖模式",
+        "desc": "先清空目标板块全部股票，再写入当前池股票"
+      }
+    ],
+    "spinfo_type": [
+      {
+        "value": 0,
+        "label": "自设监控品种",
+        "desc": "用户手动选择的监控股票列表，支持显式指定或从user_blocks表查询"
+      },
+      {
+        "value": 1,
+        "label": "沪深300+中证500",
+        "desc": "沪深300与中证500成分股并集，约800只"
+      },
+      {
+        "value": 2,
+        "label": "所有A股",
+        "desc": "全部A股（含沪深京），约5500只"
+      },
+      {
+        "value": 3,
+        "label": "自选股",
+        "desc": "用户自选股列表，支持30秒间隔自动刷新"
+      },
+      {
+        "value": 4,
+        "label": "自定义板块",
+        "desc": "通过customblockname指定的任意自定义板块"
+      },
+      {
+        "value": 5,
+        "label": "板块指数",
+        "desc": "通达信板块指数（880xxx系列等），约587只"
+      },
+      {
+        "value": 6,
+        "label": "ETF基金",
+        "desc": "全市场ETF基金，约1610只"
+      },
+      {
+        "value": 7,
+        "label": "可转债",
+        "desc": "全市场可转债，约337只"
+      }
+    ],
+    "starttype": [
+      {
+        "value": 0,
+        "label": "立即执行",
+        "desc": "池启动后立即开始执行"
+      },
+      {
+        "value": 1,
+        "label": "开盘前",
+        "desc": "9:00(开盘前)开始执行"
+      },
+      {
+        "value": 2,
+        "label": "交易日延迟",
+        "desc": "交易日开始后延迟N秒执行"
+      },
+      {
+        "value": 3,
+        "label": "按间隔执行",
+        "desc": "每隔N秒/分/小时执行一次"
+      },
+      {
+        "value": 4,
+        "label": "收盘前",
+        "desc": "收盘前N秒执行"
+      },
+      {
+        "value": 5,
+        "label": "收市后",
+        "desc": "15:00收市后执行"
+      },
+      {
+        "value": 6,
+        "label": "交易日时间",
+        "desc": "交易日内的某个HHMMSS时刻"
+      },
+      {
+        "value": 7,
+        "label": "指定时间",
+        "desc": "指定具体的HHMMSS时刻"
+      }
+    ],
+    "starttimetype": [
+      {
+        "value": 0,
+        "label": "秒数",
+        "desc": "starttime单位为秒"
+      },
+      {
+        "value": 1,
+        "label": "HHMMSS格式",
+        "desc": "starttimehms以HHMMSS整数表示"
+      },
+      {
+        "value": 2,
+        "label": "小时",
+        "desc": "starttime单位为小时(×3600秒)"
+      }
+    ],
+    "cxtype": [
+      {
+        "value": 0,
+        "label": "一直执行(无限循环)",
+        "desc": "持续不断执行，每间隔jgtime秒循环一次，永不停止"
+      },
+      {
+        "value": 1,
+        "label": "持续时长(N秒内循环)",
+        "desc": "在cxtime时长窗口内按jgtime间隔循环，超时停止。执行次数≈⌊cxtime/jgtime⌋+1"
+      },
+      {
+        "value": 2,
+        "label": "只执行一次",
+        "desc": "触发一次后停止。提示:选择只执行一次请在9:29后执行"
+      }
+    ],
+    "cxtimetype": [
+      {
+        "value": 0,
+        "label": "秒数",
+        "desc": "cxtime单位为秒"
+      },
+      {
+        "value": 1,
+        "label": "分钟",
+        "desc": "cxtime单位为分钟(×60秒)"
+      },
+      {
+        "value": 2,
+        "label": "次数",
+        "desc": "cxtime表示执行次数"
+      }
+    ],
+    "tran": [
+      {
+        "value": 0,
+        "label": "复制(保留源池)",
+        "desc": "将股票复制到目标池，源池保留"
+      },
+      {
+        "value": 1,
+        "label": "移动(清空源池)",
+        "desc": "将股票移入目标池，源池清空"
+      }
+    ],
+    "emptyps": [
+      {
+        "value": 0,
+        "label": "不触发",
+        "desc": "源池为空时不触发转移"
+      },
+      {
+        "value": 1,
+        "label": "空也触发",
+        "desc": "即使源池为空也触发转移"
+      }
+    ],
+    "noperate_impl": {
+      "0": {
+        "type": "compare",
+        "method": "eq",
+        "desc": "等于（浮点容差）"
+      },
+      "1": {
+        "type": "compare",
+        "method": "gt",
+        "desc": "大于"
+      },
+      "2": {
+        "type": "compare",
+        "method": "lt",
+        "desc": "小于"
+      },
+      "3": {
+        "type": "crossover",
+        "method": "cross_up",
+        "desc": "上穿(金叉)"
+      },
+      "4": {
+        "type": "crossover",
+        "method": "cross_down",
+        "desc": "下破(死叉)"
+      },
+      "5": {
+        "type": "rank",
+        "method": "rank_exact",
+        "desc": "排名为（精确排名第N名）"
+      },
+      "6": {
+        "type": "rank",
+        "method": "rank_top",
+        "desc": "排名前N"
+      },
+      "7": {
+        "type": "rank",
+        "method": "rank_bottom",
+        "desc": "排名后N"
+      },
+      "8": {
+        "type": "derivative",
+        "method": "up_turn",
+        "desc": "上拐"
+      },
+      "9": {
+        "type": "derivative",
+        "method": "down_turn",
+        "desc": "下拐"
+      }
+    },
+    "dzh_cycle": [
+      {"value": 1, "label": "分笔"},
+      {"value": 2, "label": "1分钟"},
+      {"value": 3, "label": "5分钟"},
+      {"value": 4, "label": "15分钟"},
+      {"value": 5, "label": "30分钟"},
+      {"value": 6, "label": "60分钟"},
+      {"value": 7, "label": "日线"},
+      {"value": 8, "label": "周线"},
+      {"value": 9, "label": "月线"}
+    ],
+    "dzh_indi_type": [
+      {"value": "indi", "label": "技术指标"},
+      {"value": "", "label": "条件选股"},
+      {"value": "trade_sys", "label": "交易系统"},
+      {"value": "basic", "label": "基本面"},
+      {"value": "dynamic", "label": "动态行情"},
+      {"value": "ref", "label": "引用公式"}
+    ],
+    "dzh_deltype": [
+      {"value": 0, "label": "不删除"},
+      {"value": 1, "label": "定时删除"},
+      {"value": 2, "label": "条件删除"}
+    ],
+    "dzh_begin": [
+      {"value": 0, "label": "立即执行"},
+      {"value": 1, "label": "开盘后执行"},
+      {"value": 2, "label": "开市前执行"},
+      {"value": 3, "label": "开市后执行"},
+      {"value": 4, "label": "收市前执行"},
+      {"value": 5, "label": "收市后执行"},
+      {"value": 6, "label": "指定时间执行"},
+      {"value": 7, "label": "延迟N秒执行"}
+    ]
+  },
+  "period_map": {"0": "1d", "1": "5m", "2": "15m", "3": "30m", "4": "1d", "5": "1w", "6": "1mon"},
+  "indicator_formula_map": {
+    "7": {
+      "formula_name": "CYX",
+      "formula_arg": "",
+      "return_count": 1,
+      "noperate_type": "sort"
+    },
+    "11": {
+      "formula_name": "CYX",
+      "formula_arg": "",
+      "return_count": 1,
+      "noperate_type": "sort"
+    },
+    "106": {
+      "formula_name": "CYX",
+      "formula_arg": "",
+      "return_count": 1,
+      "noperate_type": "condition"
+    },
+    "107": {
+      "formula_name": "CYX",
+      "formula_arg": "",
+      "return_count": 1,
+      "noperate_type": "condition"
+    },
+    "278": {
+      "formula_name": "MACD",
+      "formula_arg": "12,26,9",
+      "return_count": 3,
+      "noperate_type": "condition"
+    }
+  }
+}

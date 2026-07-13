@@ -1,0 +1,75 @@
+{
+  "version": "1.0",
+  "description": "图表配置表 - K线图和指标图的颜色、周期、布局常量",
+  "charts": {
+    "kline": {
+      "colors": {
+        "bg": "#1a1a2e",
+        "grid_line": "rgba(255,255,255,0.06)",
+        "axis_text": "#9090a8",
+        "axis_line": "rgba(255,255,255,0.12)",
+        "up_candle": "#ff4444",
+        "up_candle_fill": "#ff4444",
+        "down_candle": "#00cc66",
+        "down_candle_fill": "#00cc66",
+        "volume_up": "rgba(255,68,68,0.6)",
+        "volume_down": "rgba(0,204,102,0.6)",
+        "crosshair": "rgba(255,255,255,0.3)",
+        "crosshair_label": "#4a90d9"
+      },
+      "ma_colors": {
+        "ma5": "#ffcc00",
+        "ma10": "#00cccc",
+        "ma20": "#cc66ff",
+        "ma60": "rgba(255,255,255,0.5)"
+      },
+      "period_map": {
+        "1min": "1分钟",
+        "5min": "5分钟",
+        "15min": "15分钟",
+        "60min": "60分钟",
+        "day": "日线",
+        "week": "周线",
+        "month": "月线"
+      },
+      "layout": {
+        "padding_right": 70,
+        "padding_top": 10,
+        "padding_bottom": 24,
+        "candle_width": 8,
+        "candle_width_min": 1,
+        "candle_gap_ratio": 0.2,
+        "volume_height_ratio": 0.25,
+        "price_rows": 5
+      }
+    },
+    "indicator": {
+      "colors": {
+        "bg": "#1a1a2e",
+        "grid_line": "rgba(255,255,255,0.06)",
+        "axis_text": "#9090a8",
+        "axis_line": "rgba(255,255,255,0.12)",
+        "zero_line": "rgba(255,255,255,0.25)",
+        "positive_fill": "rgba(0,204,102,0.15)",
+        "negative_fill": "rgba(255,68,68,0.15)",
+        "line_color": "#4a9eff",
+        "crosshair": "rgba(255,255,255,0.3)",
+        "crosshair_label": "#4a90d9",
+        "dot_color": "#4a9eff"
+      },
+      "layout": {
+        "padding_right": 60,
+        "padding_top": 10,
+        "padding_bottom": 24,
+        "rows": 5
+      },
+      "default_props": {
+        "show_zero_line": true,
+        "positive_color": "#00cc66",
+        "negative_color": "#ff4444",
+        "line_color": "#4a9eff",
+        "height": 200
+      }
+    }
+  }
+}

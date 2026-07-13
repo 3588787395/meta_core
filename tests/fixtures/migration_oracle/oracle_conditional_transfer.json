@@ -1,0 +1,202 @@
+{
+  "engine_events": [
+    {
+      "edge_count": 2,
+      "event": "pool_start",
+      "node_count": 3,
+      "pool_id": "oracle_conditional_transfer",
+      "pool_name": "条件转移边",
+      "started_at": "TIMESTAMP"
+    },
+    {
+      "event": "flow_fired",
+      "exited_codes": [],
+      "fired": true,
+      "flow_id": "e1",
+      "mode": "copy",
+      "source_id": "candidate",
+      "source_remaining": 2,
+      "target_count": 2,
+      "target_id": "condition",
+      "transferred_codes": [
+        "600000",
+        "000001"
+      ]
+    },
+    {
+      "event": "flow_fired",
+      "exited_codes": [],
+      "fired": true,
+      "flow_id": "e2",
+      "mode": "copy",
+      "source_id": "condition",
+      "source_remaining": 2,
+      "target_count": 2,
+      "target_id": "state_1",
+      "transferred_codes": [
+        "600000",
+        "000001"
+      ]
+    },
+    {
+      "event": "pool_end",
+      "finished_at": "TIMESTAMP",
+      "flow_fired_count": 2,
+      "pool_id": "oracle_conditional_transfer",
+      "total_transferred": 6
+    }
+  ],
+  "error": null,
+  "node_stock_codes": {
+    "candidate": [
+      "000001",
+      "600000"
+    ],
+    "condition": [
+      "000001",
+      "600000"
+    ],
+    "state_1": [
+      "000001",
+      "600000"
+    ]
+  },
+  "node_stocks": {
+    "candidate": [
+      {
+        "code": "600000",
+        "label": "浦发银行"
+      },
+      {
+        "code": "000001",
+        "label": "平安银行"
+      }
+    ],
+    "condition": [
+      {
+        "code": "600000",
+        "label": "浦发银行"
+      },
+      {
+        "code": "000001",
+        "label": "平安银行"
+      }
+    ],
+    "state_1": [
+      {
+        "code": "600000",
+        "label": "浦发银行"
+      },
+      {
+        "code": "000001",
+        "label": "平安银行"
+      }
+    ]
+  },
+  "pool_id": "oracle_conditional_transfer",
+  "queue_events": [
+    {
+      "code": "600000",
+      "details": {
+        "flow_id": "e1",
+        "mode": "copy",
+        "price": 10.2,
+        "source_id": "candidate",
+        "timestamp": "TIMESTAMP"
+      },
+      "pool_id": "condition",
+      "time": "TIMESTAMP",
+      "event_type": "ENTER"
+    },
+    {
+      "code": "000001",
+      "details": {
+        "flow_id": "e1",
+        "mode": "copy",
+        "price": 15.1,
+        "source_id": "candidate",
+        "timestamp": "TIMESTAMP"
+      },
+      "pool_id": "condition",
+      "time": "TIMESTAMP",
+      "event_type": "ENTER"
+    },
+    {
+      "code": "600000",
+      "details": {
+        "flow_id": "e2",
+        "mode": "copy",
+        "price": 10.2,
+        "source_id": "condition",
+        "timestamp": "TIMESTAMP"
+      },
+      "pool_id": "state_1",
+      "time": "TIMESTAMP",
+      "event_type": "ENTER"
+    },
+    {
+      "code": "000001",
+      "details": {
+        "flow_id": "e2",
+        "mode": "copy",
+        "price": 15.1,
+        "source_id": "condition",
+        "timestamp": "TIMESTAMP"
+      },
+      "pool_id": "state_1",
+      "time": "TIMESTAMP",
+      "event_type": "ENTER"
+    }
+  ],
+  "run_type": "run_pool",
+  "runtime_tables": {
+    "_dirty_nodes": [],
+    "_first_run": false,
+    "_flow_exec_counts": {
+      "e1": 1,
+      "e2": 1
+    },
+    "_flow_first_fire_ts": {
+      "e1": "TIMESTAMP",
+      "e2": "TIMESTAMP"
+    },
+    "_node_snapshots": {
+      "candidate": [
+        "000001",
+        "600000"
+      ],
+      "condition": [
+        "000001",
+        "600000"
+      ],
+      "state_1": [
+        "000001",
+        "600000"
+      ]
+    }
+  },
+  "signals": [],
+  "success": true,
+  "transfer_events": [
+    {
+      "flow_id": "e1",
+      "mode": "copy",
+      "source_id": "candidate",
+      "target_id": "condition",
+      "transferred_codes": [
+        "000001",
+        "600000"
+      ]
+    },
+    {
+      "flow_id": "e2",
+      "mode": "copy",
+      "source_id": "condition",
+      "target_id": "state_1",
+      "transferred_codes": [
+        "000001",
+        "600000"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,209 @@
+{
+  "version": "1.0",
+  "description": "主题配置表 - 提取 CSS 变量到配置表，统一管理颜色/字体/间距",
+  "categories": [
+    {"category_id": "bg", "name": "背景色", "order": 1},
+    {"category_id": "text", "name": "文本色", "order": 2},
+    {"category_id": "accent", "name": "强调色", "order": 3},
+    {"category_id": "border", "name": "边框色", "order": 4},
+    {"category_id": "type", "name": "节点类型色", "order": 5},
+    {"category_id": "edge", "name": "边线色", "order": 6},
+    {"category_id": "effect", "name": "效果", "order": 7}
+  ],
+  "variables": [
+    {
+      "name": "--bg-primary",
+      "value": "#1a1a2e",
+      "category": "bg",
+      "description": "主背景色"
+    },
+    {
+      "name": "--bg-secondary",
+      "value": "#16213e",
+      "category": "bg",
+      "description": "次背景色"
+    },
+    {
+      "name": "--bg-panel",
+      "value": "#1f1f3a",
+      "category": "bg",
+      "description": "面板背景色"
+    },
+    {
+      "name": "--bg-input",
+      "value": "#252545",
+      "category": "bg",
+      "description": "输入框背景色"
+    },
+    {
+      "name": "--bg-hover",
+      "value": "#2a2a4a",
+      "category": "bg",
+      "description": "悬停背景色"
+    },
+    {
+      "name": "--text-primary",
+      "value": "#e0e0e8",
+      "category": "text",
+      "description": "主文本色"
+    },
+    {
+      "name": "--text-secondary",
+      "value": "#9090a8",
+      "category": "text",
+      "description": "次文本色"
+    },
+    {
+      "name": "--text-muted",
+      "value": "#606078",
+      "category": "text",
+      "description": "弱化文本色"
+    },
+    {
+      "name": "--accent-blue",
+      "value": "#4a90d9",
+      "category": "accent",
+      "description": "强调蓝色"
+    },
+    {
+      "name": "--accent-blue-hover",
+      "value": "#5aa0e9",
+      "category": "accent",
+      "description": "强调蓝色悬停态"
+    },
+    {
+      "name": "--accent-green",
+      "value": "#2ecc71",
+      "category": "accent",
+      "description": "强调绿色"
+    },
+    {
+      "name": "--accent-orange",
+      "value": "#f39c12",
+      "category": "accent",
+      "description": "强调橙色"
+    },
+    {
+      "name": "--accent-red",
+      "value": "#e74c3c",
+      "category": "accent",
+      "description": "强调红色"
+    },
+    {
+      "name": "--accent-purple",
+      "value": "#9b59b6",
+      "category": "accent",
+      "description": "强调紫色"
+    },
+    {
+      "name": "--border-color",
+      "value": "#2d2d5e",
+      "category": "border",
+      "description": "边框色"
+    },
+    {
+      "name": "--border-light",
+      "value": "#3d3d6e",
+      "category": "border",
+      "description": "浅色边框"
+    },
+    {
+      "name": "--type-source",
+      "value": "#1abc9c",
+      "category": "type",
+      "description": "源节点类型色"
+    },
+    {
+      "name": "--type-condition",
+      "value": "#f39c12",
+      "category": "type",
+      "description": "条件节点类型色"
+    },
+    {
+      "name": "--type-pool",
+      "value": "#3498db",
+      "category": "type",
+      "description": "股票池节点类型色"
+    },
+    {
+      "name": "--type-discard",
+      "value": "#c0392b",
+      "category": "type",
+      "description": "剔除节点类型色"
+    },
+    {
+      "name": "--edge-pass",
+      "value": "#27ae60",
+      "category": "edge",
+      "description": "通过边线色"
+    },
+    {
+      "name": "--edge-copy",
+      "value": "#2980b9",
+      "category": "edge",
+      "description": "复制边线色"
+    },
+    {
+      "name": "--edge-overwrite",
+      "value": "#e67e22",
+      "category": "edge",
+      "description": "覆盖边线色"
+    },
+    {
+      "name": "--edge-move",
+      "value": "#c0392b",
+      "category": "edge",
+      "description": "移动边线色"
+    },
+    {
+      "name": "--shadow",
+      "value": "0 4px 24px rgba(0, 0, 0, 0.3)",
+      "category": "effect",
+      "description": "通用阴影"
+    },
+    {
+      "name": "--shadow-node",
+      "value": "rgba(74, 144, 217, 0.3)",
+      "category": "effect",
+      "description": "节点阴影色"
+    },
+    {
+      "name": "--grid-color",
+      "value": "rgba(255, 255, 255, 0.03)",
+      "category": "effect",
+      "description": "网格线颜色"
+    },
+    {
+      "name": "--grid-color-strong",
+      "value": "rgba(255, 255, 255, 0.06)",
+      "category": "effect",
+      "description": "强网格线颜色"
+    }
+  ],
+  "palette_names": {
+    "0":   { "name": "黑色",       "en": "Black" },
+    "1":   { "name": "深红",       "en": "DarkRed" },
+    "2":   { "name": "深绿",       "en": "DarkGreen" },
+    "3":   { "name": "橄榄",       "en": "Olive" },
+    "4":   { "name": "深蓝",       "en": "Navy" },
+    "5":   { "name": "紫色",       "en": "Purple" },
+    "6":   { "name": "青色",       "en": "Teal" },
+    "7":   { "name": "灰色",       "en": "Gray" },
+    "8":   { "name": "浅绿灰",     "en": "PaleGreen" },
+    "9":   { "name": "浅蓝灰",     "en": "LightBlue" },
+    "10":  { "name": "米白",       "en": "AntiqueWhite" },
+    "11":  { "name": "银灰",       "en": "Silver" },
+    "12":  { "name": "深灰",       "en": "DarkGray" },
+    "13":  { "name": "红色",       "en": "Red" },
+    "14":  { "name": "亮绿",       "en": "Lime" },
+    "15":  { "name": "黄色",       "en": "Yellow" },
+    "16":  { "name": "蓝色",       "en": "Blue" },
+    "17":  { "name": "品红",       "en": "Magenta" },
+    "18":  { "name": "青(Cyan)",   "en": "Cyan" },
+    "19":  { "name": "白色",       "en": "White" }
+  },
+  "backcolor_special_map": {
+    "16777216": "#000000",
+    "-1": "#000000"
+  }
+}

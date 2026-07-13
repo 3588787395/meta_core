@@ -1,0 +1,991 @@
+{
+  "version": "1.0",
+  "types": {
+    "1": {
+      "name": "文字标签",
+      "category": "auxiliary",
+      "pool_type": "dzh",
+      "handler": null,
+      "attrs": [
+        "id",
+        "type",
+        "attr",
+        "pos",
+        "clr",
+        "text",
+        "url"
+      ],
+      "attr_bits_ref": "field_definitions.bit_fields.1",
+      "model_class": "LabelCellModel",
+      "field_mappings": {
+        "text": "text",
+        "attr_int": "attr",
+        "clr": "clr",
+        "url": "url"
+      },
+      "default_params": {
+        "text": "",
+        "attr_int": 0,
+        "clr": "",
+        "url": ""
+      }
+    },
+    "2": {
+      "name": "容器",
+      "category": "auxiliary",
+      "pool_type": "dzh",
+      "handler": null,
+      "attrs": [
+        "id",
+        "type",
+        "attr",
+        "pos",
+        "clr",
+        "text"
+      ],
+      "attr_bits_ref": "field_definitions.bit_fields.2",
+      "model_class": "ContainerCellModel",
+      "field_mappings": {
+        "label": "text",
+        "attr_int": "attr",
+        "clr": "clr",
+        "text": "text"
+      },
+      "default_params": {
+        "label": "",
+        "attr_int": 0,
+        "clr": "",
+        "text": ""
+      }
+    },
+    "3": {
+      "name": "状态列",
+      "category": "layout",
+      "pool_type": "dzh",
+      "handler": null,
+      "attrs": [
+        "id",
+        "type",
+        "attr",
+        "pos",
+        "clr"
+      ],
+      "attr_bits_ref": "field_definitions.bit_fields.3",
+      "model_class": "StateColumnModel",
+      "field_mappings": {
+        "label": "text",
+        "attr_int": "attr",
+        "clr": "clr"
+      },
+      "default_params": {
+        "label": "",
+        "attr_int": 0,
+        "clr": ""
+      }
+    },
+    "4": {
+      "name": "丢弃池",
+      "category": "sink",
+      "pool_type": "dzh",
+      "handler": "discard_handler",
+      "attrs": [
+        "id",
+        "type",
+        "attr",
+        "pos",
+        "clr",
+        "text"
+      ],
+      "attr_bits_ref": "field_definitions.bit_fields.4",
+      "model_class": "DiscardCellModel",
+      "field_mappings": {
+        "clr": "clr",
+        "name": "text",
+        "attr_int": "attr"
+      },
+      "default_params": {
+        "clr": "",
+        "name": "",
+        "attr_int": 128
+      }
+    },
+    "5": {
+      "name": "执行顺序",
+      "category": "auxiliary",
+      "pool_type": "dzh",
+      "handler": null,
+      "attrs": [
+        "id",
+        "type",
+        "attr",
+        "pos",
+        "clr"
+      ],
+      "attr_bits_ref": "field_definitions.bit_fields.5",
+      "model_class": "ArrowCellModel",
+      "field_mappings": {
+        "clr": "clr"
+      },
+      "default_params": {
+        "clr": ""
+      }
+    },
+    "6": {
+      "name": "连接箭头",
+      "category": "auxiliary",
+      "pool_type": "dzh",
+      "handler": null,
+      "attrs": [
+        "id",
+        "type",
+        "attr",
+        "pos",
+        "clr"
+      ],
+      "attr_bits": {},
+      "model_class": "ArrowCellModel",
+      "field_mappings": {
+        "clr": "clr",
+        "text": "text"
+      },
+      "default_params": {
+        "clr": "",
+        "text": ""
+      }
+    },
+    "200": {
+      "name": "股票状态池",
+      "category": "core",
+      "pool_type": "dzh",
+      "shape": "rectangle",
+      "handler": "state_pool_handler",
+      "attrs": [
+        "id",
+        "type",
+        "attr",
+        "pos",
+        "clr",
+        "text",
+        "hold",
+        "col_def",
+        "width_def",
+        "histana",
+        "wizd",
+        "deltype",
+        "endtime",
+        "delstocktype",
+        "staattr",
+        "enter_action",
+        "exit_action",
+        "stocknum",
+        "tmpl",
+        "sorttype",
+        "tradeattr"
+      ],
+      "attr_bits_ref": "field_definitions.bit_fields.200",
+      "sub_elements": [
+        "stocks",
+        "tradeattr"
+      ],
+      "model_class": "StatePoolCellModel",
+      "field_mappings": {
+        "hold_sec": "hold",
+        "col_list": "col_def",
+        "width_list": "width_def",
+        "dzh_attr": "attr",
+        "clr": "clr",
+        "text": "text",
+        "stocknum": "stocknum",
+        "deltype": "deltype",
+        "endtime": "endtime",
+        "delstocktype": "delstocktype",
+        "histana": "histana",
+        "wizd": "wizd",
+        "staattr": "staattr",
+        "enter_action": "enter_action",
+        "exit_action": "exit_action",
+        "tradeattr": "tradeattr",
+        "sorttype": "sorttype",
+        "tmpl": "tmpl"
+      },
+      "default_params": {
+        "hold_sec": 432000,
+        "col_list": "2,-1,-2,-3,7,14,8,10,17,45",
+        "width_list": "",
+        "dzh_attr": {
+          "raw": 0,
+          "bits": {
+            "show_overview": false,
+            "show_overview_container": false,
+            "simple_intermediate": false,
+            "calc_profit_from_prev": false,
+            "record_history": false,
+            "alert_sound": false,
+            "alert_popup": false,
+            "highlight_flash": false,
+            "alert_scroll_window": false,
+            "hidden_pool": false
+          }
+        },
+        "clr": "16744448",
+        "text": "",
+        "stocknum": 0,
+        "deltype": 0,
+        "endtime": 0,
+        "delstocktype": 0,
+        "histana": 0,
+        "wizd": "",
+        "staattr": 0,
+        "enter_action": {
+          "type": 0,
+          "params": 10000
+        },
+        "exit_action": {
+          "type": 0,
+          "params": 10000
+        },
+        "tradeattr": {
+          "accountno": -1,
+          "entertradetype": 0,
+          "enterrate": 0,
+          "enterbuytype": 0,
+          "enterbuyvalue": 0,
+          "enterbuypricetype": 0,
+          "enterselltype": 0,
+          "entersellvalue": 0,
+          "entersellpricetype": 0,
+          "leavetradetype": 0,
+          "leaverate": 0,
+          "leavebuytype": 0,
+          "leavebuyvalue": 0,
+          "leavebuypricetype": 0,
+          "leaveselltype": 0,
+          "leavesellvalue": 0,
+          "leavesellpricetype": 0,
+          "buycontrolnbhs": 0,
+          "buycontrolmbsc": -1
+        },
+        "stocks": [],
+        "anas": [],
+        "intersection_status": "",
+        "sorttype": "",
+        "tmpl": ""
+      }
+    },
+    "201": {
+      "name": "转移条件",
+      "category": "core",
+      "pool_type": "dzh",
+      "shape": "triangle_right",
+      "handler": "condition_handler",
+      "attrs": [
+        "id",
+        "type",
+        "attr",
+        "pos",
+        "clr",
+        "text",
+        "inditype",
+        "crc",
+        "indi",
+        "sorttype",
+        "indiparam"
+      ],
+      "attr_bits_ref": "field_definitions.bit_fields.201",
+      "model_class": "ConditionCellModel",
+      "field_mappings": {
+        "inditype": "inditype",
+        "sorttype": "sorttype",
+        "attr_int": "attr",
+        "attr_decoded": "attr",
+        "clr": "clr",
+        "indi": "indi",
+        "indiparam": "indiparam",
+        "crc": "crc",
+        "analysis_cycle": "analysis_cycle"
+      },
+      "default_params": {
+        "inditype": "",
+        "sorttype": "",
+        "attr_int": 0,
+        "attr_decoded": {
+          "is_formula_name": false,
+          "use_sort": false,
+          "show_in_list": false,
+          "pass_all": false,
+          "fail_all": false,
+          "output_constituent": false,
+          "show_in_summary": false,
+          "enable": false,
+          "raw": 0
+        },
+        "clr": "",
+        "indi": "",
+        "indiparam": "",
+        "crc": 0,
+        "analysis_cycle": 7
+      }
+    },
+    "202": {
+      "name": "备选池",
+      "category": "source",
+      "pool_type": "dzh",
+      "shape": "cylinder",
+      "handler": "candidate_handler",
+      "attrs": [
+        "id",
+        "type",
+        "attr",
+        "pos",
+        "clr",
+        "text",
+        "attrtext",
+        "reload",
+        "lastload"
+      ],
+      "attr_bits_ref": "field_definitions.bit_fields.202",
+      "markets": [
+        {
+          "label": "SH#上证A股",
+          "code": "sh_a"
+        },
+        {
+          "label": "SH#上证B股",
+          "code": "sh_b"
+        },
+        {
+          "label": "SZ#深证A股",
+          "code": "sz_a"
+        },
+        {
+          "label": "SZ#深证B股",
+          "code": "sz_b"
+        },
+        {
+          "label": "SZ#中小企业",
+          "code": "sme"
+        },
+        {
+          "label": "SZ#创业板",
+          "code": "gem"
+        },
+        {
+          "label": "B$#板块指数",
+          "code": "sector_index"
+        },
+        {
+          "label": "B$#热门概念",
+          "code": "hot_concept"
+        }
+      ],
+      "model_class": "CandidateCellModel",
+      "field_mappings": {
+        "markets": "attrtext",
+        "reload_sec": "reload",
+        "clr": "clr",
+        "name": "text",
+        "lastload": "lastload",
+        "attr_int": "attr",
+        "attrtext": "attrtext"
+      },
+      "default_params": {
+        "markets": ["sh_a", "sz_a", "sh_b", "sz_b", "sz_sme", "sz_gem", "sector_index", "hot_concept"],
+        "reload_sec": 0,
+        "clr": "",
+        "name": "",
+        "lastload": 0,
+        "attr_int": 128,
+        "attrtext": "",
+        "raw_attrtext": ""
+      }
+    },
+    "203": {
+      "name": "特殊池",
+      "category": "core",
+      "pool_type": "dzh",
+      "handler": "special_pool_handler",
+      "attrs": [
+        "id",
+        "type",
+        "attr",
+        "pos",
+        "clr",
+        "text",
+        "hold",
+        "col_def",
+        "width_def",
+        "histana",
+        "wizd",
+        "deltype",
+        "endtime",
+        "delstocktype",
+        "staattr",
+        "enter_action",
+        "exit_action",
+        "stocknum",
+        "tmpl",
+        "sorttype",
+        "tradeattr"
+      ],
+      "attr_bits_ref": "field_definitions.bit_fields.203",
+      "model_class": "Type203CellModel",
+      "field_mappings": {
+        "hold_sec": "hold",
+        "col_list": "col_def",
+        "width_list": "width_def",
+        "dzh_attr": "attr",
+        "clr": "clr",
+        "text": "text",
+        "stocknum": "stocknum",
+        "deltype": "deltype",
+        "endtime": "endtime",
+        "delstocktype": "delstocktype",
+        "histana": "histana",
+        "wizd": "wizd",
+        "staattr": "staattr",
+        "enter_action": "enter_action",
+        "exit_action": "exit_action",
+        "tradeattr": "tradeattr",
+        "sorttype": "sorttype",
+        "tmpl": "tmpl"
+      },
+      "default_params": {
+        "hold_sec": 432000,
+        "col_list": "2,-1,-2,-3,7,14,8,10,17,45",
+        "width_list": "",
+        "dzh_attr": {
+          "raw": 0,
+          "bits": {
+            "show_overview": false,
+            "show_overview_container": false,
+            "simple_intermediate": false,
+            "calc_profit_from_prev": false,
+            "record_history": false,
+            "alert_sound": false,
+            "alert_popup": false,
+            "highlight_flash": false,
+            "alert_scroll_window": false,
+            "hidden_pool": false
+          }
+        },
+        "clr": "16744448",
+        "text": "",
+        "stocknum": 0,
+        "deltype": 0,
+        "endtime": 0,
+        "delstocktype": 0,
+        "histana": 0,
+        "wizd": "",
+        "staattr": 0,
+        "enter_action": {
+          "type": 0,
+          "params": 10000
+        },
+        "exit_action": {
+          "type": 0,
+          "params": 10000
+        },
+        "tradeattr": {
+          "accountno": -1,
+          "entertradetype": 0,
+          "enterrate": 0,
+          "enterbuytype": 0,
+          "enterbuyvalue": 0,
+          "enterbuypricetype": 0,
+          "enterselltype": 0,
+          "entersellvalue": 0,
+          "entersellpricetype": 0,
+          "leavetradetype": 0,
+          "leaverate": 0,
+          "leavebuytype": 0,
+          "leavebuyvalue": 0,
+          "leavebuypricetype": 0,
+          "leaveselltype": 0,
+          "leavesellvalue": 0,
+          "leavesellpricetype": 0,
+          "buycontrolnbhs": 0,
+          "buycontrolmbsc": -1
+        },
+        "stocks": [],
+        "anas": [],
+        "intersection_status": "",
+        "sorttype": "",
+        "tmpl": ""
+      }
+    },
+    "tdx_0": {
+      "name": "TDX装饰文字",
+      "category": "auxiliary",
+      "pool_type": "tdx",
+      "handler": null,
+      "attrs": [
+        "id",
+        "type",
+        "attr",
+        "pos",
+        "text",
+        "clr",
+        "clrtext",
+        "solid"
+      ],
+      "attr_bits": {},
+      "model_class": "TdxDecorativeModel",
+      "field_mappings": {
+        "text": "text",
+        "clr": "clr",
+        "clrtext": "clrtext",
+        "solid": "solid",
+        "attr": "attr",
+        "pos": "pos"
+      },
+      "default_params": {
+        "text": "",
+        "clr": "",
+        "clrtext": "16777215",
+        "solid": 0,
+        "attr": 0,
+        "pos": ""
+      }
+    },
+    "tdx_7": {
+      "name": "TDX备选池",
+      "category": "source",
+      "pool_type": "tdx",
+      "shape": "cylinder",
+      "handler": "tdx_candidate_handler",
+      "attrs": [
+        "id",
+        "type",
+        "attr",
+        "pos",
+        "spinfo",
+        "stocks",
+        "clr",
+        "text",
+        "clrtext",
+        "solid"
+      ],
+      "attr_bits": {},
+      "model_class": "TdxCandidateModel",
+      "field_mappings": {
+        "tdx_spinfo": "spinfo",
+        "tdx_stocks": "stocks",
+        "clr": "clr",
+        "text": "text",
+        "clrtext": "clrtext",
+        "solid": "solid",
+        "attr": "attr",
+        "pos": "pos"
+      },
+      "default_params": {
+        "tdx_spinfo": {
+          "type": 0,
+          "customblockname": "",
+          "size": 0
+        },
+        "tdx_stocks": [],
+        "clr": "12615935",
+        "text": "",
+        "clrtext": "16777215",
+        "solid": 1,
+        "attr": 0,
+        "pos": ""
+      }
+    },
+    "tdx_8": {
+      "name": "TDX状态池",
+      "category": "core",
+      "pool_type": "tdx",
+      "shape": "rectangle",
+      "handler": "tdx_state_pool_handler",
+      "attrs": [
+        "id",
+        "type",
+        "attr",
+        "pos",
+        "psatt",
+        "stocks",
+        "clr",
+        "text",
+        "clrtext",
+        "solid"
+      ],
+      "attr_bits": {},
+      "model_class": "TdxStatePoolModel",
+      "field_mappings": {
+        "tdx_psatt": "psatt",
+        "stocks": "stocks",
+        "clr": "clr",
+        "text": "text",
+        "clrtext": "clrtext",
+        "solid": "solid",
+        "attr": "attr",
+        "pos": "pos"
+      },
+      "default_params": {
+        "tdx_psatt": {
+          "bdel": 1,
+          "ndelnum": 2,
+          "ndeltype": 0,
+          "baimpool": 0,
+          "bsound": 0,
+          "nsoundtype": 0,
+          "nsyssound": 0,
+          "soundfile": "",
+          "btip": 0,
+          "bsavetoblock": 0,
+          "blockfile": "",
+          "bclearblock": 0,
+          "bsavehis": 0
+        },
+        "stocks": [],
+        "clr": "16711935",
+        "text": "",
+        "clrtext": "16777215",
+        "solid": 1,
+        "attr": 0,
+        "pos": ""
+      }
+    },
+    "tdx_3": {
+      "name": "TDX转移条件",
+      "category": "core",
+      "pool_type": "tdx",
+      "shape": "triangle_right",
+      "handler": "tdx_condition_handler",
+      "attrs": [
+        "id",
+        "type",
+        "attr",
+        "pos",
+        "func",
+        "clr",
+        "text",
+        "clrtext",
+        "solid"
+      ],
+      "attr_bits": {},
+      "model_class": "TdxConditionModel",
+      "field_mappings": {
+        "tdx_func": "func",
+        "clr": "clr",
+        "text": "text",
+        "clrtext": "clrtext",
+        "solid": "solid",
+        "attr": "attr",
+        "pos": "pos"
+      },
+      "default_params": {
+        "tdx_func": {
+          "nset": 1,
+          "ntjindexno": 0,
+          "accode": "",
+          "nperiod": 4,
+          "nfirst": 0,
+          "cfirst": "",
+          "noperate": 0,
+          "nsecond": 0,
+          "csecond": "",
+          "fsecond": 0,
+          "bnost": 0,
+          "bnotp": 0,
+          "bnotq": 0,
+          "nperiodnum": 0,
+          "nbeginday": 0,
+          "nendday": 0
+        },
+        "clr": "16711680",
+        "text": "",
+        "clrtext": "16777215",
+        "solid": 1,
+        "attr": 0,
+        "pos": ""
+      }
+    }
+  },
+  "type_info": {
+    "1": {"typeName": "text_label", "defaultLabel": "文字标签", "defaultWidth": 120, "defaultHeight": 24},
+    "2": {"typeName": "container", "defaultLabel": "容器", "defaultWidth": 200, "defaultHeight": 150},
+    "3": {"typeName": "state_column", "defaultLabel": "状态列", "defaultWidth": 8, "defaultHeight": 100},
+    "4": {"typeName": "discard_pool", "defaultLabel": "丢弃池", "defaultWidth": 56, "defaultHeight": 66},
+    "5": {"typeName": "execution_order", "defaultLabel": "序号", "defaultWidth": 28, "defaultHeight": 28},
+    "6": {"typeName": "flow_arrow", "defaultLabel": "箭头", "defaultWidth": 24, "defaultHeight": 24},
+    "200": {"typeName": "stock_state_pool", "defaultLabel": "状态池", "defaultWidth": 250, "defaultHeight": 180, "shape": "rectangle"},
+    "201": {"typeName": "transfer_condition", "defaultLabel": "转移条件", "defaultWidth": 50, "defaultHeight": 32, "shape": "triangle_right"},
+    "202": {"typeName": "market_source", "defaultLabel": "备选池", "defaultWidth": 70, "defaultHeight": 63, "shape": "cylinder"},
+    "203": {"typeName": "unknown_pool", "defaultLabel": "未知池", "defaultWidth": 120, "defaultHeight": 80},
+    "tdx_0": {"typeName": "tdx_decorative", "defaultLabel": "TDX装饰文字", "defaultWidth": 120, "defaultHeight": 24},
+    "tdx_3": {"typeName": "tdx_condition", "defaultLabel": "TDX转移条件", "defaultWidth": 50, "defaultHeight": 32, "shape": "triangle_right"},
+    "tdx_7": {"typeName": "tdx_candidate", "defaultLabel": "TDX备选池", "defaultWidth": 250, "defaultHeight": 180, "shape": "cylinder"},
+    "tdx_8": {"typeName": "tdx_state_pool", "defaultLabel": "TDX状态池", "defaultWidth": 250, "defaultHeight": 180, "shape": "rectangle"},
+    "7": {"typeName": "tdx_candidate", "defaultLabel": "TDX备选池", "defaultWidth": 250, "defaultHeight": 180},
+    "8": {"typeName": "tdx_state_pool", "defaultLabel": "TDX状态池", "defaultWidth": 250, "defaultHeight": 180},
+    "0": {"typeName": "decorative", "defaultLabel": "装饰文字", "defaultWidth": 120, "defaultHeight": 24}
+  },
+  "col_id_map": {
+    "2": "代码",
+    "-1": "名称",
+    "-2": "最新价",
+    "-3": "涨跌幅",
+    "7": "涨跌额",
+    "14": "成交量",
+    "8": "成交额",
+    "10": "最高价",
+    "17": "最低价",
+    "45": "入池时间",
+    "20": "现价",
+    "21": "收益率",
+    "22": "入池价",
+    "23": "最大收益",
+    "24": "保留天数",
+    "25": "振幅",
+    "26": "换手率",
+    "27": "量比",
+    "28": "流通股本",
+    "29": "总市值",
+    "30": "市盈率",
+    "31": "市净率",
+    "32": "每股收益",
+    "33": "ROE"
+  },
+  "hold_preset_options": [
+    {
+      "label": "2秒",
+      "value": 2
+    },
+    {
+      "label": "1小时",
+      "value": 3600
+    },
+    {
+      "label": "1天",
+      "value": 86400
+    },
+    {
+      "label": "5天(默认)",
+      "value": 432000
+    },
+    {
+      "label": "30天",
+      "value": 2592000
+    },
+    {
+      "label": "500天",
+      "value": 43200000
+    }
+  ],
+  "flow": {
+    "attr_bits_ref": "field_definitions.bit_fields.flow"
+  },
+  "add_node_mapping": {
+    "source":    { "tdx_cell_type": 7,   "dzh_cell_type": 202, "tdx_action": "addSource",    "dzh_action": "addSource" },
+    "condition": { "tdx_cell_type": 3,   "dzh_cell_type": 201, "tdx_action": "addCondition", "dzh_action": "addCondition" },
+    "statepool": { "tdx_cell_type": 8,   "dzh_cell_type": 200, "tdx_action": "addStatePool", "dzh_action": "addStatePool" },
+    "discard":   { "tdx_cell_type": 5,   "dzh_cell_type": 203, "tdx_action": "addDiscard",   "dzh_action": "addDiscard" },
+    "label":     { "tdx_cell_type": 1,   "dzh_cell_type": 1,   "tdx_action": "addLabel",     "dzh_action": "addLabel" }
+  },
+  "tdx_types": {
+    "0": "decorative",
+    "1": "decorative",
+    "2": "decorative",
+    "3": "condition",
+    "7": "candidate",
+    "8": "state"
+  },
+  "tdx_to_dzh": {
+    "0": 1,
+    "1": 1,
+    "2": 2,
+    "3": 201,
+    "7": 202,
+    "8": 200
+  },
+  "type_aliases": {
+    "market_source": "candidate_provider",
+    "transfer_condition": "condition_filter",
+    "discard_pool": "discard_sink",
+    "container": "container_box",
+    "execution_order": "exec_order_arrow"
+  },
+  "tdx_type_aliases": {
+    "stock_state_pool": "tdx_state_pool",
+    "statepool": "tdx_state_pool",
+    "candidate_provider": "tdx_candidate",
+    "condition_filter": "tdx_condition",
+    "transfer_condition": "tdx_condition",
+    "state_column": "tdx_condition",
+    "market_source": "tdx_candidate",
+    "0": "tdx_decorative",
+    "3": "tdx_condition",
+    "7": "tdx_candidate",
+    "8": "tdx_state_pool",
+    "tdx_0": "tdx_decorative",
+    "tdx_3": "tdx_condition",
+    "tdx_7": "tdx_candidate",
+    "tdx_8": "tdx_state_pool"
+  },
+  "tdx_frontend_type_map": {
+    "0": "tdx_deco_text",
+    "1": "tdx_text_label",
+    "2": "tdx_container",
+    "3": "tdx_condition",
+    "6": "tdx_deco_line",
+    "7": "tdx_candidate",
+    "8": "tdx_state_pool"
+  },
+  "render_config": {
+    "200": {
+      "shape": "rectangle",
+      "fill": "#1a3a4a",
+      "stroke": "#2d8cf0",
+      "strokeWidth": 2,
+      "icon": "📦",
+      "labelColor": "#ffffff",
+      "badgeColor": "#2d8cf0"
+    },
+    "201": {
+      "shape": "triangle_right",
+      "fill": "#3a2a1a",
+      "stroke": "#e6a23c",
+      "strokeWidth": 2,
+      "icon": "🔀",
+      "labelColor": "#e6a23c",
+      "badgeColor": "#e6a23c"
+    },
+    "202": {
+      "shape": "cylinder",
+      "fill": "#1a2a3a",
+      "stroke": "#67c23a",
+      "strokeWidth": 2,
+      "icon": "📊",
+      "labelColor": "#67c23a",
+      "badgeColor": "#67c23a"
+    },
+    "4": {
+      "shape": "diamond",
+      "fill": "#3a1a1a",
+      "stroke": "#f56c6c",
+      "strokeWidth": 2,
+      "icon": "🗑️",
+      "labelColor": "#f56c6c",
+      "badgeColor": "#f56c6c"
+    },
+    "1": {
+      "shape": "text",
+      "fill": "transparent",
+      "stroke": "transparent",
+      "strokeWidth": 0,
+      "icon": "📝",
+      "labelColor": "#909399"
+    },
+    "2": {
+      "shape": "rectangle",
+      "fill": "transparent",
+      "stroke": "#606266",
+      "strokeWidth": 1,
+      "strokeDasharray": "5,5",
+      "icon": "⬜",
+      "labelColor": "#606266"
+    },
+    "3": {
+      "shape": "rectangle",
+      "fill": "#2a2a2a",
+      "stroke": "#606266",
+      "strokeWidth": 1,
+      "icon": "📋",
+      "labelColor": "#909399"
+    },
+    "5": {
+      "shape": "circle",
+      "fill": "#2a2a2a",
+      "stroke": "#909399",
+      "strokeWidth": 1,
+      "icon": "🔢",
+      "labelColor": "#909399"
+    },
+    "6": {
+      "shape": "arrow",
+      "fill": "transparent",
+      "stroke": "#909399",
+      "strokeWidth": 2,
+      "icon": "➡️",
+      "labelColor": "#909399"
+    },
+    "flow": {
+      "shape": "line",
+      "stroke": "#909399",
+      "strokeWidth": 2,
+      "activeStroke": "#2d8cf0",
+      "arrowColor": "#909399"
+    },
+    "tdx_7": {
+      "shape": "cylinder",
+      "fill": "#1a2a3a",
+      "stroke": "#409eff",
+      "strokeWidth": 2,
+      "icon": "📊",
+      "labelColor": "#409eff",
+      "badgeColor": "#409eff"
+    },
+    "tdx_8": {
+      "shape": "rectangle",
+      "fill": "#1a3a4a",
+      "stroke": "#409eff",
+      "strokeWidth": 2,
+      "icon": "📦",
+      "labelColor": "#409eff",
+      "badgeColor": "#409eff"
+    },
+    "tdx_3": {
+      "shape": "triangle_right",
+      "fill": "#3a2a1a",
+      "stroke": "#e6a23c",
+      "strokeWidth": 2,
+      "icon": "🔀",
+      "labelColor": "#e6a23c",
+      "badgeColor": "#e6a23c"
+    }
+  },
+  "canvas_node_defaults": {
+    "market_source":      { "color": "#DAA520", "shape": "cylinder",     "label": "备选池" },
+    "stock_state_pool":   { "color": "#FF1493", "shape": "rounded-rect", "label": "状态池" },
+    "transfer_condition": { "color": "#f39c12", "shape": "diamond",      "label": "转移条件" },
+    "discard_pool":       { "color": "#c0392b", "shape": "small-rect",   "label": "丢弃池" },
+    "tdx_candidate":      { "color": "#9b59b6", "shape": "cylinder",     "label": "TDX候选" },
+    "tdx_state_pool":     { "color": "#27ae60", "shape": "rounded-rect", "label": "TDX状态池" },
+    "tdx_condition":      { "color": "#e67e22", "shape": "diamond",      "label": "TDX条件" }
+  },
+  "canvas_node_sizes": {
+    "stock_state_pool":   { "width": 110, "height": 64 },
+    "transfer_condition": { "width": 26,  "height": 24 },
+    "market_source":      { "width": 70,  "height": 80 },
+    "discard_pool":       { "width": 56,  "height": 36 },
+    "container":          { "width": 200, "height": 150 },
+    "column":             { "width": 100, "height": 28 },
+    "label":              { "width": "auto", "height": "auto" }
+  },
+  "canvas_border_widths": {
+    "state_pool": 2,
+    "candidate": 2,
+    "discard": 4,
+    "container": 2,
+    "container_dashed": 2,
+    "column": 2,
+    "generic": 1
+  },
+  "canvas_font_sizes": {
+    "title_bar": 13,
+    "label": "auto",
+    "candidate": 11,
+    "badge": 10,
+    "edge_label": 10,
+    "tiny": 8,
+    "stock_count": 10
+  },
+  "canvas_cell_type_map": {
+    "202": "market_source",
+    "200": "stock_state_pool",
+    "201": "transfer_condition",
+    "4":   "discard_pool"
+  }
+}

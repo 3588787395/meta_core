@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "description": "UI 状态表驱动配置 - 声明按钮 enabled/disabled 条件、面板显隐规则。前端按表求值，禁止硬编码 if 分支。",
+  "conditions": {
+    "is_edit_mode": "state.mode == 'edit'",
+    "is_design_mode": "state.mode == 'design'",
+    "is_run_mode": "state.mode == 'run'",
+    "is_replay_mode": "state.mode == 'replay'",
+    "is_running": "state.is_running == true",
+    "has_selection": "state.selection != null",
+    "has_clipboard": "state.has_clipboard == true",
+    "pool_loaded": "state.pool_loaded == true",
+    "has_unsaved_changes": "state.has_unsaved_changes == true",
+    "can_undo": "state.can_undo == true",
+    "can_redo": "state.can_redo == true",
+    "design_mode": "state.mode == 'design'",
+    "always": "true"
+  },
+  "buttons": {
+    "btnNew": {"enabled": "is_edit_mode"},
+    "btnSave": {"enabled": "has_unsaved_changes && pool_loaded"},
+    "btnUndo": {"enabled": "can_undo"},
+    "btnRedo": {"enabled": "can_redo"},
+    "btnAddNode": {"enabled": "is_edit_mode"},
+    "btnImport": {"enabled": "is_edit_mode"},
+    "btnExport": {"enabled": "pool_loaded"},
+    "btnFit": {"enabled": "pool_loaded"},
+    "btnTdxPools": {"enabled": "always"},
+    "btnExecOrder": {"enabled": "pool_loaded && is_edit_mode"},
+    "btnFlowMode": {"enabled": "is_edit_mode"},
+    "btnRun": {"enabled": "pool_loaded"},
+    "btnReplay": {"enabled": "pool_loaded"},
+    "btnRuleEditor": {"enabled": "always"},
+    "btnComprehensiveSettings": {"enabled": "pool_loaded"},
+    "btnConfigCenter": {"enabled": "always"}
+  },
+  "panels": {
+    "node_props": {"visible": "has_selection"},
+    "dashboard": {"visible": "is_running"},
+    "replay_panel": {"visible": "is_replay_mode"}
+  }
+}

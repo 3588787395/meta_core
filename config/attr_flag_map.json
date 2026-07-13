@@ -1,0 +1,84 @@
+{
+  "_desc": "cell attr 位标志映射表（原 system_api.py _CELL_ATTR_FLAG_MAP 硬编码）。键为 cell type 字符串，值为 {attr_name: flag_mask}。203 通过 inherit_from 继承 200 的全部定义。flow_attr_masks/cell200_attr_masks/cell201_attr_masks 供 dzh.py 的 encode_flow_attr/encode_cell200_attr/encode_cell201_attr 查表使用（值与 dzh.py 中位标志常量一致）。",
+  "cell_attr_flag_map": {
+    "200": {
+      "show_overview": 1073741824,
+      "history_track": 134217728,
+      "record_history": 134217728,
+      "simple_intermediate": 32768,
+      "no_delete_source": 4096,
+      "clear_dest_first": 8192,
+      "calc_profit_from_prev": 8388608,
+      "alert_popup": 16777216,
+      "alert_sound": 268435456,
+      "highlight_flash": 536870912,
+      "alert_scroll_window": 2147483648,
+      "hidden_pool": 128,
+      "show_overview_container": 512
+    },
+    "203": {
+      "inherit_from": "200"
+    },
+    "201": {
+      "show_overview": 512,
+      "basic_condition": 2048,
+      "reverse_transfer": 262144,
+      "sector_membership": 524288,
+      "indicator_condition": 1048576,
+      "ranking_condition": 2097152,
+      "cross_section": 4194304
+    },
+    "4": {
+      "show_overview": 512,
+      "hidden_pool": 128
+    },
+    "2": {
+      "show_overview": 512
+    },
+    "3": {
+      "show_overview": 512
+    },
+    "1": {
+      "bold": 1,
+      "style1": 2,
+      "style2": 4,
+      "style3": 8,
+      "visible": 16,
+      "style4": 32,
+      "style5": 64,
+      "style6": 128,
+      "transparent": 512
+    }
+  },
+  "flow_attr_masks": {
+    "delete_source": 1,
+    "force_move": 2,
+    "keep_source": 4096,
+    "clear_dest_first": 8192,
+    "output_constituent": 16384
+  },
+  "cell200_attr_masks": {
+    "show_overview": 1073741824,
+    "simple_intermediate": 32768,
+    "no_delete_source": 4096,
+    "clear_dest_first": 8192,
+    "calc_profit_from_prev": 8388608,
+    "record_history": 134217728,
+    "alert_popup": 16777216,
+    "alert_sound": 268435456,
+    "highlight_flash": 536870912,
+    "alert_scroll_window": 2147483648,
+    "hidden_pool": 128,
+    "show_overview_container": 512
+  },
+  "cell201_attr_masks": {
+    "show_overview": 512,
+    "basic_condition": 2048,
+    "reverse_transfer": 262144,
+    "sector_membership": 524288,
+    "indicator_condition": 1048576,
+    "ranking_condition": 2097152,
+    "cross_section": 4194304,
+    "bit16_reserved": 65536
+  }
+}

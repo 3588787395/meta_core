@@ -1,0 +1,52 @@
+{
+  "version": "1.0",
+  "description": "数据管道与公式系统配置（I12：pipeline 数组已删——stage_bar_data_inject/stage_minute_aggregator_feed 零调用方）",
+  "data_pipeline": {
+    "version": "1.0",
+    "description": "数据管道与公式系统配置",
+    "minute_aggregation": {
+      "tier1_symbols": "pool_active",
+      "tier2_batch_ms": 100,
+      "tick_buffer_size": 100,
+      "max_memory_mb": 500,
+      "closed_bar_maxlen": 240
+    },
+    "formula": {
+      "cache_ttl_minute": 60,
+      "python_engine_threshold_ms": 5,
+      "hqchart_timeout_ms": 1000,
+      "simple_functions": [
+        "C",
+        "O",
+        "H",
+        "L",
+        "V",
+        "MA",
+        "EMA",
+        "SMA",
+        "REF",
+        "CROSS",
+        "HHV",
+        "LLV",
+        "SUM",
+        "COUNT",
+        "STD",
+        "ABS",
+        "MAX",
+        "MIN",
+        "IF"
+      ]
+    },
+    "data_query": {
+      "history_path": "data/history",
+      "today_path": "data/today",
+      "default_kline_count": 250
+    }
+  },
+  "_convergence": {
+    "merged_from": [
+      "data_pipeline.json"
+    ],
+    "target_count": 30
+  }
+}

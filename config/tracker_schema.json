@@ -1,0 +1,143 @@
+{
+  "version": "1.0",
+  "description": "持仓跟踪表Schema：定义StockTracker的字段结构、计算公式与输出规则",
+  "fields": {
+    "market": {
+      "type": "string",
+      "default": "0",
+      "desc": "市场代码",
+      "required": true
+    },
+    "code": {
+      "type": "string",
+      "default": "",
+      "desc": "股票代码",
+      "required": true
+    },
+    "entry_price": {
+      "type": "float",
+      "default": 0,
+      "desc": "买入/入场价格",
+      "required": true
+    },
+    "entry_time": {
+      "type": "int",
+      "default": 0,
+      "desc": "入场时间戳(秒)",
+      "required": true
+    },
+    "current_price": {
+      "type": "float",
+      "default": 0,
+      "desc": "当前价格(从行情实时更新)",
+      "required": false
+    },
+    "exit_price": {
+      "type": "float",
+      "default": 0,
+      "desc": "卖出/出场价格",
+      "required": false
+    },
+    "exit_time": {
+      "type": "int",
+      "default": 0,
+      "desc": "出场时间戳(秒)",
+      "required": false
+    },
+    "pool_id": {
+      "type": "string",
+      "default": "",
+      "desc": "当前所属池ID",
+      "required": false
+    },
+    "flow_id": {
+      "type": "string",
+      "default": "",
+      "desc": "所属流程/边ID",
+      "required": false
+    },
+    "profit_pct": {
+      "type": "float",
+      "default": 0,
+      "desc": "当前收益率(百分比)",
+      "required": false
+    },
+    "max_profit": {
+      "type": "float",
+      "default": 0,
+      "desc": "持仓期间最大收益率(百分比)",
+      "required": false
+    },
+    "max_drawdown": {
+      "type": "float",
+      "default": 0,
+      "desc": "持仓期间最大回撤(百分比,负值)",
+      "required": false
+    },
+    "hold_days": {
+      "type": "float",
+      "default": 0,
+      "desc": "持仓天数",
+      "required": false
+    },
+    "ttl": {
+      "type": "int",
+      "default": 0,
+      "desc": "剩余存活时间(秒),0表示无限制",
+      "required": false
+    },
+    "status": {
+      "type": "string",
+      "default": "holding",
+      "desc": "跟踪状态: holding/closed/timeout",
+      "required": false
+    }
+  },
+  "init_fields": ["market", "code", "entry_price", "entry_time", "pool_id", "flow_id", "ttl"],
+  "init_profile": {
+    "entry_price":  {"source": "method_call", "method": "_get_stock_price", "args_from_ctx": ["code", "current_bar_data"]},
+    "current_price":{"source": "method_call", "method": "_get_stock_price", "args_from_ctx": ["code", "current_bar_data"]},
+    "entry_time":   {"source": "method_call", "method": "_now", "wrap": "_safe_timestamp"},
+    "code":         {"source": "ctx_key", "key": "code"},
+    "pool_id":      {"source": "ctx_key", "key": "tid"},
+    "flow_id":      {"source": "ctx_key", "key": "eid"},
+    "status":       {"source": "literal_value", "value": "holding"}
+  },
+  "formulas": {
+    "profit_pct": {
+      "expression": "(current_price - entry_price) / entry_price * 100",
+      "condition": "entry_price > 0 and current_price > 0",
+      "fields": ["current_price", "entry_price"],
+      "desc": "当前收益率 = (现价 - 成本) / 成本 * 100"
+    },
+    "max_profit": {
+      "expression": "max(profit_pct, max_profit)",
+      "condition": "entry_price > 0",
+      "fields": ["profit_pct", "max_profit"],
+      "desc": "最大收益率 = max(当前收益, 历史最大收益)"
+    },
+    "drawdown": {
+      "expression": "profit_pct - max_profit",
+      "condition": "entry_price > 0",
+      "fields": ["profit_pct", "max_profit"],
+      "desc": "当前回撤 = 当前收益 - 最大收益(中间量,用于计算max_drawdown)"
+    },
+    "max_drawdown": {
+      "expression": "min(drawdown, max_drawdown)",
+      "condition": "entry_price > 0",
+      "fields": ["drawdown", "max_drawdown"],
+      "desc": "最大回撤 = min(当前回撤, 历史最大回撤)"
+    },
+    "hold_days": {
+      "expression": "(now_ts - entry_time) / 86400",
+      "condition": "entry_time > 0",
+      "fields": ["entry_time"],
+      "desc": "持仓天数 = (当前时间 - 入场时间) / 86400"
+    }
+  },
+  "output_fields": {
+    "snapshot": ["market", "code", "entry_price", "current_price", "profit_pct", "max_profit", "max_drawdown", "hold_days", "pool_id", "status"],
+    "detail": ["market", "code", "entry_price", "entry_time", "current_price", "exit_price", "exit_time", "profit_pct", "max_profit", "max_drawdown", "hold_days", "pool_id", "flow_id", "ttl", "status"],
+    "signal": ["market", "code", "entry_price", "current_price", "profit_pct", "hold_days"]
+  }
+}

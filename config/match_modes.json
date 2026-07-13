@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "description": "条件匹配模式 → set_op 映射表，通用集合合并器按 set_op 执行交集/并集，消除 condition_dispatcher 中的 if/elif 分派",
+  "match_modes": {
+    "AND": {
+      "set_op": "intersection",
+      "desc": "所有条件同时满足（交集），取 set 交集 &=",
+      "mock_pass_rate": [0.3, 0.7]
+    },
+    "OR": {
+      "set_op": "union",
+      "desc": "任一条件满足即通过（并集），取 set 并集 |=",
+      "mock_pass_rate": [0.3, 0.9]
+    }
+  },
+  "default_mode": "OR",
+  "mode_param_key": "match_mode"
+}

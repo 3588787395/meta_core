@@ -1,0 +1,217 @@
+{
+  "version": "1.0",
+  "description": "键盘快捷键配置表 - 表驱动 main.js bindKeyboard 中的键盘事件处理",
+  "note": "input 焦点（INPUT/TEXTAREA/SELECT/contentEditable）时所有快捷键均禁用；scope=global 表示全局触发，scope=canvas 表示需要画布/选中上下文",
+  "shortcuts": [
+    {
+      "id": "ks_new",
+      "key": "n",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "action": "newPool",
+      "description": "新建股票池",
+      "scope": "global"
+    },
+    {
+      "id": "ks_save",
+      "key": "s",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "action": "savePool",
+      "description": "保存当前股票池",
+      "scope": "global"
+    },
+    {
+      "id": "ks_undo",
+      "key": "z",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "action": "undo",
+      "description": "撤销上一步操作",
+      "scope": "global"
+    },
+    {
+      "id": "ks_redo_y",
+      "key": "y",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "action": "redo",
+      "description": "重做（Ctrl+Y）",
+      "scope": "global"
+    },
+    {
+      "id": "ks_redo_shift_z",
+      "key": "z",
+      "ctrl": true,
+      "shift": true,
+      "alt": false,
+      "action": "redo",
+      "description": "重做（Ctrl+Shift+Z，与 Ctrl+Y 等效）",
+      "scope": "global"
+    },
+    {
+      "id": "ks_copy",
+      "key": "c",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "action": "copyToClipboard",
+      "description": "复制选中节点",
+      "scope": "canvas"
+    },
+    {
+      "id": "ks_paste",
+      "key": "v",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "action": "pasteFromClipboard",
+      "description": "粘贴剪贴板节点",
+      "scope": "canvas"
+    },
+    {
+      "id": "ks_cut",
+      "key": "x",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "action": "cutToClipboard",
+      "description": "剪切选中节点",
+      "scope": "canvas"
+    },
+    {
+      "id": "ks_select_all",
+      "key": "a",
+      "ctrl": true,
+      "shift": false,
+      "alt": false,
+      "action": "selectAll",
+      "description": "全选节点（预留）",
+      "scope": "canvas"
+    },
+    {
+      "id": "ks_delete",
+      "key": "Delete",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "action": "deleteSelected",
+      "description": "删除选中节点/边（仅 design 模式；连线模式下取消源节点选择）",
+      "scope": "canvas"
+    },
+    {
+      "id": "ks_backspace_delete",
+      "key": "Backspace",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "action": "deleteSelected",
+      "description": "删除选中节点/边（Backspace，与 Delete 等效）",
+      "scope": "canvas"
+    },
+    {
+      "id": "ks_fit_window",
+      "key": "f",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "action": "toggleFlowMode",
+      "description": "切换连线模式（点击源节点→目标节点建立连线）",
+      "scope": "global"
+    },
+    {
+      "id": "ks_run_stop",
+      "key": "F5",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "action": "runStop",
+      "description": "运行/停止（预留）",
+      "scope": "global"
+    },
+    {
+      "id": "ks_escape",
+      "key": "Escape",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "action": "clearSelection",
+      "description": "取消选择/关闭连线模式",
+      "scope": "global"
+    },
+    {
+      "id": "ks_zoom_in_plus",
+      "key": "+",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "action": "zoomIn",
+      "description": "放大画布",
+      "scope": "canvas"
+    },
+    {
+      "id": "ks_zoom_in_eq",
+      "key": "=",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "action": "zoomIn",
+      "description": "放大画布（=，与 + 等效，无需 Shift）",
+      "scope": "canvas"
+    },
+    {
+      "id": "ks_zoom_out",
+      "key": "-",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "action": "zoomOut",
+      "description": "缩小画布",
+      "scope": "canvas"
+    },
+    {
+      "id": "ks_move_up",
+      "key": "ArrowUp",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "action": "moveNodeUp",
+      "description": "上移选中节点（预留）",
+      "scope": "canvas"
+    },
+    {
+      "id": "ks_move_down",
+      "key": "ArrowDown",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "action": "moveNodeDown",
+      "description": "下移选中节点（预留）",
+      "scope": "canvas"
+    },
+    {
+      "id": "ks_move_left",
+      "key": "ArrowLeft",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "action": "moveNodeLeft",
+      "description": "左移选中节点（预留）",
+      "scope": "canvas"
+    },
+    {
+      "id": "ks_move_right",
+      "key": "ArrowRight",
+      "ctrl": false,
+      "shift": false,
+      "alt": false,
+      "action": "moveNodeRight",
+      "description": "右移选中节点（预留）",
+      "scope": "canvas"
+    }
+  ]
+}

@@ -1,0 +1,371 @@
+{
+  "version": "1.0",
+  "description": "工具栏按钮配置表 - 表驱动渲染顶部工具栏",
+  "groups": [
+    {
+      "group_id": "file_ops",
+      "name": "文件操作",
+      "order": 1
+    },
+    {
+      "group_id": "node_ops",
+      "name": "节点操作",
+      "order": 2
+    },
+    {
+      "group_id": "io_ops",
+      "name": "导入导出",
+      "order": 3
+    },
+    {
+      "group_id": "view_ops",
+      "name": "视图操作",
+      "order": 4
+    },
+    {
+      "group_id": "exec_ops",
+      "name": "执行控制",
+      "order": 5
+    },
+    {
+      "group_id": "tools",
+      "name": "工具与配置",
+      "order": 6
+    }
+  ],
+  "buttons": [
+    {
+      "group": "file_ops",
+      "id": "btnNew",
+      "icon": "🆕",
+      "label": "新建",
+      "action": "newPool",
+      "enabled_when": "mode == 'edit'",
+      "shortcut": "Ctrl+N",
+      "order": 1,
+      "dropdown": false
+    },
+    {
+      "group": "file_ops",
+      "id": "btnSave",
+      "icon": "💾",
+      "label": "保存",
+      "action": "savePool",
+      "enabled_when": "has_unsaved_changes && pool_loaded",
+      "shortcut": "Ctrl+S",
+      "order": 2,
+      "dropdown": false
+    },
+    {
+      "group": "file_ops",
+      "id": "btnUndo",
+      "icon": "↩",
+      "label": "撤销",
+      "action": "undo",
+      "enabled_when": "can_undo",
+      "shortcut": "Ctrl+Z",
+      "order": 3,
+      "dropdown": false
+    },
+    {
+      "group": "file_ops",
+      "id": "btnRedo",
+      "icon": "↪",
+      "label": "重做",
+      "action": "redo",
+      "enabled_when": "can_redo",
+      "shortcut": "Ctrl+Y",
+      "order": 4,
+      "dropdown": false
+    },
+    {
+      "group": "node_ops",
+      "id": "btnAddNode",
+      "icon": "➕",
+      "label": "添加",
+      "action": "addNode",
+      "enabled_when": "mode == 'edit'",
+      "shortcut": "",
+      "order": 1,
+      "dropdown": true,
+      "dropdown_items": [
+        {
+          "id": "source",
+          "icon": "📦",
+          "label": "备选池",
+          "action": "addSource",
+          "data_node_type": "source"
+        },
+        {
+          "id": "condition",
+          "icon": "🔀",
+          "label": "转移条件",
+          "action": "addCondition",
+          "data_node_type": "condition"
+        },
+        {
+          "id": "statepool",
+          "icon": "🏷",
+          "label": "状态池",
+          "action": "addStatePool",
+          "data_node_type": "statepool"
+        },
+        {
+          "id": "discard",
+          "icon": "🗑",
+          "label": "丢弃池",
+          "action": "addDiscard",
+          "data_node_type": "discard"
+        },
+        {
+          "id": "label",
+          "icon": "📝",
+          "label": "文字标签",
+          "action": "addLabel",
+          "data_node_type": "label"
+        },
+        {
+          "id": "container",
+          "icon": "⬜",
+          "label": "容器",
+          "action": "addContainer",
+          "data_node_type": "container"
+        },
+        {
+          "id": "column",
+          "icon": "📋",
+          "label": "状态列",
+          "action": "addColumn",
+          "data_node_type": "column"
+        }
+      ]
+    },
+    {
+      "group": "io_ops",
+      "id": "btnImport",
+      "icon": "📥",
+      "label": "导入",
+      "action": "importPool",
+      "enabled_when": "mode == 'edit'",
+      "shortcut": "",
+      "order": 1,
+      "dropdown": true,
+      "dropdown_items": [
+        {
+          "id": "dzh",
+          "icon": "📥",
+          "label": "DZH格式 XML",
+          "action": "importDzh",
+          "data_format": "dzh"
+        },
+        {
+          "id": "tdx",
+          "icon": "📥",
+          "label": "通达信格式 XML",
+          "action": "importTdx",
+          "data_format": "tdx"
+        },
+        {
+          "id": "json",
+          "icon": "📥",
+          "label": "JSON 格式",
+          "action": "importJson",
+          "data_format": "json"
+        }
+      ]
+    },
+    {
+      "group": "io_ops",
+      "id": "btnExport",
+      "icon": "📤",
+      "label": "导出",
+      "action": "exportPool",
+      "enabled_when": "pool_loaded",
+      "shortcut": "",
+      "order": 2,
+      "dropdown": true,
+      "dropdown_items": [
+        {
+          "id": "dzh",
+          "icon": "📤",
+          "label": "DZH格式 XML",
+          "action": "exportDzh",
+          "data_format": "dzh"
+        },
+        {
+          "id": "tdx",
+          "icon": "📤",
+          "label": "通达信格式 XML",
+          "action": "exportTdx",
+          "data_format": "tdx"
+        },
+        {
+          "id": "json",
+          "icon": "📤",
+          "label": "JSON 格式",
+          "action": "exportJson",
+          "data_format": "json"
+        }
+      ]
+    },
+    {
+      "group": "view_ops",
+      "id": "btnFit",
+      "icon": "⊡",
+      "label": "适应",
+      "action": "fitCanvas",
+      "enabled_when": "pool_loaded",
+      "shortcut": "",
+      "order": 1,
+      "dropdown": false
+    },
+    {
+      "group": "view_ops",
+      "id": "btnTdxPools",
+      "icon": "☰",
+      "label": "列表",
+      "action": "togglePoolList",
+      "enabled_when": "always",
+      "shortcut": "",
+      "order": 2,
+      "dropdown": false
+    },
+    {
+      "group": "exec_ops",
+      "id": "btnExecOrder",
+      "icon": "🔢",
+      "label": "顺序",
+      "action": "toggleExecOrder",
+      "enabled_when": "pool_loaded && mode == 'edit'",
+      "shortcut": "",
+      "order": 1,
+      "dropdown": false
+    },
+    {
+      "group": "exec_ops",
+      "id": "btnFlowMode",
+      "icon": "🔗",
+      "label": "连线",
+      "action": "toggleFlowMode",
+      "enabled_when": "mode == 'edit'",
+      "shortcut": "F",
+      "order": 2,
+      "dropdown": false
+    },
+    {
+      "group": "exec_ops",
+      "id": "btnRun",
+      "icon": "▶",
+      "label": "运行",
+      "action": "toggleRunMode",
+      "enabled_when": "pool_loaded",
+      "shortcut": "",
+      "order": 3,
+      "dropdown": false
+    },
+    {
+      "group": "exec_ops",
+      "id": "btnReplay",
+      "icon": "⏪",
+      "label": "回放",
+      "action": "toggleReplayMode",
+      "enabled_when": "pool_loaded",
+      "shortcut": "",
+      "order": 4,
+      "dropdown": false
+    },
+    {
+      "group": "exec_ops",
+      "id": "btnSimulation",
+      "icon": "🔬",
+      "label": "仿真",
+      "action": "toggleSimulationMode",
+      "enabled_when": "pool_loaded",
+      "shortcut": "",
+      "order": 4.5,
+      "dropdown": false
+    },
+    {
+      "group": "tools",
+      "id": "btnRuleEditor",
+      "icon": "⚙",
+      "label": "规则",
+      "action": "openRuleEditor",
+      "enabled_when": "always",
+      "shortcut": "",
+      "order": 1,
+      "dropdown": false
+    },
+    {
+      "group": "tools",
+      "id": "btnComprehensiveSettings",
+      "icon": "⚙",
+      "label": "综合设置",
+      "action": "openComprehensiveSettings",
+      "enabled_when": "pool_loaded",
+      "shortcut": "",
+      "order": 2,
+      "dropdown": false
+    },
+    {
+      "group": "tools",
+      "id": "btnConfigCenter",
+      "icon": "⚙",
+      "label": "配置中心",
+      "action": "openConfigCenter",
+      "enabled_when": "always",
+      "shortcut": "",
+      "order": 3,
+      "dropdown": false,
+      "is_link": true,
+      "href": "config.html"
+    },
+    {
+      "group": "exec_ops",
+      "id": "btnEdgeLineType",
+      "icon": "📐",
+      "label": "线形",
+      "action": "cycleEdgeLineType",
+      "enabled_when": "mode == 'edit'",
+      "shortcut": "",
+      "order": 5,
+      "dropdown": true,
+      "dropdown_items": [
+        {
+          "id": "bezier",
+          "icon": "〰",
+          "label": "贝兹曲线",
+          "action": "setEdgeLineType",
+          "data_linetype": "bezier"
+        },
+        {
+          "id": "orthogonal",
+          "icon": "├",
+          "label": "横竖折线",
+          "action": "setEdgeLineType",
+          "data_linetype": "orthogonal"
+        },
+        {
+          "id": "straight",
+          "icon": "─",
+          "label": "直线",
+          "action": "setEdgeLineType",
+          "data_linetype": "straight"
+        }
+      ]
+    },
+    {
+      "group": "tools",
+      "id": "btnFormula",
+      "icon": "📐",
+      "label": "公式",
+      "action": "openFormulaEditor",
+      "enabled_when": "always",
+      "shortcut": "",
+      "order": 4,
+      "dropdown": false,
+      "is_link": true,
+      "href": "formula.html"
+    }
+  ]
+}

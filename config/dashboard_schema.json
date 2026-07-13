@@ -1,0 +1,80 @@
+{
+  "version": "1.1",
+  "description": "看盘面板布局配置：定义各面板的显示字段、数据源与刷新频率",
+  "panels": {
+    "pool_overview": {
+      "panel_id": "pool_overview",
+      "title": "股票池总览",
+      "data_source": "_pool_overview",
+      "refresh_interval_ticks": 1,
+      "columns": ["pool_id", "pool_name", "stock_count", "active_count", "updated_time"],
+      "layout": {"x": 0, "y": 0, "w": 12, "h": 1}
+    },
+    "pk_leaderboard": {
+      "panel_id": "pk_leaderboard",
+      "title": "PK排名榜",
+      "data_source": "_pk_rankings",
+      "refresh_interval_ticks": 1,
+      "columns": ["rank", "code", "pk_score", "profit_pct", "pool_id"],
+      "layout": {"x": 0, "y": 1, "w": 4, "h": 2}
+    },
+    "kline_main": {
+      "panel_id": "kline_main",
+      "title": "主K线图",
+      "type": "chart",
+      "data_source": "/api/kline",
+      "refresh_interval_ticks": 1,
+      "columns": ["time", "open", "high", "low", "close", "volume"],
+      "layout": {"x": 4, "y": 1, "w": 8, "h": 2}
+    },
+    "positions": {
+      "panel_id": "positions",
+      "title": "持仓",
+      "data_source": "_positions",
+      "refresh_interval_ticks": 1,
+      "columns": ["code", "name", "entry_price", "current_price", "profit_pct", "hold_days", "pool_id"],
+      "layout": {"x": 0, "y": 3, "w": 4, "h": 2}
+    },
+    "indicator_trend": {
+      "panel_id": "indicator_trend",
+      "title": "指标走势",
+      "type": "chart",
+      "data_source": "/api/indicator/values",
+      "refresh_interval_ticks": 1,
+      "columns": ["time", "indicator_name", "value"],
+      "layout": {"x": 4, "y": 3, "w": 4, "h": 2}
+    },
+    "capital_flow": {
+      "panel_id": "capital_flow",
+      "title": "资金流向",
+      "data_source": "_capital_flow",
+      "refresh_interval_ticks": 1,
+      "columns": ["code", "name", "net_inflow", "main_inflow", "retail_inflow"],
+      "layout": {"x": 8, "y": 3, "w": 4, "h": 2}
+    },
+    "sector_distribution": {
+      "panel_id": "sector_distribution",
+      "title": "板块分布",
+      "data_source": "_sector_distribution",
+      "refresh_interval_ticks": 1,
+      "columns": ["sector", "stock_count", "avg_change", "top_stock"],
+      "layout": {"x": 0, "y": 5, "w": 6, "h": 1}
+    },
+    "alert_list": {
+      "panel_id": "alert_list",
+      "title": "告警列表",
+      "data_source": "_alert_events",
+      "refresh_interval_ticks": 1,
+      "columns": ["time", "code", "rule_name", "severity", "message"],
+      "layout": {"x": 6, "y": 5, "w": 3, "h": 1}
+    },
+    "angle_summary": {
+      "panel_id": "angle_summary",
+      "title": "分析摘要",
+      "data_source": "_angle_results",
+      "refresh_interval_ticks": 1,
+      "columns": ["angle_id", "top_code", "top_score", "count"],
+      "layout": {"x": 9, "y": 5, "w": 3, "h": 1}
+    }
+  }
+}

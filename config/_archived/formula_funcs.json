@@ -1,0 +1,20 @@
+{
+  "version": "1.1",
+  "description": "公式函数算子配置表（深表驱动：handler 反射调用 + arg_spec 参数提取入表，差异显于表内容）",
+  "funcs": {
+    "MA": {"op": "window", "agg_method": "mean", "handler": "window_op", "arg_spec": [{"idx": 0, "cast": "series"}, {"idx": 1, "cast": "int", "default": 1}], "cfg_kwargs": ["agg_method", "agg_override", "agg_kwargs"]},
+    "HHV": {"op": "window", "agg_method": "max", "handler": "window_op", "arg_spec": [{"idx": 0, "cast": "series"}, {"idx": 1, "cast": "int", "default": 1}], "cfg_kwargs": ["agg_method", "agg_override", "agg_kwargs"]},
+    "LLV": {"op": "window", "agg_method": "min", "handler": "window_op", "arg_spec": [{"idx": 0, "cast": "series"}, {"idx": 1, "cast": "int", "default": 1}], "cfg_kwargs": ["agg_method", "agg_override", "agg_kwargs"]},
+    "SUM": {"op": "window", "agg_method": "sum", "handler": "window_op", "arg_spec": [{"idx": 0, "cast": "series"}, {"idx": 1, "cast": "int", "default": 1}], "cfg_kwargs": ["agg_method", "agg_override", "agg_kwargs"]},
+    "COUNT": {"op": "window", "agg_method": "sum", "agg_override": "bool_sum", "handler": "window_op", "arg_spec": [{"idx": 0, "cast": "series"}, {"idx": 1, "cast": "int", "default": 1}], "cfg_kwargs": ["agg_method", "agg_override", "agg_kwargs"]},
+    "STD": {"op": "window", "agg_method": "std", "agg_kwargs": {"ddof": 0}, "handler": "window_op", "arg_spec": [{"idx": 0, "cast": "series"}, {"idx": 1, "cast": "int", "default": 1}], "cfg_kwargs": ["agg_method", "agg_override", "agg_kwargs"]},
+    "REF": {"op": "shift", "handler": "shift_op", "arg_spec": [{"idx": 0, "cast": "series"}, {"idx": 1, "cast": "int", "default": 1}]},
+    "CROSS": {"op": "cross", "direction": "above", "handler": "cross_op", "arg_spec": [{"idx": 0}, {"idx": 1}], "direction_field": "direction"},
+    "EMA": {"op": "ema", "handler": "ema_op", "arg_spec": [{"idx": 0, "cast": "series"}, {"idx": 1, "cast": "int", "default": 1}]},
+    "SMA": {"op": "sma", "handler": "sma_op", "arg_spec": [{"idx": 0, "cast": "series"}, {"idx": 1, "cast": "int", "default": 1}, {"idx": 2, "cast": "int", "default": 1}]},
+    "ABS": {"op": "abs", "handler": "abs_op", "arg_spec": [{"idx": 0}]},
+    "MAX": {"op": "max2", "handler": "max_op", "arg_spec": [{"idx": 0}, {"idx": 1}]},
+    "MIN": {"op": "min2", "handler": "min_op", "arg_spec": [{"idx": 0}, {"idx": 1}]},
+    "IF": {"op": "if", "handler": "if_op", "arg_spec": [{"idx": 0}, {"idx": 1}, {"idx": 2}]}
+  }
+}

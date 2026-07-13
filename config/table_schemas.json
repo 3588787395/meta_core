@@ -1,0 +1,939 @@
+{
+  "version": "1.0",
+  "description": "表元模式：定义所有配置表的结构约束与校验规则，用于运行时校验",
+  "meta": {
+    "skip_validate": ["table_schemas", "defaults", "api_routes", "mock_data", "system_rules", "action_rules_old", "toolbar_config", "context_menu_config", "theme_config", "column_definitions", "chart_config", "keyboard_shortcuts", "dialog_definitions"]
+  },
+  "schemas": {
+    "table_schemas": {
+      "description": "表元模式定义",
+      "primary_key": "table_name",
+      "required_fields": ["table_name", "version", "description", "fields"],
+      "fields": {
+        "table_name": {"type": "string", "description": "表名"},
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "primary_key": {"type": "string", "description": "主键字段名"},
+        "required_fields": {"type": "array", "items": "string", "description": "必填字段列表"},
+        "fields": {"type": "object", "description": "字段定义映射"},
+        "relations": {"type": "object", "description": "外键关系"},
+        "indexes": {"type": "array", "items": "object", "description": "索引定义"}
+      }
+    },
+    "action_rules": {
+      "description": "行为规则表：提取硬编码逻辑为规则条目",
+      "collection_key": "rules",
+      "primary_key": "rule_id",
+      "required_fields": ["rule_id", "trigger", "action", "handler_ref"],
+      "fields": {
+        "rule_id": {"type": "string", "description": "规则唯一标识"},
+        "description": {"type": "string", "description": "规则描述"},
+        "trigger": {"type": "object", "description": "触发条件"},
+        "guard": {"type": "object", "description": "守卫条件(可选，满足时才执行)"},
+        "action": {"type": "string", "description": "执行动作标识"},
+        "handler_ref": {"type": "string", "description": "handler注册表中的函数名"},
+        "params_template": {"type": "object", "description": "参数模板(运行时合并context)"},
+        "priority": {"type": "integer", "description": "优先级(数值越小越先执行)", "default": 100},
+        "stop_on_match": {"type": "boolean", "description": "匹配后是否终止后续规则链", "default": true},
+        "tags": {"type": "array", "items": "string", "description": "分类标签"}
+      },
+      "relations": {
+        "handler_ref": {"references": "handler_registry", "on_invalid": "error"}
+      },
+      "indexes": [
+        {"name": "idx_trigger_type", "fields": ["trigger.type", "trigger.cell_type"], "unique": false},
+        {"name": "idx_priority", "fields": ["priority"], "unique": false},
+        {"name": "idx_tags", "fields": ["tags"], "unique": false}
+      ]
+    },
+    "ui_components": {
+      "description": "UI组件注册表：定义所有前端组件类型的渲染规则",
+      "collection_key": "components",
+      "primary_key": "comp_id",
+      "required_fields": ["component_type", "description"],
+      "fields": {
+        "comp_id": {"type": "string", "description": "组件唯一标识"},
+        "comp_type": {"type": "string", "description": "组件类型(text/select/checkbox/group/flag_group/color/textarea/number/action_compound等)"},
+        "renderer": {"type": "string", "description": "渲染器标识(映射到前端渲染函数)"},
+        "props_schema": {"type": "object", "description": "组件属性模式(定义可配置的props)"},
+        "validations": {"type": "array", "items": "object", "description": "校验规则列表"},
+        "event_bindings": {"type": "object", "description": "事件绑定映射(change/focus/blur等)"},
+        "style_template": {"type": "object", "description": "样式模板(CSS变量/类名映射)"},
+        "default_value": {"type": "any", "description": "默认值"},
+        "deprecated": {"type": "boolean", "description": "是否已废弃", "default": false}
+      },
+      "relations": {
+        "renderer": {"references": "frontend_renderer_registry", "on_invalid": "warn"}
+      },
+      "indexes": [
+        {"name": "idx_comp_type", "fields": ["comp_type"], "unique": false},
+        {"name": "idx_renderer", "fields": ["renderer"], "unique": false}
+      ]
+    },
+    "ui_layouts": {
+      "description": "UI布局配置表：定义每种cell_type/edge的面板布局",
+      "collection_key": "layouts",
+      "primary_key": "layout_id",
+      "required_fields": ["layout_id", "target_type", "sections"],
+      "fields": {
+        "layout_id": {"type": "string", "description": "布局唯一标识"},
+        "name": {"type": "string", "description": "布局显示名称"},
+        "target_type": {"type": "string", "description": "适用目标(cell_type编号或'flow')"},
+        "target_scope": {"type": "string", "enum": ["node", "edge", "global"], "description": "作用域"},
+        "sections": {"type": "array", "items": "object", "description": "面板分区列表"},
+        "actions": {"type": "array", "items": "object", "description": "操作按钮定义"},
+        "responsive_rules": {"type": "object", "description": "响应式规则"},
+        "version": {"type": "string", "description": "布局版本"}
+      },
+      "relations": {
+        "sections[].fields[].comp_ref": {"references": "ui_components.comp_id", "on_invalid": "error"}
+      },
+      "indexes": [
+        {"name": "idx_target_type", "fields": ["target_type", "target_scope"], "unique": true}
+      ]
+    },
+    "data_mappings": {
+      "description": "数据源映射表：定义前端字段与后端数据模型的绑定路径",
+      "primary_key": "mapping_id",
+      "required_fields": ["mapping_id", "source_path", "target_binding"],
+      "fields": {
+        "mapping_id": {"type": "string", "description": "映射唯一标识"},
+        "description": {"type": "string", "description": "映射描述"},
+        "source_path": {"type": "string", "description": "数据源路径(如'params.hold')"},
+        "source_type": {"type": "string", "description": "源数据类型(int/string/bool/float/json)"},
+        "transform_expr": {"type": "string", "description": "转换表达式(可选，如'int(x/1000)')"},
+        "reverse_transform": {"type": "string", "description": "反向转换表达式(用于双向绑定写回)"},
+        "target_binding": {"type": "string", "description": "前端绑定目标(如'form.hold')"},
+        "bidirectional": {"type": "boolean", "description": "是否双向绑定", "default": true},
+        "cache_policy": {"type": "string", "enum": ["none", "read", "write_through"], "description": "缓存策略", "default": "none"},
+        "default_value": {"type": "any", "description": "默认值"},
+        "nullable": {"type": "boolean", "description": "是否允许null", "default": true}
+      },
+      "indexes": [
+        {"name": "idx_source_path", "fields": ["source_path"], "unique": false},
+        {"name": "idx_target_binding", "fields": ["target_binding"], "unique": false}
+      ]
+    },
+    "modules": {
+      "description": "模块注册表(已有，此处仅声明元模式)",
+      "collection_key": "modules",
+      "primary_key": "id",
+      "required_fields": ["id", "name", "type", "handler"],
+      "fields": {
+        "id": {"type": "string"},
+        "name": {"type": "string"},
+        "type": {"type": "string"},
+        "handler": {"type": "string"},
+        "layout_id": {"type": "string", "description": "关联的UI布局ID(新增)"}
+      },
+      "relations": {
+        "layout_id": {"references": "ui_layouts.layout_id", "on_invalid": "warn"}
+      }
+    },
+    "cell_type_registry": {
+      "description": "Cell类型注册表(已有，此处仅声明元模式)",
+      "collection_key": "types",
+      "primary_key": "type_code",
+      "required_fields": ["name", "category"],
+      "fields": {
+        "type_code": {"type": "integer", "description": "类型编码"},
+        "render_config": {"type": "object", "description": "画布渲染配置(新增)"}
+      }
+    },
+    "dispatch": {
+      "description": "条件分发表：定义条件类型到处理网关的映射",
+      "collection_key": "dispatch_rules",
+      "primary_key": "condition_type",
+      "required_fields": ["condition_type", "gateway"],
+      "fields": {
+        "condition_type": {"type": "string", "description": "条件类型标识"},
+        "gateway": {"type": "string", "description": "处理网关"}
+      }
+    },
+    "edge_strategies": {
+      "description": "边策略表：定义源→目标节点类型的流转策略",
+      "collection_key": "strategies",
+      "primary_key": "edge_pattern",
+      "required_fields": ["action", "handler"],
+      "fields": {
+        "edge_pattern": {"type": "string", "description": "边模式(如source_type:target_type)"},
+        "action": {"type": "string", "description": "执行动作"},
+        "handler": {"type": "string", "description": "处理函数"}
+      }
+    },
+    "flow_mode_registry": {
+      "description": "流转模式注册表：定义attr位标志到流转模式的映射规则",
+      "collection_key": "modes",
+      "primary_key": "mode_key",
+      "required_fields": ["name", "desc"],
+      "fields": {
+        "mode_key": {"type": "string", "description": "模式标识"},
+        "name": {"type": "string", "description": "模式名称"},
+        "desc": {"type": "string", "description": "模式描述"}
+      }
+    },
+    "pool_types": {
+      "description": "池类型→执行器映射表",
+      "collection_key": "pool_types",
+      "primary_key": "pool_type",
+      "required_fields": ["name", "executor"],
+      "fields": {
+        "pool_type": {"type": "string", "description": "池类型标识"},
+        "name": {"type": "string", "description": "池类型名称"},
+        "executor": {"type": "string", "description": "执行器函数"}
+      }
+    },
+    "match_modes": {
+      "description": "条件匹配模式→handler映射表",
+      "collection_key": "match_modes",
+      "primary_key": "mode_key",
+      "required_fields": ["handler", "desc"],
+      "fields": {
+        "mode_key": {"type": "string", "description": "模式标识"},
+        "handler": {"type": "string", "description": "处理函数"},
+        "desc": {"type": "string", "description": "描述"}
+      }
+    },
+    "analysis_types": {
+      "description": "收益分析类型→handler映射表",
+      "collection_key": "analysis_types",
+      "primary_key": "type_key",
+      "required_fields": ["handler", "title"],
+      "fields": {
+        "type_key": {"type": "string", "description": "类型标识"},
+        "handler": {"type": "string", "description": "处理函数"},
+        "title": {"type": "string", "description": "标题"}
+      }
+    },
+    "actions": {
+      "description": "action→handler映射表",
+      "collection_key": "actions",
+      "primary_key": "action_id",
+      "required_fields": ["handler", "desc"],
+      "fields": {
+        "action_id": {"type": "string", "description": "动作标识"},
+        "handler": {"type": "string", "description": "处理函数"},
+        "desc": {"type": "string", "description": "描述"}
+      }
+    },
+    "engines": {
+      "description": "数据引擎注册表",
+      "collection_key": "engines",
+      "primary_key": "id",
+      "required_fields": ["name", "fn"],
+      "fields": {
+        "id": {"type": "string", "description": "引擎标识"},
+        "name": {"type": "string", "description": "引擎名称"},
+        "fn": {"type": "string", "description": "执行函数"}
+      }
+    },
+    "markets": {
+      "description": "市场注册表",
+      "collection_key": "markets",
+      "primary_key": "id",
+      "required_fields": ["name", "prefix"],
+      "fields": {
+        "id": {"type": "string", "description": "市场标识"},
+        "name": {"type": "string", "description": "市场名称"},
+        "prefix": {"type": "string", "description": "代码前缀"}
+      }
+    },
+    "pool_roles": {
+      "description": "池角色定义表：定义不同节点的角色,用于替代engine中硬编码的baimpool=1判断",
+      "schema": "partial",
+      "collection_key": "roles",
+      "primary_key": "role_id",
+      "required_fields": ["role_id", "name"],
+      "fields": {
+        "role_id": {"type": "string", "description": "角色标识"},
+        "name": {"type": "string", "description": "角色名称"},
+        "baimpool_value": {"type": "number", "description": "baimpool值映射"},
+        "is_target": {"type": "boolean", "description": "是否目标池"},
+        "is_sink": {"type": "boolean", "description": "是否废弃池"},
+        "generate_buy_signal": {"type": "boolean", "description": "是否生成买入信号"},
+        "generate_sell_on_exit": {"type": "boolean", "description": "离开时是否生成卖出信号"},
+        "desc": {"type": "string", "description": "角色描述"},
+        "priority": {"type": "number", "description": "优先级"}
+      }
+    },
+    "property_ownership": {
+      "description": "属性所有权表：定义每种节点类型在不同池类型下的属性所有权",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "ownership": {"type": "object", "description": "平台独有/共有属性归属"},
+        "type_ownership": {"type": "object", "description": "各节点类型的属性归属映射"},
+        "type_mapping": {"type": "object", "description": "DZH/TDX类型双向映射"},
+        "rules": {"type": "object", "description": "导入时的属性禁用规则"},
+        "type_name_mapping": {"type": "object", "description": "类型名称到编号的映射"}
+      }
+    },
+    "field_definitions": {
+      "description": "字段定义表：全局字段元信息（数据类型/UI组件/校验/默认值/适用类型）",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "global_fields": {"type": "object", "description": "全局字段定义映射"},
+        "type_specific_fields": {"type": "object", "description": "按节点类型分组的字段定义"},
+        "flow_fields": {"type": "object", "description": "流转边字段定义"},
+        "tdx_node_fields": {"type": "object", "description": "TDX节点字段定义"},
+        "tdx_func_fields": {"type": "object", "description": "TDX公式子字段定义"},
+        "tdx_psatt_fields": {"type": "object", "description": "TDX状态池属性子字段定义"},
+        "tdx_flow_fields": {"type": "object", "description": "TDX流转字段定义"},
+        "bit_fields": {"type": "object", "description": "位标志字段定义"}
+      }
+    },
+    "fields": {
+      "description": "辅助字段表：扩展字段定义与分组",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "price_field_priority": {"type": "array", "description": "价格字段优先级列表"},
+        "tracker_fields": {"type": "object", "description": "追踪器字段映射"},
+        "bar_data_filter_fields": {"type": "array", "description": "Bar数据过滤字段列表"}
+      }
+    },
+    "data_source_mappings": {
+      "description": "数据列映射表：列ID→字段名→数据源的映射关系",
+      "schema": "partial",
+      "collection_key": "mappings",
+      "primary_key": "col_id",
+      "required_fields": ["col_id", "display_name"],
+      "fields": {
+        "col_id": {"type": "number", "description": "列ID"},
+        "display_name": {"type": "string", "description": "显示名称"},
+        "tq_field": {"type": "string", "description": "天勤字段名"},
+        "schema_field": {"type": "string", "description": "schema字段名"},
+        "unit": {"type": "string", "description": "单位"},
+        "format": {"type": "string", "description": "格式化字符串"},
+        "sortable": {"type": "boolean", "description": "是否可排序"},
+        "align": {"type": "string", "description": "对齐方式"},
+        "source": {"type": "string", "description": "数据来源"},
+        "provider": {"type": "string", "description": "数据提供者"},
+        "computed": {"type": "boolean", "description": "是否为计算字段"},
+        "formula": {"type": "string", "description": "计算公式"}
+      }
+    },
+    "tracker_schema": {
+      "description": "持仓跟踪表Schema：定义StockTracker的字段结构、计算公式与输出规则",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "fields": {"type": "object", "description": "字段定义映射"},
+        "init_fields": {"type": "array", "description": "初始化必填字段列表"},
+        "formulas": {"type": "object", "description": "计算公式定义"},
+        "output_fields": {"type": "object", "description": "输出字段分组定义"}
+      }
+    },
+    "tracker_formulas": {
+      "description": "追踪器公式表：追踪器计算的公式定义（无独立数据文件，结构基于命名推断）",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "formulas": {"type": "object", "description": "公式定义映射"},
+        "description": {"type": "string", "description": "表用途描述"}
+      }
+    },
+    "timing": {
+      "description": "时间规则表：起始类型/持续类型规则与交易日历",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "number", "description": "版本号"},
+        "starttype_rules": {"type": "object", "description": "开始类型规则映射"},
+        "cxtype_rules": {"type": "object", "description": "持续类型规则映射"},
+        "market_calendar": {"type": "object", "description": "交易日历配置"},
+        "tick_interval": {"type": "number", "description": "tick间隔(秒)"},
+        "offset_units": {"type": "object", "description": "偏移单位映射"},
+        "cxtime_units": {"type": "object", "description": "持续时长单位映射"},
+        "_dispatch_table": {"type": "object", "description": "分发表"},
+        "simulator": {"type": "object", "description": "模拟器配置"}
+      }
+    },
+    "post_tick_pipeline": {
+      "description": "行情后处理管线表：定义每次tick执行后的后处理阶段",
+      "schema": "partial",
+      "collection_key": "pipeline",
+      "primary_key": "stage",
+      "required_fields": ["stage", "handler"],
+      "fields": {
+        "stage": {"type": "string", "description": "阶段标识"},
+        "handler": {"type": "string", "description": "处理函数"},
+        "enabled": {"type": "boolean", "description": "是否启用"},
+        "config_table": {"type": "string", "description": "关联配置表"},
+        "write_to": {"type": "string", "description": "写入目标"},
+        "desc": {"type": "string", "description": "阶段描述"}
+      }
+    },
+    "action_table": {
+      "description": "行为动作映射表：行为码与具体动作的映射表",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "number", "description": "版本号"},
+        "pool_enter_actions": {"type": "object", "description": "池进入动作映射"}
+      }
+    },
+    "behavior_actions": {
+      "description": "行为-动作绑定表：handler函数注册表与输入输出契约",
+      "schema": "partial",
+      "collection_key": "actions",
+      "primary_key": "action_id",
+      "required_fields": ["action_id", "module"],
+      "fields": {
+        "action_id": {"type": "string", "description": "动作标识"},
+        "module": {"type": "string", "description": "模块路径"},
+        "input_ports": {"type": "array", "description": "输入端口列表"},
+        "output_ports": {"type": "array", "description": "输出端口列表"},
+        "description": {"type": "string", "description": "动作描述"},
+        "depends_on": {"type": "array", "description": "依赖配置表列表"},
+        "category": {"type": "string", "description": "动作分类"}
+      }
+    },
+    "event_rules": {
+      "description": "事件规则表：定义ENTER/EXIT/TIMEOUT事件的触发规则与detail字段映射",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "events": {"type": "object", "description": "事件规则映射"},
+        "detail_mapping": {"type": "object", "description": "detail字段映射"},
+        "common_fields": {"type": "object", "description": "公共字段定义"}
+      }
+    },
+    "signal_rules": {
+      "description": "信号规则表：定义BUY/SELL信号的触发条件、字段映射与生成规则",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "signals": {"type": "object", "description": "信号规则映射"},
+        "field_mapping": {"type": "object", "description": "字段映射"},
+        "generation_rules": {"type": "object", "description": "信号生成规则"}
+      }
+    },
+    "highlight_rules": {
+      "description": "高亮规则表：运行/回放时节点与连线高亮规则",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "default_duration_ms": {"type": "number", "description": "默认高亮持续毫秒"},
+        "rules": {"type": "object", "description": "高亮规则映射(cell/flow)"}
+      }
+    },
+    "alert_rules": {
+      "description": "告警规则表：定义触发条件、严重级别与冷却时间",
+      "schema": "partial",
+      "collection_key": "rules",
+      "primary_key": "rule_id",
+      "required_fields": ["rule_id", "name", "condition"],
+      "fields": {
+        "rule_id": {"type": "string", "description": "规则标识"},
+        "name": {"type": "string", "description": "规则名称"},
+        "condition": {"type": "string", "description": "触发条件表达式"},
+        "severity": {"type": "string", "description": "严重级别"},
+        "cooldown_sec": {"type": "number", "description": "冷却时间(秒)"}
+      }
+    },
+    "formula_modes": {
+      "description": "公式模式表：公式计算模式定义",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "modes": {"type": "object", "description": "模式映射(indi/rank/reverse/filter)"}
+      }
+    },
+    "data_config": {
+      "description": "数据适配器配置表：统一配置数据获取、注入、缓存、多时间框架",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "market_code_prefixes": {"type": "array", "description": "市场代码前缀列表"},
+        "market_code_suffixes": {"type": "array", "description": "市场代码后缀列表"},
+        "code_prefix_to_market": {"type": "object", "description": "代码前缀到市场的映射"},
+        "adapters": {"type": "object", "description": "数据适配器配置"},
+        "refresh_rules": {"type": "object", "description": "刷新规则"},
+        "injection_rules": {"type": "object", "description": "数据注入规则"},
+        "cache_strategy": {"type": "object", "description": "缓存策略"},
+        "timeframes": {"type": "object", "description": "时间框架定义"},
+        "multi_timeframe": {"type": "object", "description": "多时间框架配置"}
+      }
+    },
+    "data_providers": {
+      "description": "数据提供者表：数据源优先级链与提供者注册",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "valid_live_statuses": {"type": "array", "description": "有效实盘状态列表"},
+        "mock_explicit_only": {"type": "boolean", "description": "mock是否仅显式选择"},
+        "providers": {"type": "object", "description": "数据提供者配置映射"}
+      }
+    },
+    "fallback_chain": {
+      "description": "降级链表：各网关/数据源的回退策略",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "number", "description": "版本号"},
+        "chains": {"type": "object", "description": "降级链映射(网关→策略数组)"}
+      }
+    },
+    "price_fields": {
+      "description": "价格字段表：行情价格字段名映射与优先级",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "priority": {"type": "array", "description": "价格字段优先级列表"},
+        "resolution_policy": {"type": "object", "description": "价格解析策略"},
+        "bar_ohlc_priority": {"type": "object", "description": "K线OHLC字段优先级"}
+      }
+    },
+    "runtime_modes": {
+      "description": "运行模式定义表：实盘/回放/仿真等运行模式配置",
+      "schema": "partial",
+      "collection_key": "modes",
+      "primary_key": "mode_id",
+      "required_fields": ["mode_id", "name"],
+      "fields": {
+        "mode_id": {"type": "string", "description": "模式标识"},
+        "name": {"type": "string", "description": "模式名称"},
+        "time_source_id": {"type": "string", "description": "时间源ID"},
+        "data_source_id": {"type": "string", "description": "数据源ID"},
+        "trade_interface_id": {"type": "string", "description": "交易接口ID"},
+        "tick_interval": {"type": "number", "description": "tick间隔(秒)"},
+        "allow_side_effects": {"type": "boolean", "description": "是否允许副作用"},
+        "data_driver": {"type": "string", "description": "数据驱动方式"},
+        "trigger_mechanism": {"type": "string", "description": "触发机制"},
+        "side_effects_scope": {"type": "string", "description": "副作用范围"},
+        "desc": {"type": "string", "description": "模式描述"}
+      }
+    },
+    "time_sources": {
+      "description": "时间源配置表：实时时钟/K线时间轴/虚拟时钟驱动",
+      "schema": "partial",
+      "collection_key": "time_sources",
+      "primary_key": "time_source_id",
+      "required_fields": ["time_source_id", "name", "driver_type"],
+      "fields": {
+        "time_source_id": {"type": "string", "description": "时间源标识"},
+        "name": {"type": "string", "description": "时间源名称"},
+        "driver_type": {"type": "string", "description": "驱动类型"},
+        "now_expr": {"type": "string", "description": "当前时间表达式"},
+        "wait_expr": {"type": "string", "description": "等待表达式"},
+        "gate_time_expr": {"type": "string", "description": "门控时间表达式"},
+        "desc": {"type": "string", "description": "时间源描述"}
+      }
+    },
+    "trade_interfaces": {
+      "description": "交易接口配置表：实盘下单/空操作/模拟成交接口",
+      "schema": "partial",
+      "collection_key": "trade_interfaces",
+      "primary_key": "interface_id",
+      "required_fields": ["interface_id", "name"],
+      "fields": {
+        "interface_id": {"type": "string", "description": "接口标识"},
+        "name": {"type": "string", "description": "接口名称"},
+        "behavior": {"type": "string", "description": "行为描述"},
+        "methods": {"type": "object", "description": "接口方法定义"},
+        "config": {"type": "object", "description": "接口配置"}
+      }
+    },
+    "defaults": {
+      "description": "全局默认值表：消除硬编码默认值的统一默认值表",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "col_def": {"type": "array", "description": "默认列定义"},
+        "highlight": {"type": "object", "description": "高亮默认值"},
+        "parameter_aliases": {"type": "object", "description": "参数别名映射"},
+        "engine": {"type": "object", "description": "引擎默认值"},
+        "export": {"type": "object", "description": "导出默认值"},
+        "action_type_map": {"type": "object", "description": "动作类型映射"},
+        "setcode_map": {"type": "object", "description": "市场代码映射"},
+        "period_map": {"type": "object", "description": "周期映射"},
+        "period_int_to_str": {"type": "object", "description": "周期整数字符串映射"},
+        "auth": {"type": "object", "description": "认证配置"},
+        "cors": {"type": "object", "description": "CORS配置"}
+      }
+    },
+    "api_routes": {
+      "description": "API路由表：后端API端点注册",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "routes": {"type": "object", "description": "静态路由(GET/POST/PUT/DELETE)"},
+        "dynamic_routes": {"type": "object", "description": "动态路由"},
+        "auto_generated": {"type": "object", "description": "自动生成路由配置"}
+      }
+    },
+    "xml_mapping": {
+      "description": "XML映射表：DZH/TDX格式XML导入导出映射",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "dzh_to_tdx_type": {"type": "object", "description": "DZH到TDX类型映射"},
+        "tdx_to_frontend_type": {"type": "object", "description": "TDX到前端类型映射"},
+        "frontend_to_tdx_type": {"type": "object", "description": "前端到TDX类型映射"},
+        "pool": {"type": "object", "description": "pool元素映射"},
+        "cell": {"type": "object", "description": "cell元素映射"},
+        "flow": {"type": "object", "description": "flow元素映射"},
+        "frontend_node": {"type": "object", "description": "前端节点映射"},
+        "frontend_edge": {"type": "object", "description": "前端边映射"}
+      }
+    },
+    "history_schema": {
+      "description": "历史数据模式表：配置变更历史记录结构与.dat/.log文件格式",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "xml_declaration": {"type": "string", "description": "XML声明"},
+        "xml_encoding": {"type": "string", "description": "XML编码"},
+        "root_element": {"type": "string", "description": "根元素名"},
+        "data_element": {"type": "string", "description": "数据元素名"},
+        "stock_element": {"type": "string", "description": "股票元素名"},
+        "dat_format": {"type": "object", "description": ".dat文件格式定义"},
+        "log_format": {"type": "object", "description": ".log文件格式定义"},
+        "read_mapping": {"type": "object", "description": "读取映射"},
+        "intime_format": {"type": "object", "description": "intime解析规则"},
+        "write_defaults": {"type": "object", "description": "写入默认值"}
+      }
+    },
+    "dashboard_schema": {
+      "description": "仪表盘模式表：看盘面板布局与数据源定义",
+      "schema": "partial",
+      "collection_key": "panels",
+      "primary_key": "panel_id",
+      "required_fields": ["panel_id", "title", "data_source"],
+      "fields": {
+        "panel_id": {"type": "string", "description": "面板标识"},
+        "title": {"type": "string", "description": "面板标题"},
+        "data_source": {"type": "string", "description": "数据源"},
+        "refresh_interval_ticks": {"type": "number", "description": "刷新间隔(tick数)"},
+        "columns": {"type": "array", "description": "显示列列表"}
+      }
+    },
+    "dzh_type_map": {
+      "description": "DZH类型映射表：DZH单元格类型与内部类型的映射",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "type_map": {"type": "object", "description": "数值到字符串类型映射"},
+        "reverse_map": {"type": "object", "description": "字符串到数值类型映射"},
+        "execution_node_types": {"type": "array", "description": "执行类节点类型列表"},
+        "display_node_types": {"type": "array", "description": "显示类节点类型列表"},
+        "aliases": {"type": "object", "description": "类型别名映射"},
+        "tdx_aliases": {"type": "object", "description": "TDX类型别名映射"},
+        "tdx_type_map": {"type": "object", "description": "TDX类型映射"},
+        "tdx_to_dzh": {"type": "object", "description": "TDX到DZH类型映射"},
+        "flow_validation": {"type": "object", "description": "流转校验规则"},
+        "export_dispatch": {"type": "object", "description": "导出分发表"}
+      }
+    },
+    "dzh_extra_fields": {
+      "description": "DZH扩展字段表：DZH平台特有的额外字段定义",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "defaults": {"type": "object", "description": "默认值配置"}
+      }
+    },
+    "tdx_enums": {
+      "description": "TDX枚举定义表：通达信平台枚举值定义",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "enums": {"type": "object", "description": "枚举值映射(nset/noperate/nperiod等)"},
+        "indicator_formula_map": {"type": "object", "description": "指标公式映射"}
+      }
+    },
+    "tdx_field_visibility": {
+      "description": "TDX字段可见性表：通达信平台字段显示控制矩阵",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "_legend": {"type": "object", "description": "图例说明"},
+        "matrix": {"type": "object", "description": "可见性矩阵(nset×子字段)"}
+      }
+    },
+    "tdx_indicators": {
+      "description": "TDX指标定义表：通达信技术指标参数定义",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "indicators": {"type": "array", "description": "系统指标编号列表"},
+        "common_indicators": {"type": "object", "description": "常用指标定义映射"},
+        "formula_arg_priority": {"type": "array", "description": "公式参数优先级"}
+      }
+    },
+    "tdx_ntjindexno_lookup": {
+      "description": "TDX指数查找表：通达信指数编号查找映射",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "nset_4_market": {"type": "object", "description": "实时行情选股字段索引"},
+        "nset_3_financial": {"type": "object", "description": "最新财务选股字段索引"}
+      }
+    },
+    "tdx_psatt": {
+      "description": "TDX属性表：通达信PSATT属性编码定义",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "number", "description": "版本号"},
+        "ttl_units": {"type": "object", "description": "TTL单位映射"},
+        "ttl_unit_labels": {"type": "object", "description": "TTL单位标签映射"},
+        "auto_ttl_node_types": {"type": "array", "description": "自动TTL节点类型列表"},
+        "time_formats": {"type": "array", "description": "时间格式列表"},
+        "dzh_hold_compat": {"type": "object", "description": "DZH hold兼容配置"},
+        "side_effects": {"type": "object", "description": "副作用定义"}
+      }
+    },
+    "mock_data": {
+      "description": "模拟数据表：开发/测试用的模拟行情数据",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "market_scopes": {"type": "object", "description": "市场范围定义"},
+        "sector_stocks": {"type": "object", "description": "板块股票列表"},
+        "sector_generation_rules": {"type": "object", "description": "板块生成规则"},
+        "stock_names": {"type": "object", "description": "股票名称映射"},
+        "generator": {"type": "object", "description": "数据生成器配置"}
+      }
+    },
+    "analysis_config": {
+      "description": "分析配置表：股票分析功能的配置参数",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "angles": {"type": "object", "description": "分析角度定义"},
+        "analysis_types": {"type": "object", "description": "分析类型定义"},
+        "default_type": {"type": "string", "description": "默认分析类型"},
+        "default_sample_stocks": {"type": "array", "description": "默认样本股票列表"}
+      }
+    },
+    "analysis_angles": {
+      "description": "分析角度表：分析维度/角度定义（无独立数据文件，结构基于命名推断）",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "angles": {"type": "object", "description": "分析角度定义映射"},
+        "description": {"type": "string", "description": "表用途描述"}
+      }
+    },
+    "analysis_results": {
+      "description": "分析结果表：分析输出结果的结构定义（无独立数据文件，结构基于命名推断）",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "results": {"type": "object", "description": "分析结果结构定义"},
+        "description": {"type": "string", "description": "表用途描述"}
+      }
+    },
+    "pk_config": {
+      "description": "PK配置表：擂台PK功能的配置参数",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "dimensions": {"type": "object", "description": "PK评分维度定义"},
+        "aggregation": {"type": "string", "description": "聚合方式"},
+        "rank_algorithm": {"type": "object", "description": "排名算法配置"},
+        "rank_change_rules": {"type": "object", "description": "排名变化规则"},
+        "execution": {"type": "object", "description": "执行配置"}
+      }
+    },
+    "pk_rules": {
+      "description": "PK规则表：PK评分与排名规则（无独立数据文件，结构基于命名推断）",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "rules": {"type": "object", "description": "PK规则映射"},
+        "description": {"type": "string", "description": "表用途描述"}
+      }
+    },
+    "pk_score_dimensions": {
+      "description": "PK评分维度表：PK综合评分的各维度权重（无独立数据文件，结构基于命名推断）",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "dimensions": {"type": "object", "description": "评分维度定义映射"},
+        "description": {"type": "string", "description": "表用途描述"}
+      }
+    },
+    "toolbar_config": {
+      "description": "工具栏按钮配置表：定义工具栏按钮分组、布局与行为",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "groups": {"type": "array", "description": "按钮分组列表"},
+        "buttons": {"type": "array", "description": "按钮定义列表"},
+        "layout": {"type": "object", "description": "工具栏布局配置"},
+        "actions": {"type": "object", "description": "按钮动作映射"},
+        "default_visible": {"type": "boolean", "description": "默认是否可见"}
+      }
+    },
+    "context_menu_config": {
+      "description": "右键菜单配置表：定义右键菜单项、分组与触发目标",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "menus": {"type": "object", "description": "菜单定义映射(按目标类型)"},
+        "items": {"type": "array", "description": "菜单项定义列表"},
+        "target_types": {"type": "array", "description": "适用目标类型列表"},
+        "default_menu": {"type": "string", "description": "默认菜单标识"}
+      }
+    },
+    "theme_config": {
+      "description": "主题配置表：定义主题配色、样式与默认主题",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "themes": {"type": "object", "description": "主题定义映射"},
+        "color_schemes": {"type": "object", "description": "配色方案映射"},
+        "default_theme": {"type": "string", "description": "默认主题标识"},
+        "css_variables": {"type": "object", "description": "CSS变量定义"}
+      }
+    },
+    "column_definitions": {
+      "description": "列定义配置表：定义表格列的元信息与显示规则",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "columns": {"type": "object", "description": "列定义映射(col_id→定义)"},
+        "groups": {"type": "object", "description": "列分组定义"},
+        "default_columns": {"type": "array", "description": "默认显示列列表"},
+        "formatters": {"type": "object", "description": "列格式化器映射"}
+      }
+    },
+    "chart_config": {
+      "description": "图表配置表：定义图表类型、参数与指标绑定",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "chart_types": {"type": "object", "description": "图表类型定义映射"},
+        "default_config": {"type": "object", "description": "默认图表配置"},
+        "indicators": {"type": "object", "description": "图表指标绑定映射"},
+        "axes": {"type": "object", "description": "坐标轴配置"}
+      }
+    },
+    "keyboard_shortcuts": {
+      "description": "快捷键配置表：定义快捷键组合与对应动作",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "shortcuts": {"type": "object", "description": "快捷键定义映射(组合→动作)"},
+        "groups": {"type": "object", "description": "快捷键分组定义"},
+        "contexts": {"type": "array", "description": "快捷键生效上下文列表"},
+        "conflict_resolution": {"type": "object", "description": "冲突解决规则"}
+      }
+    },
+    "dialog_definitions": {
+      "description": "对话框定义表：定义对话框模板与字段结构（预留，暂不创建数据文件）",
+      "schema": "partial",
+      "primary_key": null,
+      "required_fields": [],
+      "fields": {
+        "version": {"type": "string", "description": "版本号"},
+        "description": {"type": "string", "description": "表用途描述"},
+        "dialogs": {"type": "object", "description": "对话框定义映射(dialog_id→定义)"},
+        "templates": {"type": "object", "description": "对话框模板映射"},
+        "default_actions": {"type": "object", "description": "默认动作按钮定义"}
+      }
+    }
+  }
+}

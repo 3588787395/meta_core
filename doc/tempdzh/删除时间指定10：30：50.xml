@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="GB2312"?>
+<pool type="ss-pool" ver="1.0" mode="1" nextid="12" backcolor="-1"><cells><cell id="2" type="202" attr="128" pos="31,36,51,68" clr="-1" text="" attrtext="" reload="0" lastload="0"/><cell id="3" type="201" attr="0" pos="98,36,122,60" clr="-1" text=""/><cell id="11" type="200" attr="0" pos="196,16,286,92" clr="-1" text="״̬(11)" hold="432000" deltype="0" endtime="9050" delstocktype="1" col="2,-1,-2,-3,7,14,8,10,17,45" width="55,42,42,42,42,42,42,42,42,42"/></cells><flows/><trades/><opentrades/></pool>

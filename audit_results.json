@@ -1,0 +1,736 @@
+{
+  "total_tables": 92,
+  "total_code_files": 134,
+  "dead_tables": [
+    "alert_rules",
+    "dashboard_schema",
+    "decision_rules",
+    "dzh_trading_calendar",
+    "dzh_ttl_units",
+    "operators",
+    "pk_config"
+  ],
+  "suspected_dead_tables": [
+    {
+      "name": "api_routes",
+      "count": 1
+    },
+    {
+      "name": "dzh_extra_fields",
+      "count": 1
+    },
+    {
+      "name": "topology_patterns",
+      "count": 1
+    },
+    {
+      "name": "dzh_cell_type_schema",
+      "count": 2
+    },
+    {
+      "name": "formula_funcs",
+      "count": 2
+    },
+    {
+      "name": "formula_modes",
+      "count": 2
+    },
+    {
+      "name": "mock_field_ranges",
+      "count": 2
+    },
+    {
+      "name": "tdx_indicator_formula_map",
+      "count": 2
+    },
+    {
+      "name": "tdx_indicators",
+      "count": 2
+    }
+  ],
+  "active_tables": [
+    {
+      "name": "column_definitions",
+      "count": 3
+    },
+    {
+      "name": "data_mappings",
+      "count": 3
+    },
+    {
+      "name": "match_modes",
+      "count": 3
+    },
+    {
+      "name": "price_fields",
+      "count": 3
+    },
+    {
+      "name": "action_pipeline",
+      "count": 4
+    },
+    {
+      "name": "action_table",
+      "count": 4
+    },
+    {
+      "name": "analysis_config",
+      "count": 4
+    },
+    {
+      "name": "filter_action_rules",
+      "count": 4
+    },
+    {
+      "name": "runtime_tables_schema",
+      "count": 4
+    },
+    {
+      "name": "theme_config",
+      "count": 4
+    },
+    {
+      "name": "dzh_reload_schedule",
+      "count": 5
+    },
+    {
+      "name": "local_file_paths",
+      "count": 5
+    },
+    {
+      "name": "tdx_field_visibility",
+      "count": 5
+    },
+    {
+      "name": "xml_mapping",
+      "count": 5
+    },
+    {
+      "name": "context_menu_config",
+      "count": 6
+    },
+    {
+      "name": "dzh_condition_fallback",
+      "count": 6
+    },
+    {
+      "name": "fallback_chain",
+      "count": 6
+    },
+    {
+      "name": "flow_mode_rules",
+      "count": 6
+    },
+    {
+      "name": "highlight_rules",
+      "count": 6
+    },
+    {
+      "name": "history_schema",
+      "count": 6
+    },
+    {
+      "name": "keyboard_shortcuts",
+      "count": 6
+    },
+    {
+      "name": "pre_tick_pipeline",
+      "count": 6
+    },
+    {
+      "name": "signal_rules",
+      "count": 6
+    },
+    {
+      "name": "tdx_noperate_rules",
+      "count": 6
+    },
+    {
+      "name": "tdx_ntjindexno_lookup",
+      "count": 6
+    },
+    {
+      "name": "tdx_element_schemas",
+      "count": 7
+    },
+    {
+      "name": "trade_interfaces",
+      "count": 7
+    },
+    {
+      "name": "value_extractors",
+      "count": 7
+    },
+    {
+      "name": "capability_registry",
+      "count": 8
+    },
+    {
+      "name": "chart_config",
+      "count": 8
+    },
+    {
+      "name": "formula_routing",
+      "count": 8
+    },
+    {
+      "name": "post_tick_pipeline",
+      "count": 8
+    },
+    {
+      "name": "ui_state",
+      "count": 8
+    },
+    {
+      "name": "market_classifications",
+      "count": 9
+    },
+    {
+      "name": "tdx_system_indicators",
+      "count": 9
+    },
+    {
+      "name": "tracker_schema",
+      "count": 9
+    },
+    {
+      "name": "custom_formulas",
+      "count": 10
+    },
+    {
+      "name": "data_pipeline",
+      "count": 11
+    },
+    {
+      "name": "event_rules",
+      "count": 11
+    },
+    {
+      "name": "mock_data",
+      "count": 11
+    },
+    {
+      "name": "runtime_modes",
+      "count": 11
+    },
+    {
+      "name": "toolbar_config",
+      "count": 11
+    },
+    {
+      "name": "data_source_routes",
+      "count": 12
+    },
+    {
+      "name": "pool_types",
+      "count": 12
+    },
+    {
+      "name": "builtin_formulas",
+      "count": 13
+    },
+    {
+      "name": "tdx_enums",
+      "count": 13
+    },
+    {
+      "name": "time_sources",
+      "count": 13
+    },
+    {
+      "name": "dzh_market_mappings",
+      "count": 17
+    },
+    {
+      "name": "edge_semantics",
+      "count": 17
+    },
+    {
+      "name": "ui_components",
+      "count": 17
+    },
+    {
+      "name": "data_source_mappings",
+      "count": 20
+    },
+    {
+      "name": "edge_strategies",
+      "count": 20
+    },
+    {
+      "name": "table_schemas",
+      "count": 20
+    },
+    {
+      "name": "data_config",
+      "count": 21
+    },
+    {
+      "name": "engines",
+      "count": 21
+    },
+    {
+      "name": "data_providers",
+      "count": 25
+    },
+    {
+      "name": "data_source_contract",
+      "count": 26
+    },
+    {
+      "name": "pool_roles",
+      "count": 26
+    },
+    {
+      "name": "behavior_actions",
+      "count": 36
+    },
+    {
+      "name": "dzh_type_map",
+      "count": 36
+    },
+    {
+      "name": "property_ownership",
+      "count": 37
+    },
+    {
+      "name": "field_definitions",
+      "count": 41
+    },
+    {
+      "name": "flow_mode_registry",
+      "count": 42
+    },
+    {
+      "name": "attr_flag_map",
+      "count": 43
+    },
+    {
+      "name": "action_rules",
+      "count": 47
+    },
+    {
+      "name": "ui_layouts",
+      "count": 53
+    },
+    {
+      "name": "cell_type_registry",
+      "count": 70
+    },
+    {
+      "name": "topology",
+      "count": 70
+    },
+    {
+      "name": "tdx_psatt",
+      "count": 96
+    },
+    {
+      "name": "defaults",
+      "count": 105
+    },
+    {
+      "name": "timing",
+      "count": 117
+    },
+    {
+      "name": "modules",
+      "count": 128
+    },
+    {
+      "name": "actions",
+      "count": 130
+    },
+    {
+      "name": "dispatch",
+      "count": 188
+    },
+    {
+      "name": "markets",
+      "count": 194
+    },
+    {
+      "name": "fields",
+      "count": 447
+    }
+  ],
+  "table_stats": [
+    {
+      "name": "alert_rules",
+      "count": 0
+    },
+    {
+      "name": "dashboard_schema",
+      "count": 0
+    },
+    {
+      "name": "decision_rules",
+      "count": 0
+    },
+    {
+      "name": "dzh_trading_calendar",
+      "count": 0
+    },
+    {
+      "name": "dzh_ttl_units",
+      "count": 0
+    },
+    {
+      "name": "operators",
+      "count": 0
+    },
+    {
+      "name": "pk_config",
+      "count": 0
+    },
+    {
+      "name": "api_routes",
+      "count": 1
+    },
+    {
+      "name": "dzh_extra_fields",
+      "count": 1
+    },
+    {
+      "name": "topology_patterns",
+      "count": 1
+    },
+    {
+      "name": "dzh_cell_type_schema",
+      "count": 2
+    },
+    {
+      "name": "formula_funcs",
+      "count": 2
+    },
+    {
+      "name": "formula_modes",
+      "count": 2
+    },
+    {
+      "name": "mock_field_ranges",
+      "count": 2
+    },
+    {
+      "name": "tdx_indicator_formula_map",
+      "count": 2
+    },
+    {
+      "name": "tdx_indicators",
+      "count": 2
+    },
+    {
+      "name": "column_definitions",
+      "count": 3
+    },
+    {
+      "name": "data_mappings",
+      "count": 3
+    },
+    {
+      "name": "match_modes",
+      "count": 3
+    },
+    {
+      "name": "price_fields",
+      "count": 3
+    },
+    {
+      "name": "action_pipeline",
+      "count": 4
+    },
+    {
+      "name": "action_table",
+      "count": 4
+    },
+    {
+      "name": "analysis_config",
+      "count": 4
+    },
+    {
+      "name": "filter_action_rules",
+      "count": 4
+    },
+    {
+      "name": "runtime_tables_schema",
+      "count": 4
+    },
+    {
+      "name": "theme_config",
+      "count": 4
+    },
+    {
+      "name": "dzh_reload_schedule",
+      "count": 5
+    },
+    {
+      "name": "local_file_paths",
+      "count": 5
+    },
+    {
+      "name": "tdx_field_visibility",
+      "count": 5
+    },
+    {
+      "name": "xml_mapping",
+      "count": 5
+    },
+    {
+      "name": "context_menu_config",
+      "count": 6
+    },
+    {
+      "name": "dzh_condition_fallback",
+      "count": 6
+    },
+    {
+      "name": "fallback_chain",
+      "count": 6
+    },
+    {
+      "name": "flow_mode_rules",
+      "count": 6
+    },
+    {
+      "name": "highlight_rules",
+      "count": 6
+    },
+    {
+      "name": "history_schema",
+      "count": 6
+    },
+    {
+      "name": "keyboard_shortcuts",
+      "count": 6
+    },
+    {
+      "name": "pre_tick_pipeline",
+      "count": 6
+    },
+    {
+      "name": "signal_rules",
+      "count": 6
+    },
+    {
+      "name": "tdx_noperate_rules",
+      "count": 6
+    },
+    {
+      "name": "tdx_ntjindexno_lookup",
+      "count": 6
+    },
+    {
+      "name": "tdx_element_schemas",
+      "count": 7
+    },
+    {
+      "name": "trade_interfaces",
+      "count": 7
+    },
+    {
+      "name": "value_extractors",
+      "count": 7
+    },
+    {
+      "name": "capability_registry",
+      "count": 8
+    },
+    {
+      "name": "chart_config",
+      "count": 8
+    },
+    {
+      "name": "formula_routing",
+      "count": 8
+    },
+    {
+      "name": "post_tick_pipeline",
+      "count": 8
+    },
+    {
+      "name": "ui_state",
+      "count": 8
+    },
+    {
+      "name": "market_classifications",
+      "count": 9
+    },
+    {
+      "name": "tdx_system_indicators",
+      "count": 9
+    },
+    {
+      "name": "tracker_schema",
+      "count": 9
+    },
+    {
+      "name": "custom_formulas",
+      "count": 10
+    },
+    {
+      "name": "data_pipeline",
+      "count": 11
+    },
+    {
+      "name": "event_rules",
+      "count": 11
+    },
+    {
+      "name": "mock_data",
+      "count": 11
+    },
+    {
+      "name": "runtime_modes",
+      "count": 11
+    },
+    {
+      "name": "toolbar_config",
+      "count": 11
+    },
+    {
+      "name": "data_source_routes",
+      "count": 12
+    },
+    {
+      "name": "pool_types",
+      "count": 12
+    },
+    {
+      "name": "builtin_formulas",
+      "count": 13
+    },
+    {
+      "name": "tdx_enums",
+      "count": 13
+    },
+    {
+      "name": "time_sources",
+      "count": 13
+    },
+    {
+      "name": "dzh_market_mappings",
+      "count": 17
+    },
+    {
+      "name": "edge_semantics",
+      "count": 17
+    },
+    {
+      "name": "ui_components",
+      "count": 17
+    },
+    {
+      "name": "data_source_mappings",
+      "count": 20
+    },
+    {
+      "name": "edge_strategies",
+      "count": 20
+    },
+    {
+      "name": "table_schemas",
+      "count": 20
+    },
+    {
+      "name": "data_config",
+      "count": 21
+    },
+    {
+      "name": "engines",
+      "count": 21
+    },
+    {
+      "name": "data_providers",
+      "count": 25
+    },
+    {
+      "name": "data_source_contract",
+      "count": 26
+    },
+    {
+      "name": "pool_roles",
+      "count": 26
+    },
+    {
+      "name": "behavior_actions",
+      "count": 36
+    },
+    {
+      "name": "dzh_type_map",
+      "count": 36
+    },
+    {
+      "name": "property_ownership",
+      "count": 37
+    },
+    {
+      "name": "field_definitions",
+      "count": 41
+    },
+    {
+      "name": "flow_mode_registry",
+      "count": 42
+    },
+    {
+      "name": "attr_flag_map",
+      "count": 43
+    },
+    {
+      "name": "action_rules",
+      "count": 47
+    },
+    {
+      "name": "ui_layouts",
+      "count": 53
+    },
+    {
+      "name": "cell_type_registry",
+      "count": 70
+    },
+    {
+      "name": "topology",
+      "count": 70
+    },
+    {
+      "name": "tdx_psatt",
+      "count": 96
+    },
+    {
+      "name": "defaults",
+      "count": 105
+    },
+    {
+      "name": "timing",
+      "count": 117
+    },
+    {
+      "name": "modules",
+      "count": 128
+    },
+    {
+      "name": "actions",
+      "count": 130
+    },
+    {
+      "name": "dispatch",
+      "count": 188
+    },
+    {
+      "name": "markets",
+      "count": 194
+    },
+    {
+      "name": "fields",
+      "count": 447
+    }
+  ],
+  "secondary_check": {
+    "alert_rules": 0,
+    "dashboard_schema": 0,
+    "decision_rules": 0,
+    "dzh_trading_calendar": 0,
+    "dzh_ttl_units": 0,
+    "operators": 4,
+    "pk_config": 0
+  }
+}

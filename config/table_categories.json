@@ -1,0 +1,497 @@
+{
+  "version": "1.0",
+  "description": "配置表分类元数据：集中定义所有配置表的分类树与元信息，作为前后端唯一分类来源",
+  "categories": [
+    {
+      "id": "nodes",
+      "name": "节点与模块",
+      "icon": "📦",
+      "desc": "核心节点类型定义、模块注册、池角色与属性归属",
+      "tables": [
+        {
+          "name": "cell_type_registry",
+          "label": "节点类型注册表",
+          "badge": "core",
+          "desc": "所有节点类型的完整定义（名称/分类/属性/渲染/默认参数）",
+          "schema_covered": true
+        },
+        {
+          "name": "modules",
+          "label": "模块注册表",
+          "badge": "core",
+          "desc": "备选池/条件过滤器/状态池等模块的输入输出与handler",
+          "schema_covered": true
+        },
+        {
+          "name": "pool_types",
+          "label": "池类型定义",
+          "desc": "股票池的类型分类（备选/条件/状态/丢弃）",
+          "schema_covered": true
+        },
+        {
+          "name": "pool_roles",
+          "label": "池角色定义",
+          "badge": "core",
+          "desc": "DZH/TDX池角色映射、角色解析规则",
+          "schema_covered": true
+        },
+        {
+          "name": "property_ownership",
+          "label": "属性归属映射",
+          "desc": "各节点类型的属性字段归属定义",
+          "schema_covered": true
+        }
+      ]
+    },
+    {
+      "id": "fields",
+      "name": "字段与界面",
+      "icon": "🖼",
+      "desc": "字段定义、UI组件注册、面板布局、数据绑定",
+      "tables": [
+        {
+          "name": "field_definitions",
+          "label": "字段定义表",
+          "badge": "core",
+          "desc": "全局字段元信息（数据类型/UI组件/校验/默认值/适用类型）",
+          "schema_covered": true
+        },
+        {
+          "name": "fields",
+          "label": "辅助字段表",
+          "desc": "扩展字段定义与分组",
+          "schema_covered": true
+        },
+        {
+          "name": "ui_components",
+          "label": "UI组件注册表",
+          "badge": "core",
+          "desc": "前端组件类型定义（文本框/数字/复选/下拉/标志组/颜色等）",
+          "schema_covered": true
+        },
+        {
+          "name": "ui_layouts",
+          "label": "面板布局配置",
+          "badge": "core",
+          "desc": "每种节点类型的属性面板分区与字段布局",
+          "schema_covered": true
+        },
+        {
+          "name": "data_mappings",
+          "label": "数据绑定映射",
+          "desc": "前端字段与后端数据模型的双向绑定路径与转换规则",
+          "schema_covered": true
+        },
+        {
+          "name": "data_source_mappings",
+          "label": "数据列映射",
+          "desc": "列ID→字段名→数据源的映射关系",
+          "schema_covered": true
+        },
+        {
+          "name": "tracker_schema",
+          "label": "追踪器模式",
+          "desc": "股票追踪器的数据结构定义与计算公式（已合并 tracker_formulas）",
+          "schema_covered": true
+        }
+      ]
+    },
+    {
+      "id": "flow",
+      "name": "流转与调度",
+      "icon": "🔀",
+      "desc": "股票流转模式、边策略、分发规则、时序调度",
+      "tables": [
+        {
+          "name": "flow_mode_registry",
+          "label": "流转模式注册表",
+          "badge": "core",
+          "desc": "移动/覆盖/复制/强制等流转模式定义",
+          "schema_covered": true
+        },
+        {
+          "name": "edge_strategies",
+          "label": "边策略表",
+          "badge": "core",
+          "desc": "源→目标节点类型的流转策略与handler",
+          "schema_covered": true
+        },
+        {
+          "name": "dispatch",
+          "label": "分发规则表",
+          "badge": "core",
+          "desc": "节点执行分发逻辑与路由规则",
+          "schema_covered": true
+        },
+        {
+          "name": "timing",
+          "label": "时间规则表",
+          "desc": "起始类型/持续类型规则与交易日历",
+          "schema_covered": true
+        },
+        {
+          "name": "match_modes",
+          "label": "匹配模式",
+          "desc": "股票匹配方式定义",
+          "schema_covered": true
+        },
+        {
+          "name": "post_tick_pipeline",
+          "label": "行情后处理管线",
+          "desc": "Tick到达后的处理流水线定义",
+          "schema_covered": true
+        },
+        {
+          "name": "edge_semantics",
+          "label": "边语义定义",
+          "badge": "core",
+          "desc": "条件边/无条件边的类型、触发规则、运算流程与缓存策略",
+          "schema_covered": true
+        },
+        {
+          "name": "topology",
+          "label": "拓扑模式",
+          "desc": "TDX/DZH 股票池流转拓扑模式定义与文档对照",
+          "schema_covered": false
+        },
+        {
+          "name": "topology_patterns",
+          "label": "拓扑识别规则",
+          "desc": "股票池拓扑模式识别规则与默认执行策略",
+          "schema_covered": false
+        }
+      ]
+    },
+    {
+      "id": "rules",
+      "name": "业务规则",
+      "icon": "📐",
+      "desc": "通用业务规则引擎：行为规则、事件规则、信号规则",
+      "tables": [
+        {
+          "name": "action_rules",
+          "label": "行为规则表",
+          "badge": "rule",
+          "desc": "提取硬编码逻辑为规则条目，统一驱动业务与UI联动",
+          "schema_covered": true
+        },
+        {
+          "name": "action_table",
+          "label": "行为动作映射",
+          "desc": "行为码与具体动作的映射表",
+          "schema_covered": true
+        },
+        {
+          "name": "actions",
+          "label": "动作定义表",
+          "desc": "所有可执行动作的注册定义",
+          "schema_covered": true
+        },
+        {
+          "name": "behavior_actions",
+          "label": "行为-动作绑定",
+          "badge": "rule",
+          "desc": "handler函数注册表与输入输出契约",
+          "schema_covered": true
+        },
+        {
+          "name": "event_rules",
+          "label": "事件规则表",
+          "badge": "rule",
+          "desc": "ENTER/EXIT/TIMEOUT事件触发规则",
+          "schema_covered": true
+        },
+        {
+          "name": "signal_rules",
+          "label": "信号规则表",
+          "badge": "rule",
+          "desc": "BUY/SELL交易信号触发条件",
+          "schema_covered": true
+        },
+        {
+          "name": "highlight_rules",
+          "label": "高亮规则表",
+          "desc": "运行/回放时节点与连线高亮规则",
+          "schema_covered": true
+        },
+        {
+          "name": "alert_rules",
+          "label": "告警规则表",
+          "desc": "异常告警触发规则",
+          "schema_covered": true
+        },
+        {
+          "name": "formula_modes",
+          "label": "公式模式表",
+          "desc": "公式计算模式定义",
+          "schema_covered": true
+        },
+        {
+          "name": "filter_action_rules",
+          "label": "过滤器动作解码规则表",
+          "badge": "rule",
+          "desc": "过滤器动作整数值解码为结构化动作",
+          "schema_covered": true
+        }
+      ]
+    },
+    {
+      "id": "data",
+      "name": "数据源",
+      "icon": "📊",
+      "desc": "市场数据获取、适配器配置、降级策略",
+      "tables": [
+        {
+          "name": "data_config",
+          "label": "数据适配器配置",
+          "badge": "data",
+          "desc": "天勤/AKShare/Mock等数据适配器的配置",
+          "schema_covered": true
+        },
+        {
+          "name": "data_providers",
+          "label": "数据提供者",
+          "badge": "data",
+          "desc": "数据源优先级链与提供者注册",
+          "schema_covered": true
+        },
+        {
+          "name": "fallback_chain",
+          "label": "降级链",
+          "desc": "各网关/数据源的回退策略",
+          "schema_covered": true
+        },
+        {
+          "name": "markets",
+          "label": "市场定义",
+          "desc": "交易所/市场范围定义",
+          "schema_covered": true
+        },
+        {
+          "name": "price_fields",
+          "label": "价格字段",
+          "desc": "行情价格字段名映射",
+          "schema_covered": true
+        },
+        {
+          "name": "data_source_contract",
+          "label": "数据源契约",
+          "badge": "data",
+          "desc": "数据源探测契约与可用状态定义",
+          "schema_covered": true
+        },
+        {
+          "name": "data_source_routes",
+          "label": "数据源路由表",
+          "badge": "data",
+          "desc": "数据源周期/API/状态/模式别名路由映射",
+          "schema_covered": true
+        },
+        {
+          "name": "market_classifications",
+          "label": "市场分类规则表",
+          "badge": "data",
+          "desc": "代码前缀→市场/setcode/ETF类型/市场筛选规则",
+          "schema_covered": true
+        }
+      ]
+    },
+    {
+      "id": "runtime",
+      "name": "运行模式",
+      "icon": "▶",
+      "desc": "运行时配置：实盘/回放/仿真模式、时间源、交易接口",
+      "tables": [
+        {
+          "name": "runtime_modes",
+          "label": "运行模式定义",
+          "desc": "实盘/回放/仿真等运行模式配置",
+          "schema_covered": true
+        },
+        {
+          "name": "time_sources",
+          "label": "时间源配置",
+          "desc": "实时时钟/K线时间轴/虚拟时钟驱动",
+          "schema_covered": true
+        },
+        {
+          "name": "trade_interfaces",
+          "label": "交易接口配置",
+          "desc": "实盘下单/空操作/模拟成交接口",
+          "schema_covered": true
+        },
+        {
+          "name": "engines",
+          "label": "引擎定义",
+          "desc": "执行引擎类型与配置",
+          "schema_covered": true
+        }
+      ]
+    },
+    {
+      "id": "system",
+      "name": "系统架构",
+      "icon": "🔧",
+      "desc": "元模式定义、全局默认值、API路由、XML映射",
+      "tables": [
+        {
+          "name": "table_schemas",
+          "label": "表模式定义",
+          "badge": "core",
+          "desc": "所有配置表的结构约束与校验规则",
+          "schema_covered": true
+        },
+        {
+          "name": "defaults",
+          "label": "全局默认值",
+          "desc": "消除硬编码默认值的统一默认值表",
+          "schema_covered": true
+        },
+        {
+          "name": "api_routes",
+          "label": "API路由表",
+          "desc": "后端API端点注册",
+          "schema_covered": true
+        },
+        {
+          "name": "xml_mapping",
+          "label": "XML映射表",
+          "desc": "DZH/TDX格式XML导入导出映射",
+          "schema_covered": true
+        },
+        {
+          "name": "history_schema",
+          "label": "历史数据模式",
+          "desc": "配置变更历史记录结构",
+          "schema_covered": true
+        },
+        {
+          "name": "dashboard_schema",
+          "label": "仪表盘模式",
+          "desc": "看盘面板布局与数据源定义",
+          "schema_covered": true
+        }
+      ]
+    },
+    {
+      "id": "platform",
+      "name": "平台适配与模拟",
+      "icon": "🎰",
+      "desc": "DZH/TDX平台特有配置、模拟数据、分析/PK等专项功能（集中存放）",
+      "tables": [
+        {
+          "name": "dzh_market_mappings",
+          "label": "DZH attrtext 市场/板块映射",
+          "badge": "special",
+          "desc": "DZH attrtext 中市场、自选组、概念/行业板块到内部市场ID与数据源代码的映射配置",
+          "schema_covered": true
+        },
+        {
+          "name": "dzh_type_map",
+          "label": "DZH类型映射",
+          "badge": "special",
+          "desc": "DZH单元格类型与内部类型的映射",
+          "schema_covered": true
+        },
+        {
+          "name": "dzh_extra_fields",
+          "label": "DZH扩展字段",
+          "badge": "special",
+          "desc": "DZH平台特有的额外字段定义",
+          "schema_covered": true
+        },
+        {
+          "name": "dzh_condition_fallback",
+          "label": "DZH条件降级策略",
+          "badge": "special",
+          "desc": "DZH条件评估中各条件类型的fallback降级策略（指标/基本/排序/横向统计/反向转移）",
+          "schema_covered": true
+        },
+        {
+          "name": "dzh_reload_schedule",
+          "label": "DZH备选池重载调度",
+          "badge": "special",
+          "desc": "DZH备选池5种reload重载模式定义、魔数映射与歧义消解规则",
+          "schema_covered": true
+        },
+        {
+          "name": "tdx_enums",
+          "label": "TDX枚举定义",
+          "badge": "special",
+          "desc": "通达信平台枚举值定义",
+          "schema_covered": true
+        },
+        {
+          "name": "tdx_field_visibility",
+          "label": "TDX字段可见性",
+          "badge": "special",
+          "desc": "通达信平台字段显示控制",
+          "schema_covered": true
+        },
+        {
+          "name": "tdx_indicators",
+          "label": "TDX指标定义",
+          "badge": "special",
+          "desc": "通达信技术指标参数定义",
+          "schema_covered": true
+        },
+        {
+          "name": "tdx_system_indicators",
+          "label": "TDX系统指标映射",
+          "badge": "special",
+          "desc": "通达信系统指标编号到可评估逻辑的映射",
+          "schema_covered": true
+        },
+        {
+          "name": "tdx_indicator_formula_map",
+          "label": "TDX指标公式映射",
+          "badge": "special",
+          "desc": "通达信系统指标编号到公式计算的映射",
+          "schema_covered": true
+        },
+        {
+          "name": "tdx_ntjindexno_lookup",
+          "label": "TDX指数查找表",
+          "badge": "special",
+          "desc": "通达信指数编号查找映射",
+          "schema_covered": true
+        },
+        {
+          "name": "tdx_noperate_rules",
+          "label": "TDX操作符规则",
+          "badge": "special",
+          "desc": "通达信 noperate 排名/上穿/下破/上拐/下拐等操作符规则定义",
+          "schema_covered": true
+        },
+        {
+          "name": "tdx_psatt",
+          "label": "TDX属性表",
+          "badge": "special",
+          "desc": "通达信PSATT属性编码定义",
+          "schema_covered": true
+        },
+        {
+          "name": "mock_data",
+          "label": "模拟数据",
+          "badge": "special",
+          "desc": "开发/测试用的模拟行情数据",
+          "schema_covered": true
+        },
+        {
+          "name": "analysis_config",
+          "label": "分析配置",
+          "badge": "special",
+          "desc": "股票分析完整配置（已合并 analysis_angles/analysis_types/analysis_results）",
+          "schema_covered": true
+        },
+        {
+          "name": "pk_config",
+          "label": "PK配置",
+          "badge": "special",
+          "desc": "PK排名完整配置（已合并 pk_rules/pk_score_dimensions）",
+          "schema_covered": true
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "version": "1.0",
+  "description": "副作用范围配置表：明确实盘/回放/仿真三种运行模式下允许与禁止的副作用",
+  "side_effect_scopes": {
+    "live": {
+      "scope_id": "live",
+      "name": "实盘副作用范围",
+      "allowed": [
+        "read_state",
+        "compute",
+        "emit_event",
+        "emit_signal",
+        "live_order",
+        "write_external_state",
+        "persist_tracker"
+      ],
+      "denied": [],
+      "deny_message": "实盘模式允许所有副作用，包括真实下单与外部状态写入",
+      "desc": "实盘交易模式：信号将产生真实市场委托，可写外部状态"
+    },
+    "replay": {
+      "scope_id": "replay",
+      "name": "回放副作用范围",
+      "allowed": [
+        "read_state",
+        "compute",
+        "emit_event",
+        "emit_signal",
+        "update_internal_replay_state"
+      ],
+      "denied": [
+        "live_order",
+        "paper_order",
+        "write_external_state",
+        "persist_tracker",
+        "send_notification"
+      ],
+      "deny_message": "回放模式禁止真实下单、模拟下单及任何外部状态写入",
+      "desc": "历史数据回放模式：仅允许计算与事件发射，禁止任何形式的下单与外部写入"
+    },
+    "simulation": {
+      "scope_id": "simulation",
+      "name": "仿真副作用范围",
+      "allowed": [
+        "read_state",
+        "compute",
+        "emit_event",
+        "emit_signal",
+        "paper_order",
+        "update_internal_paper_state"
+      ],
+      "denied": [
+        "live_order",
+        "write_external_state",
+        "persist_tracker",
+        "send_notification"
+      ],
+      "deny_message": "仿真模式允许模拟下单，但禁止真实下单与外部状态写入",
+      "desc": "模拟交易模式：维护虚拟持仓并计算模拟盈亏，不产生真实市场影响"
+    }
+  },
+  "notes": {
+    "principle": "模式差异仅体现在四张配置表行（time_source / data_source / trade_interface / side_effects_scope），核心循环 run_tick() 不再分支。",
+    "deny_policy": "任何副作用执行前应查本表；若 action 在 denied 列表中，则记录日志并跳过，不抛异常（避免中断回放/仿真流程）。"
+  }
+}

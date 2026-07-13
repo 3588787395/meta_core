@@ -1,0 +1,53 @@
+{
+  "version": "1.2",
+  "description": "Post-tick流水线配置表：定义每次tick执行后的后处理阶段，按pipeline顺序执行。差异显示于 cfg_table/eval_field/result_action 字段内容",
+  "pipeline": [
+    {
+      "stage": "pk_ranking",
+      "op": "pk_ranking",
+      "enabled": true,
+      "config_table": "pk_config",
+      "cfg_field": "dimensions",
+      "eval_field": "formula",
+      "weight_field": "weight",
+      "result_action": "score_weighted_sort",
+      "rank_change": true,
+      "write_to": "_pk_rankings",
+      "desc": "PK排名：对所有持仓股票按多维度加权评分排名"
+    },
+    {
+      "stage": "analysis_angles",
+      "op": "analysis_angles",
+      "enabled": true,
+      "config_table": "analysis_config",
+      "cfg_field": "angles",
+      "eval_field": "formula",
+      "sort_order_field": "sort_order",
+      "result_action": "score_per_group_sort",
+      "write_to": "_angle_results",
+      "desc": "多分析角度：按不同维度（动量/趋势/价值）分别评分排序"
+    },
+    {
+      "stage": "dashboard",
+      "op": "dashboard",
+      "enabled": true,
+      "config_table": "dashboard_schema",
+      "cfg_field": "panels",
+      "result_action": "aggregate_panels",
+      "write_to": "_dashboard_data",
+      "desc": "看盘面板：汇总PK排名/告警/分析摘要到面板数据"
+    },
+    {
+      "stage": "alerts",
+      "op": "alerts",
+      "enabled": true,
+      "config_table": "alert_rules",
+      "cfg_field": "rules",
+      "eval_field": "condition",
+      "cooldown_field": "cooldown_sec",
+      "result_action": "collect_alerts",
+      "write_to": "_alert_events",
+      "desc": "监控告警：检查持仓股票是否触发止盈/回撤/排名变化/波动率告警"
+    }
+  ]
+}

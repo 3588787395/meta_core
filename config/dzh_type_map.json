@@ -1,0 +1,1029 @@
+{
+  "version": "1.0",
+  "description": "DZH 数值节点类型到内部字符串类型的映射表",
+  "type_map": {
+    "1": "text_label",
+    "2": "container_box",
+    "3": "state_column",
+    "4": "discard_pool",
+    "5": "execution_order",
+    "6": "flow_arrow",
+    "200": "stock_state_pool",
+    "201": "transfer_condition",
+    "202": "market_source",
+    "203": "stock_state_fallback"
+  },
+  "reverse_map": {
+    "text_label": 1,
+    "container_box": 2,
+    "state_column": 3,
+    "discard_pool": 4,
+    "execution_order": 5,
+    "flow_arrow": 6,
+    "stock_state_pool": 200,
+    "transfer_condition": 201,
+    "market_source": 202,
+    "stock_state_fallback": 203
+  },
+  "execution_node_types": [
+    "market_source",
+    "transfer_condition",
+    "stock_state_pool",
+    "discard_pool",
+    "stock_state_fallback"
+  ],
+  "display_node_types": [
+    "text_label",
+    "container_box",
+    "state_column",
+    "execution_order",
+    "flow_arrow"
+  ],
+  "aliases": {
+    "market_source": "candidate_provider",
+    "transfer_condition": "condition_filter",
+    "discard_pool": "discard_sink",
+    "container_box": "container_box",
+    "execution_order": "exec_order_arrow"
+  },
+  "tdx_aliases": {
+    "stock_state_pool": "tdx_state_pool",
+    "candidate_provider": "tdx_candidate",
+    "condition_filter": "tdx_condition",
+    "transfer_condition": "tdx_condition",
+    "market_source": "tdx_candidate"
+  },
+  "tdx_type_map": {
+    "0": "decorative",
+    "1": "decorative",
+    "2": "decorative",
+    "3": "tdx_condition",
+    "7": "tdx_candidate",
+    "8": "tdx_state_pool"
+  },
+  "tdx_to_dzh": {
+    "0": 1,
+    "1": 1,
+    "2": 2,
+    "3": 201,
+    "7": 202,
+    "8": 200
+  },
+  "flow_validation": {
+    "allowed_sources": [
+      "market_source",
+      "stock_state_pool",
+      "tdx_candidate",
+      "tdx_state_pool"
+    ],
+    "allowed_middle": [
+      "transfer_condition",
+      "tdx_condition"
+    ],
+    "allowed_targets": [
+      "stock_state_pool",
+      "discard_pool",
+      "tdx_state_pool"
+    ]
+  },
+  "export_dispatch": {
+    "market_source": {
+      "dzh_cell_type": 202,
+      "attr_strategy": "attr_int_or_attr_default_128",
+      "pos_strategy": "standard",
+      "clr_default": "cell_colors",
+      "clr_conditional": true,
+      "text_strategy": "set_cell_text",
+      "export_fields": [
+        "clr",
+        "attrtext",
+        "reload",
+        "lastload"
+      ]
+    },
+    "transfer_condition": {
+      "dzh_cell_type": 201,
+      "attr_strategy": "flag_encoded_201",
+      "pos_strategy": "standard",
+      "clr_default": "minus_one",
+      "clr_conditional": true,
+      "text_strategy": "set_cell_text",
+      "export_fields": [
+        "clr",
+        "inditype",
+        "crc",
+        "indi",
+        "sorttype",
+        "indiparam"
+      ]
+    },
+    "dzh_condition_pool": {
+      "dzh_cell_type": 200,
+      "attr_strategy": "flag_encoded_200",
+      "pos_strategy": "standard",
+      "clr_default": "cell_colors",
+      "clr_conditional": true,
+      "text_strategy": "set_cell_text",
+      "export_fields": [
+        "clr",
+        "hold",
+        "col",
+        "width",
+        "wizd",
+        "deltype",
+        "endtime",
+        "delstocktype",
+        "staattr",
+        "sorttype",
+        "intersection_status",
+        "reload",
+        "lastload",
+        "attrtext",
+        "histana",
+        "stocknum",
+        "tmpl",
+        "enter",
+        "exit",
+        "bsound",
+        "btip",
+        "bsavetoblock",
+        "stocks",
+        "anas",
+        "tradeattr"
+      ],
+      "sub_type_dispatch": {
+        "4": {
+          "override": "discard_pool"
+        },
+        "203": {
+          "force_type": "203",
+          "export_fields_add": [
+            "result_type"
+          ]
+        }
+      }
+    },
+    "stock_state_pool": {
+      "dzh_cell_type": 200,
+      "attr_strategy": "flag_encoded_200",
+      "pos_strategy": "standard",
+      "clr_default": "cell_colors",
+      "clr_conditional": true,
+      "text_strategy": "set_cell_text",
+      "export_fields": [
+        "clr",
+        "hold",
+        "col",
+        "width",
+        "wizd",
+        "deltype",
+        "endtime",
+        "delstocktype",
+        "staattr",
+        "sorttype",
+        "intersection_status",
+        "reload",
+        "lastload",
+        "attrtext",
+        "histana",
+        "stocknum",
+        "tmpl",
+        "enter",
+        "exit",
+        "bsound",
+        "btip",
+        "bsavetoblock",
+        "stocks",
+        "anas",
+        "tradeattr"
+      ],
+      "sub_type_dispatch": {
+        "4": {
+          "override": "discard_pool"
+        },
+        "203": {
+          "force_type": "203",
+          "export_fields_add": [
+            "result_type"
+          ]
+        }
+      }
+    },
+    "discard_pool": {
+      "dzh_cell_type": 4,
+      "attr_strategy": "simple_attr_int",
+      "pos_strategy": "standard",
+      "clr_default": "minus_one",
+      "clr_conditional": false,
+      "text_strategy": "set_cell_text",
+      "export_fields": []
+    },
+    "text_label": {
+      "dzh_cell_type": 1,
+      "attr_strategy": "attr_int_or_attr_default_0",
+      "pos_strategy": "rect_or_standard",
+      "clr_default": "minus_one",
+      "clr_conditional": false,
+      "text_strategy": "set_cell_text",
+      "export_fields": [
+        "url"
+      ]
+    },
+    "container": {
+      "dzh_cell_type": 2,
+      "attr_strategy": "attr_int_or_default_512_or_0",
+      "pos_strategy": "rect_or_standard",
+      "clr_default": "minus_one",
+      "clr_conditional": false,
+      "text_strategy": "set_cell_text",
+      "export_fields": [],
+      "extra_arg": 2
+    },
+    "container_box": {
+      "dzh_cell_type": 2,
+      "attr_strategy": "attr_int_or_default_512_or_0",
+      "pos_strategy": "rect_or_standard",
+      "clr_default": "minus_one",
+      "clr_conditional": false,
+      "text_strategy": "set_cell_text",
+      "export_fields": [],
+      "extra_arg": 2
+    },
+    "state_column": {
+      "dzh_cell_type": 3,
+      "attr_strategy": "attr_int_or_default_512_or_0",
+      "pos_strategy": "rect_or_standard",
+      "clr_default": "minus_one",
+      "clr_conditional": false,
+      "text_strategy": "set_cell_text",
+      "export_fields": [],
+      "extra_arg": 3
+    },
+    "execution_order": {
+      "dzh_cell_type": 5,
+      "attr_strategy": "simple_attr_int",
+      "pos_strategy": "rect_or_standard",
+      "clr_default": "minus_one",
+      "clr_conditional": false,
+      "text_strategy": "set_cell_text",
+      "export_fields": [
+        "line_type",
+        "style"
+      ]
+    },
+    "flow_arrow": {
+      "dzh_cell_type": 6,
+      "handler": null
+    }
+  },
+  "dzh_cell_type_schema": {
+    "_desc": "DZH cell 类型 schema：将 cell 类型差异隐含于表结构，通用解析器/构建器按表分派。parser/builder 字段指定处理函数名，params_fields/params_extra/param_mapping 为默认处理函数提供数据驱动规则。",
+    "cell_types": {
+      "1": {
+        "node_type": "text_label",
+        "model_class": "LabelCellModel",
+        "parser": "_parse_cell_default",
+        "builder": "_build_cell_default",
+        "position_mode": "pos",
+        "params_fields": [
+          "attr",
+          "clr",
+          "url",
+          "_orig_text",
+          "_present_attrs"
+        ],
+        "params_extra": {
+          "text": {
+            "src": "label"
+          },
+          "attr_int": {
+            "src": "attr_int"
+          }
+        },
+        "param_mapping": {
+          "id": {
+            "src": "cell_id"
+          },
+          "attr": {
+            "src": "params",
+            "key": "attr",
+            "transform": "safe_int",
+            "default": 0
+          },
+          "position": {
+            "src": "position"
+          },
+          "clr": {
+            "src": "params",
+            "key": "clr",
+            "transform": "safe_int",
+            "default": -1
+          },
+          "text": {
+            "src": "label"
+          },
+          "url": {
+            "src": "params",
+            "key": "url"
+          }
+        }
+      },
+      "2": {
+        "node_type": "container",
+        "model_class": "ContainerCellModel",
+        "parser": "_parse_cell_default",
+        "builder": "_build_cell_default",
+        "position_mode": "pos",
+        "params_fields": [
+          "attr",
+          "clr",
+          "text",
+          "_orig_text",
+          "_present_attrs"
+        ],
+        "params_extra": {
+          "attr_int": {
+            "src": "attr_int"
+          },
+          "show_overview": {
+            "expr": "bool(attr_int & 512)"
+          }
+        },
+        "param_mapping": {
+          "id": {
+            "src": "cell_id"
+          },
+          "attr": {
+            "src": "params",
+            "key": "attr",
+            "transform": "safe_int",
+            "default": 0
+          },
+          "position": {
+            "src": "position"
+          },
+          "clr": {
+            "src": "params",
+            "key": "clr",
+            "transform": "safe_int",
+            "default": -1
+          },
+          "text": {
+            "src": "label"
+          }
+        }
+      },
+      "3": {
+        "node_type": "state_column",
+        "model_class": "StateColumnModel",
+        "parser": "_parse_cell_default",
+        "builder": "_build_cell_default",
+        "position_mode": "pos",
+        "params_fields": [
+          "attr",
+          "clr",
+          "text",
+          "_orig_text",
+          "_present_attrs"
+        ],
+        "params_extra": {
+          "attr_int": {
+            "src": "attr_int"
+          },
+          "show_overview": {
+            "expr": "bool(attr_int & 512)"
+          }
+        },
+        "param_mapping": {
+          "id": {
+            "src": "cell_id"
+          },
+          "attr": {
+            "src": "params",
+            "key": "attr",
+            "transform": "safe_int",
+            "default": 0
+          },
+          "position": {
+            "src": "position"
+          },
+          "clr": {
+            "src": "params",
+            "key": "clr",
+            "transform": "safe_int",
+            "default": -1
+          },
+          "text": {
+            "src": "label"
+          }
+        }
+      },
+      "4": {
+        "node_type": "discard_pool",
+        "model_class": "DiscardCellModel",
+        "parser": "_parse_cell_default",
+        "builder": "_build_cell_default",
+        "position_mode": "func_pos",
+        "label_mode": "orig_text",
+        "params_fields": [
+          "clr",
+          "text",
+          "_orig_text",
+          "_present_attrs"
+        ],
+        "params_extra": {
+          "name": {
+            "src": "label"
+          },
+          "attr_int": {
+            "src": "attr_int"
+          }
+        },
+        "param_mapping": {
+          "id": {
+            "src": "cell_id"
+          },
+          "attr": {
+            "src": "params",
+            "key": "attr_int",
+            "transform": "safe_int",
+            "default": 0
+          },
+          "position": {
+            "src": "position"
+          },
+          "clr": {
+            "src": "params",
+            "key": "clr",
+            "transform": "safe_int",
+            "default": -1
+          },
+          "text": {
+            "src": "label"
+          }
+        }
+      },
+      "5": {
+        "node_type": "drawing_tool",
+        "model_class": "ArrowCellModel",
+        "parser": "_parse_cell_default",
+        "builder": "_build_cell_default",
+        "position_mode": "pos",
+        "params_fields": [
+          "attr",
+          "clr",
+          "text",
+          "line_type",
+          "color",
+          "style",
+          "_orig_text",
+          "_present_attrs"
+        ],
+        "params_extra": {
+          "attr_int": {
+            "src": "attr_int"
+          },
+          "_visual_only": {
+            "const": true
+          }
+        },
+        "node_extra": {
+          "_visual_only": true
+        },
+        "param_mapping": {
+          "id": {
+            "src": "cell_id"
+          },
+          "attr": {
+            "src": "params",
+            "key": "attr_int",
+            "transform": "safe_int",
+            "default": 0
+          },
+          "position": {
+            "src": "position"
+          },
+          "clr": {
+            "src": "params",
+            "key": "clr",
+            "transform": "safe_int",
+            "default": -1
+          },
+          "text": {
+            "src": "label"
+          }
+        }
+      },
+      "6": {
+        "node_type": "flow_arrow",
+        "aliases": [
+          "flow_arrow_v2"
+        ],
+        "model_class": "ArrowCellModel",
+        "parser": "_parse_cell_default",
+        "builder": "_build_cell_default",
+        "position_mode": "pos",
+        "params_fields": [
+          "clr",
+          "text",
+          "_orig_text",
+          "_present_attrs"
+        ],
+        "params_extra": {},
+        "param_mapping": {
+          "id": {
+            "src": "cell_id"
+          },
+          "attr": {
+            "src": "params",
+            "key": "attr_int",
+            "transform": "safe_int",
+            "default": 0
+          },
+          "position": {
+            "src": "position"
+          },
+          "clr": {
+            "src": "params",
+            "key": "clr",
+            "transform": "safe_int",
+            "default": -1
+          },
+          "text": {
+            "src": "label"
+          }
+        }
+      },
+      "201": {
+        "node_type": "transfer_condition",
+        "model_class": "ConditionCellModel",
+        "parser": "_parse_cell_condition",
+        "builder": "_build_cell_default",
+        "position_mode": "pos",
+        "param_mapping": {
+          "id": {
+            "src": "cell_id"
+          },
+          "attr": {
+            "src": "params",
+            "key": "attr_int",
+            "transform": "safe_int",
+            "default": 0
+          },
+          "position": {
+            "src": "position"
+          },
+          "clr": {
+            "src": "params",
+            "key": "clr",
+            "transform": "safe_int",
+            "default": -1
+          },
+          "text": {
+            "src": "label"
+          },
+          "inditype": {
+            "src": "params",
+            "key": "inditype",
+            "default": "indi"
+          },
+          "crc": {
+            "src": "params",
+            "key": "crc"
+          },
+          "indi": {
+            "src": "params",
+            "key": "indi"
+          },
+          "sorttype": {
+            "src": "params",
+            "key": "sorttype"
+          },
+          "indiparam": {
+            "src": "params",
+            "key": "indiparam"
+          }
+        }
+      },
+      "200": {
+        "node_type": "stock_state_pool",
+        "aliases": [
+          "dzh_condition_pool"
+        ],
+        "model_class": "StatePoolCellModel",
+        "parser": "_parse_cell_pool",
+        "builder": "_build_cell_pool",
+        "position_mode": "func_pos",
+        "pool_variant": "200"
+      },
+      "202": {
+        "node_type": "market_source",
+        "model_class": "CandidateCellModel",
+        "parser": "_parse_cell_market",
+        "builder": "_build_cell_market",
+        "position_mode": "func_pos"
+      },
+      "203": {
+        "node_type": "result_pool",
+        "model_class": "Type203CellModel",
+        "parser": "_parse_cell_pool",
+        "builder": "_build_cell_pool",
+        "position_mode": "func_pos",
+        "pool_variant": "203"
+      }
+    }
+  },
+  "dzh_extra_fields": {
+    "version": "1.0",
+    "defaults": {
+      "intermediate_mode": false,
+      "analysis_cycle": "1d",
+      "mode": "indi"
+    }
+  },
+  "dzh_market_mappings": {
+    "version": "1.0",
+    "description": "DZH attrtext 市场/板块/自选组/概念/行业解析映射配置：将 DZH 备选池 attrtext 中的各类条目映射到内部市场ID或数据源可识别的板块代码列表",
+    "separator": "\t",
+    "mappings": [
+      {
+        "pattern": "^SH#上证A股$",
+        "type": "market",
+        "name": "上证A股",
+        "resolver": "market",
+        "default_codes": [
+          "sh_a"
+        ]
+      },
+      {
+        "pattern": "^SH#上证B股$",
+        "type": "market",
+        "name": "上证B股",
+        "resolver": "market",
+        "default_codes": [
+          "sh_b"
+        ]
+      },
+      {
+        "pattern": "^SZ#深证A股$",
+        "type": "market",
+        "name": "深证A股",
+        "resolver": "market",
+        "default_codes": [
+          "sz_a"
+        ]
+      },
+      {
+        "pattern": "^SZ#深证B股$",
+        "type": "market",
+        "name": "深证B股",
+        "resolver": "market",
+        "default_codes": [
+          "sz_b"
+        ]
+      },
+      {
+        "pattern": "^SZ#中小企业$",
+        "type": "market",
+        "name": "中小企业板",
+        "resolver": "market",
+        "default_codes": [
+          "sme"
+        ]
+      },
+      {
+        "pattern": "^SZ#创业板$",
+        "type": "market",
+        "name": "创业板",
+        "resolver": "market",
+        "default_codes": [
+          "gem"
+        ]
+      },
+      {
+        "pattern": "^SH#科创板$",
+        "type": "market",
+        "name": "科创板",
+        "resolver": "market",
+        "default_codes": [
+          "kcb"
+        ]
+      },
+      {
+        "pattern": "^BJ#北证A股$",
+        "type": "market",
+        "name": "北证A股",
+        "resolver": "market",
+        "default_codes": [
+          "bj_a"
+        ]
+      },
+      {
+        "pattern": "^BJ#北交所$",
+        "type": "market",
+        "name": "北交所",
+        "resolver": "market",
+        "default_codes": [
+          "bj_a"
+        ]
+      },
+      {
+        "pattern": "^SH#上证指数$",
+        "type": "market",
+        "name": "上证指数成份股",
+        "resolver": "market",
+        "default_codes": [
+          "sh_index"
+        ]
+      },
+      {
+        "pattern": "^SZ#深证指数$",
+        "type": "market",
+        "name": "深证指数成份股",
+        "resolver": "market",
+        "default_codes": [
+          "sz_index"
+        ]
+      },
+      {
+        "pattern": "^B\\$#板块指数$",
+        "type": "sector_index",
+        "name": "板块指数",
+        "resolver": "sector_index",
+        "default_codes": [
+          "tdx_sector_index"
+        ]
+      },
+      {
+        "pattern": "^B\\$#热门概念$",
+        "type": "sector_index",
+        "name": "热门概念",
+        "resolver": "sector_index",
+        "default_codes": [
+          "tdx_hot_concept"
+        ]
+      },
+      {
+        "pattern": "^BLK-自选股([1-9]|10)$",
+        "type": "group",
+        "name": "自选组",
+        "resolver": "user_group",
+        "default_codes": []
+      },
+      {
+        "pattern": "^BLK-概念新材料\\d{7}$",
+        "type": "concept_sector",
+        "name": "概念-新材料",
+        "resolver": "sector",
+        "default_codes": [
+          "tdx_concept_新材料"
+        ]
+      },
+      {
+        "pattern": "^BLK-概念新能源\\d{7}$",
+        "type": "concept_sector",
+        "name": "概念-新能源",
+        "resolver": "sector",
+        "default_codes": [
+          "tdx_concept_新能源"
+        ]
+      },
+      {
+        "pattern": "^BLK-概念人工智能\\d{7}$",
+        "type": "concept_sector",
+        "name": "概念-人工智能",
+        "resolver": "sector",
+        "default_codes": [
+          "tdx_concept_人工智能"
+        ]
+      },
+      {
+        "pattern": "^BLK-概念芯片\\d{7}$",
+        "type": "concept_sector",
+        "name": "概念-芯片",
+        "resolver": "sector",
+        "default_codes": [
+          "tdx_concept_芯片"
+        ]
+      },
+      {
+        "pattern": "^BLK-概念医药\\d{7}$",
+        "type": "concept_sector",
+        "name": "概念-医药",
+        "resolver": "sector",
+        "default_codes": [
+          "tdx_concept_医药"
+        ]
+      },
+      {
+        "pattern": "^BLK-概念\\S+\\d{7}$",
+        "type": "concept_sector",
+        "name": "概念板块",
+        "resolver": "sector",
+        "default_codes": []
+      },
+      {
+        "pattern": "^BLK-农业\\d{7}$",
+        "type": "industry_sector",
+        "name": "行业-农业",
+        "resolver": "sector",
+        "default_codes": [
+          "tdx_industry_农业"
+        ]
+      },
+      {
+        "pattern": "^BLK-银行\\d{7}$",
+        "type": "industry_sector",
+        "name": "行业-银行",
+        "resolver": "sector",
+        "default_codes": [
+          "tdx_industry_银行"
+        ]
+      },
+      {
+        "pattern": "^BLK-房地产\\d{7}$",
+        "type": "industry_sector",
+        "name": "行业-房地产",
+        "resolver": "sector",
+        "default_codes": [
+          "tdx_industry_房地产"
+        ]
+      },
+      {
+        "pattern": "^BLK-电力\\d{7}$",
+        "type": "industry_sector",
+        "name": "行业-电力",
+        "resolver": "sector",
+        "default_codes": [
+          "tdx_industry_电力"
+        ]
+      },
+      {
+        "pattern": "^BLK-证券\\d{7}$",
+        "type": "industry_sector",
+        "name": "行业-证券",
+        "resolver": "sector",
+        "default_codes": [
+          "tdx_industry_证券"
+        ]
+      },
+      {
+        "pattern": "^BLK-(?!自选股|概念)[^\\d]+\\d{7}$",
+        "type": "industry_sector",
+        "name": "行业板块",
+        "resolver": "sector",
+        "default_codes": []
+      },
+      {
+        "pattern": "^BLK-证监板块$",
+        "type": "classic_sector",
+        "name": "经典行业-证监板块",
+        "resolver": "sector",
+        "default_codes": [
+          "tdx_classic_证监板块"
+        ]
+      },
+      {
+        "pattern": "^BLK-(?!自选股|概念)[^\\d]+$",
+        "type": "classic_sector",
+        "name": "经典行业",
+        "resolver": "sector",
+        "default_codes": []
+      }
+    ]
+  },
+  "dzh_condition_fallback": {
+    "version": "1.0",
+    "description": "DZH 条件评估降级策略：当指标/基本条件无法真正计算或需要可控降级时的 fallback 行为",
+    "policies": {
+      "indicator": {
+        "condition_type": "indicator",
+        "strategy": "deterministic_seed",
+        "pass_ratio": 0.5,
+        "seed": 42,
+        "deterministic": true
+      },
+      "basic": {
+        "condition_type": "basic",
+        "strategy": "deterministic_seed",
+        "pass_ratio": 0.55,
+        "seed": 43,
+        "deterministic": true
+      },
+      "rank": {
+        "condition_type": "rank",
+        "strategy": "all_pass",
+        "pass_ratio": 1.0,
+        "seed": 0,
+        "deterministic": true
+      },
+      "cross_section": {
+        "condition_type": "cross_section",
+        "strategy": "deterministic_seed",
+        "pass_ratio": 0.4,
+        "seed": 44,
+        "deterministic": true
+      },
+      "reverse_transfer": {
+        "condition_type": "reverse_transfer",
+        "strategy": "all_pass",
+        "pass_ratio": 1.0,
+        "seed": 0,
+        "deterministic": true
+      },
+      "default": {
+        "condition_type": "default",
+        "strategy": "deterministic_seed",
+        "pass_ratio": 0.5,
+        "seed": 42,
+        "deterministic": true
+      }
+    }
+  },
+  "dzh_reload_schedule": {
+    "version": "1.0",
+    "description": "DZH 备选池 reload 重载模式定义：魔数、歧义消解与调度策略",
+    "magic_numbers": {
+      "RELOAD_ON_STARTUP": -57387,
+      "RELOAD_DAILY_TIME": -57387,
+      "RELOAD_NEVER": 2147483647,
+      "RELOAD_ON_FILE_LOAD": 2147483646
+    },
+    "modes": {
+      "on_startup": {
+        "label": "每次启动",
+        "magic": -57387,
+        "requires_param": false,
+        "desc": "只在引擎启动时加载一次"
+      },
+      "daily_time": {
+        "label": "每天指定时间",
+        "magic": -57387,
+        "requires_param": true,
+        "param_format": "HHMMSS",
+        "desc": "每天指定 HHMMSS 时刻检查并加载"
+      },
+      "never": {
+        "label": "不重载",
+        "magic": 2147483647,
+        "requires_param": false,
+        "desc": "永不自动加载"
+      },
+      "interval": {
+        "label": "每隔一定时间",
+        "magic": "positive_integer",
+        "requires_param": true,
+        "param_unit": "seconds",
+        "desc": "每隔 N 秒加载"
+      },
+      "on_file_load": {
+        "label": "文件载入时",
+        "magic": 2147483646,
+        "requires_param": false,
+        "desc": "只在 XML/池配置加载时加载"
+      }
+    },
+    "disambiguation": {
+      "magic": -57387,
+      "fields": [
+        "daily_time",
+        "reload_param"
+      ],
+      "rule": "魔数 -57387 同时对应 on_startup 与 daily_time；若节点上下文存在 reload_param 或 daily_time 字段，则解码为 daily_time 并取该字段值为参数；否则解码为 on_startup"
+    },
+    "default_mode": "on_startup",
+    "scheduling": {
+      "on_startup": {
+        "method": "_schedule_on_startup",
+        "max_executions": 1,
+        "desc": "整个引擎生命周期内对同一节点只执行一次"
+      },
+      "daily_time": {
+        "method": "_schedule_daily_time",
+        "desc": "每天指定 HHMMSS 触发；参数为 6 位时间字符串 HHMMSS"
+      },
+      "interval": {
+        "method": "_schedule_interval",
+        "desc": "按正整数秒数周期触发"
+      },
+      "never": {
+        "method": "_schedule_never",
+        "desc": "不创建任何后台任务"
+      },
+      "on_file_load": {
+        "method": "_schedule_on_file_load",
+        "desc": "在 XML/池配置加载时立即执行一次"
+      }
+    }
+  },
+  "_convergence": {
+    "merged_from": [
+      "dzh_cell_type_schema.json",
+      "dzh_extra_fields.json",
+      "dzh_market_mappings.json",
+      "dzh_condition_fallback.json",
+      "dzh_reload_schedule.json"
+    ],
+    "target_count": 30
+  }
+}

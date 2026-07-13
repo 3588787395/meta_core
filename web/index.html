@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MetaCore 股票池平台</title>
+<link rel="stylesheet" href="css/style.css?v=42">
+<link rel="stylesheet" href="css/table-driven-panel.css?v=40">
+</head>
+<body>
+
+<div class="app-shell">
+
+  <!-- ===== Top Toolbar ===== -->
+  <header class="topbar" id="topbar">
+    <button class="tb-btn hamburger-btn" id="btnHamburger" title="菜单">☰</button>
+    <div class="topbar-logo">
+      <span class="logo-icon">◆</span>
+      <span class="logo-text">MetaCore</span>
+    </div>
+    <div class="tb-dropdown-wrapper">
+      <button class="tb-btn tb-btn-dropdown" id="btnDatasource" title="数据源选择">📡 <span id="dsBtnLabel">--</span> <span class="tb-dropdown-arrow">▼</span></button>
+      <div class="tb-dropdown-menu hidden" id="datasourceDropdown"></div>
+    </div>
+    <span class="tb-sep"></span>
+    <span class="pool-name-display" id="poolNameDisplay"></span>
+    <span class="tb-sep"></span>
+
+    <button class="tb-btn" id="btnNew" title="新建空白池">🆕 新建</button>
+
+    <div class="tb-dropdown-wrapper">
+      <button class="tb-btn tb-btn-dropdown" id="btnAddNode" title="添加节点">➕ 添加 <span class="tb-dropdown-arrow">▼</span></button>
+      <div class="tb-dropdown-menu hidden" id="addNodeDropdown">
+        <div class="tb-dropdown-item" data-node-type="source">📦 备选池</div>
+        <div class="tb-dropdown-item" data-node-type="condition">🔀 转移条件</div>
+        <div class="tb-dropdown-item" data-node-type="statepool">🏷 状态池</div>
+        <div class="tb-dropdown-item" data-node-type="discard">🗑 丢弃池</div>
+        <div class="tb-dropdown-item" data-node-type="label">📝 文字标签</div>
+      </div>
+    </div>
+
+    <div class="tb-dropdown-wrapper">
+      <button class="tb-btn tb-btn-dropdown" id="btnImport" title="导入">📥 导入 <span class="tb-dropdown-arrow">▼</span></button>
+      <div class="tb-dropdown-menu hidden" id="importDropdown">
+        <div class="tb-dropdown-item" data-format="dzh">📥 DZH格式 XML</div>
+        <div class="tb-dropdown-item" data-format="tdx">📥 通达信格式 XML</div>
+        <div class="tb-dropdown-item" data-format="json">📥 JSON 格式</div>
+      </div>
+    </div>
+
+    <div class="tb-dropdown-wrapper">
+      <button class="tb-btn tb-btn-dropdown" id="btnExport" title="导出" disabled>📤 导出 <span class="tb-dropdown-arrow">▼</span></button>
+      <div class="tb-dropdown-menu hidden" id="exportDropdown">
+        <div class="tb-dropdown-item" data-format="dzh">📤 DZH格式 XML</div>
+        <div class="tb-dropdown-item" data-format="tdx">📤 通达信格式 XML</div>
+        <div class="tb-dropdown-item" data-format="json">📤 JSON 格式</div>
+      </div>
+    </div>
+
+    <button class="tb-btn" id="btnSave" title="保存到服务器" disabled>💾 保存</button>
+    <span class="tb-sep"></span>
+    <button class="tb-btn" id="btnUndo" title="撤销 (Ctrl+Z)" disabled>↩ 撤销</button>
+    <button class="tb-btn" id="btnRedo" title="重做 (Ctrl+Y)" disabled>↪ 重做</button>
+    <span class="tb-sep"></span>
+    <button class="tb-btn" id="btnFit" title="适应画布">⊡ 适应</button>
+    <button class="tb-btn" id="btnExecOrder" title="执行顺序">🔢 顺序</button>
+    <button class="tb-btn" id="btnFlowMode" title="连线模式 (F)">🔗 连线</button>
+    <div class="tb-dropdown" id="edgeLineTypeDropdown">
+      <button class="tb-btn tb-dropdown-toggle" id="btnEdgeLineType" title="连线线形">📐 线形 ▼</button>
+      <div class="tb-dropdown-menu" style="min-width:120px;">
+        <div class="tb-dropdown-item" data-linetype="bezier">〰 贝兹曲线</div>
+        <div class="tb-dropdown-item" data-linetype="orthogonal">├ 横竖折线</div>
+        <div class="tb-dropdown-item" data-linetype="straight">─ 直线</div>
+      </div>
+    </div>
+    <button class="tb-btn" id="btnRun" title="实盘模式">▶ 实盘</button>
+    <button class="tb-btn" id="btnReplay" title="回放模式">⏪ 回放</button>
+    <button class="tb-btn" id="btnSimulation" title="仿真模式">🔬 仿真</button>
+    <span class="tb-sep"></span>
+    <button class="tb-btn" id="btnTdxPools" title="显示/隐藏池列表侧栏">☰ 列表</button>
+    <span class="tb-sep"></span>
+    <button class="tb-btn" id="btnRuleEditor" title="规则配置编辑器">⚙ 规则</button>
+    <button class="tb-btn" id="btnComprehensiveSettings" title="股票池流程综合设置">⚙ 综合设置</button>
+    <a href="formula.html" class="tb-btn" title="公式编辑器" style="text-decoration:none">📐 公式</a>
+    <a href="config.html" class="tb-btn" title="配置中心" style="text-decoration:none">⚙ 配置中心</a>
+
+    <div class="topbar-spacer"></div>
+    <span class="topbar-zoom" id="topbarZoom">100%</span>
+  </header>
+
+  <!-- Overflow menu for mobile/tablet (mirrors hidden toolbar buttons) -->
+  <div class="overflow-menu" id="overflowMenu">
+    <button class="tb-btn" id="btnNewOverflow" title="新建空白池">🆕 新建</button>
+    <div class="tb-dropdown-wrapper">
+      <button class="tb-btn tb-btn-dropdown" id="btnAddNodeOverflow" title="添加节点">➕ 添加 <span class="tb-dropdown-arrow">▼</span></button>
+      <div class="tb-dropdown-menu hidden" id="addNodeDropdownOverflow">
+        <div class="tb-dropdown-item" data-node-type="source">📦 备选池</div>
+        <div class="tb-dropdown-item" data-node-type="condition">🔀 转移条件</div>
+        <div class="tb-dropdown-item" data-node-type="statepool">🏷 状态池</div>
+        <div class="tb-dropdown-item" data-node-type="discard">🗑 丢弃池</div>
+        <div class="tb-dropdown-item" data-node-type="label">📝 文字标签</div>
+      </div>
+    </div>
+    <div class="tb-dropdown-wrapper">
+      <button class="tb-btn tb-btn-dropdown" id="btnImportOverflow" title="导入">📥 导入 <span class="tb-dropdown-arrow">▼</span></button>
+      <div class="tb-dropdown-menu hidden" id="importDropdownOverflow">
+        <div class="tb-dropdown-item" data-format="dzh">📥 DZH格式 XML</div>
+        <div class="tb-dropdown-item" data-format="tdx">📥 通达信格式 XML</div>
+        <div class="tb-dropdown-item" data-format="json">📥 JSON 格式</div>
+      </div>
+    </div>
+    <div class="tb-dropdown-wrapper">
+      <button class="tb-btn tb-btn-dropdown" id="btnExportOverflow" title="导出">📤 导出 <span class="tb-dropdown-arrow">▼</span></button>
+      <div class="tb-dropdown-menu hidden" id="exportDropdownOverflow">
+        <div class="tb-dropdown-item" data-format="dzh">📤 DZH格式 XML</div>
+        <div class="tb-dropdown-item" data-format="tdx">📤 通达信格式 XML</div>
+        <div class="tb-dropdown-item" data-format="json">📤 JSON 格式</div>
+      </div>
+    </div>
+    <button class="tb-btn" id="btnFitOverflow" title="适应画布">⊡ 适应</button>
+    <button class="tb-btn" id="btnExecOrderOverflow" title="执行顺序">🔢 顺序</button>
+    <button class="tb-btn" id="btnFlowModeOverflow" title="连线模式">🔗 连线</button>
+    <button class="tb-btn" id="btnRunOverflow" title="实盘模式">▶ 实盘</button>
+    <button class="tb-btn" id="btnReplayOverflow" title="回放模式">⏪ 回放</button>
+    <button class="tb-btn" id="btnSimulationOverflow" title="仿真模式">🔬 仿真</button>
+    <button class="tb-btn" id="btnTdxPoolsOverflow" title="显示/隐藏池列表侧栏">☰ 列表</button>
+    <button class="tb-btn" id="btnRuleEditorOverflow" title="规则配置">⚙ 规则</button>
+    <button class="tb-btn" id="btnComprehensiveSettingsOverflow" title="综合设置">⚙ 综合设置</button>
+    <a href="formula.html" class="tb-btn" title="公式编辑器" style="text-decoration:none">📐 公式</a>
+    <button class="tb-btn" id="btnUndoOverflow" title="撤销" disabled>↩ 撤销</button>
+    <button class="tb-btn" id="btnRedoOverflow" title="重做" disabled>↪ 重做</button>
+  </div>
+
+  <!-- ===== Mode Indicator ===== -->
+  <div id="modeIndicator"></div>
+
+  <!-- ===== Main Area ===== -->
+  <div class="main-area">
+
+    <!-- Left Sidebar: Pool List -->
+    <aside class="sidebar-left" id="sidebarLeft">
+      <div class="sidebar-header">
+        <span class="sidebar-header-title">股票池列表</span>
+        <button class="sidebar-toggle-btn" id="sidebarToggleClose" title="收起侧栏">◀</button>
+      </div>
+      <div class="sidebar-tabs">
+        <button class="sidebar-tab active" data-tab="tdxpool">通达信</button>
+        <button class="sidebar-tab" data-tab="dzhpool">大智慧</button>
+        <button class="sidebar-tab" data-tab="examples">实例</button>
+        <button class="sidebar-tab" data-tab="saved">已保存</button>
+      </div>
+      <div style="padding:4px 8px; flex-shrink:0;">
+        <input type="text" id="poolSearch" placeholder="搜索...">
+      </div>
+      <div class="pool-list-scroll">
+        <ul id="poolListTdx" class="pool-list-tab active"></ul>
+        <ul id="poolListDzh" class="pool-list-tab"></ul>
+        <ul id="poolListExamples" class="pool-list-tab"></ul>
+        <ul id="poolListSaved" class="pool-list-tab"></ul>
+      </div>
+    </aside>
+
+    <!-- Center: Canvas (FlowCanvas creates its own DOM inside canvasWrapper) -->
+    <main class="canvas-area">
+      <div id="canvasWrapper">
+      </div>
+    </main>
+
+    <!-- Right: Property Panel -->
+    <aside class="panel-right" id="panelRight">
+      <div class="panel-header">
+        <span class="panel-title" id="panelTitle">属性面板</span>
+        <button class="panel-toggle-btn" id="panelToggleClose" title="收起面板">▶</button>
+      </div>
+      <div id="panelBody">
+        <div class="panel-placeholder" id="panelPlaceholder">
+          <div class="panel-placeholder-icon">📋</div>
+          <div class="panel-placeholder-text">选择节点或连线<br>查看/编辑属性</div>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- ===== Status Bar ===== -->
+  <footer class="statusbar" id="statusbar">
+    <span id="statusText">就绪</span>
+    <span class="status-spacer"></span>
+    <span id="statusNodes">节点: 0</span>
+    <span>|</span>
+    <span id="statusEdges">连线: 0</span>
+    <span>|</span>
+    <span id="statusCoords">X: 0 Y: 0</span>
+    <span>|</span>
+    <span id="statusTime"></span>
+    <span>|</span>
+    <span id="statusZoom">100%</span>
+  </footer>
+
+  <!-- ===== Mobile Tab Bar ===== -->
+  <nav class="mobile-tab-bar" id="mobileTabBar">
+    <button class="active" id="mobileTabCanvas">画布</button>
+    <button id="mobileTabProperties">属性</button>
+  </nav>
+
+</div>
+
+<!-- ===== Mobile Float Buttons ===== -->
+<div class="mobile-float-btns" id="mobileFloatBtns">
+  <button class="mobile-float-btn" id="mobileAddSource" title="添加备选池">🗄</button>
+  <button class="mobile-float-btn" id="mobileAddCondition" title="添加条件">⚙</button>
+  <button class="mobile-float-btn" id="mobileAddPool" title="添加状态池">📦</button>
+</div>
+
+<!-- ===== Context Menu ===== -->
+<div id="contextMenu">
+  <div class="ctx-item ctx-has-sub" data-action="addNode">➕ 添加节点 ▸
+    <div class="ctx-sub">
+      <div class="ctx-item" data-action="addSource">📦 备选池</div>
+      <div class="ctx-item" data-action="addCondition">🔀 转移条件</div>
+      <div class="ctx-item" data-action="addStatePool">🏷 状态池</div>
+      <div class="ctx-item" data-action="addDiscard">🗑 丢弃池</div>
+      <div class="ctx-item" data-action="addLabel">📝 文字标签</div>
+    </div>
+  </div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" data-action="properties">🔧 属性</div>
+    <div class="ctx-item" data-action="comprehensiveSettings">⚙ 综合设置</div>
+    <div class="ctx-sep"></div>
+  <div class="ctx-item" data-action="copy">📋 复制</div>
+  <div class="ctx-item" data-action="cut">✂ 剪切</div>
+  <div class="ctx-item" data-action="paste">📄 粘贴</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item" data-action="bringToFront">⬆ 置于顶层</div>
+  <div class="ctx-item" data-action="sendToBack">⬇ 置于底层</div>
+  <div class="ctx-sep"></div>
+  <div class="ctx-item ctx-danger" data-action="delete">🗑 删除</div>
+</div>
+
+<!-- ===== Context Dialogs (TDX V8 + DZH Right-Click) ===== -->
+<div id="lineWidthDialog" class="ctx-dialog" style="display:none;">
+  <div class="ctx-dialog-header">线条宽度</div>
+  <div class="ctx-dialog-body">
+    <label>线条宽度(1-16)</label>
+    <input type="number" id="lineWidthInput" min="1" max="16" value="1">
+  </div>
+  <div class="ctx-dialog-footer">
+    <button class="ctx-btn ctx-btn-primary" id="lineWidthOk">确定</button>
+    <button class="ctx-btn" id="lineWidthCancel">取消</button>
+  </div>
+</div>
+
+<div id="descTextDialog" class="ctx-dialog" style="display:none;">
+  <div class="ctx-dialog-header">说明文字</div>
+  <div class="ctx-dialog-body">
+    <label>请输入说明文字</label>
+    <textarea id="descTextInput" rows="3"></textarea>
+    <label>颜色</label>
+    <input type="color" id="descTextColorInput" value="#000000">
+  </div>
+  <div class="ctx-dialog-footer">
+    <button class="ctx-btn ctx-btn-primary" id="descTextOk">确定</button>
+    <button class="ctx-btn" id="descTextCancel">取消</button>
+  </div>
+</div>
+
+<div id="clearConfirmDialog" class="ctx-dialog" style="display:none;">
+  <div class="ctx-dialog-header">提示</div>
+  <div class="ctx-dialog-body">
+    <div class="ctx-confirm-icon">?</div>
+    <p id="clearConfirmText">清除状态池中所有股票?</p>
+  </div>
+  <div class="ctx-dialog-footer">
+    <button class="ctx-btn ctx-btn-primary" id="clearConfirmYes">是(Y)</button>
+    <button class="ctx-btn" id="clearConfirmNo">否(N)</button>
+  </div>
+</div>
+
+<div id="selectStockDialog" class="ctx-dialog ctx-dialog-large" style="display:none;">
+  <div class="ctx-dialog-header">选择品种</div>
+  <div class="ctx-dialog-body">
+    <div class="ctx-tabs" id="stockTabs">
+      <div class="ctx-tab active" data-tab="cat">分类</div>
+      <div class="ctx-tab" data-tab="region">地区</div>
+      <div class="ctx-tab" data-tab="industry">行业</div>
+      <div class="ctx-tab" data-tab="concept">概念</div>
+      <div class="ctx-tab" data-tab="style">风格</div>
+      <div class="ctx-tab" data-tab="index">指数</div>
+      <div class="ctx-tab" data-tab="combo">组合</div>
+      <div class="ctx-tab" data-tab="system">系统特定</div>
+      <div class="ctx-tab" data-tab="custom">自定义</div>
+      <div class="ctx-tab" data-tab="ext-mkt">扩展市场</div>
+      <div class="ctx-tab" data-tab="ext-quote">扩展行情</div>
+    </div>
+    <div class="ctx-tree-area" id="stockTreeArea">
+      <p style="color:#888;padding:12px;font-size:12px;">按住Ctrl或Shift可多选品种</p>
+    </div>
+  </div>
+  <div class="ctx-dialog-footer">
+    <button class="ctx-btn" id="stockSelectAll">全选</button>
+    <button class="ctx-btn ctx-btn-primary" id="stockOk">确定</button>
+    <button class="ctx-btn" id="stockCancel">取消</button>
+  </div>
+</div>
+
+<div id="selectBlockDialog" class="ctx-dialog" style="display:none;">
+  <div class="ctx-dialog-header">请选择板块</div>
+  <div class="ctx-dialog-body">
+    <div class="ctx-block-layout">
+      <div class="ctx-block-list" id="blockList">
+        <!-- 动态填充板块列表 -->
+      </div>
+      <div class="ctx-block-actions">
+        <button class="ctx-btn" id="blockNew">新建板块</button>
+        <button class="ctx-btn" id="blockDelete">删除板块</button>
+        <button class="ctx-btn" id="blockRename">板块改名</button>
+        <button class="ctx-btn" id="blockClear">清空品种</button>
+      </div>
+    </div>
+    <label class="ctx-checkbox"><input type="checkbox" id="blockPrepend"> 放在前面</label>
+  </div>
+  <div class="ctx-dialog-footer">
+    <button class="ctx-btn ctx-btn-primary" id="blockOk">确定</button>
+    <button class="ctx-btn" id="blockCancel">取消</button>
+  </div>
+</div>
+
+<!-- ===== Replay Panel ===== -->
+<div id="replayPanel">
+  <div class="replay-panel-inner">
+    <div class="replay-info">
+      <span class="replay-time" id="replayTime">--</span>
+      <span class="replay-bar-index" id="replayBarIndex">0/0</span>
+    </div>
+    <div class="replay-progress-bar" id="replayProgressBar">
+      <div class="replay-progress-fill" id="replayProgressFill"></div>
+    </div>
+    <div class="replay-controls">
+      <button class="replay-btn" id="replayBtnPlay" title="播放">▶</button>
+      <button class="replay-btn" id="replayBtnPause" title="暂停">⏸</button>
+      <button class="replay-btn" id="replayBtnStep" title="步进">⏭</button>
+      <div class="replay-speed-group">
+        <label>速度</label>
+        <select id="replaySpeedSelect">
+          <option value="1">1x</option>
+          <option value="2">2x</option>
+          <option value="5">5x</option>
+          <option value="10">10x</option>
+          <option value="100">100x</option>
+          <option value="MAX">MAX</option>
+        </select>
+      </div>
+      <div class="replay-period-group">
+        <label>周期</label>
+        <select id="replayPeriodSelect">
+          <option value="1min">1分钟</option>
+          <option value="5min">5分钟</option>
+          <option value="15min">15分钟</option>
+          <option value="30min">30分钟</option>
+          <option value="60min">60分钟</option>
+          <option value="day" selected>日线</option>
+        </select>
+      </div>
+      <div class="replay-date-group">
+        <label>区间</label>
+        <input type="date" id="replayStartDate" value="2024-01-01">
+        <span class="replay-date-sep">~</span>
+        <input type="date" id="replayEndDate" value="2024-12-31">
+      </div>
+    </div>
+    <button class="replay-btn replay-close-btn" id="replayBtnClose" title="退出回放">✕</button>
+  </div>
+</div>
+
+<!-- ===== Simulation Panel ===== -->
+<div id="simulationPanel">
+  <div class="simulation-panel-inner">
+    <div class="simulation-info">
+      <span class="simulation-clock" id="simulationClock">--</span>
+      <span class="simulation-step-count" id="simulationStepCount">步数: 0</span>
+    </div>
+    <div class="simulation-controls">
+      <button class="simulation-btn" id="simBtnStep" title="步进">⏭ 步进</button>
+      <button class="simulation-btn" id="simBtnReset" title="重置">↻ 重置</button>
+      <div class="simulation-delta-group">
+        <label>步长(秒)</label>
+        <select id="simDeltaSelect">
+          <option value="1">1s</option>
+          <option value="60" selected>60s</option>
+          <option value="300">5min</option>
+          <option value="3600">1h</option>
+        </select>
+      </div>
+    </div>
+    <button class="simulation-btn simulation-close-btn" id="simBtnClose" title="退出仿真">✕</button>
+  </div>
+</div>
+
+<!-- ===== Event Panel ===== -->
+<div id="eventPanel">
+  <div class="event-panel-inner">
+    <div class="event-panel-header">
+      <span class="event-panel-title">事件日志</span>
+      <span class="event-panel-count" id="eventPanelCount">0</span>
+      <button class="event-panel-btn" id="eventPanelClear" title="清空">✕</button>
+      <button class="event-panel-btn" id="eventPanelToggle" title="折叠/展开">▾</button>
+    </div>
+    <div class="event-panel-body" id="eventPanelBody">
+      <div class="event-panel-empty" id="eventPanelEmpty">暂无事件</div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== New Pool Modal ===== -->
+<div class="modal-overlay hidden" id="newPoolModal">
+  <div class="modal">
+    <h3>新建股票池</h3>
+    <div class="field">
+      <label for="newPoolName">股票池名称</label>
+      <input type="text" id="newPoolName" placeholder="输入股票池名称..." value="新股票池">
+    </div>
+    <div class="field">
+      <label for="newPoolType">池类型</label>
+      <select id="newPoolType">
+        <option value="dzh">大智慧 (DZH)</option>
+        <option value="tdx">通达信 (TDX)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="newPoolMarket">市场范围</label>
+      <select id="newPoolMarket">
+        <option value="all">全部A股</option>
+        <option value="sh_a">上海A股</option>
+        <option value="sz_a">深圳A股</option>
+        <option value="bj_a">北京A股</option>
+        <option value="sh_b">上海B股</option>
+        <option value="sz_b">深圳B股</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="newPoolBgColor" id="bgColorLabel">默认画布背景颜色</label>
+      <input type="text" id="newPoolBgColor" placeholder="DZH颜色值，默认黑色" value="16777216">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="btnCancelNew">取消</button>
+      <button class="btn btn-primary" id="btnConfirmNew">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Import XML Modal ===== -->
+<div class="modal-overlay hidden" id="importModal">
+  <div class="modal">
+    <h3 id="importModalTitle">导入股票池</h3>
+    <div class="file-drop-zone" id="dropZone">
+      <div class="dz-icon">📂</div>
+      <p id="dropZoneText">点击选择或拖拽文件到此处</p>
+    </div>
+    <div class="import-preview hidden" id="importPreview" style="margin-top:12px;border:1px solid var(--border-light);border-radius:6px;padding:10px;max-height:240px;overflow:auto;background:var(--bg-input);">
+      <div style="font-weight:600;margin-bottom:6px;font-size:13px;">文件预览</div>
+      <div id="importPreviewInfo" style="font-size:12px;color:var(--text-secondary);margin-bottom:6px;"></div>
+      <pre id="importPreviewContent" style="font-size:11px;white-space:pre-wrap;word-break:break-all;color:var(--text-primary);margin:0;"></pre>
+    </div>
+    <div class="modal-actions" style="margin-top:16px;">
+      <button class="btn btn-outline" id="btnCancelImport">取消</button>
+      <button class="btn btn-primary hidden" id="btnConfirmImport">确认导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 综合设置窗口 (股票池流程设置) ===== -->
+<div class="modal-overlay hidden" id="comprehensiveSettingsOverlay">
+  <div class="cs-modal" id="comprehensiveSettingsModal">
+    <!-- 标题栏 -->
+    <div class="cs-header">
+      <span class="cs-title">股票池流程设置</span>
+      <button class="cs-close-btn" id="csCloseBtn" title="关闭">✕</button>
+    </div>
+    <!-- 表格主体 -->
+    <div class="cs-table-wrap">
+      <!-- 表头（三列布局：流程标识 | 条件/属性 | 时序/操作） -->
+      <div class="cst-header-row" id="cstHeaderRow">
+        <div class="cst-col-flow">流程标识</div>
+        <div class="cst-col-condition">条件/属性</div>
+        <div class="cst-col-timing">时序/操作</div>
+      </div>
+      <!-- 表体 -->
+      <div class="cst-body" id="csTableBody"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 综合设置 - 字段编辑器弹窗 ===== -->
+<div class="modal-overlay hidden" id="csFieldEditorOverlay">
+  <div class="cs-modal cs-field-editor-modal" id="csFieldEditorModal">
+    <div class="cs-header">
+      <span class="cs-title" id="csFieldEditorTitle">设置字段</span>
+      <button class="cs-close-btn" id="csFieldEditorCloseBtn" title="关闭">✕</button>
+    </div>
+    <div class="cs-field-body" id="csFieldEditorBody"></div>
+    <div class="cs-modal-actions">
+      <button class="btn btn-outline" id="csFieldEditorCancelBtn">取消</button>
+      <button class="btn btn-primary" id="csFieldEditorOkBtn">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Hidden File Input ===== -->
+<input type="file" id="fileInput" accept=".xml" style="display:none">
+
+<!-- ===== Scripts ===== -->
+<script src="js/table-driven-panel.js?v=63"></script>
+<script src="js/charts.js?v=1"></script>
+<script src="js/editor.js?v=1"></script>
+<script src="js/comprehensive-settings.js?v=1"></script>
+<script type="module" src="js/canvas.js?v=86"></script>
+<script type="module" src="js/main.js?v=89"></script>
+
+<!-- 所有下拉菜单挂载到此容器，避免被 topbar overflow 裁剪 -->
+<div id="dropdownContainer" style="position:fixed;top:0;left:0;width:0;height:0;overflow:visible;z-index:9999;pointer-events:none;"></div>
+
+</body>
+</html>

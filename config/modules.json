@@ -1,0 +1,192 @@
+{
+  "version": "1.0",
+  "modules": {
+    "candidate_provider": {
+      "id": "candidate_provider",
+      "name": "备选池提供器",
+      "type": "source",
+      "node_type": "candidate",
+      "handler": "candidate_resolve",
+      "layout_id": "market_source",
+      "inputs": [],
+      "outputs": [
+        "stock_list"
+      ],
+      "dzh_cell_types": [
+        202,
+        7
+      ],
+      "field_refs": ["attrtext", "reload", "lastload", "clr"]
+    },
+    "condition_filter": {
+      "id": "condition_filter",
+      "name": "条件过滤器",
+      "type": "transform",
+      "node_type": "condition",
+      "handler": "condition_dispatcher",
+      "layout_id": "condition_filter",
+      "inputs": [
+        "stock_list"
+      ],
+      "outputs": [
+        "result"
+      ],
+      "dzh_cell_types": [
+        201
+      ],
+      "field_refs": ["inditype", "indi", "sorttype", "indiparam", "crc", "attr", "clr"]
+    },
+    "stock_state_pool": {
+      "id": "stock_state_pool",
+      "name": "股票状态池",
+      "type": "accumulator",
+      "node_type": "state",
+      "handler": "accumulate_state",
+      "layout_id": "stock_state_pool",
+      "inputs": [
+        "result"
+      ],
+      "outputs": [
+        "stock_list"
+      ],
+      "dzh_cell_types": [
+        200,
+        203
+      ],
+      "field_refs": ["hold", "col", "width", "text", "wizd", "histana", "stocknum", "enter", "exit", "deltype", "endtime", "delstocktype", "staattr", "tmpl", "sorttype", "clr", "attr", "tradeattr"],
+      "_group_alert": {
+        "name": "预警设置",
+        "fields": ["alert_sound", "alert_popup", "alert_scroll_window", "highlight_flash"]
+      },
+      "_group_display": {
+        "name": "显示设置",
+        "fields": ["show_overview", "history_track", "calc_profit_from_prev", "simple_intermediate"]
+      },
+      "_group_action": {
+        "name": "进出动作",
+        "fields": ["enter", "exit"]
+      },
+      "_group_tradeattr": {
+        "name": "交易属性",
+        "fields": ["tradeattr"]
+      }
+    },
+    "discard_sink": {
+      "id": "discard_sink",
+      "name": "丢弃池",
+      "type": "sink",
+      "node_type": "discard",
+      "handler": "discard_stocks",
+      "layout_id": "discard_sink",
+      "inputs": [
+        "result"
+      ],
+      "outputs": [],
+      "dzh_cell_types": [
+        4
+      ],
+      "field_refs": ["text", "clr", "attr"],
+      "_group_attr": {
+        "name": "属性标志",
+        "fields": ["discard_marker", "show_overview"]
+      }
+    },
+    "text_label": {
+      "id": "text_label",
+      "name": "文字标签",
+      "type": "auxiliary",
+      "node_type": "label",
+      "handler": null,
+      "layout_id": "text_label",
+      "inputs": [],
+      "outputs": [],
+      "dzh_cell_types": [
+        1
+      ],
+      "field_refs": ["text", "url", "clr", "attr"],
+      "_group_font_style": {
+        "name": "字体样式",
+        "fields": ["font_bold", "font_style_1", "font_style_2", "font_style_3", "visible", "font_style_4", "font_style_5", "font_style_6", "transparent"]
+      }
+    },
+    "container_box": {
+      "id": "container_box",
+      "name": "容器框",
+      "type": "auxiliary",
+      "node_type": "container",
+      "handler": null,
+      "layout_id": "container_box",
+      "inputs": [],
+      "outputs": [],
+      "dzh_cell_types": [
+        2
+      ],
+      "field_refs": ["clr", "attr"],
+      "_group_display": {
+        "name": "显示设置",
+        "fields": ["show_overview"]
+      }
+    },
+    "state_column": {
+      "id": "state_column",
+      "name": "状态列",
+      "type": "layout",
+      "node_type": "column",
+      "handler": null,
+      "layout_id": "state_column",
+      "inputs": [],
+      "outputs": [],
+      "dzh_cell_types": [
+        3
+      ],
+      "field_refs": ["clr", "attr"],
+      "_group_display": {
+        "name": "显示设置",
+        "fields": ["show_overview"]
+      }
+    },
+    "flow_arrow": {
+      "id": "flow_arrow",
+      "name": "连接箭头",
+      "type": "auxiliary",
+      "node_type": "arrow",
+      "handler": null,
+      "layout_id": "flow",
+      "inputs": [],
+      "outputs": [],
+      "dzh_cell_types": [
+        6
+      ],
+      "field_refs": ["clr"]
+    },
+    "execution_order": {
+      "id": "execution_order",
+      "name": "执行顺序",
+      "type": "auxiliary",
+      "node_type": "execution_order",
+      "handler": null,
+      "layout_id": "execution_order",
+      "inputs": [],
+      "outputs": [],
+      "dzh_cell_types": [
+        5
+      ],
+      "field_refs": ["clr", "attr"]
+    }
+  },
+  "flow_schema": {
+    "field_refs": ["from", "to", "attr", "begin", "begint", "end", "endt", "interval", "clr", "mid", "count"],
+    "_group_transfer": {
+      "name": "转移选项",
+      "fields": ["delete_source", "keep_source", "clear_dest_first", "output_constituent"]
+    },
+    "_group_timing": {
+      "name": "时序控制",
+      "fields": ["begin", "begint", "end", "endt", "interval"]
+    },
+    "_group_visual": {
+      "name": "视觉属性",
+      "fields": ["clr", "mid"]
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "modes": {
+    "indi": {"action": "default", "description": "指标模式：保留passed"},
+    "rank": {"action": "default", "description": "排序模式：保留passed"},
+    "reverse": {"action": "reverse", "description": "反向模式：交换passed/rejected"},
+    "filter": {"action": "default", "description": "筛选模式：保留passed"}
+  }
+}

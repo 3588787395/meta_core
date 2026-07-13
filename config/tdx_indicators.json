@@ -1,0 +1,142 @@
+{
+  "version": "1.0",
+  "description": "TDX系统指标编号配置表",
+  "indicators": [
+    {"value": 6, "label": "6 - 日线排序"},
+    {"value": 7, "label": "7 - 涨幅排序"},
+    {"value": 11, "label": "11 - 量比排序"},
+    {"value": 106, "label": "106 - 粘合"},
+    {"value": 107, "label": "107 - 牛股/牛启动"},
+    {"value": 110, "label": "110 - 资金龙头"},
+    {"value": 111, "label": "111 - 龙头首板"},
+    {"value": 113, "label": "113 - 止盈/止损"},
+    {"value": 122, "label": "122 - 反弹信号"},
+    {"value": 125, "label": "125 - 火箭发射/买入信号"},
+    {"value": 133, "label": "133 - 主力控盘"},
+    {"value": 135, "label": "135 - 120日内新高"},
+    {"value": 136, "label": "136 - 趋势下跌"},
+    {"value": 137, "label": "137 - 趋势上修"},
+    {"value": 138, "label": "138 - 强牛奔腾"},
+    {"value": 139, "label": "139 - 趋势上修2"},
+    {"value": 140, "label": "140 - 追强"},
+    {"value": 141, "label": "141 - 趋势金步/B点信号"},
+    {"value": 142, "label": "142 - 强牛回头"},
+    {"value": 149, "label": "149 - 主力筑底"},
+    {"value": 150, "label": "150 - 昨日涨停"},
+    {"value": 193, "label": "193 - DDE排名"},
+    {"value": 207, "label": "207 - 龙头股/强势股"},
+    {"value": 209, "label": "209 - 最高换手"},
+    {"value": 211, "label": "211 - 探底回升"},
+    {"value": 212, "label": "212 - 连涨3天"},
+    {"value": 213, "label": "213 - 连涨5天"},
+    {"value": 214, "label": "214 - 强势新高"},
+    {"value": 217, "label": "217 - 获利超8"},
+    {"value": 219, "label": "219 - 突破年线"},
+    {"value": 239, "label": "239 - 龙头股(自定义)"},
+    {"value": 250, "label": "250 - 小品2_1/去ST小盘"},
+    {"value": 251, "label": "251 - 小品2_3/趋势"},
+    {"value": 253, "label": "253 - 小品2_5/板块指数"},
+    {"value": 254, "label": "254 - 小品2_7/牛股路径"},
+    {"value": 255, "label": "255 - 小品2_8/牛股出口"},
+    {"value": 256, "label": "256 - 涨跌家数"},
+    {"value": 257, "label": "257 - 去ST/日内突破"},
+    {"value": 258, "label": "258 - 小品2_9/趋势判断"},
+    {"value": 259, "label": "259 - 小品2_10/60分钟"},
+    {"value": 260, "label": "260 - 小品2_11/桃花依旧"},
+    {"value": 261, "label": "261 - 小品2_12/60分钟2"},
+    {"value": 262, "label": "262 - 小品2_13/牛股延续"},
+    {"value": 263, "label": "263 - 小品2_6/中军参考"},
+    {"value": 264, "label": "264 - 牛牛/热点板块"},
+    {"value": 278, "label": "278 - 短线首板"},
+    {"value": 306, "label": "306 - 日内突破(自定义)"},
+    {"value": 360, "label": "360 - 日内突破(周线)"},
+    {"value": 424, "label": "424 - 热点板块"},
+    {"value": 552, "label": "552 - 行业均值"},
+    {"value": 553, "label": "553 - 第一成份"},
+    {"value": 554, "label": "554 - 第二成份"},
+    {"value": 555, "label": "555 - 第三成份"}
+  ],
+  "common_indicators": {
+    "MACD": {
+      "formula_name": "MACD",
+      "formula_arg": "12,26,9",
+      "return_count": 3,
+      "outputs": ["DIF", "DEA", "MACD"],
+      "xsflag": 6,
+      "description": "指数平滑异同移动平均线"
+    },
+    "KDJ": {
+      "formula_name": "KDJ",
+      "formula_arg": "9,3,3",
+      "return_count": 3,
+      "outputs": ["K", "D", "J"],
+      "xsflag": 6,
+      "description": "随机指标"
+    },
+    "RSI": {
+      "formula_name": "RSI",
+      "formula_arg": "6,12,24",
+      "return_count": 3,
+      "outputs": ["RSI1", "RSI2", "RSI3"],
+      "xsflag": 6,
+      "description": "相对强弱指标"
+    },
+    "BOLL": {
+      "formula_name": "BOLL",
+      "formula_arg": "20",
+      "return_count": 3,
+      "outputs": ["MID", "UPPER", "LOWER"],
+      "xsflag": 6,
+      "description": "布林带"
+    },
+    "MA": {
+      "formula_name": "MA",
+      "formula_arg": "5,10,20,60",
+      "return_count": 4,
+      "outputs": ["MA5", "MA10", "MA20", "MA60"],
+      "xsflag": 6,
+      "description": "移动平均线"
+    },
+    "CCI": {
+      "formula_name": "CCI",
+      "formula_arg": "14",
+      "return_count": 1,
+      "outputs": ["CCI"],
+      "xsflag": 6,
+      "description": "商品通道指数"
+    },
+    "WR": {
+      "formula_name": "WR",
+      "formula_arg": "10,6",
+      "return_count": 2,
+      "outputs": ["WR1", "WR2"],
+      "xsflag": 6,
+      "description": "威廉指标"
+    },
+    "OBV": {
+      "formula_name": "OBV",
+      "formula_arg": "",
+      "return_count": 1,
+      "outputs": ["OBV"],
+      "xsflag": 6,
+      "description": "能量潮"
+    },
+    "BIAS": {
+      "formula_name": "BIAS",
+      "formula_arg": "6,12,24",
+      "return_count": 3,
+      "outputs": ["BIAS6", "BIAS12", "BIAS24"],
+      "xsflag": 6,
+      "description": "乖离率"
+    },
+    "PSY": {
+      "formula_name": "PSY",
+      "formula_arg": "12",
+      "return_count": 1,
+      "outputs": ["PSY"],
+      "xsflag": 6,
+      "description": "心理线"
+    }
+  },
+  "formula_arg_priority": ["nfirst", "nsecond", "cfirst", "csecond"]
+}

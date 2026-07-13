@@ -1,0 +1,479 @@
+{
+  "version": "1.0",
+  "components": {
+    "text_input": {
+      "component_type": "text_input",
+      "html_tag": "input",
+      "html_type": "text",
+      "default_props": {},
+      "validation_rules": ["is_string", "max_length_256"],
+      "description": "单行文本输入框"
+    },
+    "number_input": {
+      "component_type": "number_input",
+      "html_tag": "input",
+      "html_type": "number",
+      "default_props": {
+        "min": 0,
+        "step": 1
+      },
+      "validation_rules": ["is_number"],
+      "description": "数字输入框"
+    },
+    "checkbox": {
+      "component_type": "checkbox",
+      "html_tag": "input",
+      "html_type": "checkbox",
+      "default_props": {
+        "checked": false
+      },
+      "validation_rules": [],
+      "description": "复选框"
+    },
+    "select": {
+      "component_type": "select",
+      "html_tag": "select",
+      "default_props": {},
+      "validation_rules": ["is_valid_option"],
+      "description": "下拉选择框"
+    },
+    "color_picker": {
+      "component_type": "color_picker",
+      "html_tag": "input",
+      "html_type": "color",
+      "default_props": {},
+      "validation_rules": ["is_color"],
+      "description": "颜色选择器"
+    },
+    "textarea": {
+      "component_type": "textarea",
+      "html_tag": "textarea",
+      "default_props": {
+        "rows": 3
+      },
+      "validation_rules": ["is_string"],
+      "description": "多行文本域(小)"
+    },
+    "readonly": {
+      "component_type": "readonly",
+      "html_tag": "span",
+      "renderer": "readonly_text_renderer",
+      "default_props": {},
+      "validation_rules": [],
+      "description": "只读文本显示"
+    },
+    "readonly_number": {
+      "component_type": "readonly_number",
+      "html_tag": "span",
+      "renderer": "readonly_number_renderer",
+      "default_props": {},
+      "validation_rules": [],
+      "description": "只读数字显示"
+    },
+    "readonly_datetime": {
+      "component_type": "readonly_datetime",
+      "html_tag": "span",
+      "renderer": "readonly_datetime_renderer",
+      "default_props": {},
+      "validation_rules": [],
+      "description": "只读日期时间显示"
+    },
+    "base64_readonly": {
+      "component_type": "base64_readonly",
+      "html_tag": "span",
+      "renderer": "base64_readonly_renderer",
+      "default_props": {},
+      "validation_rules": [],
+      "description": "Base64编码内容的只读显示"
+    },
+    "text_readonly": {
+      "component_type": "text_readonly",
+      "html_tag": "span",
+      "renderer": "text_readonly_renderer",
+      "default_props": {},
+      "validation_rules": [],
+      "description": "只读文本显示(无编辑)"
+    },
+    "flag_group": {
+      "component_type": "flag_group",
+      "renderer": "flag_group_renderer",
+      "child_component": "checkbox",
+      "default_props": {},
+      "validation_rules": [],
+      "description": "位标志组,自动展开子复选框"
+    },
+    "group": {
+      "component_type": "group",
+      "renderer": "group_renderer",
+      "default_props": {
+        "collapsible": true,
+        "default_expanded": true
+      },
+      "validation_rules": [],
+      "description": "字段分组容器,折叠/展开"
+    },
+    "action_compound": {
+      "component_type": "action_compound",
+      "renderer": "action_compound_renderer",
+      "default_props": {
+        "action_options": [
+          {
+            "value": "0x0",
+            "label": "无动作"
+          },
+          {
+            "value": "0x1",
+            "label": "买入指定金额"
+          },
+          {
+            "value": "0x2",
+            "label": "买入指定股数"
+          },
+          {
+            "value": "0x3",
+            "label": "卖出股票"
+          }
+        ]
+      },
+      "validation_rules": ["validate_bit_compound"],
+      "description": "交易动作复合组件:下拉选择动作类型+数字输入参数"
+    },
+    "kline_chart": {
+      "component_type": "kline_chart",
+      "renderer": "kline_chart_renderer",
+      "html_tag": "canvas",
+      "default_props": {
+        "height": 400,
+        "show_volume": true,
+        "show_ma": [5, 10, 20, 60],
+        "period": "day"
+      },
+      "data_source": {
+        "type": "api",
+        "endpoint": "/api/kline",
+        "params": ["stock_code", "period"]
+      },
+      "validation_rules": [],
+      "description": "K线图组件：蜡烛图+成交量柱状图+MA均线叠加"
+    },
+    "indicator_chart": {
+      "component_type": "indicator_chart",
+      "renderer": "indicator_chart_renderer",
+      "html_tag": "canvas",
+      "default_props": {
+        "height": 200,
+        "show_zero_line": true,
+        "positive_color": "#00cc66",
+        "negative_color": "#ff4444",
+        "line_color": "#4a9eff"
+      },
+      "data_source": {
+        "type": "api",
+        "endpoint": "/api/indicator/values",
+        "params": ["node_id", "formula"]
+      },
+      "validation_rules": [],
+      "description": "指标走势图组件：折线图+0轴参考线+正负区域着色"
+    },
+    "rule_editor": {
+      "component_type": "rule_editor",
+      "renderer": "rule_editor_renderer",
+      "html_tag": "div",
+      "default_props": {
+        "editable": true,
+        "max_rules": 50,
+        "show_priority": true,
+        "show_stop_flag": true
+      },
+      "data_source": {
+        "type": "api",
+        "endpoint": "/api/rules",
+        "params": ["pool_id"]
+      },
+      "child_components": ["rule_card", "rule_form", "condition_chip"],
+      "validation_rules": ["validate_rule_structure"],
+      "description": "规则编辑器组件：规则列表+拖拽排序+条件编辑+动作配置"
+    },
+    "rule_card": {
+      "component_type": "rule_card",
+      "renderer": "rule_card_renderer",
+      "html_tag": "div",
+      "default_props": {
+        "collapsible": true,
+        "default_expanded": true,
+        "show_stop_badge": true,
+        "show_priority": true
+      },
+      "validation_rules": [],
+      "description": "规则卡片组件：规则ID、优先级、停止标志、条件chips、动作名称"
+    },
+    "stock_list": {
+      "component_type": "stock_list",
+      "renderer": "stock_list_renderer",
+      "html_tag": "div",
+      "default_props": {
+        "virtual_scroll": true,
+        "row_height": 32,
+        "visible_rows": 20,
+        "columns": ["code", "name", "now", "rise", "volume", "inprice", "indate", "maxrate", "idaynum"]
+      },
+      "data_source": {
+        "type": "api",
+        "endpoint": "/api/stocks",
+        "params": ["pool_id", "node_id"]
+      },
+      "validation_rules": [],
+      "description": "股票列表组件：支持虚拟滚动，>100条自动启用虚拟滚动优化"
+    },
+    "canvas_container": {
+      "component_type": "canvas_container",
+      "renderer": "canvas_container_renderer",
+      "html_tag": "div",
+      "default_props": {
+        "zoom": 1.0,
+        "min_zoom": 0.3,
+        "max_zoom": 3.0,
+        "grid_size": 20,
+        "snap_to_grid": true
+      },
+      "child_components": ["node", "edge", "group"],
+      "validation_rules": [],
+      "description": "Canvas容器组件：画布缩放、平移、网格对齐、节点拖拽管理"
+    },
+    "canvas": {
+      "component_type": "canvas",
+      "renderer": "canvas_renderer",
+      "html_tag": "canvas",
+      "default_props": {
+        "width": 800,
+        "height": 600,
+        "zoom": 1.0,
+        "min_zoom": 0.3,
+        "max_zoom": 3.0,
+        "snap_to_grid": true
+      },
+      "child_components": ["node", "edge", "group"],
+      "validation_rules": [],
+      "description": "Canvas画布组件：SVG/Canvas混合渲染，节点拖拽，连线绘制"
+    },
+    "property_panel": {
+      "component_type": "property_panel",
+      "renderer": "property_panel_renderer",
+      "html_tag": "div",
+      "default_props": {
+        "collapsible": true,
+        "show_tabs": true,
+        "readonly": false
+      },
+      "child_components": ["text_input", "number_input", "select", "checkbox", "color_picker", "flag_group", "action_compound", "group"],
+      "validation_rules": [],
+      "description": "属性面板组件：表驱动渲染，支持字段联动、折叠分组、标签页切换"
+    },
+    "formula_editor": {
+      "component_type": "formula_editor",
+      "renderer": "formula_editor_renderer",
+      "html_tag": "div",
+      "default_props": {
+        "rows": 8,
+        "show_toolbar": true,
+        "show_validation": true,
+        "auto_encode": true
+      },
+      "validation_rules": ["validate_formula"],
+      "description": "公式编辑器：多行文本编辑+工具栏+语法验证+Base64自动编解码"
+    },
+    "market_selector": {
+      "component_type": "market_selector",
+      "renderer": "market_selector_renderer",
+      "html_tag": "div",
+      "default_props": {
+        "markets": ["SH", "SZ", "CYB", "KCB", "BJS"]
+      },
+      "validation_rules": [],
+      "description": "市场选择器：多选框组(沪市/深市/创业/科创/北交所)"
+    },
+    "sector_tree": {
+      "component_type": "sector_tree",
+      "renderer": "sector_tree_renderer",
+      "html_tag": "div",
+      "default_props": {
+        "multiple": true,
+        "show_search": true
+      },
+      "validation_rules": [],
+      "description": "板块树选择器：树形下拉多选"
+    },
+    "stock_source_editor": {
+      "component_type": "stock_source_editor",
+      "renderer": "stock_source_editor_renderer",
+      "html_tag": "div",
+      "default_props": {
+        "source_types": ["sector", "stock", "formula"]
+      },
+      "validation_rules": [],
+      "description": "股票来源编辑器：下拉选择来源类型+列表管理"
+    },
+    "reload_mode": {
+      "component_type": "reload_mode",
+      "renderer": "reload_mode_renderer",
+      "html_tag": "select",
+      "default_props": {},
+      "validation_rules": ["is_valid_option"],
+      "description": "重载模式选择器：下拉选择(never/daily/interval等特殊常量值)"
+    },
+    "flow_info": {
+      "component_type": "flow_info",
+      "renderer": "flow_info_renderer",
+      "html_tag": "span",
+      "default_props": {},
+      "validation_rules": [],
+      "description": "流转信息显示：只读复合组件"
+    },
+    "flow_mode_display": {
+      "component_type": "flow_mode_display",
+      "renderer": "flow_mode_display_renderer",
+      "html_tag": "span",
+      "default_props": {},
+      "validation_rules": [],
+      "description": "流转模式显示：只读标签+颜色标识"
+    },
+    "transfer_mode": {
+      "component_type": "transfer_mode",
+      "renderer": "transfer_mode_renderer",
+      "html_tag": "select",
+      "default_props": {},
+      "validation_rules": ["is_valid_option"],
+      "description": "转移模式选择器：下拉选择+联动控制"
+    },
+    "begint_input": {
+      "component_type": "begint_input",
+      "renderer": "begint_input_renderer",
+      "html_tag": "div",
+      "default_props": {
+        "hhmmss_modes": [3, 4, 7]
+      },
+      "validation_rules": [],
+      "description": "开始时间输入：日期时间+单位选择联动"
+    },
+    "tdx_enum_select": {
+      "component_type": "tdx_enum_select",
+      "renderer": "tdx_enum_select_renderer",
+      "html_tag": "select",
+      "default_props": {
+        "show_description": true
+      },
+      "validation_rules": ["is_valid_option"],
+      "description": "TDX枚举选择器：下拉选择+枚举描述显示"
+    },
+    "bsavehis_panel": {
+      "component_type": "bsavehis_panel",
+      "renderer": "bsavehis_panel_renderer",
+      "html_tag": "div",
+      "default_props": {},
+      "validation_rules": [],
+      "description": "保存历史数据面板：复选框+日期+按钮"
+    },
+    "stock_data_table": {
+      "component_type": "stock_data_table",
+      "renderer": "stock_data_table_renderer",
+      "html_tag": "div",
+      "default_props": {
+        "virtual_scroll": true,
+        "row_height": 32,
+        "show_count": true
+      },
+      "validation_rules": [],
+      "description": "股票数据表格：表格+计数+滚动"
+    },
+    "color_input": {
+      "component_type": "color_input",
+      "html_tag": "input",
+      "html_type": "color",
+      "default_props": {},
+      "validation_rules": ["is_color"],
+      "description": "颜色输入框"
+    }
+  },
+  "chart_panel": {
+    "id": "chart_panel",
+    "name": "图表面板",
+    "type": "compound",
+    "description": "动态图表面板，包含多种图表类型，由配置表驱动生成",
+    "lifecycle": {
+      "on_mount": "render_chart_panel",
+      "on_unmount": "destroy_chart_panel",
+      "on_update": "refresh_chart_data"
+    },
+    "props": {
+      "theme": "dark",
+      "responsive": true,
+      "height": 400,
+      "show_toolbar": true
+    },
+    "chart_items": {
+      "line_chart": {
+        "id": "line_chart",
+        "name": "折线图",
+        "type": "native",
+        "component": "LineChart",
+        "data_source": "profit_trend",
+        "config": {
+          "x_field": "date",
+          "y_field": "profit_pct",
+          "smooth": true,
+          "show_area": true
+        }
+      },
+      "kline_chart": {
+        "id": "kline_chart",
+        "name": "K线图",
+        "type": "native",
+        "component": "KlineChart",
+        "data_source": "kline_data",
+        "config": {
+          "period": "day",
+          "show_ma": [5, 10, 20, 60],
+          "show_volume": true
+        }
+      },
+      "pie_chart": {
+        "id": "pie_chart",
+        "name": "饼图",
+        "type": "native",
+        "component": "PieChart",
+        "data_source": "sector_distribution",
+        "config": {
+          "label_field": "sector_name",
+          "value_field": "stock_count",
+          "show_legend": true,
+          "radius": ["40%", "70%"]
+        }
+      },
+      "radar_chart": {
+        "id": "radar_chart",
+        "name": "雷达图",
+        "type": "native",
+        "component": "RadarChart",
+        "data_source": "stock_metrics",
+        "config": {
+          "metrics": ["profit", "risk", "liquidity", "growth", "valuation"],
+          "show_area": true,
+          "max_value": 100
+        }
+      },
+      "bar_chart": {
+        "id": "bar_chart",
+        "name": "柱状图",
+        "type": "native",
+        "component": "BarChart",
+        "data_source": "volume_analysis",
+        "config": {
+          "x_field": "date",
+          "y_field": "volume",
+          "show_trend_line": true,
+          "color_by": "direction"
+        }
+      }
+    }
+  }
+}

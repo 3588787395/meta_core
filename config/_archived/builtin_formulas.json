@@ -1,0 +1,237 @@
+{
+  "version": "1.0",
+  "formulas": [
+    {
+      "name": "MA",
+      "description": "均线 - 移动平均线，用于显示价格的平均趋势",
+      "category": "indicator",
+      "script": "MA1:MA(CLOSE,M1);\nMA2:MA(CLOSE,M2);\nMA3:MA(CLOSE,M3);\nMA4:MA(CLOSE,M4);",
+      "args": [
+        { "name": "M1", "value": 5, "description": "短期均线周期" },
+        { "name": "M2", "value": 10, "description": "中短期均线周期" },
+        { "name": "M3", "value": 20, "description": "中期均线周期" },
+        { "name": "M4", "value": 60, "description": "长期均线周期" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "MACD",
+      "description": "指数平滑异同移动平均线 - 用于判断趋势和买卖时机",
+      "category": "indicator",
+      "script": "DIF:EMA(CLOSE,SHORT)-EMA(CLOSE,LONG);\nDEA:EMA(DIF,MID);\nMACD:(DIF-DEA)*2,COLORSTICK;",
+      "args": [
+        { "name": "SHORT", "value": 12, "description": "短期EMA周期" },
+        { "name": "LONG", "value": 26, "description": "长期EMA周期" },
+        { "name": "MID", "value": 9, "description": "DEA的EMA周期" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "KDJ",
+      "description": "随机指标 - 用于判断超买超卖和买卖信号",
+      "category": "indicator",
+      "script": "RSV:=(CLOSE-LLV(LOW,N))/(HHV(HIGH,N)-LLV(LOW,N))*100;\nK:SMA(RSV,M1,1);\nD:SMA(K,M2,1);\nJ:3*K-2*D;",
+      "args": [
+        { "name": "N", "value": 9, "description": "RSV计算周期" },
+        { "name": "M1", "value": 3, "description": "K值的SMA周期" },
+        { "name": "M2", "value": 3, "description": "D值的SMA周期" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "RSI",
+      "description": "相对强弱指标 - 用于衡量价格变动的强弱程度",
+      "category": "indicator",
+      "script": "LC:=REF(CLOSE,1);\nRSI1:SMA(MAX(CLOSE-LC,0),N1,1)/SMA(ABS(CLOSE-LC),N1,1)*100;\nRSI2:SMA(MAX(CLOSE-LC,0),N2,1)/SMA(ABS(CLOSE-LC),N2,1)*100;\nRSI3:SMA(MAX(CLOSE-LC,0),N3,1)/SMA(ABS(CLOSE-LC),N3,1)*100;",
+      "args": [
+        { "name": "N1", "value": 6, "description": "短期RSI周期" },
+        { "name": "N2", "value": 12, "description": "中期RSI周期" },
+        { "name": "N3", "value": 24, "description": "长期RSI周期" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "BOLL",
+      "description": "布林带 - 用于判断价格波动区间和超买超卖",
+      "category": "indicator",
+      "script": "MID:MA(CLOSE,N);\nUPPER:MID+P*STD(CLOSE,N);\nLOWER:MID-P*STD(CLOSE,N);",
+      "args": [
+        { "name": "N", "value": 20, "description": "中轨周期" },
+        { "name": "P", "value": 2, "description": "标准差倍数" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "WR",
+      "description": "威廉指标 - 用于判断超买超卖状态",
+      "category": "indicator",
+      "script": "WR1:(HHV(HIGH,N)-CLOSE)/(HHV(HIGH,N)-LLV(LOW,N))*100;\nWR2:(HHV(HIGH,N1)-CLOSE)/(HHV(HIGH,N1)-LLV(LOW,N1))*100;",
+      "args": [
+        { "name": "N", "value": 10, "description": "短期威廉周期" },
+        { "name": "N1", "value": 6, "description": "超短期威廉周期" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "BIAS",
+      "description": "乖离率 - 用于衡量价格偏离均线的程度",
+      "category": "indicator",
+      "script": "BIAS1:(CLOSE-MA(CLOSE,N1))/MA(CLOSE,N1)*100;\nBIAS2:(CLOSE-MA(CLOSE,N2))/MA(CLOSE,N2)*100;\nBIAS3:(CLOSE-MA(CLOSE,N3))/MA(CLOSE,N3)*100;",
+      "args": [
+        { "name": "N1", "value": 6, "description": "短期乖离率周期" },
+        { "name": "N2", "value": 12, "description": "中期乖离率周期" },
+        { "name": "N3", "value": 24, "description": "长期乖离率周期" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "CCI",
+      "description": "商品通道指数 - 用于判断价格偏离正常范围的异常波动",
+      "category": "indicator",
+      "script": "TYP:=(HIGH+LOW+CLOSE)/3;\nCCI:(TYP-MA(TYP,N))/(0.015*AVEDEV(TYP,N));",
+      "args": [
+        { "name": "N", "value": 14, "description": "CCI计算周期" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "VOL",
+      "description": "成交量 - 显示成交量及其均线",
+      "category": "indicator",
+      "script": "VOLUME:VOL,VOLSTICK;\nMAVOL1:MA(VOL,M1);\nMAVOL2:MA(VOL,M2);",
+      "args": [
+        { "name": "M1", "value": 5, "description": "短期成交量均线周期" },
+        { "name": "M2", "value": 10, "description": "中期成交量均线周期" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "OBV",
+      "description": "能量潮 - 通过成交量变化判断价格趋势",
+      "category": "indicator",
+      "script": "VA:=IF(CLOSE>REF(CLOSE,1),VOL,-VOL);\nOBV:SUM(IF(CLOSE=REF(CLOSE,1),0,VA),0);\nMAOBV:MA(OBV,30);",
+      "args": [],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "DMI",
+      "description": "趋向指标 - 用于判断趋势方向和强度",
+      "category": "indicator",
+      "script": "TR:=SUM(MAX(MAX(HIGH-LOW,ABS(HIGH-REF(CLOSE,1))),ABS(LOW-REF(CLOSE,1))),N);\nHD:=HIGH-REF(HIGH,1);\nLD:=REF(LOW,1)-LOW;\nPDM:=SUM(IF(HD>0 AND HD>LD,HD,0),N);\nMDM:=SUM(IF(LD>0 AND LD>HD,LD,0),N);\nPDI:PDM*100/TR;\nMDI:MDM*100/TR;\nADX:MA(ABS(MDI-PDI)/(MDI+PDI)*100,MM);\nADXR:(ADX+REF(ADX,MM))/2;",
+      "args": [
+        { "name": "N", "value": 14, "description": "TR计算周期" },
+        { "name": "MM", "value": 6, "description": "ADX平滑周期" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "SAR",
+      "description": "抛物线指标 - 用于判断趋势反转点",
+      "category": "indicator",
+      "script": "SAR:SAR(N,STEP,MAXP);",
+      "args": [
+        { "name": "N", "value": 4, "description": "计算周期" },
+        { "name": "STEP", "value": 2, "description": "步长(%)" },
+        { "name": "MAXP", "value": 20, "description": "最大值(%)" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "EXPMA",
+      "description": "指数平均线 - 用于判断价格趋势",
+      "category": "indicator",
+      "script": "EXPMA1:EMA(CLOSE,P1);\nEXPMA2:EMA(CLOSE,P2);",
+      "args": [
+        { "name": "P1", "value": 12, "description": "短期指数平均周期" },
+        { "name": "P2", "value": 50, "description": "长期指数平均周期" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "TRIX",
+      "description": "三重指数平滑平均线 - 用于判断长期趋势",
+      "category": "indicator",
+      "script": "MTR:=EMA(EMA(EMA(CLOSE,N),N),N);\nTRIX:(MTR-REF(MTR,1))/REF(MTR,1)*100;\nTRMA:MA(TRIX,M);",
+      "args": [
+        { "name": "N", "value": 12, "description": "三重平滑周期" },
+        { "name": "M", "value": 9, "description": "信号线周期" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "PSY",
+      "description": "心理线 - 用于判断投资者心理倾向",
+      "category": "indicator",
+      "script": "PSY:COUNT(CLOSE>REF(CLOSE,1),N)/N*100;\nPSYMA:MA(PSY,M);",
+      "args": [
+        { "name": "N", "value": 12, "description": "心理线计算周期" },
+        { "name": "M", "value": 6, "description": "心理线均线周期" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "VR",
+      "description": "容量比率 - 通过成交量衡量买卖气势",
+      "category": "indicator",
+      "script": "TH:=SUM(IF(CLOSE>REF(CLOSE,1),VOL,0),N);\nTL:=SUM(IF(CLOSE<REF(CLOSE,1),VOL,0),N);\nTQ:=SUM(IF(CLOSE=REF(CLOSE,1),VOL,0),N);\nVR:(TH*2+TQ)/(TL*2+TQ)*100;\nVRMA:MA(VR,M);",
+      "args": [
+        { "name": "N", "value": 26, "description": "VR计算周期" },
+        { "name": "M", "value": 6, "description": "VR均线周期" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "CR",
+      "description": "能量指标 - 通过中间价衡量买卖能量",
+      "category": "indicator",
+      "script": "MID:=(HIGH+LOW+CLOSE)/3;\nCR:SUM(MAX(0,HIGH-REF(MID,1)),N)/SUM(MAX(0,REF(MID,1)-LOW),N)*100;\nCRMA:MA(CR,M);",
+      "args": [
+        { "name": "N", "value": 26, "description": "CR计算周期" },
+        { "name": "M", "value": 10, "description": "CR均线周期" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "ARBR",
+      "description": "人气意愿指标 - AR衡量人气，BR衡量意愿",
+      "category": "indicator",
+      "script": "AR:SUM(HIGH-OPEN,N)/SUM(OPEN-LOW,N)*100;\nBR:SUM(MAX(0,HIGH-REF(CLOSE,1)),N)/SUM(MAX(0,REF(CLOSE,1)-LOW),N)*100;",
+      "args": [
+        { "name": "N", "value": 26, "description": "ARBR计算周期" }
+      ],
+      "formula_type": "indicator"
+    },
+    {
+      "name": "均线多头排列",
+      "description": "均线多头排列选股 - MA5>MA10>MA20>MA60，短期均线在长期均线上方，多头趋势",
+      "category": "xg",
+      "script": "MA5:=MA(CLOSE,5);\nMA10:=MA(CLOSE,10);\nMA20:=MA(CLOSE,20);\nMA60:=MA(CLOSE,60);\nXG:MA5>MA10 AND MA10>MA20 AND MA20>MA60;",
+      "args": [],
+      "formula_type": "xg"
+    },
+    {
+      "name": "MACD金叉",
+      "description": "MACD金叉选股 - DIF上穿DEA，买入信号",
+      "category": "xg",
+      "script": "DIF:=EMA(CLOSE,12)-EMA(CLOSE,26);\nDEA:=EMA(DIF,9);\nXG:CROSS(DIF,DEA);",
+      "args": [],
+      "formula_type": "xg"
+    },
+    {
+      "name": "KDJ金叉",
+      "description": "KDJ金叉选股 - K上穿D，买入信号",
+      "category": "xg",
+      "script": "RSV:=(CLOSE-LLV(LOW,9))/(HHV(HIGH,9)-LLV(LOW,9))*100;\nK:=SMA(RSV,3,1);\nD:=SMA(K,3,1);\nXG:CROSS(K,D);",
+      "args": [],
+      "formula_type": "xg"
+    },
+    {
+      "name": "MACD买卖",
+      "description": "MACD买卖专家系统 - DIF上穿DEA买入，下穿卖出",
+      "category": "exp",
+      "script": "DIF:=EMA(CLOSE,12)-EMA(CLOSE,26);\nDEA:=EMA(DIF,9);\nENTERLONG:CROSS(DIF,DEA);\nEXITLONG:CROSS(DEA,DIF);",
+      "args": [],
+      "formula_type": "exp"
+    }
+  ]
+}

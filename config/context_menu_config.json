@@ -1,0 +1,332 @@
+{
+  "version": "1.0",
+  "description": "右键菜单配置表 - 按 target_type 动态渲染右键菜单",
+  "menus": {
+    "node": [
+      {
+        "id": "ctx_properties",
+        "label": "属性",
+        "icon": "🔧",
+        "action": "properties",
+        "order": 1,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_comprehensive_settings",
+        "label": "综合设置",
+        "icon": "⚙",
+        "action": "comprehensiveSettings",
+        "order": 2,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_copy",
+        "label": "复制",
+        "icon": "📋",
+        "action": "copy",
+        "order": 3,
+        "visible_when": "always",
+        "separator_before": true,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_cut",
+        "label": "剪切",
+        "icon": "✂",
+        "action": "cut",
+        "order": 4,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_paste",
+        "label": "粘贴",
+        "icon": "📄",
+        "action": "paste",
+        "order": 5,
+        "visible_when": "has_clipboard",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_bring_to_front",
+        "label": "置于顶层",
+        "icon": "⬆",
+        "action": "bringToFront",
+        "order": 6,
+        "visible_when": "always",
+        "separator_before": true,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_send_to_back",
+        "label": "置于底层",
+        "icon": "⬇",
+        "action": "sendToBack",
+        "order": 7,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_delete_node",
+        "label": "删除",
+        "icon": "🗑",
+        "action": "delete",
+        "order": 8,
+        "visible_when": "always",
+        "separator_before": true,
+        "cell_types": ["all"],
+        "danger": true
+      },
+      {
+        "id": "ctx_add_node_submenu",
+        "label": "添加节点",
+        "icon": "➕",
+        "action": "addNode",
+        "order": 9,
+        "visible_when": "design_mode",
+        "separator_before": true,
+        "cell_types": ["all"],
+        "submenu": [
+          {
+            "id": "ctx_add_source",
+            "label": "备选池",
+            "icon": "📦",
+            "action": "addSource"
+          },
+          {
+            "id": "ctx_add_condition",
+            "label": "转移条件",
+            "icon": "🔀",
+            "action": "addCondition"
+          },
+          {
+            "id": "ctx_add_statepool",
+            "label": "状态池",
+            "icon": "🏷",
+            "action": "addStatePool"
+          },
+          {
+            "id": "ctx_add_discard",
+            "label": "丢弃池",
+            "icon": "🗑",
+            "action": "addDiscard"
+          },
+          {
+            "id": "ctx_add_label",
+            "label": "文字标签",
+            "icon": "📝",
+            "action": "addLabel"
+          },
+          {
+            "id": "ctx_add_container",
+            "label": "容器",
+            "icon": "⬜",
+            "action": "addContainer"
+          },
+          {
+            "id": "ctx_add_column",
+            "label": "状态列",
+            "icon": "📋",
+            "action": "addColumn"
+          }
+        ]
+      }
+    ],
+    "edge": [
+      {
+        "id": "ctx_edge_properties",
+        "label": "属性",
+        "icon": "🔧",
+        "action": "properties",
+        "order": 1,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_edge_delete",
+        "label": "删除",
+        "icon": "🗑",
+        "action": "delete",
+        "order": 2,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"],
+        "danger": true
+      },
+      {
+        "id": "ctx_edge_line_width",
+        "label": "线宽",
+        "icon": "📏",
+        "action": "editLineWidth",
+        "order": 3,
+        "visible_when": "always",
+        "separator_before": true,
+        "cell_types": ["all"],
+        "submenu": [
+          {
+            "id": "ctx_line_width_1",
+            "label": "1px",
+            "icon": "─",
+            "action": "setLineWidth:1"
+          },
+          {
+            "id": "ctx_line_width_2",
+            "label": "2px",
+            "icon": "━",
+            "action": "setLineWidth:2"
+          },
+          {
+            "id": "ctx_line_width_3",
+            "label": "3px",
+            "icon": "■",
+            "action": "setLineWidth:3"
+          },
+          {
+            "id": "ctx_line_width_4",
+            "label": "4px",
+            "icon": "█",
+            "action": "setLineWidth:4"
+          }
+        ]
+      },
+      {
+        "id": "ctx_edge_desc_text",
+        "label": "描述文本",
+        "icon": "✏",
+        "action": "editDescText",
+        "order": 4,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      }
+    ],
+    "canvas": [
+      {
+        "id": "ctx_canvas_add_node_submenu",
+        "label": "添加节点",
+        "icon": "➕",
+        "action": "addNode",
+        "order": 1,
+        "visible_when": "design_mode",
+        "separator_before": false,
+        "cell_types": ["all"],
+        "submenu": [
+          {
+            "id": "ctx_canvas_add_source",
+            "label": "备选池",
+            "icon": "📦",
+            "action": "addSource"
+          },
+          {
+            "id": "ctx_canvas_add_condition",
+            "label": "转移条件",
+            "icon": "🔀",
+            "action": "addCondition"
+          },
+          {
+            "id": "ctx_canvas_add_statepool",
+            "label": "状态池",
+            "icon": "🏷",
+            "action": "addStatePool"
+          },
+          {
+            "id": "ctx_canvas_add_discard",
+            "label": "丢弃池",
+            "icon": "🗑",
+            "action": "addDiscard"
+          },
+          {
+            "id": "ctx_canvas_add_label",
+            "label": "文字标签",
+            "icon": "📝",
+            "action": "addLabel"
+          },
+          {
+            "id": "ctx_canvas_add_container",
+            "label": "容器",
+            "icon": "⬜",
+            "action": "addContainer"
+          },
+          {
+            "id": "ctx_canvas_add_column",
+            "label": "状态列",
+            "icon": "📋",
+            "action": "addColumn"
+          }
+        ]
+      },
+      {
+        "id": "ctx_canvas_paste",
+        "label": "粘贴",
+        "icon": "📄",
+        "action": "paste",
+        "order": 2,
+        "visible_when": "has_clipboard",
+        "separator_before": true,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_canvas_select_all",
+        "label": "全选",
+        "icon": "☑",
+        "action": "selectAll",
+        "order": 3,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_canvas_clear",
+        "label": "清空",
+        "icon": "🧹",
+        "action": "clearAll",
+        "order": 4,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"],
+        "danger": true
+      }
+    ],
+    "label": [
+      {
+        "id": "ctx_label_properties",
+        "label": "属性",
+        "icon": "🔧",
+        "action": "properties",
+        "order": 1,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["1", "tdx_0"]
+      },
+      {
+        "id": "ctx_label_edit_text",
+        "label": "编辑文本",
+        "icon": "✏",
+        "action": "editText",
+        "order": 2,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["1", "tdx_0"]
+      },
+      {
+        "id": "ctx_label_delete",
+        "label": "删除",
+        "icon": "🗑",
+        "action": "delete",
+        "order": 3,
+        "visible_when": "always",
+        "separator_before": true,
+        "cell_types": ["1", "tdx_0"],
+        "danger": true
+      }
+    ]
+  }
+}

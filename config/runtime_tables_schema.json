@@ -1,0 +1,132 @@
+{
+  "version": 1,
+  "description": "运行时表 schema 声明：定义所有内存 Dict 运行时表的结构、读写时机、生命周期",
+  "tables": [
+    {
+      "table_name": "node_stocks",
+      "key_type": "str",
+      "value_type": "List",
+      "read_timing": "per_tick",
+      "write_timing": "per_tick",
+      "lifecycle": "per_session",
+      "desc": "核心运行时表：key=节点ID，value=股票列表，池中此刻真实存在的股票"
+    },
+    {
+      "table_name": "_flow_exec_counts",
+      "key_type": "str",
+      "value_type": "int",
+      "read_timing": "per_edge",
+      "write_timing": "per_edge",
+      "lifecycle": "per_session",
+      "desc": "cxtype=2 执行计数：key=边ID，value=边已执行次数，用于只执行一次判定"
+    },
+    {
+      "table_name": "_flow_first_fire_ts",
+      "key_type": "str",
+      "value_type": "float",
+      "read_timing": "per_edge",
+      "write_timing": "per_edge",
+      "lifecycle": "per_session",
+      "desc": "flow 首次触发时间戳：key=边ID，value=首次触发 Unix 时间戳，用于 end_type=1/2 的 end 守门"
+    },
+    {
+      "table_name": "_pk_rankings",
+      "key_type": "None",
+      "value_type": "Dict",
+      "read_timing": "per_tick",
+      "write_timing": "per_tick",
+      "lifecycle": "per_tick",
+      "desc": "PK 排名结果：post_tick 阶段计算并写入，存储各 PK 维度的排名"
+    },
+    {
+      "table_name": "_angle_results",
+      "key_type": "str",
+      "value_type": "Dict",
+      "read_timing": "per_tick",
+      "write_timing": "per_tick",
+      "lifecycle": "per_tick",
+      "desc": "多分析角度结果：key=角度ID，value=角度聚合结果，post_tick 阶段写入"
+    },
+    {
+      "table_name": "_dashboard_data",
+      "key_type": "str",
+      "value_type": "Dict",
+      "read_timing": "per_tick",
+      "write_timing": "per_tick",
+      "lifecycle": "per_tick",
+      "desc": "看盘面板数据：key=面板ID，value=面板数据，post_tick 阶段更新供前端读取"
+    },
+    {
+      "table_name": "_alert_events",
+      "key_type": "None",
+      "value_type": "List[dict]",
+      "read_timing": "per_tick",
+      "write_timing": "per_tick",
+      "lifecycle": "per_tick",
+      "desc": "告警事件列表：post_tick 阶段记录所有触发的告警事件"
+    },
+    {
+      "table_name": "_alert_queue",
+      "key_type": "None",
+      "value_type": "asyncio.Queue[dict]",
+      "read_timing": "on_demand",
+      "write_timing": "per_tick",
+      "lifecycle": "per_session",
+      "desc": "告警异步队列：post_tick 阶段 put_nowait 写入，消费者按需读取分发"
+    },
+    {
+      "table_name": "_alert_cooldown",
+      "key_type": "Tuple[str,str]",
+      "value_type": "float",
+      "read_timing": "per_tick",
+      "write_timing": "per_tick",
+      "lifecycle": "per_session",
+      "desc": "告警冷却时间：key=(rule_id,code)，value=冷却截止时间戳，post_tick 阶段读写"
+    },
+    {
+      "table_name": "_trackers",
+      "key_type": "str",
+      "value_type": "Dict",
+      "read_timing": "per_tick",
+      "write_timing": "per_tick",
+      "lifecycle": "per_session",
+      "desc": "持仓跟踪：key=股票code，value=tracker 详情（含入场价/时间/当前价等）"
+    },
+    {
+      "table_name": "_signal_events",
+      "key_type": "None",
+      "value_type": "List",
+      "read_timing": "per_tick",
+      "write_timing": "per_tick",
+      "lifecycle": "per_session",
+      "desc": "交易信号记录：记录所有产生的交易信号"
+    },
+    {
+      "table_name": "_signal_queue",
+      "key_type": "None",
+      "value_type": "asyncio.Queue",
+      "read_timing": "on_demand",
+      "write_timing": "per_tick",
+      "lifecycle": "per_session",
+      "desc": "信号异步队列：tick 内 put_nowait 写入，消费者按需读取分发"
+    },
+    {
+      "table_name": "_event_queue",
+      "key_type": "None",
+      "value_type": "asyncio.Queue",
+      "read_timing": "on_demand",
+      "write_timing": "per_tick",
+      "lifecycle": "per_session",
+      "desc": "事件流队列：tick 内 put_nowait 写入流转事件，消费者按需读取分发"
+    },
+    {
+      "table_name": "_node_snapshots",
+      "key_type": "str",
+      "value_type": "frozenset",
+      "read_timing": "per_tick",
+      "write_timing": "per_tick",
+      "lifecycle": "per_session",
+      "desc": "节点股票快照：key=节点ID，value=frozenset(股票代码)，用于比较节点是否真的变化了，忽略顺序和附加属性"
+    }
+  ]
+}

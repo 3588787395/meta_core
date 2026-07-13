@@ -1,0 +1,220 @@
+{
+  "version": "1.0",
+  "markets": [
+    {
+      "code": "SH#上证A股",
+      "id": "sh_a",
+      "name": "上海A股",
+      "prefix": "SH",
+      "category": "A",
+      "exchange": "SSE",
+      "attrtext_code": "SH#上证A股",
+      "stock_code_pattern": "SH\\d{6}",
+      "trading_hours": {
+        "start": "093000",
+        "end": "150000",
+        "lunch_break": {
+          "start": "113000",
+          "end": "130000"
+        }
+      }
+    },
+    {
+      "code": "SH#上证B股",
+      "id": "sh_b",
+      "name": "上海B股",
+      "prefix": "SH",
+      "category": "B",
+      "exchange": "SSE",
+      "attrtext_code": "SH#上证B股",
+      "stock_code_pattern": "SH9\\d{5}",
+      "trading_hours": {
+        "start": "093000",
+        "end": "150000",
+        "lunch_break": {
+          "start": "113000",
+          "end": "130000"
+        }
+      }
+    },
+    {
+      "code": "SZ#深证A股",
+      "id": "sz_a",
+      "name": "深圳A股",
+      "prefix": "SZ",
+      "category": "A",
+      "exchange": "SZSE",
+      "attrtext_code": "SZ#深证A股",
+      "stock_code_pattern": "SZ(00|30)\\d{4}",
+      "trading_hours": {
+        "start": "093000",
+        "end": "150000",
+        "lunch_break": {
+          "start": "113000",
+          "end": "130000"
+        }
+      }
+    },
+    {
+      "code": "SZ#深证B股",
+      "id": "sz_b",
+      "name": "深圳B股",
+      "prefix": "SZ",
+      "category": "B",
+      "exchange": "SZSE",
+      "attrtext_code": "SZ#深证B股",
+      "stock_code_pattern": "SZ2\\d{5}",
+      "trading_hours": {
+        "start": "093000",
+        "end": "150000",
+        "lunch_break": {
+          "start": "113000",
+          "end": "130000"
+        }
+      }
+    },
+    {
+      "code": "SZ#中小企业",
+      "id": "sme",
+      "name": "中小板",
+      "prefix": "SZ",
+      "category": "SME",
+      "exchange": "SZSE",
+      "attrtext_code": "SZ#中小企业",
+      "stock_code_pattern": "SZ00\\d{4}",
+      "note": "已并入主板",
+      "trading_hours": {
+        "start": "093000",
+        "end": "150000",
+        "lunch_break": {
+          "start": "113000",
+          "end": "130000"
+        }
+      }
+    },
+    {
+      "code": "SZ#创业板",
+      "id": "gem",
+      "name": "创业板",
+      "prefix": "SZ",
+      "category": "GEM",
+      "exchange": "SZSE",
+      "attrtext_code": "SZ#创业板",
+      "stock_code_pattern": "SZ30\\d{4}",
+      "trading_hours": {
+        "start": "093000",
+        "end": "150000",
+        "lunch_break": {
+          "start": "113000",
+          "end": "130000"
+        }
+      }
+    },
+    {
+      "code": "B$#板块指数",
+      "id": "sector_index",
+      "name": "行业板块指数",
+      "prefix": "B$",
+      "category": "SECTOR",
+      "exchange": "INDEX",
+      "attrtext_code": "B$#板块指数",
+      "stock_code_pattern": "B$\\d{6}",
+      "is_sector_index": true
+    },
+    {
+      "code": "B$#热门概念",
+      "id": "hot_concept",
+      "name": "热门概念板块",
+      "prefix": "B$",
+      "category": "CONCEPT",
+      "exchange": "INDEX",
+      "attrtext_code": "B$#热门概念",
+      "stock_code_pattern": "B$C\\d+",
+      "is_concept_block": true
+    }
+  ],
+  "attrtext_format": "{EXCHANGE}#{NAME}",
+  "separator": "\t",
+  "default_selections": [
+    "SH#上证A股",
+    "SZ#深证A股"
+  ],
+  "category_groups": {
+    "A_SHARES": [
+      "sh_a",
+      "sz_a",
+      "sme",
+      "gem"
+    ],
+    "B_SHARES": [
+      "sh_b",
+      "sz_b"
+    ],
+    "BLOCK_INDEXES": [
+      "sector_index",
+      "hot_concept"
+    ],
+    "ALL": [
+      "sh_a",
+      "sh_b",
+      "sz_a",
+      "sz_b",
+      "sme",
+      "gem",
+      "sector_index",
+      "hot_concept"
+    ]
+  },
+  "market_id_map": {
+    "SH#上证A股": 1,
+    "SH#上证B股": 1,
+    "SZ#深证A股": 0,
+    "SZ#深证B股": 0,
+    "BJ#北证A股": 2,
+    "SH#上证指数": 1,
+    "SZ#深证指数": 0,
+    "SZ#中小企业": 0,
+    "SZ#创业板": 0,
+    "B$#板块指数": 1,
+    "B$#热门概念": 1
+  },
+  "short_name_to_market_id": {
+    "sh_a": 1,
+    "sz_a": 0,
+    "bj_a": 2,
+    "sh_b": 1,
+    "sz_b": 0,
+    "sme": 0,
+    "gem": 0,
+    "sector_index": 1,
+    "hot_concept": 1
+  },
+  "dzh_to_short": {
+    "SH#上证A股": "sh_a",
+    "SH#上证B股": "sh_b",
+    "SZ#深证A股": "sz_a",
+    "SZ#深证B股": "sz_b",
+    "BJ#北证A股": "bj_a",
+    "SZ#中小企业": "sme",
+    "SZ#创业板": "gem",
+    "B$#板块指数": "sector_index",
+    "B$#热门概念": "hot_concept"
+  },
+  "short_to_dzh": {
+    "sh_a": "SH#上证A股",
+    "sh_b": "SH#上证B股",
+    "sz_a": "SZ#深证A股",
+    "sz_b": "SZ#深证B股",
+    "bj_a": "BJ#北证A股",
+    "sme": "SZ#中小企业",
+    "gem": "SZ#创业板",
+    "sector_index": "B$#板块指数",
+    "hot_concept": "B$#热门概念"
+  },
+  "stock_code_generation": {
+    "sh_a": {"prefix": "SH", "suffix": "SH", "range_start": 600000, "range_end": 605000},
+    "sz_a": {"prefix": "SZ", "suffix": "SZ", "range_start": 1, "range_end": 4000},
+    "all_a": {"prefix": "", "suffix": "", "range_start": 0, "range_end": 0, "note": "合并 sh_a + sz_a"},
+    "gem": {"prefix": "SZ", "suffix": "SZ", "range_start": 300000, "range_end": 301000}
+  }
+}

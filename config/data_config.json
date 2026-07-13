@@ -1,0 +1,2206 @@
+{
+  "version": "1.0",
+  "description": "数据配置表：统一配置数据获取、注入、缓存、多时间框架",
+  "market_code_prefixes": [
+    "SH",
+    "SZ",
+    "BJ"
+  ],
+  "market_code_suffixes": [
+    ".SH",
+    ".SZ",
+    ".BJ"
+  ],
+  "code_prefix_to_market": {
+    "0": ".SZ",
+    "3": ".SZ",
+    "6": ".SH",
+    "8": ".BJ",
+    "4": ".BJ"
+  },
+  "adapters": {
+    "local_file": {
+      "name": "本地文件数据",
+      "class": "LocalFileProvider",
+      "module": "meta_core.services.providers.local_file_provider",
+      "priority": 0,
+      "always_ready": true,
+      "capabilities": [
+        "market",
+        "sector",
+        "user_block"
+      ],
+      "config": {
+        "paths_config": "config/local_file_paths.json",
+        "desc": "解析通达信/大智慧/同花顺本地配置文件作为备选池基础数据库，优先级最高"
+      }
+    },
+    "tq_dll": {
+      "name": "通达信TQ量化",
+      "class": "TqDllProvider",
+      "module": "meta_core.services.providers.tq",
+      "priority": 1,
+      "always_ready": false,
+      "capabilities": [
+        "kline",
+        "snapshot",
+        "market",
+        "formula",
+        "sector",
+        "replay",
+        "financial",
+        "user_block"
+      ],
+      "config": {
+        "dll_path": "TPythClient.dll",
+        "desc": "通过 TPythClient.dll 与本地通达信客户端通信"
+      }
+    },
+    "akshare": {
+      "name": "AKShare数据",
+      "class": "AkShareProvider",
+      "module": "meta_core.services.providers.akshare_provider",
+      "priority": 20,
+      "always_ready": false,
+      "capabilities": [
+        "kline",
+        "snapshot",
+        "market",
+        "sector",
+        "financial"
+      ],
+      "config": {
+        "rate_limit": 1,
+        "desc": "AKShare免费数据源,请求频率限制1次/秒"
+      }
+    },
+    "mock": {
+      "name": "Mock模拟数据",
+      "class": "MockProvider",
+      "module": "meta_core.services.providers.mock_provider",
+      "priority": 99,
+      "always_ready": true,
+      "capabilities": [
+        "kline",
+        "snapshot",
+        "market",
+        "formula",
+        "sector",
+        "replay",
+        "financial"
+      ],
+      "config": {
+        "random_seed": 42,
+        "desc": "本地模拟数据,用于离线测试和回测"
+      }
+    }
+  },
+  "refresh_rules": {
+    "desc": "备选池刷新规则:节点类型 → 数据源/键参数映射,type=3 自选股/type=4 自定义板块。local_file 为优先数据源,不可用时降级到 tq_dll",
+    "3": {
+      "source": "favorites",
+      "desc": "自选股刷新,无 key_param,直接以 source 作为 task_key。优先 local_file.get_user_sector()"
+    },
+    "4": {
+      "source": "block",
+      "key_param": "customblockname",
+      "desc": "自定义板块刷新,以 customblockname 参数值拼接 task_key。优先 local_file.get_block_members()"
+    }
+  },
+  "injection_rules": {
+    "bar_data": {
+      "desc": "Bar数据注入规则:哪些源节点类型注入哪些字段到股票上下文",
+      "source_node_types": [
+        "market_source",
+        "tdx_candidate"
+      ],
+      "bar_fields": [
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "amount"
+      ],
+      "injection_policy": "merge",
+      "desc_policy": "将bar字段合并到股票对象,已有字段不覆盖(除非force=true)",
+      "timeframe": "1min",
+      "desc_timeframe": "默认注入1分钟K线数据"
+    },
+    "snapshot": {
+      "desc": "实时快照注入规则",
+      "source_node_types": [
+        "market_source"
+      ],
+      "fields": [
+        "last_price",
+        "bid_price",
+        "ask_price",
+        "bid_volume",
+        "ask_volume"
+      ],
+      "injection_policy": "overwrite",
+      "desc_policy": "实时快照字段允许覆盖旧值"
+    }
+  },
+  "cache_strategy": {
+    "enabled": true,
+    "desc": "是否启用数据缓存",
+    "ttl": {
+      "snapshot": 5,
+      "desc_snapshot": "实时快照缓存TTL(秒)",
+      "kline": 300,
+      "desc_kline": "K线数据缓存TTL(秒)",
+      "financial": 86400,
+      "desc_financial": "财务数据缓存TTL(秒)",
+      "sector": 3600,
+      "desc_sector": "板块列表缓存TTL(秒)"
+    },
+    "key_format": {
+      "snapshot": "snap:{market}:{code}:{timeframe}",
+      "kline": "kline:{market}:{code}:{timeframe}:{count}",
+      "financial": "fin:{market}:{code}:{report_type}",
+      "sector": "sector:{sector_code}"
+    },
+    "max_entries": 10000,
+    "desc_max": "最大缓存条目数,LRU淘汰",
+    "eviction_policy": "lru",
+    "desc_eviction": "LRU最近最少使用淘汰策略"
+  },
+  "timeframes": {
+    "1min": {
+      "name": "1分钟",
+      "seconds": 60,
+      "desc": "超短线交易,高频信号"
+    },
+    "5min": {
+      "name": "5分钟",
+      "seconds": 300,
+      "desc": "短线交易,日内波段"
+    },
+    "15min": {
+      "name": "15分钟",
+      "seconds": 900,
+      "desc": "短线到中短线过渡"
+    },
+    "30min": {
+      "name": "30分钟",
+      "seconds": 1800,
+      "desc": "中短线交易"
+    },
+    "60min": {
+      "name": "60分钟",
+      "seconds": 3600,
+      "desc": "中线交易,日内趋势"
+    },
+    "daily": {
+      "name": "日线",
+      "seconds": 86400,
+      "desc": "中长线交易,日线级别信号"
+    }
+  },
+  "multi_timeframe": {
+    "enabled": true,
+    "desc": "是否启用多时间框架分析",
+    "alignment": {
+      "method": "latest_common",
+      "desc": "多时间框架对齐方式:取各框架最新数据的公共时间点"
+    },
+    "cascade": {
+      "desc": "时间框架级联权重,大框架信号作为小框架的过滤条件",
+      "daily_to_60min": 0.3,
+      "60min_to_30min": 0.25,
+      "30min_to_15min": 0.2,
+      "15min_to_5min": 0.15,
+      "5min_to_1min": 0.1
+    }
+  },
+  "data_source_contract": {
+    "version": 1,
+    "description": "数据源契约表：声明每种数据源的可用性探测、超时、降级策略",
+    "sources": {
+      "local_file": {
+        "name": "本地文件数据",
+        "module": "meta_core.services.providers.local_file_provider",
+        "class": "LocalFileProvider",
+        "probe": {
+          "method": "_probe",
+          "args": [],
+          "timeout_ms": 500,
+          "description": "检测本地配置文件是否存在（通达信/大智慧/同花顺任一即可）"
+        },
+        "on_unavailable": "warn",
+        "on_available": "use",
+        "mock_fallback_allowed": false,
+        "message_on_fail": "本地配置文件未找到，将降级到运行时数据源（tq_dll/akshare）"
+      },
+      "tq_dll": {
+        "name": "通达信TQ量化",
+        "module": "meta_core.services.providers.tq",
+        "class": "TqDllProvider",
+        "probe": {
+          "method": "_probe",
+          "args": [],
+          "timeout_ms": 2000,
+          "description": "调用 is_ready() + get_market_data() 探测"
+        },
+        "on_unavailable": "raise",
+        "on_available": "use",
+        "mock_fallback_allowed": false,
+        "message_on_fail": "通达信客户端未启动或 TPythClient.dll 不可用"
+      },
+      "tq_sdk": {
+        "name": "天勤TQ SDK",
+        "module": "meta_core.services.providers.tq",
+        "class": "TqSdkProvider",
+        "probe": {
+          "method": "_probe",
+          "args": [],
+          "timeout_ms": 3000
+        },
+        "on_unavailable": "raise",
+        "mock_fallback_allowed": false
+      },
+      "akshare": {
+        "name": "AkShare",
+        "module": "meta_core.services.providers.akshare_provider",
+        "class": "AkShareProvider",
+        "probe": {
+          "method": "_probe",
+          "args": [],
+          "timeout_ms": 5000
+        },
+        "on_unavailable": "raise",
+        "mock_fallback_allowed": false
+      },
+      "mock": {
+        "name": "模拟数据",
+        "module": "meta_core.services.providers.mock_provider",
+        "class": "MockProvider",
+        "probe": {
+          "method": "_probe",
+          "args": [],
+          "timeout_ms": 100
+        },
+        "on_unavailable": "raise",
+        "mock_fallback_allowed": true,
+        "explicit_only": true,
+        "message_on_fail": "Mock 数据源显式选择后才能使用"
+      }
+    },
+    "default_chain": [
+      "tq_dll"
+    ],
+    "global_policy": {
+      "auto_fallback": false,
+      "require_explicit_user_consent_for_mock": true,
+      "log_data_source_state": true
+    },
+    "notes": {
+      "default_chain_policy": "default_chain is explicit candidate order only, no silent fallback; mock requires explicit consent."
+    },
+    "injector": {
+      "async_multi_tf": {
+        "handler": "async_multi_tf_injector",
+        "capability": "tq_adapter",
+        "desc": "实盘模式异步多时间框架注入"
+      },
+      "sync_bar": {
+        "handler": "sync_bar_injector",
+        "capability": "kline_cache",
+        "desc": "回放模式同步K线注入"
+      },
+      "mock_generate": {
+        "handler": "mock_generate_injector",
+        "capability": "mock_provider",
+        "desc": "仿真模式 mock 数据生成注入"
+      }
+    },
+    "multi_tf_fetcher": {
+      "tq_async_fetcher": {
+        "handler": "fetch_multi_tf_via_tq",
+        "capability": "tq_adapter",
+        "desc": "通过 TQ 异步并发获取多时间框架"
+      },
+      "kline_cache_fetcher": {
+        "handler": "fetch_multi_tf_from_cache",
+        "capability": "kline_cache",
+        "desc": "从K线缓存读取多时间框架"
+      },
+      "mock_fetcher": {
+        "handler": "fetch_multi_tf_mock",
+        "capability": "mock_provider",
+        "desc": "mock 多时间框架数据"
+      }
+    }
+  },
+  "data_source_mappings": {
+    "version": "1.0",
+    "mappings": {
+      "2": {
+        "col_id": 2,
+        "display_name": "代码",
+        "tq_field": "stock_code",
+        "schema_field": "code",
+        "unit": "",
+        "format": "%s",
+        "sortable": true,
+        "align": "left",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-1": {
+        "col_id": -1,
+        "display_name": "名称",
+        "tq_field": "stock_name",
+        "schema_field": "name",
+        "unit": "",
+        "format": "%s",
+        "sortable": true,
+        "align": "left",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-2": {
+        "col_id": -2,
+        "display_name": "最新价",
+        "tq_field": "last_price",
+        "schema_field": "latest_price",
+        "unit": "元",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-3": {
+        "col_id": -3,
+        "display_name": "涨跌幅",
+        "tq_field": "pct_chg",
+        "schema_field": "change_pct",
+        "unit": "%",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-4": {
+        "col_id": -4,
+        "display_name": "总手",
+        "tq_field": "volume",
+        "schema_field": "volume",
+        "unit": "手",
+        "format": "%.0f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-5": {
+        "col_id": -5,
+        "display_name": "总额",
+        "tq_field": "amount",
+        "schema_field": "amount",
+        "unit": "元",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-6": {
+        "col_id": -6,
+        "display_name": "换手",
+        "tq_field": "turnover_rate",
+        "schema_field": "turnover_rate",
+        "unit": "%",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-7": {
+        "col_id": -7,
+        "display_name": "今开",
+        "tq_field": "open",
+        "schema_field": "open",
+        "unit": "元",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-8": {
+        "col_id": -8,
+        "display_name": "昨收",
+        "tq_field": "pre_close",
+        "schema_field": "pre_close",
+        "unit": "元",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-9": {
+        "col_id": -9,
+        "display_name": "卖出价",
+        "tq_field": "ask1",
+        "schema_field": "ask",
+        "unit": "元",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-10": {
+        "col_id": -10,
+        "display_name": "市盈率",
+        "tq_field": "pe",
+        "schema_field": "pe",
+        "unit": "倍",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-11": {
+        "col_id": -11,
+        "display_name": "最高",
+        "tq_field": "high",
+        "schema_field": "high",
+        "unit": "元",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-12": {
+        "col_id": -12,
+        "display_name": "最低",
+        "tq_field": "low",
+        "schema_field": "low",
+        "unit": "元",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-13": {
+        "col_id": -13,
+        "display_name": "量比",
+        "tq_field": "volume_ratio",
+        "schema_field": "volume_ratio",
+        "unit": "",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-14": {
+        "col_id": -14,
+        "display_name": "委比",
+        "tq_field": "commission_ratio",
+        "schema_field": "commission_ratio",
+        "unit": "%",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-15": {
+        "col_id": -15,
+        "display_name": "委差",
+        "tq_field": "commission_diff",
+        "schema_field": "commission_diff",
+        "unit": "手",
+        "format": "%.0f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-28": {
+        "col_id": -28,
+        "display_name": "流通市值",
+        "tq_field": "float_market_value",
+        "schema_field": "float_market_value",
+        "unit": "元",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "-29": {
+        "col_id": -29,
+        "display_name": "总市值",
+        "tq_field": "total_market_value",
+        "schema_field": "total_market_value",
+        "unit": "元",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "1": {
+        "col_id": 1,
+        "display_name": "序号",
+        "tq_field": "row_number",
+        "schema_field": "row_number",
+        "unit": "",
+        "format": "%d",
+        "sortable": false,
+        "align": "right",
+        "provider": "auto"
+      },
+      "3": {
+        "col_id": 3,
+        "display_name": "买入价",
+        "tq_field": "bid1",
+        "schema_field": "bid",
+        "unit": "元",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "7": {
+        "col_id": 7,
+        "display_name": "入池时间",
+        "tq_field": "entry_time",
+        "schema_field": "entry_time",
+        "unit": "",
+        "format": "%s",
+        "sortable": true,
+        "align": "right",
+        "source": "pool_stock_state",
+        "provider": "auto"
+      },
+      "8": {
+        "col_id": 8,
+        "display_name": "现价",
+        "tq_field": "last_price",
+        "schema_field": "latest_price",
+        "unit": "元",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "10": {
+        "col_id": 10,
+        "display_name": "收益",
+        "tq_field": "computed",
+        "schema_field": "profit_rate",
+        "unit": "%",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "computed": true,
+        "formula": "(latest_price - entry_price) / entry_price * 100",
+        "provider": "auto"
+      },
+      "14": {
+        "col_id": 14,
+        "display_name": "入池价",
+        "tq_field": "entry_price",
+        "schema_field": "entry_price",
+        "unit": "元",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "pool_stock_state",
+        "provider": "auto"
+      },
+      "17": {
+        "col_id": 17,
+        "display_name": "最大收益",
+        "tq_field": "computed",
+        "schema_field": "max_profit",
+        "unit": "%",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "computed": true,
+        "formula": "max_profit",
+        "provider": "auto"
+      },
+      "24": {
+        "col_id": 24,
+        "display_name": "换手率",
+        "tq_field": "turnover_rate",
+        "schema_field": "turnover_rate",
+        "unit": "%",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "45": {
+        "col_id": 45,
+        "display_name": "保留天数",
+        "tq_field": "computed",
+        "schema_field": "hold_days",
+        "unit": "天",
+        "format": "%.1f",
+        "sortable": true,
+        "align": "right",
+        "computed": true,
+        "formula": "hold / 86400",
+        "provider": "auto"
+      },
+      "101": {
+        "col_id": 101,
+        "display_name": "DDX飘红天数",
+        "tq_field": "ddx_red_days",
+        "schema_field": "ddx_red_days",
+        "unit": "天",
+        "format": "%d",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "108": {
+        "col_id": 108,
+        "display_name": "量比",
+        "tq_field": "volume_ratio",
+        "schema_field": "volume_ratio",
+        "unit": "",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "251": {
+        "col_id": 251,
+        "display_name": "特大单买入",
+        "tq_field": "super_large_buy",
+        "schema_field": "super_large_buy",
+        "unit": "手",
+        "format": "%.0f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "285": {
+        "col_id": 285,
+        "display_name": "大单买入",
+        "tq_field": "large_buy",
+        "schema_field": "large_buy",
+        "unit": "手",
+        "format": "%.0f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "287": {
+        "col_id": 287,
+        "display_name": "BBD",
+        "tq_field": "bbd",
+        "schema_field": "bbd",
+        "unit": "",
+        "format": "%.2f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      },
+      "401": {
+        "col_id": 401,
+        "display_name": "DDX",
+        "tq_field": "ddx",
+        "schema_field": "ddx",
+        "unit": "",
+        "format": "%.3f",
+        "sortable": true,
+        "align": "right",
+        "source": "tq_adapter",
+        "provider": "auto"
+      }
+    },
+    "stock_info_field_map": {
+      "description": "TDX nset3财务字段 → tq_adapter实际字段名映射，替代tdx_evaluators.py中的_STOCK_INFO_FIELD_MAP硬编码",
+      "zgb": "J_zgb",
+      "ltg": "ActiveCapital",
+      "bg": "J_bg",
+      "hg": "J_hg",
+      "total_mv": "J_zzc",
+      "mgjzc": "J_mgjzc",
+      "mgsy": "J_mgsy",
+      "jzl": "J_jyxjl",
+      "yyl": "J_yyly",
+      "wfply": "J_wfply"
+    },
+    "derived_fields": {
+      "_derived_pct_change": {
+        "expr": "(close - pre_close) / pre_close * 100",
+        "inputs": [
+          "close",
+          "pre_close"
+        ],
+        "guard": "pre_close != 0"
+      },
+      "_derived_amplitude": {
+        "expr": "(high - low) / pre_close * 100",
+        "inputs": [
+          "high",
+          "low",
+          "pre_close"
+        ],
+        "guard": "pre_close != 0"
+      }
+    }
+  },
+  "data_source_routes": {
+    "version": "1.0",
+    "description": "数据源路由与映射：周期、API选择、状态映射、模式别名（消除 akshare_provider / tq_adapter 中的硬编码分支）",
+    "provider_routes": {
+      "akshare": {
+        "period_map": {
+          "1d": "daily",
+          "1w": "weekly",
+          "1mon": "monthly",
+          "5m": "5",
+          "15m": "15",
+          "30m": "30",
+          "60m": "60",
+          "1m": "1"
+        },
+        "sector_list_apis": {
+          "1": "stock_board_industry_name_em",
+          "2": "stock_board_concept_name_em"
+        },
+        "sector_stocks_apis": {
+          "0": "stock_board_industry_cons_em",
+          "1": "stock_board_concept_cons_em"
+        },
+        "sector_sources": {
+          "em": {
+            "categories": [
+              "industry",
+              "concept"
+            ]
+          },
+          "ths": {
+            "categories": [
+              "concept"
+            ]
+          },
+          "sw": {
+            "categories": [
+              "industry"
+            ]
+          }
+        },
+        "sector_dispatch": {
+          "em": {
+            "industry": {
+              "list": "stock_board_industry_name_em",
+              "stocks": "stock_board_industry_cons_em"
+            },
+            "concept": {
+              "list": "stock_board_concept_name_em",
+              "stocks": "stock_board_concept_cons_em"
+            }
+          },
+          "ths": {
+            "concept": {
+              "list": "stock_board_concept_name_ths",
+              "stocks": "stock_board_concept_cons_ths"
+            }
+          },
+          "sw": {
+            "industry": {
+              "list": "sw_index_first_info",
+              "stocks": "sw_index_cons"
+            }
+          }
+        },
+        "sector_id_dispatch": {
+          "ths_concept": "get_ths_concept_stocks",
+          "em_industry": "get_em_industry_stocks",
+          "em_concept": "get_em_concept_stocks",
+          "sw_industry": "get_sw_industry_stocks"
+        },
+        "sector_category_dispatch": {
+          "em_industry": "get_em_industry_list",
+          "em_concept": "get_em_concept_list",
+          "ths_concept": "get_ths_concept_list",
+          "sw_industry": "get_sw_industry_list"
+        },
+        "block_type_to_list_type": {
+          "0": 1,
+          "1": 2
+        }
+      }
+    },
+    "mode_aliases": {
+      "tq_dll": "dll",
+      "tq_sdk": "sdk"
+    },
+    "provider_status_map": {
+      "tq_dll": "tdx_tq_ready",
+      "tq_sdk": "tdx_tq_ready",
+      "akshare": "akshare_ready"
+    }
+  },
+  "data_providers": {
+    "version": "2.0",
+    "valid_live_statuses": [
+      "tdx_tq_ready",
+      "akshare_ready",
+      "user_selected_mock"
+    ],
+    "description": "数据源提供者配置表。主选 TDX 通达信客户端 + TQ 量化（TPythClient.dll），mock 仅在用户显式选择时使用。default_chain 的唯一真相源为 data_source_contract.json。",
+    "mock_explicit_only": true,
+    "capability_labels": {
+      "kline": "K线",
+      "snapshot": "快照",
+      "market": "市场",
+      "formula": "公式",
+      "formula_zb": "公式",
+      "formula_xg": "公式",
+      "formula_exp": "公式",
+      "sector": "板块",
+      "replay": "回放",
+      "financial": "财务",
+      "user_block": "自选",
+      "send_warn": "告警",
+      "send_message": "消息",
+      "order_stock": "下单"
+    },
+    "providers": {
+      "local_file": {
+        "class": "LocalFileProvider",
+        "module": "meta_core.services.providers.local_file_provider",
+        "priority": 0,
+        "always_ready": true,
+        "label": "本地文件数据",
+        "description": "解析通达信/大智慧/同花顺本地配置文件（zxg.cfg 自选股、blocknew.cfg 自定义板块）作为备选池基础数据库，优先级最高，不可用时降级到 tq_dll",
+        "capabilities": [
+          "market",
+          "sector",
+          "user_block"
+        ],
+        "paths_config": "config/local_file_paths.json"
+      },
+      "tq_dll": {
+        "class": "TqDllProvider",
+        "module": "meta_core.services.providers.tq",
+        "priority": 1,
+        "always_ready": false,
+        "label": "通达信TQ量化",
+        "description": "通过 TPythClient.dll 与本地通达信客户端通信，调用 tq.get_market_data / get_market_snapshot / formula_zb / formula_xg / formula_exp / order_stock 等API",
+        "capabilities": [
+          "kline",
+          "snapshot",
+          "market",
+          "formula_zb",
+          "formula_xg",
+          "formula_exp",
+          "sector",
+          "replay",
+          "financial",
+          "user_block",
+          "send_warn",
+          "send_message",
+          "order_stock"
+        ],
+        "dll_path": "TPythClient.dll"
+      },
+      "tq_sdk": {
+        "class": "TqSdkProvider",
+        "module": "meta_core.services.providers.tq",
+        "priority": 10,
+        "always_ready": false,
+        "label": "天勤TQ SDK",
+        "description": "TQ SDK 数据源（独立数据源，不在默认降级链中，需显式选择）",
+        "capabilities": [
+          "kline",
+          "snapshot",
+          "market",
+          "formula",
+          "sector",
+          "replay",
+          "financial",
+          "user_block"
+        ]
+      },
+      "akshare": {
+        "class": "AkShareProvider",
+        "module": "meta_core.services.providers.akshare_provider",
+        "priority": 20,
+        "always_ready": false,
+        "label": "AkShare",
+        "description": "AkShare 第三方数据源作为最后备选",
+        "capabilities": [
+          "kline",
+          "snapshot",
+          "market",
+          "sector",
+          "financial"
+        ]
+      },
+      "dfcf": {
+        "class": "DfcfProvider",
+        "module": "meta_core.services.providers.dfcf_provider",
+        "priority": 21,
+        "always_ready": false,
+        "label": "东方财富",
+        "description": "东方财富在线数据源，通过 AKShare 的东方财富接口获取板块和成分股数据。在线数据源，可能不可用。",
+        "capabilities": [
+          "market",
+          "sector"
+        ]
+      },
+      "mock": {
+        "class": "MockProvider",
+        "module": "meta_core.services.providers.mock_provider",
+        "priority": 99,
+        "always_ready": true,
+        "explicit_only": true,
+        "label": "模拟数据",
+        "description": "Mock 模拟数据，**仅在用户显式调用 set_active_source('mock') 时使用**。不在降级链中自动选择。",
+        "capabilities": [
+          "kline",
+          "snapshot",
+          "market",
+          "formula",
+          "sector",
+          "replay",
+          "financial"
+        ]
+      }
+    }
+  },
+  "mock_data": {
+    "version": "2.0",
+    "description": "Mock 数据——市场范围、板块股票列表、生成参数等",
+    "market_scopes": {
+      "all_a": [
+        {
+          "prefix": "60",
+          "suffix": "SH",
+          "range_start": 0,
+          "range_end": 1999
+        },
+        {
+          "prefix": "00",
+          "suffix": "SZ",
+          "range_start": 1,
+          "range_end": 500
+        },
+        {
+          "prefix": "001",
+          "suffix": "SZ",
+          "range_start": 1,
+          "range_end": 400
+        },
+        {
+          "prefix": "002",
+          "suffix": "SZ",
+          "range_start": 1,
+          "range_end": 700
+        },
+        {
+          "prefix": "30",
+          "suffix": "SZ",
+          "range_start": 1,
+          "range_end": 800
+        },
+        {
+          "prefix": "68",
+          "suffix": "SH",
+          "range_start": 1,
+          "range_end": 600
+        }
+      ],
+      "sh_a": [
+        {
+          "prefix": "60",
+          "suffix": "SH",
+          "range_start": 0,
+          "range_end": 1999
+        }
+      ],
+      "sz_a": [
+        {
+          "prefix": "00",
+          "suffix": "SZ",
+          "range_start": 1,
+          "range_end": 500
+        },
+        {
+          "prefix": "001",
+          "suffix": "SZ",
+          "range_start": 1,
+          "range_end": 400
+        }
+      ],
+      "gem": [
+        {
+          "prefix": "30",
+          "suffix": "SZ",
+          "range_start": 1,
+          "range_end": 800
+        }
+      ],
+      "star": [
+        {
+          "prefix": "68",
+          "suffix": "SH",
+          "range_start": 1,
+          "range_end": 600
+        }
+      ]
+    },
+    "sector_stocks": {
+      "BK0425_银行": [
+        "600000.SH",
+        "600016.SH",
+        "601166.SH",
+        "601398.SH",
+        "601939.SH",
+        "600036.SH",
+        "601288.SH",
+        "600015.SH",
+        "601328.SH",
+        "601818.SH",
+        "601988.SH",
+        "600919.SH",
+        "601229.SH",
+        "002142.SZ"
+      ],
+      "BK0885_白酒": [
+        "600519.SH",
+        "000858.SZ",
+        "000568.SZ",
+        "002304.SZ",
+        "000596.SZ",
+        "000799.SZ",
+        "603198.SH",
+        "000768.SZ",
+        "002557.SZ",
+        "603369.SH"
+      ],
+      "BK0953_新能源": [
+        "300750.SZ",
+        "002594.SZ",
+        "601012.SH",
+        "300274.SZ",
+        "002466.SZ",
+        "300124.SZ",
+        "600884.SH",
+        "300014.SZ",
+        "002129.SZ",
+        "601615.SH"
+      ],
+      "BK0069_医药": [
+        "000538.SZ",
+        "600276.SH",
+        "300760.SZ",
+        "000963.SZ",
+        "600196.SH",
+        "002007.SZ",
+        "300122.SZ",
+        "600085.SH",
+        "300347.SZ",
+        "300601.SZ",
+        "002001.SZ"
+      ],
+      "BK1039_半导体": [
+        "688981.SH",
+        "603501.SH",
+        "002371.SZ",
+        "688012.SH",
+        "688041.SH",
+        "002049.SZ",
+        "603160.SH",
+        "688256.SH",
+        "300782.SZ"
+      ],
+      "BK0050_房地产": [
+        "000002.SZ",
+        "001979.SZ",
+        "600048.SH",
+        "600383.SH",
+        "000656.SZ",
+        "001914.SZ",
+        "600606.SH",
+        "600340.SH",
+        "600208.SH",
+        "000069.SZ"
+      ],
+      "BK1030_证券": [
+        "600030.SH",
+        "601211.SH",
+        "600837.SH",
+        "601688.SH",
+        "600109.SH",
+        "601901.SH",
+        "000776.SZ",
+        "601377.SH",
+        "000166.SZ",
+        "601099.SH"
+      ],
+      "BK1064_光伏": [
+        "601012.SH",
+        "002452.SZ",
+        "300274.SZ",
+        "688599.SH",
+        "002506.SZ",
+        "300393.SZ",
+        "601865.SH",
+        "600438.SH",
+        "002623.SZ",
+        "300118.SZ"
+      ],
+      "BK0250_汽车": [
+        "601633.SH",
+        "002594.SZ",
+        "000625.SZ",
+        "601238.SH",
+        "000800.SZ",
+        "600104.SH",
+        "002920.SZ",
+        "603179.SH",
+        "600066.SH"
+      ],
+      "BK0427_有色": [
+        "601168.SH",
+        "600111.SH",
+        "002460.SZ",
+        "600497.SH",
+        "601899.SH",
+        "000807.SZ",
+        "600547.SH",
+        "002466.SZ",
+        "603993.SH",
+        "600362.SH"
+      ],
+      "BK0486_券商": [
+        "600030.SH",
+        "601211.SH",
+        "600837.SH",
+        "600109.SH",
+        "601688.SH",
+        "601788.SH",
+        "600999.SH",
+        "601377.SH"
+      ],
+      "BK0733_疫苗": [
+        "300122.SZ",
+        "300142.SZ",
+        "300009.SZ",
+        "300347.SZ",
+        "300558.SZ",
+        "300601.SZ",
+        "300759.SZ",
+        "688180.SH",
+        "688235.SH",
+        "301267.SZ"
+      ],
+      "BK1036_锂电": [
+        "002594.SZ",
+        "300750.SZ",
+        "002460.SZ",
+        "300124.SZ",
+        "300274.SZ",
+        "002812.SZ",
+        "688567.SH",
+        "300014.SZ",
+        "002074.SZ",
+        "600104.SH"
+      ],
+      "BK0976_芯片": [
+        "688981.SH",
+        "688012.SH",
+        "688041.SH",
+        "688256.SH",
+        "603501.SH",
+        "688396.SH",
+        "002371.SZ",
+        "688986.SH",
+        "688078.SH",
+        "300451.SZ"
+      ],
+      "BK0516_地产": [
+        "000002.SZ",
+        "001979.SZ",
+        "600048.SH",
+        "600383.SH",
+        "001914.SZ",
+        "600606.SH",
+        "600340.SH",
+        "600208.SH"
+      ],
+      "BK0428_煤炭": [
+        "601088.SH",
+        "601225.SH",
+        "600188.SH",
+        "601699.SH",
+        "601898.SH",
+        "601666.SH",
+        "600123.SH",
+        "603693.SH"
+      ],
+      "BK0451_电力": [
+        "600900.SH",
+        "601985.SH",
+        "600869.SH",
+        "600011.SH",
+        "600795.SH",
+        "600886.SH",
+        "600310.SH",
+        "601179.SH"
+      ]
+    },
+    "sector_generation_rules": {
+      "enabled": true,
+      "min_stocks": 8,
+      "max_stocks": 25,
+      "sh_range": [
+        600000,
+        601999
+      ],
+      "sz_range": [
+        1,
+        3999
+      ]
+    },
+    "stock_names": {
+      "002372": "伟星新材",
+      "002693": "双成药业",
+      "002700": "万憬能源",
+      "600132": "重庆啤酒",
+      "600971": "恒源煤电",
+      "603721": "中广天择",
+      "603779": "威龙股份",
+      "000539": "粤电力A",
+      "000636": "风华高科",
+      "002552": "鼎信通讯",
+      "003036": "通裕重工",
+      "300975": "商络电子"
+    },
+    "generator": {
+      "markets": {
+        "SH": {
+          "prefix": "6",
+          "range": [
+            600000,
+            605000
+          ]
+        },
+        "SZ": {
+          "prefix": "0",
+          "range": [
+            1,
+            3000
+          ],
+          "pad": 6
+        },
+        "SHBJ": {
+          "prefix": "68",
+          "range": [
+            688000,
+            689000
+          ]
+        },
+        "SZCY": {
+          "prefix": "30",
+          "range": [
+            300000,
+            301000
+          ]
+        }
+      },
+      "market_detect_rules": [
+        {
+          "prefix": "6",
+          "length": 6,
+          "first_char": "6",
+          "market": "SH"
+        },
+        {
+          "prefix": "0",
+          "market": "SZ"
+        },
+        {
+          "prefix": "3",
+          "market": "SZCY"
+        }
+      ],
+      "legacy_sectors": {
+        "银行": [
+          "600036",
+          "601166",
+          "601398",
+          "601939",
+          "600016"
+        ],
+        "证券": [
+          "600030",
+          "601211",
+          "600837",
+          "601688"
+        ],
+        "地产": [
+          "000002",
+          "001979",
+          "600048",
+          "600383"
+        ],
+        "医药": [
+          "600276",
+          "000538",
+          "603259",
+          "300760"
+        ],
+        "白酒": [
+          "600519",
+          "000858",
+          "000568",
+          "603369"
+        ],
+        "新能源": [
+          "300750",
+          "002594",
+          "601012",
+          "688005"
+        ],
+        "芯片": [
+          "688981",
+          "002371",
+          "603501",
+          "688012"
+        ],
+        "军工": [
+          "600893",
+          "600760",
+          "002013",
+          "688012"
+        ]
+      },
+      "names_pool": [
+        "平安银行",
+        "招商银行",
+        "工商银行",
+        "中国银行",
+        "农业银行",
+        "中信证券",
+        "华泰证券",
+        "国泰君安",
+        "海通证券",
+        "万科A",
+        "保利发展",
+        "招商蛇口",
+        "金地集团",
+        "恒瑞医药",
+        "云南白药",
+        "药明康德",
+        "迈瑞医疗",
+        "贵州茅台",
+        "五粮液",
+        "泸州老窖",
+        "洋河股份",
+        "宁德时代",
+        "比亚迪",
+        "隆基绿能",
+        "阳光电源",
+        "中芯国际",
+        "韦尔股份",
+        "北方华创",
+        "兆易创新",
+        "航发动力",
+        "中航沈飞",
+        "中国卫星",
+        "洪都航空"
+      ],
+      "price_range": [
+        5.0,
+        200.0
+      ],
+      "change_pct_std": 3.0,
+      "volume_lognorm_mu": 14,
+      "volume_lognorm_sigma": 2,
+      "ddx_std": 0.5,
+      "bbd_std": 100.0,
+      "volume_ratio_range": [
+        0.5,
+        5.0
+      ],
+      "turnover_range": [
+        0.5,
+        15.0
+      ],
+      "high_low_std": 0.01,
+      "sort_strategies": {
+        "1": {
+          "key": "change_pct",
+          "reverse": true
+        },
+        "5": {
+          "key": "change_pct",
+          "reverse": false
+        },
+        "7": {
+          "key": "ddx",
+          "reverse": false
+        },
+        "10": {
+          "key": "bbd",
+          "reverse": false
+        },
+        "20": {
+          "key": "volume_ratio",
+          "reverse": false
+        },
+        "200": {
+          "key": "price",
+          "reverse": true
+        }
+      },
+      "default_pass_rate": 0.3,
+      "ref_pass_rate": 0.4
+    }
+  },
+  "mock_field_ranges": {
+    "version": "1.0",
+    "description": "Mock 字段生成范围常量——modulus/offset/divisor/round/sign 表驱动，消除 _calc_mock_field 内联 magic numbers",
+    "fields": {
+      "profit_pct": {
+        "suffix": "",
+        "modulus": 1000,
+        "offset": -500,
+        "divisor": 100,
+        "round": 2,
+        "sign": 1
+      },
+      "entry_price": {
+        "suffix": "_entry",
+        "modulus": 9000,
+        "offset": 1000,
+        "divisor": 100,
+        "round": 2,
+        "sign": 1
+      },
+      "current_price": {
+        "suffix": "_curr",
+        "modulus": 9500,
+        "offset": 950,
+        "divisor": 100,
+        "round": 2,
+        "sign": 1
+      },
+      "cum_return_pct": {
+        "suffix": "",
+        "modulus": 5000,
+        "offset": -2000,
+        "divisor": 100,
+        "round": 2,
+        "sign": 1
+      },
+      "max_drawdown_pct": {
+        "suffix": "_dd",
+        "modulus": 2500,
+        "offset": 500,
+        "divisor": 100,
+        "round": 2,
+        "sign": -1
+      },
+      "win_rate": {
+        "suffix": "_wr",
+        "modulus": 5000,
+        "offset": 3000,
+        "divisor": 10000,
+        "round": 2,
+        "sign": 1
+      },
+      "weight": {
+        "suffix": "_wt",
+        "modulus": 3000,
+        "offset": 0,
+        "divisor": 10000,
+        "round": 4,
+        "sign": 1
+      },
+      "market_value": {
+        "suffix": "_mv",
+        "modulus": 990000,
+        "offset": 10000,
+        "divisor": 100,
+        "round": 2,
+        "sign": 1
+      },
+      "cost_basis": {
+        "suffix": "_cost",
+        "modulus": 9000,
+        "offset": 1000,
+        "divisor": 100,
+        "round": 2,
+        "sign": 1
+      }
+    }
+  },
+  "data_mappings": {
+    "version": "1.0",
+    "description": "数据映射表：定义前端字段与后端数据模型的绑定路径与转换规则",
+    "mappings": [
+      {
+        "mapping_id": "hold_to_form",
+        "description": "持仓数量映射",
+        "source_path": "params.hold",
+        "source_type": "int",
+        "transform_expr": null,
+        "reverse_transform": null,
+        "target_binding": "form.hold",
+        "bidirectional": true,
+        "cache_policy": "none",
+        "default_value": 0,
+        "nullable": false
+      },
+      {
+        "mapping_id": "attr_to_flags",
+        "description": "attr位标志映射：整数→布尔字典",
+        "source_path": "params.attr",
+        "source_type": "int",
+        "transform_expr": "decode_attr_flags",
+        "reverse_transform": "encode_attr_flags",
+        "target_binding": "form.attr_flags",
+        "bidirectional": true,
+        "cache_policy": "none",
+        "default_value": 0,
+        "nullable": false
+      },
+      {
+        "mapping_id": "enter_action_encode",
+        "description": "进入动作编码：{action_type, param}→整数",
+        "source_path": "params.enter",
+        "source_type": "int",
+        "transform_expr": "decode_action_compound",
+        "reverse_transform": "encode_action_compound",
+        "target_binding": "form.enter",
+        "bidirectional": true,
+        "cache_policy": "none",
+        "default_value": 0,
+        "nullable": true
+      },
+      {
+        "mapping_id": "exit_action_encode",
+        "description": "退出动作编码：{action_type, param}→整数",
+        "source_path": "params.exit",
+        "source_type": "int",
+        "transform_expr": "decode_action_compound",
+        "reverse_transform": "encode_action_compound",
+        "target_binding": "form.exit",
+        "bidirectional": true,
+        "cache_policy": "none",
+        "default_value": 0,
+        "nullable": true
+      },
+      {
+        "mapping_id": "starttype_to_seconds",
+        "description": "TDX起始类型映射",
+        "source_path": "params.starttype",
+        "source_type": "int",
+        "transform_expr": null,
+        "reverse_transform": null,
+        "target_binding": "form.starttype",
+        "bidirectional": true,
+        "cache_policy": "none",
+        "default_value": 0,
+        "nullable": false
+      },
+      {
+        "mapping_id": "starttime_hhmmss",
+        "description": "TDX起始时间映射（HHMMSS格式）",
+        "source_path": "params.starttimehms",
+        "source_type": "int",
+        "transform_expr": null,
+        "reverse_transform": null,
+        "target_binding": "form.starttimehms",
+        "bidirectional": true,
+        "cache_policy": "none",
+        "default_value": 0,
+        "nullable": true
+      },
+      {
+        "mapping_id": "nset_to_form",
+        "description": "TDX条件类型映射",
+        "source_path": "params.tdx_func.nset",
+        "source_type": "int",
+        "transform_expr": null,
+        "reverse_transform": null,
+        "target_binding": "form.nset",
+        "bidirectional": true,
+        "cache_policy": "none",
+        "default_value": 0,
+        "nullable": false
+      },
+      {
+        "mapping_id": "psatt_bdel_to_form",
+        "description": "TDX自动删除开关映射",
+        "source_path": "params.tdx_psatt.bdel",
+        "source_type": "int",
+        "transform_expr": null,
+        "reverse_transform": null,
+        "target_binding": "form.bdel",
+        "bidirectional": true,
+        "cache_policy": "none",
+        "default_value": 0,
+        "nullable": false
+      },
+      {
+        "mapping_id": "psatt_ndelnum_to_form",
+        "description": "TDX删除数量映射",
+        "source_path": "params.tdx_psatt.ndelnum",
+        "source_type": "int",
+        "transform_expr": null,
+        "reverse_transform": null,
+        "target_binding": "form.ndelnum",
+        "bidirectional": true,
+        "cache_policy": "none",
+        "default_value": 0,
+        "nullable": true
+      },
+      {
+        "mapping_id": "psatt_ndeltype_to_form",
+        "description": "TDX删除类型映射",
+        "source_path": "params.tdx_psatt.ndeltype",
+        "source_type": "int",
+        "transform_expr": null,
+        "reverse_transform": null,
+        "target_binding": "form.ndeltype",
+        "bidirectional": true,
+        "cache_policy": "none",
+        "default_value": 0,
+        "nullable": true
+      },
+      {
+        "mapping_id": "cxtype_to_form",
+        "description": "TDX持续类型映射",
+        "source_path": "params.cxtype",
+        "source_type": "int",
+        "transform_expr": null,
+        "reverse_transform": null,
+        "target_binding": "form.cxtype",
+        "bidirectional": true,
+        "cache_policy": "none",
+        "default_value": 0,
+        "nullable": false
+      },
+      {
+        "mapping_id": "flow_attr_resolve",
+        "description": "流转属性映射：attr整数→模式名称",
+        "source_path": "params.attr",
+        "source_type": "int",
+        "transform_expr": "resolve_flow_mode",
+        "reverse_transform": null,
+        "target_binding": "form.flow_mode",
+        "bidirectional": false,
+        "cache_policy": "read",
+        "default_value": 0,
+        "nullable": false
+      },
+      {
+        "mapping_id": "tdx_action_hex_decode",
+        "description": "TDX动作十六进制解码",
+        "source_path": "params.tdx_func.action",
+        "source_type": "int",
+        "transform_expr": "decode_tdx_action_hex",
+        "reverse_transform": "encode_tdx_action_hex",
+        "target_binding": "form.tdx_action",
+        "bidirectional": true,
+        "cache_policy": "none",
+        "default_value": 0,
+        "nullable": true
+      },
+      {
+        "mapping_id": "stock_list_to_form",
+        "description": "股票列表映射",
+        "source_path": "params.stocks",
+        "source_type": "json",
+        "transform_expr": null,
+        "reverse_transform": null,
+        "target_binding": "form.stocks",
+        "bidirectional": true,
+        "cache_policy": "none",
+        "default_value": [],
+        "nullable": true
+      },
+      {
+        "mapping_id": "markets_to_form",
+        "description": "市场选择映射",
+        "source_path": "params.markets",
+        "source_type": "json",
+        "transform_expr": null,
+        "reverse_transform": null,
+        "target_binding": "form.markets",
+        "bidirectional": true,
+        "cache_policy": "none",
+        "default_value": [],
+        "nullable": true
+      }
+    ]
+  },
+  "local_file_paths": {
+    "version": "2.0",
+    "description": "本地文件数据源路径探测规则配置表：定义通达信/大智慧/同花顺客户端本地配置文件的路径探测、编码格式与解析规则",
+    "priority_order": [
+      "config",
+      "env",
+      "registry"
+    ],
+    "priority_order_desc": "路径探测优先级：config(本配置文件 default_homes 显式指定) > env(环境变量) > registry(Windows注册表自动探测)",
+    "default_homes": {
+      "tdx_home": "H:\\GTJA\\RichEZ\\newVer",
+      "tdx_home_desc": "通达信实际安装根目录（用户配置）",
+      "dzh_home": "D:\\dzh (64)vlp8.84.25049",
+      "dzh_home_desc": "大智慧实际安装根目录（用户配置）",
+      "ths_home": "F:\\同花顺软件\\同花顺",
+      "ths_home_desc": "同花顺实际安装根目录（用户配置）",
+      "ths_home_alt": "C:\\同花顺软件\\同花顺",
+      "ths_home_alt_desc": "同花顺备用默认安装路径（主路径未命中时尝试）"
+    },
+    "clients": {
+      "tdx": {
+        "name": "通达信",
+        "env_var": "TDX_HOME",
+        "env_var_desc": "通达信安装根目录环境变量，设置后优先于注册表",
+        "config_key": "tdx_home",
+        "config_key_desc": "在 local_file_paths.json 中显式指定通达信安装根目录，优先级最高",
+        "registry_keys": [
+          {
+            "hive": "HKLM",
+            "path": "SOFTWARE\\通达信",
+            "value": "InstallPath",
+            "desc": "通达信安装路径注册表键（64位系统）"
+          },
+          {
+            "hive": "HKLM",
+            "path": "SOFTWARE\\WOW6432Node\\通达信",
+            "value": "InstallPath",
+            "desc": "通达信安装路径注册表键（32位程序在64位系统）"
+          },
+          {
+            "hive": "HKCU",
+            "path": "SOFTWARE\\通达信",
+            "value": "InstallPath",
+            "desc": "通达信安装路径注册表键（当前用户）"
+          }
+        ],
+        "default_subdirs": {
+          "config_dir": "T0002",
+          "config_dir_desc": "通达信配置文件子目录（相对安装根目录）",
+          "block_dir": "T0002\\blocknew",
+          "block_dir_desc": "自定义板块成分股文件子目录"
+        },
+        "files": {
+          "favorites": {
+            "path": "T0002\\blocknew\\zxg.blk",
+            "path_desc": "自选股文件（相对安装根目录，实际位于 blocknew 目录）",
+            "encoding": "gb2312",
+            "format": "tdx_blk",
+            "format_desc": "通达信自选股格式：每行一个代码，市场位+6位代码（如 1600141 表示 600141.SH，首位1=沪市0=深市2=北京）",
+            "line_pattern": "^([012])(\\d{6})$",
+            "line_pattern_desc": "正则匹配：1位市场标识（0=深圳,1=上海,2=北京） + 6位数字代码"
+          },
+          "custom_blocks_index": {
+            "path": "T0002\\blocknew",
+            "path_desc": "自定义板块目录（扫描目录下 .blk 文件作为板块索引，无独立索引文件）",
+            "encoding": "gb2312",
+            "format": "tdx_blocknew_dir",
+            "format_desc": "通达信自定义板块索引：扫描 blocknew 目录下所有 .blk 文件，文件名（不含扩展名）即为板块代码",
+            "exclude_files": [
+              "zxg.blk",
+              "tjg.blk",
+              "error.cfg",
+              "time.cfg"
+            ],
+            "exclude_files_desc": "扫描时排除的系统文件"
+          },
+          "block_members_pattern": {
+            "path": "T0002\\blocknew\\{block_filename}.blk",
+            "path_desc": "板块成分股文件（{block_filename} 为文件名，如 3RQS）",
+            "encoding": "gb2312",
+            "format": "tdx_blk",
+            "format_desc": "通达信板块成分股格式：每行一个代码，市场位+6位代码（如 1600141 = 600141.SH）",
+            "line_pattern": "^([012])(\\d{6})$",
+            "line_pattern_desc": "正则匹配：1位市场标识（0=深圳,1=上海,2=北京） + 6位数字代码"
+          },
+          "system_blocks": {
+            "path": "T0002\\hq_cache\\tdxbk.cfg",
+            "path_desc": "系统板块配置文件（概念/行业/地区等，相对安装根目录）",
+            "encoding": "gb2312",
+            "format": "tdx_tdxbk",
+            "format_desc": "通达信系统板块格式：管道分隔，每行 类型|板块名|板块描述|标志",
+            "line_pattern": "^(\\d+)\\|([^|]+)\\|([^|]*)\\|(\\d+)$",
+            "line_pattern_desc": "正则匹配：类型|板块名|描述|标志"
+          },
+          "global_blocks": {
+            "path": "T0002\\block_glbk.cfg",
+            "path_desc": "全局板块配置文件（系统板块，相对安装根目录）",
+            "encoding": "gb2312",
+            "format": "tdx_blocknew",
+            "format_desc": "全局板块索引格式，与 blocknew.cfg 相同"
+          },
+          "tdxw_cfg": {
+            "path": "T0002\\tdxw.cfg",
+            "path_desc": "通达信客户端配置文件（含安装路径等信息）",
+            "encoding": "gb2312",
+            "format": "ini",
+            "format_desc": "INI 格式配置文件"
+          },
+          "tdxhy_cfg": {
+            "path": "T0002\\hq_cache\\tdxhy.cfg",
+            "path_desc": "通达信股票→行业映射文件（相对安装根目录）",
+            "encoding": "gbk",
+            "format": "tdx_pipe_industry",
+            "format_desc": "通达信行业映射格式：管道分隔，每行 market|code|tdx_industry|||sw_industry（如 0|000001|T1001|||X500102，market 0=SZ/1=SH）",
+            "line_pattern": "^([012])\\|(\\d{6})\\|([^|]+)\\|\\|\\|([^|]+)$",
+            "line_pattern_desc": "正则匹配：市场位|6位代码|TDX行业代码|||申万行业代码"
+          },
+          "tdxzs_cfg": {
+            "path": "T0002\\hq_cache\\tdxzs.cfg",
+            "path_desc": "通达信板块指数定义文件（相对安装根目录）",
+            "encoding": "gbk",
+            "format": "tdx_pipe_index",
+            "format_desc": "通达信板块指数格式：管道分隔，每行 name|code|type|category|?|desc（如 农业种植|880201|3|1|0|1，type 3=行业/5=风格）",
+            "line_pattern": "^([^|]+)\\|(\\d+)\\|(\\d+)\\|(\\d+)\\|(\\d+)\\|([^|]*)$",
+            "line_pattern_desc": "正则匹配：板块名|板块代码|类型|分类|标志|描述"
+          },
+          "infoharbor_block": {
+            "path": "T0002\\hq_cache\\infoharbor_block.dat",
+            "path_desc": "通达信板块成分股实时数据文件（相对安装根目录，含概念/风格/指数板块成分股）",
+            "encoding": "gb18030",
+            "format": "tdx_infoharbor",
+            "format_desc": "通达信板块成分股格式：头行 #XX_板块名,数量,指数代码,创建日期,更新日期,, 后跟数据行 市场位#6位代码（0=深,1=沪,2=京），逗号分隔。前缀 #GN_=概念, #FG_=风格, #ZS_=指数"
+          },
+          "base_dbf": {
+            "path": "T0002\\hq_cache\\base.dbf",
+            "path_desc": "通达信股票基础信息 DBF 文件（含 DY 地区代码字段，用于地区板块成分股）",
+            "encoding": "gb18030",
+            "format": "tdx_dbf",
+            "format_desc": "DBF/dBASE III 格式，DY 字段（地区代码，3字节）配合 tdxzs.cfg type=3 的 32 个地区定义使用"
+          },
+          "infoharbor_ex_code": {
+            "path": "T0002\\hq_cache\\infoharbor_ex.code",
+            "path_desc": "通达信股票名称映射文件（含 5500+ 只 A 股代码与中文名称，用于补全个股名）",
+            "encoding": "gb18030",
+            "format": "tdx_stock_names",
+            "format_desc": "管道分隔格式：股票代码|股票名称|关键词列表（如 000001|平安银行|平安保险,谢永林）"
+          },
+          "addedcode_bj": {
+            "path": "T0002\\hq_cache\\addedcode_bj.cfg",
+            "path_desc": "通达信北交所股票代码映射文件（含 BJ 股票新旧代码与中文名称，补全 infoharbor_ex.code 缺失的 BJ 股票名）",
+            "encoding": "gb18030",
+            "format": "tdx_bj_stock_names",
+            "format_desc": "管道分隔格式：市场标志|旧代码|新代码|股票名称(含状态)|日期（如 44|832000|920000|安徽凤凰(已切换)|20251009）"
+          },
+          "profile_dat": {
+            "path": "T0002\\hq_cache\\profile.dat",
+            "path_desc": "通达信深圳股票历史名称二进制文件（含 SZ0/3 A 股与 SZ2 B 股名称，补全 infoharbor_ex.code 缺失的 SZ2 B 股名）",
+            "encoding": "gb18030",
+            "format": "tdx_profile_dat",
+            "format_desc": "二进制格式：固定 64 字节记录，每条 \\x00+6位代码+\\x00+名称(GBK, 填充\\x00)+其他数据。含历史名称（ST/*ST/S 前缀），取最后一条记录作为当前名称"
+          }
+        }
+      },
+      "dzh": {
+        "name": "大智慧",
+        "env_var": "DZH_HOME",
+        "env_var_desc": "大智慧安装根目录环境变量",
+        "config_key": "dzh_home",
+        "config_key_desc": "在 local_file_paths.json 中显式指定大智慧安装根目录",
+        "registry_keys": [
+          {
+            "hive": "HKLM",
+            "path": "SOFTWARE\\dzh",
+            "value": "InstallPath",
+            "desc": "大智慧安装路径注册表键"
+          },
+          {
+            "hive": "HKLM",
+            "path": "SOFTWARE\\WOW6432Node\\dzh",
+            "value": "InstallPath",
+            "desc": "大智慧安装路径注册表键（32位程序在64位系统）"
+          }
+        ],
+        "default_subdirs": {
+          "config_dir": "cfg",
+          "config_dir_desc": "大智慧配置文件子目录（相对安装根目录）",
+          "block_dir": "cfg",
+          "block_dir_desc": "板块配置文件子目录"
+        },
+        "files": {
+          "favorites": {
+            "path": "cfg\\zxg.cfg",
+            "path_desc": "自选股文件（相对安装根目录，可能不存在）",
+            "encoding": "gb2312",
+            "format": "dzh_zxg",
+            "format_desc": "大智慧自选股格式：Tab分隔，每行含代码+市场+名称",
+            "line_pattern": "^(\\S+)\\t(\\S+)(?:\\t(\\S+))?$",
+            "line_pattern_desc": "正则匹配：代码 Tab 市场 [Tab 名称]"
+          },
+          "custom_blocks_index": {
+            "path": "cfg\\block.ini",
+            "path_desc": "板块配置文件（INI 格式，相对安装根目录）",
+            "encoding": "gb2312",
+            "format": "dzh_block_ini",
+            "format_desc": "大智慧板块索引格式：INI 格式 [BlockInfo] 段，SysBlock 键含空格分隔的板块名列表"
+          },
+          "block_members_pattern": {
+            "path": "cfg\\{block_name}.blk",
+            "path_desc": "板块成分股文件",
+            "encoding": "gb2312",
+            "format": "dzh_blk",
+            "format_desc": "大智慧板块成分股格式"
+          },
+          "net_favorites": {
+            "path": "cfg\\netzxg.dat",
+            "path_desc": "网络自选股文件（备份）",
+            "encoding": "gb2312",
+            "format": "dzh_zxg",
+            "format_desc": "网络自选股格式，与 zxg.cfg 相同"
+          },
+          "classtree_dir": {
+            "path": "cfg\\classtree",
+            "path_desc": "大智慧分类树 XML 文件目录（相对安装根目录，含 140+ XML 文件）",
+            "encoding": "gb2312",
+            "format": "dzh_classtree_xml",
+            "format_desc": "大智慧分类树格式：XML 文件，结构为 <classes><class name='...'><subclass name='...' node='...'/></class></classes>。按文件名前缀分类：bkgn=概念, bkhy=行业, bkzs=指数, gphq_dzhhy=大智慧行业",
+            "file_prefix_map": {
+              "bkgn": "concept",
+              "bkhy": "industry",
+              "bkzs": "index",
+              "gphq_dzhhy": "industry",
+              "gphq": "stock_class",
+              "indextree": "index",
+              "hszs": "index",
+              "jjbk": "fund",
+              "etf": "fund"
+            },
+            "file_prefix_map_desc": "文件名前缀到分类的映射表"
+          },
+          "full_abk": {
+            "path": "Download\\ABK\\full.ABK",
+            "path_desc": "大智慧完整板块数据文件（3.6MB 二进制文件，含所有板块成分股）",
+            "encoding": "binary",
+            "format": "dzh_abk_binary",
+            "format_desc": "大智慧 ABK 二进制格式：含板块定义和成分股，格式需研究确定。inc.ABK 为增量更新文件",
+            "inc_abk_path": "Download\\ABK\\inc.ABK",
+            "inc_abk_path_desc": "增量板块数据文件（14KB）"
+          },
+          "userdata_block_dir": {
+            "path": "USERDATA\\block",
+            "path_desc": "大智慧用户板块目录（相对安装根目录，含自选股.BLK 及自定义板块 .BLK 文件，二进制格式）",
+            "encoding": "binary",
+            "format": "dzh_blk_binary",
+            "format_desc": "大智慧 BLK 二进制格式：前2字节是记录数(小端uint16)，之后每10字节一条记录，格式为 SZ/SH+6位代码+\\x00填充（GBK编码）",
+            "favorites_filename": "自选股.BLK",
+            "favorites_filename_desc": "自选股文件名（二进制格式）",
+            "exclude_keywords": [
+              "自选股"
+            ],
+            "exclude_keywords_desc": "扫描自定义板块时排除的文件名关键词（如自选股）"
+          }
+        }
+      },
+      "ths": {
+        "name": "同花顺",
+        "env_var": "THS_HOME",
+        "env_var_desc": "同花顺安装根目录环境变量",
+        "config_key": "ths_home",
+        "config_key_desc": "在 local_file_paths.json 中显式指定同花顺安装根目录",
+        "default_paths": [
+          "F:\\同花顺软件\\同花顺",
+          "C:\\同花顺软件\\同花顺"
+        ],
+        "default_paths_desc": "同花顺默认安装路径列表（配置/环境变量/注册表均未命中时依次尝试）",
+        "registry_keys": [
+          {
+            "hive": "HKLM",
+            "path": "SOFTWARE\\同花顺",
+            "value": "InstallPath",
+            "desc": "同花顺安装路径注册表键"
+          },
+          {
+            "hive": "HKLM",
+            "path": "SOFTWARE\\WOW6432Node\\同花顺",
+            "value": "InstallPath",
+            "desc": "同花顺安装路径注册表键（32位程序在64位系统）"
+          }
+        ],
+        "default_subdirs": {
+          "config_dir": "股神之师",
+          "config_dir_desc": "同花顺配置文件子目录（相对安装根目录）",
+          "block_dir": "股神之师\\custom_block",
+          "block_dir_desc": "自定义板块文件子目录（编号文件）"
+        },
+        "files": {
+          "favorites": {
+            "path": "data\\basket.dat",
+            "path_desc": "自选股文件（二进制格式，相对安装根目录）",
+            "encoding": "gbk",
+            "format": "ths_basket",
+            "format_desc": "同花顺自选股格式：二进制文件，降级处理（无法解析时返回空列表）",
+            "line_pattern": "",
+            "line_pattern_desc": "二进制文件，无文本行模式"
+          },
+          "custom_blocks_index": {
+            "path": "股神之师\\custom_block",
+            "path_desc": "自定义板块目录（编号文件，如 0/233/234 等）",
+            "encoding": "gbk",
+            "format": "ths_custom_block_dir",
+            "format_desc": "同花顺自定义板块索引：扫描目录下编号文件，每个文件为一个板块"
+          },
+          "block_members_pattern": {
+            "path": "股神之师\\custom_block\\{block_id}",
+            "path_desc": "板块成分股文件（{block_id} 为编号，如 233）",
+            "encoding": "gbk",
+            "format": "ths_custom_block",
+            "format_desc": "同花顺板块成分股格式：可能为二进制或加密，降级处理"
+          },
+          "stockblock_ini": {
+            "path": "股神之师\\stockblock.ini",
+            "path_desc": "板块配置文件（加密格式，相对安装根目录）",
+            "encoding": "gbk",
+            "format": "ths_encrypted",
+            "format_desc": "同花顺板块配置：加密格式，无法直接解析，降级处理返回空列表"
+          },
+          "blockupdate_dir": {
+            "path": "BlockUpdate",
+            "path_desc": "同花顺板块更新目录（相对安装根目录，含 59 个 block_*.ini 文件，同时含板块名称和成分股）",
+            "encoding": "gbk",
+            "format": "ths_blockupdate_ini",
+            "format_desc": "同花顺 BlockUpdate INI 格式：每个文件含 [ConfigInfo]/[BLOCK_NAME_MAP_TABLE]/[BLOCK_STOCK_CONTEXT]/[SUBDIVISION_BLOCK_STOCK_CONTEXT] 段。block_id=block_name 映射板块名，block_id=market:code,... 映射成分股（market 17=SH/33=SZ/-105=BJ）",
+            "file_pattern": "block_*.ini",
+            "file_pattern_desc": "扫描目录下匹配 block_*.ini 的文件",
+            "category_detection": "config_name",
+            "category_detection_desc": "分类识别方式：根据 [ConfigInfo]ConfigName 字段识别分类（概念/行业/指数等）",
+            "market_code_map": {
+              "17": "SH",
+              "33": "SZ",
+              "-105": "BJ"
+            },
+            "market_code_map_desc": "THS market 代码到市场标识映射"
+          },
+          "favorites_zxg": {
+            "path": "hexin\\ZXG.cfg",
+            "path_desc": "同花顺自选股文件（文本格式，GBK编码，每行一个代码，相对安装根目录。注意：hexin 目录在部分安装中不存在，降级处理）",
+            "encoding": "gbk",
+            "format": "ths_zxg_cfg",
+            "format_desc": "同花顺自选股格式：每行一个股票代码，可能是纯代码 600000 或带市场前缀 SH600000；根据代码前缀判断市场（6开头=SH, 0/3开头=SZ, 8/4开头=BJ）",
+            "line_pattern": "^(SH|SZ|BJ)?(\\d{6})$",
+            "line_pattern_desc": "正则匹配：可选市场前缀(SH/SZ/BJ) + 6位数字代码",
+            "deprecated": true,
+            "deprecated_desc": "此路径在多数安装中不存在，实际自选股数据在 data\\basket.dat 或 BlockUpdate 目录"
+          },
+          "block_cfg": {
+            "path": "hexin\\Block.cfg",
+            "path_desc": "同花顺板块配置文件（文本格式，GBK编码，相对安装根目录。注意：hexin 目录在部分安装中不存在，降级处理）",
+            "encoding": "gbk",
+            "format": "ths_block_cfg",
+            "format_desc": "同花顺板块配置格式：INI或自定义格式，含板块定义；[板块名]段头定义板块，段内每行为成员代码",
+            "deprecated": true,
+            "deprecated_desc": "此路径在多数安装中不存在，实际板块数据在 BlockUpdate 目录"
+          },
+          "stockspirit_json": {
+            "path": "stockspirit.json",
+            "path_desc": "同花顺股票名称映射文件（JSON格式，含6287条 name→code.SZ/SH 映射，用于补全个股名）",
+            "encoding": "gbk",
+            "format": "ths_stockspirit_json",
+            "format_desc": "JSON字典格式：{\"股票名\":\"代码.市场\",...}（如 {\"达瑞电子\":\"301696.SZ\",...}），需反转为 code→name 使用"
+          }
+        }
+      }
+    },
+    "market_code_rules": {
+      "tdx_market_digit": {
+        "0": {
+          "setcode": 0,
+          "market": "SZ",
+          "desc": "深圳市场"
+        },
+        "1": {
+          "setcode": 1,
+          "market": "SH",
+          "desc": "上海市场"
+        },
+        "2": {
+          "setcode": 2,
+          "market": "BJ",
+          "desc": "北京市场"
+        }
+      },
+      "code_prefix_to_market": {
+        "6": {
+          "setcode": 1,
+          "market": "SH",
+          "desc": "6开头=上海"
+        },
+        "0": {
+          "setcode": 0,
+          "market": "SZ",
+          "desc": "0开头=深圳"
+        },
+        "3": {
+          "setcode": 0,
+          "market": "SZ",
+          "desc": "3开头=深圳创业板"
+        },
+        "4": {
+          "setcode": 2,
+          "market": "BJ",
+          "desc": "4开头=北京"
+        },
+        "8": {
+          "setcode": 2,
+          "market": "BJ",
+          "desc": "8开头=北京"
+        }
+      }
+    },
+    "cache_strategy": {
+      "enabled": true,
+      "desc": "是否启用本地文件解析结果缓存到 sector_members 表",
+      "sector_id_prefix": "local_",
+      "sector_id_prefix_desc": "本地文件缓存的 sector_id 前缀，格式：local_{client}_{block_code}（如 local_tdx_TEST）",
+      "check_mtime": true,
+      "check_mtime_desc": "是否通过文件修改时间判断缓存是否过期",
+      "ttl_seconds": 3600,
+      "ttl_seconds_desc": "缓存TTL（秒），即使文件未修改也定期刷新"
+    }
+  },
+  "_convergence": {
+    "merged_from": [
+      "data_source_contract.json",
+      "data_source_mappings.json",
+      "data_source_routes.json",
+      "data_providers.json",
+      "mock_data.json",
+      "mock_field_ranges.json",
+      "data_mappings.json",
+      "local_file_paths.json"
+    ],
+    "target_count": 30
+  }
+}

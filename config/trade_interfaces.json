@@ -1,0 +1,43 @@
+{
+  "version": "1.0",
+  "description": "交易接口配置表：定义不同运行模式下的交易行为与接口方法",
+  "trade_interfaces": {
+    "live_order": {
+      "interface_id": "live_order",
+      "name": "实盘下单",
+      "behavior": "BUY/SELL信号触发真实委托",
+      "methods": {
+        "on_signal": "on_signal(signal_dict) -> 发送真实委托到券商/交易所"
+      },
+      "config": {
+        "risk_check": true,
+        "max_order_qty": 1000000,
+        "desc": "连接真实交易通道，信号将产生实际市场委托"
+      }
+    },
+    "noop": {
+      "interface_id": "noop",
+      "name": "空操作",
+      "behavior": "只记录信号，不执行任何交易操作",
+      "methods": {
+        "on_signal": "on_signal(signal_dict) -> 直接返回，无操作"
+      }
+    },
+    "paper_trade": {
+      "interface_id": "paper_trade",
+      "name": "模拟成交",
+      "behavior": "维护虚拟持仓并计算模拟盈亏",
+      "methods": {
+        "on_signal": "on_signal(signal_dict) -> 更新虚拟持仓",
+        "get_positions": "get_positions() -> 返回虚拟持仓列表",
+        "get_pnl": "get_pnl() -> 返回模拟盈亏数据"
+      },
+      "config": {
+        "initial_cash": 1000000,
+        "commission_rate": 0.0003,
+        "slippage": 0.001,
+        "desc": "基于模拟资金与费用模型计算虚拟成交结果"
+      }
+    }
+  }
+}

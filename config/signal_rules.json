@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "description": "交易信号规则表：定义BUY/SELL信号的触发条件、字段映射与生成规则",
+  "signals": {
+    "BUY": {
+      "trigger": {
+        "type": "pool_enter",
+        "desc": "股票进入目标池时生成BUY信号",
+        "condition": "target_pool_role.is_target == true",
+        "guard": "tracker == null OR tracker.status != 'holding'"
+      },
+      "priority": 10,
+      "stop_on_match": true,
+      "desc": "买入信号：股票首次进入目标池",
+      "delegated_to": "EdgeExecutor._action_baimpool",
+      "delegation_note": "I34/I35：BUY 经 EdgeExecutor._action_baimpool → EventBus → MetaEngine._on_signal_event 订阅写入 _signal_queue；_emit_domain_event 跳过 pool_enter BUY（engine.py:770-771），消除双发。本表的 trigger/condition/guard 仍为语义声明，不再驱动 _emit_domain_event 的 BUY 分支。"
+    },
+    "SELL": {
+      "trigger": {
+        "type": "pool_exit",
+        "desc": "股票离开目标池或TTL超时时生成SELL信号",
+        "conditions": [
+          {
+            "type": "move_exit",
+            "desc": "move模式下离开源池(目标池)",
+            "condition": "transfer_mode == 'move' AND source_role.is_target == true AND tracker.status == 'holding'"
+          },
+          {
+            "type": "timeout",
+            "desc": "TTL超时淘汰",
+            "condition": "tracker.ttl > 0 AND (now_ts - tracker.entry_time) >= tracker.ttl AND tracker.status == 'holding'",
+            "declarative_note": "I65：声明式文档，不被 _should_emit_signal_for_domain 求值。实际触发由 _run_ttl（edge_executor.py:342）按 _TTL_CHECK_HANDLERS 表分派：interval 模式 (now_unix - entry_ts) >= ttl_spec.ttl_sec，endtime 模式 now_sec_of_day >= endtime_sec AND (now_unix - entry_ts) >= hold_for_ttl。原引用 tracker.ttl_remaining 已删除（I65 消除死计算：ttl_remaining 公式每 tick 求值但零 .py 读取）。"
+          }
+        ],
+        "match_policy": "any"
+      },
+      "priority": 10,
+      "stop_on_match": true,
+      "desc": "卖出信号：持仓股票离开目标池或TTL到期"
+    }
+  }
+}

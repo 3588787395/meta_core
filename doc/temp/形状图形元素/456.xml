@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="GB2312"?>
+<root>
+<pool backcolor="1644825">
+<cells>
+<cell id="1494" type="5" attr="0" pos="201,123,321,243" clr="255" clrtext="16711680" solid="1" text="圆形">
+</cell>
+<cell id="1495" type="2" attr="141" pos="153,48,267,106" clr="255" clrtext="0" solid="0" text="文字">
+</cell>
+<cell id="1496" type="6" attr="0" pos="355,44,501,61" clr="255" clrtext="0" solid="0" text="直线">
+</cell>
+<cell id="1497" type="0" attr="0" pos="589,30,745,115" clr="255" clrtext="16777215" solid="1" text="矩形">
+</cell>
+<cell id="1498" type="1" attr="0" pos="814,36,950,136" clr="255" clrtext="4259584" solid="1" text="圆角矩形">
+</cell>
+<cell id="1499" type="4" attr="0" pos="81,127,191,222" clr="255" clrtext="65535" solid="1" text="椭圆">
+</cell>
+</cells>
+<flows>
+</flows>
+</pool>
+</root>

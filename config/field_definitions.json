@@ -1,0 +1,3422 @@
+{
+  "version": "1.0",
+  "global_fields": {
+    "id": {
+      "data_type": "int",
+      "ui_component": "text",
+      "label": "节点ID",
+      "default": null,
+      "description": "节点唯一标识符，整数，自增分配。在整个股票池XML中唯一",
+      "applies_to_types": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        200,
+        201,
+        202,
+        203
+      ],
+      "required": true
+    },
+    "type": {
+      "data_type": "int",
+      "ui_component": "text",
+      "label": "节点类型",
+      "default": null,
+      "description": "控件类型编号：1=文字标签,2=容器,3=状态列,4=丢弃池,5=执行顺序,6=连接箭头,200=股票状态池,201=转移条件,202=备选池,203=未知类型",
+      "applies_to_types": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        200,
+        201,
+        202,
+        203
+      ],
+      "required": true,
+      "min": 1
+    },
+    "pos": {
+      "data_type": "str",
+      "ui_component": "text",
+      "label": "位置坐标",
+      "default": "",
+      "description": "位置坐标格式为 'x1,y1,x2,y2'，表示矩形的左上角到右下角。type=5中x1>x2表示左向箭头，y1>y2表示向上箭头；type=6中y1==y2则为水平线",
+      "applies_to_types": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        200,
+        201,
+        202,
+        203
+      ],
+      "required": false
+    },
+    "clr": {
+      "data_type": "int",
+      "ui_component": "color",
+      "label": "颜色",
+      "default": -1,
+      "description": "Windows GDI颜色整数值(COLORREF格式，0x00BBGGRR)。-1=透明/默认颜色，16777216=黑色。≥0x01000000为系统颜色索引",
+      "applies_to_types": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        200,
+        201,
+        202,
+        203
+      ]
+    },
+    "text": {
+      "data_type": "str",
+      "ui_component": "text",
+      "label": "显示文本",
+      "default": "",
+      "description": "节点显示文本/名称。type=1中\\n为换行符，type=200中为状态池名称。部分类型此字段始终为空(type=2/5/6)",
+      "applies_to_types": [
+        1,
+        2,
+        4,
+        6,
+        200,
+        201,
+        202,
+        203
+      ]
+    },
+    "attr": {
+      "data_type": "int",
+      "ui_component": "flag_group",
+      "label": "属性位标志",
+      "default": 0,
+      "description": "32位整数位标志。各类型的位含义不同，解析时必须先判断type再解读。详见bit_fields中的定义",
+      "applies_to_types": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        200,
+        201,
+        202,
+        203
+      ]
+    }
+  },
+  "type_specific_fields": {
+    "1": {
+      "text": {
+        "data_type": "str",
+        "ui_component": "multiline_text",
+        "label": "文本内容",
+        "default": "",
+        "description": "文字标签显示的文本内容，\\n为换行符。用于标题、说明文字、标注、时间标签等",
+        "required": false
+      },
+      "url": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "超链接",
+        "default": null,
+        "description": "超链接URL，点击标签时跳转。仅少量实例使用",
+        "required": false
+      },
+      "clr": {
+        "data_type": "int",
+        "ui_component": "color",
+        "label": "文字颜色",
+        "default": 16777229,
+        "description": "文字颜色（Windows GDI整数值）。常见值：16777229=深蓝黑(标题文字), 221=浅灰(连接线)",
+        "applies_to_types": [
+          1
+        ]
+      },
+      "attr": {
+        "data_type": "int",
+        "ui_component": "flag_group",
+        "label": "字体样式位标志",
+        "default": 0,
+        "description": "字体样式位标志组合。常见值：89(0x59)=时间标签, 77(0x4D)=主标题, 95(0x5F)=副标题, 57(0x39)=股票池标题, 0=普通文本。bit0=加粗, bit1-7=字体样式, bit4=可见性, bit9=空心/透明背景"
+      }
+    },
+    "2": {
+      "clr": {
+        "data_type": "int",
+        "ui_component": "color",
+        "label": "底色",
+        "default": 1579032,
+        "description": "容器底色（Windows GDI整数值）。常见值：1579032=暗绿, 2565927=墨绿, 3092271=橄榄, 6184542=浅蓝绿, 4227327=亮蓝",
+        "applies_to_types": [
+          2
+        ]
+      },
+      "attr": {
+        "data_type": "int",
+        "ui_component": "flag_group",
+        "label": "显示位标志",
+        "default": 0,
+        "description": "位标志。0=普通容器(背景框), 512(0x200)=显示到股票池总览的容器, 89(0x59)=带时间标签属性的容器"
+      }
+    },
+    "3": {
+      "clr": {
+        "data_type": "int",
+        "ui_component": "color",
+        "label": "底色",
+        "default": -1,
+        "description": "状态列底色。-1=默认, 15263718=浅红强调",
+        "applies_to_types": [
+          3
+        ]
+      },
+      "attr": {
+        "data_type": "int",
+        "ui_component": "flag_group",
+        "label": "显示位标志",
+        "default": 0,
+        "description": "位标志。0=普通状态列, 512(0x200)=扩展态(显示到总览，最左列亮色强调)"
+      }
+    },
+    "4": {
+      "text": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "丢弃池名称",
+        "default": "",
+        "description": "丢弃池显示名称，通常为'不满足'或类似描述",
+        "required": false
+      },
+      "clr": {
+        "data_type": "int",
+        "ui_component": "color",
+        "label": "底色",
+        "default": -1,
+        "description": "丢弃池底色",
+        "applies_to_types": [
+          4
+        ]
+      },
+      "attr": {
+        "data_type": "int",
+        "ui_component": "flag_group",
+        "label": "丢弃池位标志",
+        "default": 128,
+        "description": "位标志。128(0x80)=标准丢弃池(基本标记), 219(0xDB)=带装饰文字的丢弃池, 640(0x280)=显示到总览的丢弃池。bit7=丢弃池标记, bit9=显示总览"
+      }
+    },
+    "5": {
+      "clr": {
+        "data_type": "int",
+        "ui_component": "color",
+        "label": "箭头颜色",
+        "default": -1,
+        "description": "执行顺序箭头颜色",
+        "applies_to_types": [
+          5
+        ]
+      },
+      "attr": {
+        "data_type": "int",
+        "ui_component": "flag_group",
+        "label": "视图位标志",
+        "default": 0,
+        "description": "位标志。0=设计视图中的执行顺序标注, 512(0x200)=总览视图中的执行顺序标注（双层显示）"
+      }
+    },
+    "6": {
+      "clr": {
+        "data_type": "int",
+        "ui_component": "color",
+        "label": "线条颜色",
+        "default": -1,
+        "description": "连接箭头线条颜色",
+        "applies_to_types": [
+          6
+        ]
+      }
+    },
+    "200": {
+      "hold": {
+        "data_type": "int",
+        "ui_component": "number_input",
+        "label": "保留时长(秒)",
+        "default": 432000,
+        "description": "股票保留时长(秒)，到期自动删除。常用值：2=即时删除, 59=1分钟, 300=5分钟, 3600=1小时, 64800=18小时, 86400=1天, 432000=5天(默认), 2592000=30天, 43200000=永久",
+        "min": 0,
+        "required": false
+      },
+      "col": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "列显示内容",
+        "default": "2,-1,-2,-3,7,14,8,10,17,45",
+        "description": "逗号分隔的列ID列表。常见列ID：2=代码, -1=名称, -2=最新价, -3=涨跌幅, -5=涨跌额, 1=序号, 7=入池时间, 8=现价, 10=收益率, 14=入池价, 17=最大收益, 24=换手率, 45=保留天数, 101=DDX连续飘红天数, 108=量比, 251=特大单买入, 285=大单买入, 287=BBD, 401=DDX",
+        "required": false
+      },
+      "width": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "列宽(像素)",
+        "default": null,
+        "description": "逗号分隔的列宽值，与col一一对应，缺省时使用默认宽度。格式如'55,42,42,42,42,42,42,42,42,42'",
+        "required": false
+      },
+      "text": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "显示名称",
+        "default": "",
+        "description": "状态池在画布上显示的文字标签/名称",
+        "applies_to_types": [
+          200
+        ],
+        "required": false
+      },
+      "wizd": {
+        "data_type": "str",
+        "ui_component": "textarea",
+        "label": "状态说明",
+        "default": null,
+        "description": "状态池的状态说明文字（备注信息），用于描述该状态池的用途或特征",
+        "required": false
+      },
+      "histana": {
+        "data_type": "int",
+        "ui_component": "number_input",
+        "label": "收益分析点数",
+        "default": null,
+        "description": "收益分析历史数据点数，如1000表示最多记录1000条收益分析数据",
+        "min": 0,
+        "required": false
+      },
+      "stocknum": {
+        "data_type": "int",
+        "ui_component": "number_input",
+        "label": "最大股票数",
+        "default": null,
+        "description": "状态池最大股票数量限制，限制状态池中最多保留N只股票",
+        "min": 0,
+        "required": false
+      },
+      "enter": {
+        "data_type": "int",
+        "ui_component": "action_compound",
+        "label": "进入时执行动作",
+        "default": null,
+        "encoding": "[bit31..bit28: 动作类型] [bit27..bit16: 保留(全0)] [bit15..bit0: 参数值]",
+        "description": "股票进入状态池时触发的交易动作。动作类型：0x0=无动作, 0x1=买入指定金额(参数=金额元), 0x2=买入指定股数(参数=股数), 0x3=卖出股票(参数=股数)。示例：0x30002710=卖出10000股, 0x10002710=买入10000元",
+        "options": [
+          {
+            "value": "0x0",
+            "label": "无动作"
+          },
+          {
+            "value": "0x1",
+            "label": "买入指定金额"
+          },
+          {
+            "value": "0x2",
+            "label": "买入指定股数"
+          },
+          {
+            "value": "0x3",
+            "label": "卖出股票"
+          }
+        ],
+        "param_bits": "bit15..bit0",
+        "param_example": "10000=0x2710",
+        "required": false
+      },
+      "exit": {
+        "data_type": "int",
+        "ui_component": "action_compound",
+        "label": "离开时执行动作",
+        "default": null,
+        "encoding": "[bit31..bit28: 动作类型] [bit27..bit16: 保留(全0)] [bit15..bit0: 参数值]",
+        "description": "股票离开状态池(过期/被移除)时触发的交易动作。编码规则同enter。动作类型同上",
+        "options": [
+          {
+            "value": "0x0",
+            "label": "无动作"
+          },
+          {
+            "value": "0x1",
+            "label": "买入指定金额"
+          },
+          {
+            "value": "0x2",
+            "label": "买入指定股数"
+          },
+          {
+            "value": "0x3",
+            "label": "卖出股票"
+          }
+        ],
+        "param_bits": "bit15..bit0",
+        "param_example": "10000=0x2710",
+        "required": false
+      },
+      "deltype": {
+        "data_type": "int",
+        "ui_component": "select",
+        "label": "删除时间单位",
+        "default": 0,
+        "description": "✅ 已确认(2026-06-10): 删除时间单位枚举，决定hold字段的时间单位语义。0=进入N天后(自然日), 1=进入N个交易日后, 2=N小时后, 3=N分钟后, 4=N秒后。hold始终存储为秒数。详见技术文档§4.7a",
+        "options": [
+          {
+            "value": 0,
+            "label": "进入N天后(自然日)"
+          },
+          {
+            "value": 1,
+            "label": "进入N个交易日后"
+          },
+          {
+            "value": 2,
+            "label": "N小时后"
+          },
+          {
+            "value": 3,
+            "label": "N分钟后"
+          },
+          {
+            "value": 4,
+            "label": "N秒后"
+          }
+        ],
+        "min": 0,
+        "max": 4,
+        "required": false
+      },
+      "endtime": {
+        "data_type": "int",
+        "ui_component": "time_input",
+        "label": "指定删除时间",
+        "default": 0,
+        "description": "✅ 已确认(2026-06-10): 绝对时间参数，编码公式 endtime = 3600×HH − 900×MM + SS。仅当delstocktype=1(指定交易时间模式)时有效。0=未设置/默认值。验证样本: 10:30:50→9050, 14:30:10→23410。详见技术文档§4.7a",
+        "encoding": "endtime = 3600*HH - 900*MM + SS (末2位=秒, 前缀=9*(4H-M))",
+        "min": 0,
+        "required": false,
+        "depends_on": {
+          "field": "delstocktype",
+          "active_when": [
+            1
+          ]
+        }
+      },
+      "delstocktype": {
+        "data_type": "int",
+        "ui_component": "select",
+        "label": "删除时机模式",
+        "default": 0,
+        "description": "✅ 已确认(2026-06-10): 删除时机模式。0=相对时间模式(入池后经过hold指定时间自动删除), 1=指定交易时间模式(在每个交易日的endtime指定时刻检查是否满足hold条件)。详见技术文档§4.7a",
+        "options": [
+          {
+            "value": 0,
+            "label": "相对时间(入池后N单位)"
+          },
+          {
+            "value": 1,
+            "label": "指定交易时间(每日某时刻)"
+          }
+        ],
+        "min": 0,
+        "max": 1,
+        "required": false
+      },
+      "staattr": {
+        "data_type": "int",
+        "ui_component": "select",
+        "label": "双击显示模式",
+        "default": null,
+        "description": "✅ 已确认(2026-06-10): 双击显示模式标志。0=K线模式(默认/无此属性), 1=分时线模式。当状态池配置'切换到显示=分时线'时出现并设为1。详见技术文档§4.7b",
+        "options": [
+          {
+            "value": null,
+            "label": "K线模式(默认)"
+          },
+          {
+            "value": 1,
+            "label": "分时线模式"
+          }
+        ],
+        "min": 0,
+        "max": 1,
+        "required": false
+      },
+      "tmpl": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "双击目标模板",
+        "default": null,
+        "description": "✅ 已确认(2026-06-10): 双击目标模板，格式TYPE-name。TYPE前缀决定窗口类型: TEML-(看盘面板模板), PAGE-(弹出页面/窗口), INDI-(指标图表模板)。双击该池中股票时打开的目标窗口/模板。详见技术文档§4.7b",
+        "pattern": "^(TEML|PAGE|INDI)-.+",
+        "required": false
+      },
+      "sorttype": {
+        "data_type": "int",
+        "ui_component": "number_input",
+        "label": "排序类型",
+        "default": null,
+        "description": "列表排序类型。极少出现，可能用于控制状态池内股票的排序方式",
+        "required": false
+      },
+      "clr": {
+        "data_type": "int",
+        "ui_component": "color",
+        "label": "底色",
+        "default": -1,
+        "description": "状态池底色（Windows GDI整数值）",
+        "applies_to_types": [
+          200
+        ]
+      },
+      "attr": {
+        "data_type": "int",
+        "ui_component": "flag_group",
+        "label": "状态池属性位标志",
+        "default": 0,
+        "description": "状态池功能开关位标志（12位有效位）。各bit含义见bit_fields.200定义",
+        "applies_to_types": [
+          200
+        ]
+      },
+      "tradeattr": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "交易属性",
+        "default": null,
+        "description": "交易属性子元素(JSON字符串)，包含19个交易参数字段：accountno(账户编号), entertradetype(进入交易类型), enterrate(进入费率), enterbuytype(进入买入类型), enterbuyvalue(进入买入值), enterbuypricetype(进入买入价格类型), enterselltype(进入卖出类型), entersellvalue(进入卖出值), entersellpricetype(进入卖出价格类型), leavetradetype(离开交易类型), leaverate(离开费率), leavebuytype(离开买入类型), leavebuyvalue(离开买入值), leavebuypricetype(离开买入价格类型), leaveselltype(离开卖出类型), leavesellvalue(离开卖出值), leavesellpricetype(离开卖出价格类型), buycontrolnbhs(买入控制笔数), buycontrolmbsc(买入控制目标)。tradeattr是enter/exit的扩展版，提供更精细的交易控制",
+        "required": false
+      }
+    },
+    "201": {
+      "inditype": {
+        "data_type": "str",
+        "ui_component": "select",
+        "label": "公式类型",
+        "default": "indi",
+        "description": "公式类型选择。'indi'=技术指标, ''=条件选股, 'trade_sys'=交易系统, 'basic'=基本面, 'dynamic'=动态行情, 'ref'=引用公式",
+        "options": [
+          {
+            "value": "indi",
+            "label": "技术指标"
+          },
+          {
+            "value": "",
+            "label": "条件选股"
+          },
+          {
+            "value": "trade_sys",
+            "label": "交易系统"
+          },
+          {
+            "value": "basic",
+            "label": "基本面"
+          },
+          {
+            "value": "dynamic",
+            "label": "动态行情"
+          },
+          {
+            "value": "ref",
+            "label": "引用公式"
+          }
+        ],
+        "required": false
+      },
+      "crc": {
+        "data_type": "str",
+        "ui_component": "text_readonly",
+        "label": "公式校验和",
+        "default": null,
+        "description": "公式完整性校验和，用于验证公式内容是否被篡改",
+        "readonly": true,
+        "required": false
+      },
+      "indi": {
+        "data_type": "str",
+        "ui_component": "base64_readonly",
+        "label": "公式内容(含分析周期)",
+        "default": null,
+        "description": "✅ 已确认(2026-06-10): Base64编码的公式内容，**内部包含分析周期信息**(14种周期: 1分/5分/15分/30分/60分/日线/周线/月线/多日/季线/半年线/年线/分笔成交/分时线)。变更周期仅改变crc+indi，attr不变。运行时由decode_formula()解码后执行筛选。inditype='indi'时有效。详见技术文档§4.8b",
+        "readonly": true,
+        "required": false
+      },
+      "sorttype": {
+        "data_type": "int",
+        "ui_component": "select",
+        "label": "排序类型",
+        "default": null,
+        "description": "✅ 已确认(2026-06-10): 有符号整数排序参数。正数N=取前N名(升序), 负数-N=取后N名(降序), null/空=不排序(条件筛选模式)。仅在'选择指标排序'模式下有值。详见技术文档§4.8c",
+        "options": [
+          {
+            "value": null,
+            "label": "不排序（条件筛选模式）"
+          },
+          {
+            "value": 1,
+            "label": "前1名"
+          },
+          {
+            "value": 5,
+            "label": "前5名"
+          },
+          {
+            "value": 7,
+            "label": "前7名"
+          },
+          {
+            "value": 10,
+            "label": "前10名"
+          },
+          {
+            "value": 20,
+            "label": "前20名"
+          },
+          {
+            "value": 50,
+            "label": "前50名"
+          },
+          {
+            "value": 100,
+            "label": "前100名"
+          },
+          {
+            "value": 200,
+            "label": "前200名"
+          },
+          {
+            "value": -10,
+            "label": "后10名"
+          },
+          {
+            "value": -20,
+            "label": "后20名"
+          }
+        ],
+        "required": false
+      },
+      "indiparam": {
+        "data_type": "str",
+        "ui_component": "text_readonly",
+        "label": "指标参数",
+        "default": null,
+        "description": "指标参数，格式为括号包裹的逗号分隔值，如'(1,25,100,30,15,30)'，传递给公式执行器",
+        "readonly": true,
+        "required": false
+      },
+      "text": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "条件名称",
+        "default": "",
+        "description": "转移条件名称，通常为空字符串",
+        "applies_to_types": [
+          201
+        ],
+        "required": false
+      },
+      "clr": {
+        "data_type": "int",
+        "ui_component": "color",
+        "label": "颜色",
+        "default": -1,
+        "description": "转移条件颜色。通常-1=不显示/默认",
+        "applies_to_types": [
+          201
+        ]
+      },
+      "attr": {
+        "data_type": "int",
+        "ui_component": "flag_group",
+        "label": "转移选项位标志",
+        "default": 1048576,
+        "description": "✅ 已确认(2026-06-10): 转移条件设置窗口底部三个独立复选框的位域编码(bit19~bit21)。bit19=输出成分股(0x80000), bit20=指标条件(0x100000,indicator_condition), bit21=清空目的状态(0x200000)。三者可任意组合(位或运算)。详见技术文档§4.8a。另有bit9/11/16-18/22等未完全确认位。",
+        "bit_fields": {
+          "19": {
+            "mask": 524288,
+            "label": "输出成分股",
+            "default": false,
+            "description": "当源是板块时输出成分股而非板块本身"
+          },
+          "20": {
+            "mask": 1048576,
+            "label": "指标条件(indicator_condition)",
+            "default": false,
+            "description": "条件类型标志，分发至formula_eval指标模式进行公式求值筛选"
+          },
+          "21": {
+            "mask": 2097152,
+            "label": "转移前先清空目的状态",
+            "default": false,
+            "description": "写入目标池前先清空目标全部内容"
+          }
+        },
+        "applies_to_types": [
+          201
+        ]
+      }
+    },
+    "202": {
+      "attrtext": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "市场选择",
+        "default": null,
+        "description": "市场选择文本，Tab分隔格式：'交易所#市场名'。如'SH#上证A股\\tSZ#深证A股\\tSZ#中小企业\\tSZ#创业板'。运行时由_parse_markets()解析为市场ID列表",
+        "required": false
+      },
+      "reload": {
+        "data_type": "int",
+        "ui_component": "number_input",
+        "label": "重载间隔(秒)",
+        "default": 0,
+        "description": "重新载入间隔(秒)。0=不自动重载，60=每分钟重载",
+        "min": 0,
+        "max": 86400,
+        "required": false
+      },
+      "lastload": {
+        "data_type": "int",
+        "ui_component": "readonly_datetime",
+        "label": "上次加载时间",
+        "default": null,
+        "description": "上次加载时间戳（Unix时间戳），记录备选池最后更新时间",
+        "readonly": true,
+        "required": false
+      },
+      "text": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "显示名称",
+        "default": "",
+        "description": "备选池在画布上显示的名称",
+        "applies_to_types": [
+          202
+        ],
+        "required": false
+      },
+      "clr": {
+        "data_type": "int",
+        "ui_component": "color",
+        "label": "底色",
+        "default": 16777227,
+        "description": "备选池底色。常见值：16777227/16777228/16777225（深蓝黑系系统颜色）",
+        "applies_to_types": [
+          202
+        ]
+      },
+      "attr": {
+        "data_type": "int",
+        "ui_component": "flag_group",
+        "label": "备选池位标志",
+        "default": 128,
+        "description": "备选池位标志。128(0x80)=标准备选池(基本标记), 640(0x280)=显示到总览的备选池, 152(0x98)=带额外样式标记",
+        "applies_to_types": [
+          202
+        ]
+      }
+    },
+    "203": {
+      "hold": {
+        "data_type": "int",
+        "ui_component": "number_input",
+        "label": "保留时长(秒)",
+        "default": null,
+        "description": "股票保留时长(秒)，同type=200。type=203与type=200共享handler(accumulate_state)，通过_is_fallback标记区分",
+        "min": 0,
+        "required": false
+      },
+      "col": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "列显示内容",
+        "default": null,
+        "description": "逗号分隔的列ID列表，同type=200",
+        "required": false
+      },
+      "width": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "列宽(像素)",
+        "default": null,
+        "description": "逗号分隔的列宽值，同type=200",
+        "required": false
+      },
+      "text": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "显示名称",
+        "default": "",
+        "description": "状态池在画布上显示的文字标签，同type=200",
+        "required": false
+      },
+      "wizd": {
+        "data_type": "str",
+        "ui_component": "textarea",
+        "label": "状态说明",
+        "default": null,
+        "description": "状态池的状态说明文字，同type=200",
+        "required": false
+      },
+      "histana": {
+        "data_type": "int",
+        "ui_component": "number_input",
+        "label": "收益分析点数",
+        "default": null,
+        "description": "收益分析历史数据点数，同type=200",
+        "min": 0,
+        "required": false
+      },
+      "stocknum": {
+        "data_type": "int",
+        "ui_component": "number_input",
+        "label": "最大股票数",
+        "default": null,
+        "description": "状态池最大股票数量限制，同type=200",
+        "min": 0,
+        "required": false
+      },
+      "enter": {
+        "data_type": "int",
+        "ui_component": "action_compound",
+        "label": "进入时执行动作",
+        "default": null,
+        "encoding": "[bit31..bit28: 动作类型] [bit27..bit16: 保留(全0)] [bit15..bit0: 参数值]",
+        "description": "股票进入状态池时触发的交易动作，编码规则同type=200",
+        "options": [
+          {
+            "value": "0x0",
+            "label": "无动作"
+          },
+          {
+            "value": "0x1",
+            "label": "买入指定金额"
+          },
+          {
+            "value": "0x2",
+            "label": "买入指定股数"
+          },
+          {
+            "value": "0x3",
+            "label": "卖出股票"
+          }
+        ],
+        "param_bits": "bit15..bit0",
+        "param_example": "10000=0x2710",
+        "required": false
+      },
+      "exit": {
+        "data_type": "int",
+        "ui_component": "action_compound",
+        "label": "离开时执行动作",
+        "default": null,
+        "encoding": "[bit31..bit28: 动作类型] [bit27..bit16: 保留(全0)] [bit15..bit0: 参数值]",
+        "description": "股票离开状态池时触发的交易动作，编码规则同type=200",
+        "options": [
+          {
+            "value": "0x0",
+            "label": "无动作"
+          },
+          {
+            "value": "0x1",
+            "label": "买入指定金额"
+          },
+          {
+            "value": "0x2",
+            "label": "买入指定股数"
+          },
+          {
+            "value": "0x3",
+            "label": "卖出股票"
+          }
+        ],
+        "param_bits": "bit15..bit0",
+        "param_example": "10000=0x2710",
+        "required": false
+      },
+      "deltype": {
+        "data_type": "int",
+        "ui_component": "select",
+        "label": "删除时间单位",
+        "default": 0,
+        "description": "✅ 已确认(2026-06-10): 删除时间单位枚举，同type=200。0=进入N天后(自然日), 1=进入N个交易日后, 2=N小时后, 3=N分钟后, 4=N秒后。hold始终存储为秒数。详见技术文档§4.7a",
+        "options": [
+          {
+            "value": 0,
+            "label": "进入N天后(自然日)"
+          },
+          {
+            "value": 1,
+            "label": "进入N个交易日后"
+          },
+          {
+            "value": 2,
+            "label": "N小时后"
+          },
+          {
+            "value": 3,
+            "label": "N分钟后"
+          },
+          {
+            "value": 4,
+            "label": "N秒后"
+          }
+        ],
+        "min": 0,
+        "max": 4,
+        "required": false
+      },
+      "endtime": {
+        "data_type": "int",
+        "ui_component": "time_input",
+        "label": "指定删除时间",
+        "default": 0,
+        "description": "✅ 已确认(2026-06-10): 绝对时间参数，编码公式 endtime = 3600×HH − 900×MM + SS。仅当delstocktype=1(指定交易时间模式)时有效。0=未设置/默认值。同type=200。详见技术文档§4.7a",
+        "encoding": "endtime = 3600*HH - 900*MM + SS (末2位=秒, 前缀=9*(4H-M))",
+        "min": 0,
+        "required": false,
+        "depends_on": {
+          "field": "delstocktype",
+          "active_when": [
+            1
+          ]
+        }
+      },
+      "delstocktype": {
+        "data_type": "int",
+        "ui_component": "select",
+        "label": "删除时机模式",
+        "default": 0,
+        "description": "✅ 已确认(2026-06-10): 删除时机模式，同type=200。0=相对时间模式(入池后经过hold指定时间自动删除), 1=指定交易时间模式(在每个交易日的endtime指定时刻检查是否满足hold条件)。详见技术文档§4.7a",
+        "options": [
+          {
+            "value": 0,
+            "label": "相对时间(入池后N单位)"
+          },
+          {
+            "value": 1,
+            "label": "指定交易时间(每日某时刻)"
+          }
+        ],
+        "min": 0,
+        "max": 1,
+        "required": false
+      },
+      "staattr": {
+        "data_type": "int",
+        "ui_component": "select",
+        "label": "双击显示模式",
+        "default": null,
+        "description": "✅ 已确认(2026-06-10): 双击显示模式标志，同type=200。0=K线模式(默认/无此属性), 1=分时线模式。当状态池配置'切换到显示=分时线'时出现并设为1。详见技术文档§4.7b",
+        "options": [
+          {
+            "value": null,
+            "label": "K线模式(默认)"
+          },
+          {
+            "value": 1,
+            "label": "分时线模式"
+          }
+        ],
+        "min": 0,
+        "max": 1,
+        "required": false
+      },
+      "tmpl": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "双击目标模板",
+        "default": null,
+        "description": "✅ 已确认(2026-06-10): 双击目标模板，格式TYPE-name，同type=200。TYPE前缀决定窗口类型: TEML-(看盘面板模板), PAGE-(弹出页面/窗口), INDI-(指标图表模板)。双击该池中股票时打开的目标窗口/模板。详见技术文档§4.7b",
+        "pattern": "^(TEML|PAGE|INDI)-.+",
+        "required": false
+      },
+      "sorttype": {
+        "data_type": "int",
+        "ui_component": "number_input",
+        "label": "排序类型",
+        "default": null,
+        "description": "排序类型，同type=200",
+        "required": false
+      },
+      "attrtext": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "属性文本",
+        "default": null,
+        "description": "属性文本，同type=202的attrtext",
+        "required": false
+      },
+      "reload": {
+        "data_type": "int",
+        "ui_component": "number_input",
+        "label": "重载间隔(秒)",
+        "default": null,
+        "description": "重载间隔，同type=202",
+        "min": 0,
+        "required": false
+      },
+      "lastload": {
+        "data_type": "int",
+        "ui_component": "readonly_datetime",
+        "label": "上次加载时间",
+        "default": null,
+        "description": "上次加载时间戳，同type=202",
+        "readonly": true,
+        "required": false
+      },
+      "clr": {
+        "data_type": "int",
+        "ui_component": "color",
+        "label": "底色",
+        "default": -1,
+        "description": "底色，同type=200",
+        "applies_to_types": [
+          203
+        ]
+      },
+      "attr": {
+        "data_type": "int",
+        "ui_component": "flag_group",
+        "label": "状态池属性位标志",
+        "default": 0,
+        "description": "位标志含义与type=200相同。仅3个实例，极少见",
+        "applies_to_types": [
+          203
+        ]
+      },
+      "tradeattr": {
+        "data_type": "str",
+        "ui_component": "text",
+        "label": "交易属性",
+        "default": null,
+        "description": "交易属性子元素，同type=200。含19个交易参数字段",
+        "required": false
+      }
+    }
+  },
+  "flow_fields": {
+    "from": {
+      "data_type": "str",
+      "ui_component": "readonly_text",
+      "label": "源节点ID",
+      "default": null,
+      "description": "源节点ID，对应cell元素的id属性。偶数attr=出流（从源节点流出），奇数=入流（流入目标节点）",
+      "required": true
+    },
+    "to": {
+      "data_type": "str",
+      "ui_component": "readonly_text",
+      "label": "目标节点ID",
+      "default": null,
+      "description": "目标节点ID，对应cell元素的id属性",
+      "required": true
+    },
+    "attr": {
+      "data_type": "int",
+      "ui_component": "flag_group",
+      "label": "流转位标志",
+      "default": 0,
+      "description": "流转位标志，控制股票在节点间的流转行为。奇偶规律：偶数=出流，奇数=入流(出流attr+1)。详见bit_fields.flow定义",
+      "required": false
+    },
+    "begin": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "开始时间类型",
+      "default": 0,
+      "description": "开始时间类型（8种枚举）。决定流转何时开始执行",
+      "options": [
+        {
+          "value": 0,
+          "label": "立即开始"
+        },
+        {
+          "value": 1,
+          "label": "延迟开始"
+        },
+        {
+          "value": 2,
+          "label": "开市前"
+        },
+        {
+          "value": 3,
+          "label": "开市后"
+        },
+        {
+          "value": 4,
+          "label": "收市前"
+        },
+        {
+          "value": 5,
+          "label": "收市后"
+        },
+        {
+          "value": 6,
+          "label": "指定交易日时间"
+        },
+        {
+          "value": 7,
+          "label": "指定时间"
+        }
+      ],
+      "required": false
+    },
+    "begint": {
+      "data_type": "str",
+      "ui_component": "text",
+      "label": "开始时间参数",
+      "default": "0",
+      "description": "开始时间参数。格式取决于begin值：begin=0时不使用, begin=1/2/5时为秒数, begin=3/4/7时为HHMMSS格式(如93000=09:30:00)。BEGINT_HHMMSS_MODES = {3, 4, 7}",
+      "required": false,
+      "depends_on": {
+        "field": "begin",
+        "active_when": [
+          3,
+          4,
+          7
+        ]
+      }
+    },
+    "end": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "持续时长类型",
+      "default": 0,
+      "description": "持续时长类型（3种枚举）。决定流转执行多久后停止",
+      "options": [
+        {
+          "value": 0,
+          "label": "一直执行"
+        },
+        {
+          "value": 1,
+          "label": "执行指定时长"
+        },
+        {
+          "value": 2,
+          "label": "只执行一次"
+        }
+      ],
+      "required": false
+    },
+    "endt": {
+      "data_type": "str",
+      "ui_component": "text",
+      "label": "持续时长参数",
+      "default": "2147483647",
+      "description": "持续时长参数。end=0时不使用(传2147483647=INT_MAX占位), end=1时为秒数(如19800=5.5小时), end=2时不使用",
+      "required": false,
+      "depends_on": {
+        "field": "end",
+        "active_when": [
+          1
+        ]
+      }
+    },
+    "interval": {
+      "data_type": "int",
+      "ui_component": "number_input",
+      "label": "执行间隔(秒)",
+      "default": 60,
+      "description": "执行间隔(秒)，定时器循环执行周期。常用值：5=超高频(金色两点半收盘前), 10=高频, 20=中高频, 30=中频, 60=默认(1分钟), 300=低频(5分钟), 600=极低频(10分钟)",
+      "min": 1,
+      "required": false
+    },
+    "clr": {
+      "data_type": "int",
+      "ui_component": "color",
+      "label": "线条颜色",
+      "default": -1,
+      "description": "流程线颜色（Windows GDI整数值）。-1=默认颜色",
+      "required": false
+    },
+    "mid": {
+      "data_type": "int",
+      "ui_component": "number_input",
+      "label": "线条中点偏移",
+      "default": null,
+      "description": "线条中点偏移(像素)。控制流程线在两个节点之间的弯曲程度和方向：正值=向右弯曲，负值=向左弯曲。常见值：500, -500, 50, -50",
+      "required": false
+    },
+    "count": {
+      "data_type": "int",
+      "ui_component": "readonly_number",
+      "label": "通过股票数",
+      "default": null,
+      "description": "通过此流转的股票数（运行时统计值），只读",
+      "readonly": true,
+      "required": false
+    }
+  },
+  "tdx_node_fields": {
+    "clrtext": {
+      "data_type": "int",
+      "ui_component": "color",
+      "label": "文字颜色(TDX)",
+      "default": 0,
+      "description": "TDX 文字颜色(GDI颜色值)，控制节点文字显示颜色",
+      "required": false
+    },
+    "solid": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "边框样式(TDX)",
+      "default": 0,
+      "description": "TDX 节点边框样式：0=实线, 1=虚线等",
+      "options": [
+        {
+          "value": 0,
+          "label": "实线"
+        },
+        {
+          "value": 1,
+          "label": "虚线"
+        }
+      ],
+      "required": false
+    },
+    "func": {
+      "data_type": "tdx_field_group",
+      "ui_component": "field_group",
+      "label": "转移条件公式(TDX)",
+      "default": null,
+      "description": "TDX 转移条件公式复合字段，包含 nset/ntjindexno/accode/nperiod/nfirst/cfirst/noperate/nsecond/csecond/fsecond/nbeginday/nendday/bnost/bnotp/bnotq/nperiodnum 等子字段。详见 tdx_func_fields 定义",
+      "sub_fields": "tdx_func_fields",
+      "required": false
+    },
+    "spinfo": {
+      "data_type": "tdx_field_group",
+      "ui_component": "field_group",
+      "label": "备选池属性(TDX)",
+      "default": null,
+      "description": "TDX 备选池(spinfo)复合字段，包含备选池相关的子属性配置",
+      "required": false
+    },
+    "stocks": {
+      "data_type": "tdx_field_group",
+      "ui_component": "field_group",
+      "label": "股票列表(TDX)",
+      "default": null,
+      "description": "TDX 股票列表复合字段，包含状态池/备选池中的股票数据子元素",
+      "required": false
+    },
+    "psatt": {
+      "data_type": "tdx_field_group",
+      "ui_component": "field_group",
+      "label": "状态池属性(TDX)",
+      "default": null,
+      "description": "TDX 状态池属性(psatt)复合字段，包含 bdel/ndelnum/ndeltype/baimpool/bsound/nsoundtype/nsyssound/soundfile/btip/bsavetoblock/blockfile/bclearblock/bsavehis 等子字段。详见 tdx_psatt_fields 定义",
+      "sub_fields": "tdx_psatt_fields",
+      "required": false
+    }
+  },
+  "tdx_func_fields": {
+    "nset": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "公式类型",
+      "default": 0,
+      "description": "公式类型路由（V9-R3最终确认6种数据类型范式）：0=技术指标公式(Time Series，完整16字段), 1=条件选股公式(Signal Event，仅需accode+nperiod+nfirst+noperate), 2=专家系统公式(Signal Event，含信号选择器nfirst), 3=最新财务选股(Scalar，仅fsecond+noperate有效), 4=实时行情选股(Scalar，仅fsecond+noperate有效), 5=逻辑运算/集合操作(Set Op，仅noperate有效)。详见残留字段原则：每种nset只读取需要的子字段，其余为残留值应忽略",
+      "options": [
+        {
+          "value": 0,
+          "label": "技术指标公式"
+        },
+        {
+          "value": 1,
+          "label": "条件选股公式"
+        },
+        {
+          "value": 2,
+          "label": "专家系统公式"
+        },
+        {
+          "value": 3,
+          "label": "最新财务选股"
+        },
+        {
+          "value": 4,
+          "label": "实时行情选股"
+        },
+        {
+          "value": 5,
+          "label": "逻辑运算/集合操作"
+        }
+      ],
+      "required": true
+    },
+    "ntjindexno": {
+      "data_type": "int",
+      "ui_component": "number_input",
+      "label": "系统指标编号",
+      "default": 0,
+      "description": "系统指标编号（nset=3时为财务指标0-29，nset=4时为行情字段0-11）。详见tdx_ntjindexno_lookup.json查找表",
+      "required": false,
+      "depends_on": {
+        "field": "nset",
+        "active_when": [
+          3,
+          4
+        ]
+      }
+    },
+    "accode": {
+      "data_type": "str",
+      "ui_component": "text",
+      "label": "指标编码",
+      "default": "",
+      "description": "指标/公式名称（nset=0时为技术指标如'MA'/'MACD'，nset=1时为条件选股公式如'UPN'，nset=2时为专家系统如'MACD'）",
+      "required": false,
+      "depends_on": {
+        "field": "nset",
+        "active_when": [
+          0,
+          1,
+          2
+        ]
+      }
+    },
+    "nperiod": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "分析周期",
+      "default": 4,
+      "description": "分析周期：3=60分钟, 4=日线, 5=周线, 6=月线, 0=分笔, 1=1分钟, 2=5分钟",
+      "options": [
+        {
+          "value": 0,
+          "label": "分笔"
+        },
+        {
+          "value": 1,
+          "label": "1分钟"
+        },
+        {
+          "value": 2,
+          "label": "5分钟"
+        },
+        {
+          "value": 3,
+          "label": "15分钟"
+        },
+        {
+          "value": 4,
+          "label": "日线"
+        },
+        {
+          "value": 5,
+          "label": "周线"
+        },
+        {
+          "value": 6,
+          "label": "月线"
+        }
+      ],
+      "required": false,
+      "depends_on": {
+        "field": "nset",
+        "active_when": [
+          0,
+          1,
+          2
+        ]
+      }
+    },
+    "nfirst": {
+      "data_type": "int",
+      "ui_component": "number_input",
+      "label": "第一参数(整数)",
+      "default": 0,
+      "description": "第一参数整数值。nset=0时为指标参数索引(如MA周期)，nset=1时为公式参数(如连涨N天)，nset=2时为信号选择器(0=任意/1=买入/2=卖出)",
+      "required": false,
+      "depends_on": {
+        "field": "nset",
+        "active_when": [
+          0,
+          1,
+          2
+        ]
+      }
+    },
+    "cfirst": {
+      "data_type": "str",
+      "ui_component": "text",
+      "label": "第一参数(字符串)",
+      "default": "",
+      "description": "第一参数字符串值，如'强势突破'/'VAR1'/'参考价格'/'连续涨停数'",
+      "required": false,
+      "depends_on": {
+        "field": "nset",
+        "active_when": [
+          0
+        ]
+      }
+    },
+    "noperate": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "操作符",
+      "default": 0,
+      "description": "操作符（V9-R3确认：依赖nset数据类型范式，非全局统一枚举）。nset=0(Time Series)全部10项可用: 0=等于, 1=大于, 2=小于, 3=上穿(金叉), 4=下破(死叉), 5=持股, 6=排名前N, 7=排名后N, 8=上拐, 9=下拐。nset=3/4(Scalar)仅标量子集: 0=等于, 1=大于, 2=小于, 4=排名前N, 7=排名后N。nset=1由公式内部定义(常见=9连涨N天)。nset=2: 2=条件交叉(新版), 9=买卖信号(旧版)。nset=5: 0=并集, 1=差集, 2=交集",
+      "options": [
+        {
+          "value": 0,
+          "label": "等于"
+        },
+        {
+          "value": 1,
+          "label": "大于"
+        },
+        {
+          "value": 2,
+          "label": "小于"
+        },
+        {
+          "value": 3,
+          "label": "上穿(金叉)"
+        },
+        {
+          "value": 4,
+          "label": "下破(死叉)"
+        },
+        {
+          "value": 5,
+          "label": "持股"
+        },
+        {
+          "value": 6,
+          "label": "排名前N"
+        },
+        {
+          "value": 7,
+          "label": "排名后N"
+        },
+        {
+          "value": 8,
+          "label": "上拐"
+        },
+        {
+          "value": 9,
+          "label": "下拐"
+        }
+      ],
+      "required": false,
+      "depends_on": {
+        "field": "nset",
+        "active_when": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      }
+    },
+    "nsecond": {
+      "data_type": "int",
+      "ui_component": "number_input",
+      "label": "第二参数(整数)",
+      "default": -1,
+      "description": "第二参数整数值（nset=0时有效），-1=不参与",
+      "required": false,
+      "depends_on": {
+        "field": "nset",
+        "active_when": [
+          0
+        ]
+      }
+    },
+    "csecond": {
+      "data_type": "str",
+      "ui_component": "text",
+      "label": "第二参数(字符串)",
+      "default": "",
+      "description": "第二参数字符串值（nset=0时为第二线条名如'MA3'）",
+      "required": false,
+      "depends_on": {
+        "field": "nset",
+        "active_when": [
+          0
+        ]
+      }
+    },
+    "fsecond": {
+      "data_type": "float",
+      "ui_component": "number_input",
+      "label": "第二参数(浮点)/比较值",
+      "default": 0.0,
+      "description": "浮点比较值。nset=0时为阈值(如上穿目标值)，nset=3/4时为标量比较值（财务数值或行情数值），noperate=4排名时为N名次",
+      "required": false,
+      "depends_on": {
+        "field": "nset",
+        "active_when": [
+          0,
+          3,
+          4
+        ]
+      }
+    },
+    "nbeginday": {
+      "data_type": "int",
+      "ui_component": "number_input",
+      "label": "开始天数",
+      "default": 0,
+      "description": "开始天数偏移（条件时间窗口开始）",
+      "required": false,
+      "depends_on": {
+        "field": "nset",
+        "active_when": [
+          0,
+          1
+        ]
+      }
+    },
+    "nendday": {
+      "data_type": "int",
+      "ui_component": "number_input",
+      "label": "结束天数",
+      "default": 0,
+      "description": "结束天数偏移（条件时间窗口结束，0=当天）",
+      "required": false,
+      "depends_on": {
+        "field": "nset",
+        "active_when": [
+          0,
+          1
+        ]
+      }
+    },
+    "bnost": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "忽略ST",
+      "default": 0,
+      "description": "不包含ST股票：0=包含, 1=排除ST",
+      "options": [
+        {
+          "value": 0,
+          "label": "否"
+        },
+        {
+          "value": 1,
+          "label": "是"
+        }
+      ],
+      "required": false,
+      "depends_on": {
+        "field": "nset",
+        "active_when": [
+          0,
+          1
+        ]
+      }
+    },
+    "bnotp": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "忽略停牌",
+      "default": 0,
+      "description": "不包含停牌股票：0=包含, 1=排除停牌",
+      "options": [
+        {
+          "value": 0,
+          "label": "否"
+        },
+        {
+          "value": 1,
+          "label": "是"
+        }
+      ],
+      "required": false,
+      "depends_on": {
+        "field": "nset",
+        "active_when": [
+          0,
+          1
+        ]
+      }
+    },
+    "bnotq": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "忽略Q项",
+      "default": 0,
+      "description": "不包含某种类型股票",
+      "options": [
+        {
+          "value": 0,
+          "label": "否"
+        },
+        {
+          "value": 1,
+          "label": "是"
+        }
+      ],
+      "required": false,
+      "depends_on": {
+        "field": "nset",
+        "active_when": [
+          0,
+          1
+        ]
+      }
+    },
+    "nperiodnum": {
+      "data_type": "int",
+      "ui_component": "number_input",
+      "label": "周期数量",
+      "default": 0,
+      "description": "周期数量参数（nset=0/1时有效），如持股N天/连涨N周等",
+      "required": false,
+      "depends_on": {
+        "field": "nset",
+        "active_when": [
+          0,
+          1
+        ]
+      }
+    }
+  },
+  "tdx_psatt_fields": {
+    "bdel": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "自动删除旧股票",
+      "default": 0,
+      "description": "是否启用自动删除：1=启用，按ndelnum限制池容量",
+      "options": [
+        {
+          "value": 0,
+          "label": "否"
+        },
+        {
+          "value": 1,
+          "label": "是"
+        }
+      ],
+      "required": false
+    },
+    "ndelnum": {
+      "data_type": "int",
+      "ui_component": "number_input",
+      "label": "保留股票数量上限",
+      "default": 0,
+      "description": "bdel=1时生效，保留股票数量上限",
+      "required": false,
+      "depends_on": {
+        "field": "bdel",
+        "active_when": [
+          1
+        ]
+      }
+    },
+    "ndeltype": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "删除策略",
+      "default": 0,
+      "description": "0=保留最新N只(删最早), 1=删除最后N只, 2=其他策略",
+      "options": [
+        {
+          "value": 0,
+          "label": "保留最新N只"
+        },
+        {
+          "value": 1,
+          "label": "删除最后N只"
+        },
+        {
+          "value": 2,
+          "label": "其他策略"
+        }
+      ],
+      "required": false,
+      "depends_on": {
+        "field": "bdel",
+        "active_when": [
+          1
+        ]
+      }
+    },
+    "baimpool": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "目标池标记",
+      "default": 0,
+      "description": "1=此池为最终目标池（日志标记）",
+      "options": [
+        {
+          "value": 0,
+          "label": "否"
+        },
+        {
+          "value": 1,
+          "label": "是"
+        }
+      ],
+      "required": false
+    },
+    "bsound": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "播放声音",
+      "default": 0,
+      "description": "1=有新股票时播放声音",
+      "options": [
+        {
+          "value": 0,
+          "label": "否"
+        },
+        {
+          "value": 1,
+          "label": "是"
+        }
+      ],
+      "required": false
+    },
+    "nsoundtype": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "声音类型",
+      "default": 0,
+      "description": "0=系统声音, 1=自定义文件",
+      "options": [
+        {
+          "value": 0,
+          "label": "系统声音"
+        },
+        {
+          "value": 1,
+          "label": "自定义文件"
+        }
+      ],
+      "required": false,
+      "depends_on": {
+        "field": "bsound",
+        "active_when": [
+          1
+        ]
+      }
+    },
+    "nsyssound": {
+      "data_type": "int",
+      "ui_component": "number_input",
+      "label": "系统声音编号",
+      "default": 0,
+      "description": "系统声音编号（老版特有）",
+      "required": false,
+      "depends_on": {
+        "field": "nsoundtype",
+        "active_when": [
+          0
+        ]
+      }
+    },
+    "soundfile": {
+      "data_type": "str",
+      "ui_component": "text",
+      "label": "自定义声音文件",
+      "default": "",
+      "description": "自定义声音文件路径（nsoundtype=1时使用）",
+      "required": false,
+      "depends_on": {
+        "field": "nsoundtype",
+        "active_when": [
+          1
+        ]
+      }
+    },
+    "btip": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "弹窗提示",
+      "default": 0,
+      "description": "1=有新股票入池时弹窗",
+      "options": [
+        {
+          "value": 0,
+          "label": "否"
+        },
+        {
+          "value": 1,
+          "label": "是"
+        }
+      ],
+      "required": false
+    },
+    "bsavetoblock": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "保存到板块",
+      "default": 0,
+      "description": "1=自动保存到板块文件",
+      "options": [
+        {
+          "value": 0,
+          "label": "否"
+        },
+        {
+          "value": 1,
+          "label": "是"
+        }
+      ],
+      "required": false
+    },
+    "blockfile": {
+      "data_type": "str",
+      "ui_component": "text",
+      "label": "板块文件名",
+      "default": "",
+      "description": "板块文件名，如'TJQRM'/'3RQS'/'BYGN'",
+      "required": false,
+      "depends_on": {
+        "field": "bsavetoblock",
+        "active_when": [
+          1
+        ]
+      }
+    },
+    "bclearblock": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "清空板块",
+      "default": 0,
+      "description": "1=保存前先清空板块文件",
+      "options": [
+        {
+          "value": 0,
+          "label": "否"
+        },
+        {
+          "value": 1,
+          "label": "是"
+        }
+      ],
+      "required": false,
+      "depends_on": {
+        "field": "bsavetoblock",
+        "active_when": [
+          1
+        ]
+      }
+    },
+    "bsavehis": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "保存历史记录",
+      "default": 0,
+      "description": "1=保存历史入池记录",
+      "options": [
+        {
+          "value": 0,
+          "label": "否"
+        },
+        {
+          "value": 1,
+          "label": "是"
+        }
+      ],
+      "required": false
+    }
+  },
+  "tdx_flow_fields": {
+    "startid": {
+      "data_type": "int",
+      "ui_component": "readonly",
+      "label": "源节点ID",
+      "default": null,
+      "description": "起始cell ID，对应cell元素的id属性",
+      "required": true
+    },
+    "endid": {
+      "data_type": "int",
+      "ui_component": "readonly",
+      "label": "目标节点ID",
+      "default": null,
+      "description": "目标cell ID，对应cell元素的id属性",
+      "required": true
+    },
+    "tran": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "转移模式",
+      "default": 0,
+      "description": "0=copy(保留源池), 1=move(清空源池)",
+      "options": [
+        {
+          "value": 0,
+          "label": "复制(保留源池)"
+        },
+        {
+          "value": 1,
+          "label": "移动(清空源池)"
+        }
+      ],
+      "required": false
+    },
+    "starttype": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "开始类型",
+      "default": 0,
+      "description": "0=立即执行, 2=交易日延迟开始, 3=按jgtime间隔执行",
+      "options": [
+        {
+          "value": 0,
+          "label": "立即执行"
+        },
+        {
+          "value": 2,
+          "label": "交易日延迟"
+        },
+        {
+          "value": 3,
+          "label": "按间隔执行"
+        }
+      ],
+      "required": false
+    },
+    "starttime": {
+      "data_type": "int",
+      "ui_component": "number_input",
+      "label": "开始时间参数",
+      "default": 0,
+      "description": "开始时间参数（配合starttype使用）",
+      "required": false,
+      "depends_on": {
+        "field": "starttype",
+        "active_when": [
+          2,
+          3
+        ]
+      }
+    },
+    "starttimetype": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "时间格式",
+      "default": 0,
+      "description": "0=秒数, 1=HHMMSS",
+      "options": [
+        {
+          "value": 0,
+          "label": "秒数"
+        },
+        {
+          "value": 1,
+          "label": "HHMMSS"
+        }
+      ],
+      "required": false
+    },
+    "starttimehms": {
+      "data_type": "int",
+      "ui_component": "number_input",
+      "label": "HHMMSS时间",
+      "default": 0,
+      "description": "精确时间HHMMSS格式，如140000=14:00:00",
+      "required": false,
+      "depends_on": {
+        "field": "starttimetype",
+        "active_when": [
+          1
+        ]
+      }
+    },
+    "cxtype": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "持续类型",
+      "default": 0,
+      "description": "0=一直执行, 1=持续一定次数/时长",
+      "options": [
+        {
+          "value": 0,
+          "label": "一直执行"
+        },
+        {
+          "value": 1,
+          "label": "持续一定次数/时长"
+        }
+      ],
+      "required": false
+    },
+    "cxtime": {
+      "data_type": "int",
+      "ui_component": "number_input",
+      "label": "持续参数",
+      "default": 0,
+      "description": "持续时长参数，0=无限",
+      "required": false,
+      "depends_on": {
+        "field": "cxtype",
+        "active_when": [
+          1
+        ]
+      }
+    },
+    "cxtimetype": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "持续单位",
+      "default": 0,
+      "description": "0=秒, 1=分钟, 2=次数",
+      "options": [
+        {
+          "value": 0,
+          "label": "秒"
+        },
+        {
+          "value": 1,
+          "label": "分钟"
+        },
+        {
+          "value": 2,
+          "label": "次数"
+        }
+      ],
+      "required": false,
+      "depends_on": {
+        "field": "cxtype",
+        "active_when": [
+          1
+        ]
+      }
+    },
+    "jgtime": {
+      "data_type": "int",
+      "ui_component": "number_input",
+      "label": "间隔时间(秒)",
+      "default": 0,
+      "description": "间隔时间(秒)，0=一次性, 60/600/1800等",
+      "min": 0,
+      "required": false
+    },
+    "emptyps": {
+      "data_type": "int",
+      "ui_component": "select",
+      "label": "空池触发",
+      "default": 0,
+      "description": "0=不触发, 1=源池为空时仍然触发",
+      "options": [
+        {
+          "value": 0,
+          "label": "不触发"
+        },
+        {
+          "value": 1,
+          "label": "空也触发"
+        }
+      ],
+      "required": false
+    },
+    "clr": {
+      "data_type": "int",
+      "ui_component": "color",
+      "label": "线条颜色",
+      "default": 0,
+      "description": "TDX GDI颜色值",
+      "required": false
+    },
+    "size": {
+      "data_type": "int",
+      "ui_component": "number_input",
+      "label": "线宽",
+      "default": 1,
+      "description": "线条宽度：1=默认, 2=加粗",
+      "min": 1,
+      "max": 10,
+      "required": false
+    }
+  },
+  "bit_fields": {
+    "1": {
+      "font_bold": {
+        "bit_position": 0,
+        "mask_hex": "0x1",
+        "parent_field": "attr",
+        "label": "字体加粗/强调",
+        "description": "字体加粗渲染（502/1006样本有此位）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "font_style_1": {
+        "bit_position": 1,
+        "mask_hex": "0x2",
+        "parent_field": "attr",
+        "label": "字体样式1",
+        "description": "字体样式控制位1（386/1006样本）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "font_style_2": {
+        "bit_position": 2,
+        "mask_hex": "0x4",
+        "parent_field": "attr",
+        "label": "字体样式2",
+        "description": "字体样式控制位2（390/1006样本）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "font_style_3": {
+        "bit_position": 3,
+        "mask_hex": "0x8",
+        "parent_field": "attr",
+        "label": "字体样式3",
+        "description": "字体样式控制位3（373/1006样本）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "visible": {
+        "bit_position": 4,
+        "mask_hex": "0x10",
+        "parent_field": "attr",
+        "label": "可见/显示",
+        "description": "元素可见性开关（648/1006样本，绝大多数有此位）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "font_style_4": {
+        "bit_position": 5,
+        "mask_hex": "0x20",
+        "parent_field": "attr",
+        "label": "字体样式4",
+        "description": "字体样式控制位4（214/1006样本）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "font_style_5": {
+        "bit_position": 6,
+        "mask_hex": "0x40",
+        "parent_field": "attr",
+        "label": "字体样式5",
+        "description": "字体样式控制位5（336/1006样本）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "font_style_6": {
+        "bit_position": 7,
+        "mask_hex": "0x80",
+        "parent_field": "attr",
+        "label": "字体样式6",
+        "description": "字体样式控制位6（45/1006样本）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "transparent": {
+        "bit_position": 9,
+        "mask_hex": "0x200",
+        "parent_field": "attr",
+        "label": "空心/透明背景",
+        "description": "空心背景渲染（16/1006样本）",
+        "default": false,
+        "data_type": "bool"
+      }
+    },
+    "2": {
+      "show_overview": {
+        "bit_position": 9,
+        "mask_hex": "0x200",
+        "parent_field": "attr",
+        "label": "显示到股票池总览",
+        "description": "该容器在总览视图中可见（87/417样本）。0=普通容器(背景框)，512(0x200)=显示到总览的容器",
+        "default": false,
+        "data_type": "bool"
+      }
+    },
+    "3": {
+      "show_overview": {
+        "bit_position": 9,
+        "mask_hex": "0x200",
+        "parent_field": "attr",
+        "label": "显示到股票池总览",
+        "description": "该状态列在总览视图中可见（79/354样本）。512=扩展态(最左列亮色强调)",
+        "default": false,
+        "data_type": "bool"
+      }
+    },
+    "4": {
+      "discard_marker": {
+        "bit_position": 7,
+        "mask_hex": "0x80",
+        "parent_field": "attr",
+        "label": "丢弃池标记",
+        "description": "标识为丢弃池控件（71/71全样本）。128(0x80)=标准丢弃池",
+        "default": false,
+        "data_type": "bool"
+      },
+      "show_overview": {
+        "bit_position": 9,
+        "mask_hex": "0x200",
+        "parent_field": "attr",
+        "label": "显示到股票池总览",
+        "description": "在总览视图中渲染（3/71样本）。640(0x280)=显示到总览的丢弃池",
+        "default": false,
+        "data_type": "bool"
+      }
+    },
+    "5": {
+      "show_overview": {
+        "bit_position": 9,
+        "mask_hex": "0x200",
+        "parent_field": "attr",
+        "label": "显示到总览视图",
+        "description": "0=设计视图中的执行顺序标注, 512(0x200)=总览视图中的执行顺序标注（双层显示，7/26样本）",
+        "default": false,
+        "data_type": "bool"
+      }
+    },
+    "200": {
+      "hidden_pool": {
+        "bit_position": 7,
+        "mask_hex": "0x80",
+        "parent_field": "attr",
+        "label": "隐藏池/内部池",
+        "description": "被标记的池不在常规列表中显示（30/2876样本，1.0%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "show_overview_container": {
+        "bit_position": 9,
+        "mask_hex": "0x200",
+        "parent_field": "attr",
+        "label": "显示到总览(容器级)",
+        "description": "type=2容器的总览标记，与其他类型bit9含义一致（220/2876样本）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "no_delete_source": {
+        "bit_position": 12,
+        "mask_hex": "0x1000",
+        "parent_field": "attr",
+        "label": "不删源状态中股票",
+        "description": "流转时保留源池股票，不删除（758/2876样本，26.4%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "clear_dest_first": {
+        "bit_position": 13,
+        "mask_hex": "0x2000",
+        "parent_field": "attr",
+        "label": "先清空目的状态",
+        "description": "写入前先清空目标状态池（18/2876样本，0.6%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "simple_intermediate": {
+        "bit_position": 15,
+        "mask_hex": "0x8000",
+        "parent_field": "attr",
+        "label": "简易中间态",
+        "description": "启用后状态池变为6×6极小节点，仅做中转传递不展示股票列表（597/2876样本，20.8%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "calc_profit_from_prev": {
+        "bit_position": 23,
+        "mask_hex": "0x800000",
+        "parent_field": "attr",
+        "label": "列表基于前一状态计算收益",
+        "description": "列表基于前一状态计算收益+高亮闪烁显示。注意：此位与highlight_flash共用bit23，两者可能共享同一bit或存在双重含义（131/2876样本，4.6%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "highlight_flash": {
+        "bit_position": 23,
+        "mask_hex": "0x800000",
+        "parent_field": "attr",
+        "label": "高亮闪烁",
+        "description": "入池股票列表高亮闪烁显示。注意：此位与calc_profit_from_prev共用bit23。有人把高亮闪烁关联到bit29(0x20000000)，此处保留bit23定义以备与calc_profit_from_prev合用",
+        "default": false,
+        "data_type": "bool"
+      },
+      "alert_popup": {
+        "bit_position": 24,
+        "mask_hex": "0x1000000",
+        "parent_field": "attr",
+        "label": "弹出预警提示",
+        "description": "有新股票入池时弹出预警对话框（358/2876样本，12.4%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "history_track": {
+        "bit_position": 27,
+        "mask_hex": "0x8000000",
+        "parent_field": "attr",
+        "label": "记录历史轨迹",
+        "description": "记录股票进出池的历史轨迹数据（993/2876样本，34.5%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "alert_sound": {
+        "bit_position": 28,
+        "mask_hex": "0x10000000",
+        "parent_field": "attr",
+        "label": "发出预警声",
+        "description": "有新股票入池时播放预警声音（221/2876样本，7.7%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "alert_scroll_window": {
+        "bit_position": 29,
+        "mask_hex": "0x20000000",
+        "parent_field": "attr",
+        "label": "滚动预警窗",
+        "description": "有新股票入池时输出到滚动预警窗口（851/2876样本，29.6%，最高频未知位）。schemas.py中此功能被标注到bit31，此处保留bit29定义",
+        "default": false,
+        "data_type": "bool"
+      },
+      "show_overview": {
+        "bit_position": 30,
+        "mask_hex": "0x40000000",
+        "parent_field": "attr",
+        "label": "显示到股票池总览",
+        "description": "该状态池卡片显示到总览视图（513/2876样本，17.8%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "unknown_f": {
+        "bit_position": 31,
+        "mask_hex": "0x80000000",
+        "parent_field": "attr",
+        "label": "未知标志F",
+        "description": "推断为'可接收上游转移'或'主状态池'标记（309/2876样本，10.7%）。schemas.py中对应alert_scroll_window，cell_type_registry.json中为unknown_f",
+        "default": false,
+        "data_type": "bool"
+      }
+    },
+    "201": {
+      "show_overview": {
+        "bit_position": 9,
+        "mask_hex": "0x200",
+        "parent_field": "attr",
+        "label": "显示到股票池总览",
+        "description": "该条件节点在总览视图中可见（241/2919样本，8.3%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "basic_condition": {
+        "bit_position": 11,
+        "mask_hex": "0x800",
+        "parent_field": "attr",
+        "label": "基本条件",
+        "description": "分发至basic_filter，按PE/PB/ROE等基本面字段筛选（920/2919样本，31.5%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "bit16_reserved": {
+        "bit_position": 16,
+        "mask_hex": "0x10000",
+        "parent_field": "attr",
+        "label": "保留位(bit16)",
+        "description": "极少出现（2/2919样本），用途不明，推测为设计器内部标记",
+        "default": false,
+        "data_type": "bool"
+      },
+      "reverse_transfer": {
+        "bit_position": 18,
+        "mask_hex": "0x40000",
+        "parent_field": "attr",
+        "label": "反向转移",
+        "description": "分发至formula_eval反向模式，筛选后交换passed/rejected（20/2919样本，0.7%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "sector_membership": {
+        "bit_position": 19,
+        "mask_hex": "0x80000",
+        "parent_field": "attr",
+        "label": "板块成员",
+        "description": "分发至sector_filter，筛选特定行业/板块成员（155/2919样本，5.3%）。说明书原文'板块成员转移条件'",
+        "default": false,
+        "data_type": "bool"
+      },
+      "indicator_condition": {
+        "bit_position": 20,
+        "mask_hex": "0x100000",
+        "parent_field": "attr",
+        "label": "指标条件",
+        "description": "分发至formula_eval指标模式，Base64解码公式→eval_indicator→按>0筛选（2243/2919样本，76.8%，最常见）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "ranking_condition": {
+        "bit_position": 21,
+        "mask_hex": "0x200000",
+        "parent_field": "attr",
+        "label": "排序条件",
+        "description": "分发至formula_eval排序模式，按sorttype截取前N名（882/2919样本，30.2%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "cross_section": {
+        "bit_position": 22,
+        "mask_hex": "0x400000",
+        "parent_field": "attr",
+        "label": "横向统计",
+        "description": "分发至cross_section_eval，公式求值→按分数排序→截取top_n（43/2919样本，1.5%）",
+        "default": false,
+        "data_type": "bool"
+      }
+    },
+    "202": {
+      "candidate_marker": {
+        "bit_position": 7,
+        "mask_hex": "0x80",
+        "parent_field": "attr",
+        "label": "备选池基本标记",
+        "description": "标识为备选池控件（307/308全样本）。128(0x80)=标准备选池",
+        "default": false,
+        "data_type": "bool"
+      },
+      "show_overview": {
+        "bit_position": 9,
+        "mask_hex": "0x200",
+        "parent_field": "attr",
+        "label": "显示到股票池总览",
+        "description": "在总览视图中渲染（10/308样本）。640(0x280)=显示到总览的备选池",
+        "default": false,
+        "data_type": "bool"
+      }
+    },
+    "203": {
+      "hidden_pool": {
+        "bit_position": 7,
+        "mask_hex": "0x80",
+        "parent_field": "attr",
+        "label": "隐藏池/内部池",
+        "description": "同type=200的bit7，被标记的池不在常规列表中显示",
+        "default": false,
+        "data_type": "bool"
+      },
+      "show_overview_container": {
+        "bit_position": 9,
+        "mask_hex": "0x200",
+        "parent_field": "attr",
+        "label": "显示到总览(容器级)",
+        "description": "同type=200的bit9",
+        "default": false,
+        "data_type": "bool"
+      },
+      "no_delete_source": {
+        "bit_position": 12,
+        "mask_hex": "0x1000",
+        "parent_field": "attr",
+        "label": "不删源状态中股票",
+        "description": "同type=200",
+        "default": false,
+        "data_type": "bool"
+      },
+      "clear_dest_first": {
+        "bit_position": 13,
+        "mask_hex": "0x2000",
+        "parent_field": "attr",
+        "label": "先清空目的状态",
+        "description": "同type=200",
+        "default": false,
+        "data_type": "bool"
+      },
+      "simple_intermediate": {
+        "bit_position": 15,
+        "mask_hex": "0x8000",
+        "parent_field": "attr",
+        "label": "简易中间态",
+        "description": "同type=200",
+        "default": false,
+        "data_type": "bool"
+      },
+      "calc_profit_from_prev": {
+        "bit_position": 23,
+        "mask_hex": "0x800000",
+        "parent_field": "attr",
+        "label": "列表基于前一状态计算收益",
+        "description": "同type=200",
+        "default": false,
+        "data_type": "bool"
+      },
+      "alert_popup": {
+        "bit_position": 24,
+        "mask_hex": "0x1000000",
+        "parent_field": "attr",
+        "label": "弹出预警提示",
+        "description": "同type=200",
+        "default": false,
+        "data_type": "bool"
+      },
+      "history_track": {
+        "bit_position": 27,
+        "mask_hex": "0x8000000",
+        "parent_field": "attr",
+        "label": "记录历史轨迹",
+        "description": "同type=200",
+        "default": false,
+        "data_type": "bool"
+      },
+      "alert_sound": {
+        "bit_position": 28,
+        "mask_hex": "0x10000000",
+        "parent_field": "attr",
+        "label": "发出预警声",
+        "description": "同type=200",
+        "default": false,
+        "data_type": "bool"
+      },
+      "alert_scroll_window": {
+        "bit_position": 29,
+        "mask_hex": "0x20000000",
+        "parent_field": "attr",
+        "label": "滚动预警窗",
+        "description": "同type=200",
+        "default": false,
+        "data_type": "bool"
+      },
+      "show_overview": {
+        "bit_position": 30,
+        "mask_hex": "0x40000000",
+        "parent_field": "attr",
+        "label": "显示到股票池总览",
+        "description": "同type=200",
+        "default": false,
+        "data_type": "bool"
+      },
+      "unknown_f": {
+        "bit_position": 31,
+        "mask_hex": "0x80000000",
+        "parent_field": "attr",
+        "label": "未知标志F",
+        "description": "同type=200",
+        "default": false,
+        "data_type": "bool"
+      }
+    },
+    "flow": {
+      "delete_source": {
+        "bit_position": 0,
+        "mask_hex": "0x1",
+        "parent_field": "attr",
+        "label": "删除源状态中股票",
+        "description": "满足条件的股票从源池删除。标准移动模式（2916/6315样本，46.2%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "force_move": {
+        "bit_position": 1,
+        "mask_hex": "0x2",
+        "parent_field": "attr",
+        "label": "强制移动",
+        "description": "与bit0组合为0x3时生效，强制覆盖写入忽略限制（7/6315样本，0.1%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "keep_source": {
+        "bit_position": 12,
+        "mask_hex": "0x1000",
+        "parent_field": "attr",
+        "label": "不删源状态中股票",
+        "description": "与bit0互斥，保留源池中的股票。复制模式（441/6315样本，7.0%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "clear_dest_first": {
+        "bit_position": 13,
+        "mask_hex": "0x2000",
+        "parent_field": "attr",
+        "label": "先清空目的状态",
+        "description": "在写入前先清空目标状态池。覆盖模式（604/6315样本，9.6%）",
+        "default": false,
+        "data_type": "bool"
+      },
+      "output_constituent": {
+        "bit_position": 14,
+        "mask_hex": "0x4000",
+        "parent_field": "attr",
+        "label": "输出成份股",
+        "description": "当源为板块时展开为个股输出。说明书原文'输出成份股'（95/6315样本，1.5%）",
+        "default": false,
+        "data_type": "bool"
+      }
+    }
+  },
+  "comp_type_rules": {
+    "description": "组件类型处理规则表：按 comp_type 查表驱动 _resolve_field/apply_change，消除 if/elif 分支。差异显示于表内容（decode_method/empty_mode/apply_mode/copy_to_result 取值不同）",
+    "flag_group": {
+      "decode_method": "decode_attr_flags",
+      "decode_config_args": [
+        "flags"
+      ],
+      "empty_mode": "flags_all_false",
+      "empty_config_args": [
+        "flags"
+      ],
+      "apply_mode": "merge_encode",
+      "apply_decode_method": "decode_attr_flags",
+      "apply_encode_method": "encode_attr_flags",
+      "apply_config_args": [
+        "flags"
+      ],
+      "copy_to_result": {
+        "flags": "flags"
+      }
+    },
+    "action_compound": {
+      "decode_method": "decode_action_compound",
+      "decode_config_args": [],
+      "empty_mode": "literal",
+      "empty_value": {
+        "action_type": 0,
+        "param": 0
+      },
+      "apply_mode": "encode_extract",
+      "apply_encode_method": "encode_action_compound",
+      "apply_extract_keys": [
+        "action_type",
+        "param"
+      ],
+      "copy_to_result": {
+        "action_types": "action_types"
+      }
+    },
+    "default": {
+      "decode_method": null,
+      "empty_mode": "field_default",
+      "apply_mode": "direct_set",
+      "copy_to_result": {}
+    }
+  },
+  "fields": {
+    "version": "1.0",
+    "price_field_priority": [
+      "last_price",
+      "close",
+      "current",
+      "pre_close",
+      "price",
+      "现价",
+      "收盘"
+    ],
+    "tracker_fields": {
+      "entry_price": "entry_price",
+      "exit_price": "current_price",
+      "profit_pct": "profit_pct",
+      "max_profit": "max_profit",
+      "max_drawdown": "max_drawdown",
+      "hold_days": "hold_days"
+    },
+    "bar_data_filter_fields": [
+      "close",
+      "open",
+      "high",
+      "low",
+      "volume",
+      "amount"
+    ]
+  },
+  "column_definitions": {
+    "version": "1.0",
+    "description": "列定义配置表 - 从 cell_type_registry 拆出，增加列宽/对齐/格式化",
+    "columns": [
+      {
+        "col_id": 2,
+        "name": "代码",
+        "key": "code",
+        "width": 55,
+        "align": "left",
+        "format": "text",
+        "sortable": true,
+        "visible": true,
+        "type": "string"
+      },
+      {
+        "col_id": -1,
+        "name": "名称",
+        "key": "name",
+        "width": 55,
+        "align": "left",
+        "format": "text",
+        "sortable": true,
+        "visible": true,
+        "type": "string"
+      },
+      {
+        "col_id": -2,
+        "name": "最新价",
+        "key": "current_price",
+        "width": 48,
+        "align": "right",
+        "format": "price",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": -3,
+        "name": "涨跌幅",
+        "key": "change_pct",
+        "width": 48,
+        "align": "right",
+        "format": "percent",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 7,
+        "name": "涨跌额",
+        "key": "change_amt",
+        "width": 48,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 14,
+        "name": "成交量",
+        "key": "volume",
+        "width": 55,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 8,
+        "name": "成交额",
+        "key": "amount",
+        "width": 55,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 10,
+        "name": "最高价",
+        "key": "high_price",
+        "width": 48,
+        "align": "right",
+        "format": "price",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 17,
+        "name": "最低价",
+        "key": "low_price",
+        "width": 48,
+        "align": "right",
+        "format": "price",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 45,
+        "name": "入池时间",
+        "key": "entry_time",
+        "width": 90,
+        "align": "center",
+        "format": "date",
+        "sortable": true,
+        "visible": true,
+        "type": "date"
+      },
+      {
+        "col_id": 20,
+        "name": "现价",
+        "key": "current_price",
+        "width": 48,
+        "align": "right",
+        "format": "price",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 21,
+        "name": "收益率",
+        "key": "profit_rate",
+        "width": 48,
+        "align": "right",
+        "format": "percent",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 22,
+        "name": "入池价",
+        "key": "entry_price",
+        "width": 48,
+        "align": "right",
+        "format": "price",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 23,
+        "name": "最大收益",
+        "key": "max_profit",
+        "width": 48,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 24,
+        "name": "保留天数",
+        "key": "hold_days",
+        "width": 48,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 25,
+        "name": "振幅",
+        "key": "amplitude",
+        "width": 48,
+        "align": "right",
+        "format": "percent",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 26,
+        "name": "换手率",
+        "key": "turnover_rate",
+        "width": 48,
+        "align": "right",
+        "format": "percent",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 27,
+        "name": "量比",
+        "key": "volume_ratio",
+        "width": 42,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 28,
+        "name": "流通股本",
+        "key": "float_shares",
+        "width": 60,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 29,
+        "name": "总市值",
+        "key": "market_cap",
+        "width": 60,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 30,
+        "name": "市盈率",
+        "key": "pe_ratio",
+        "width": 48,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 31,
+        "name": "市净率",
+        "key": "pb_ratio",
+        "width": 48,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 32,
+        "name": "每股收益",
+        "key": "eps",
+        "width": 48,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 33,
+        "name": "ROE",
+        "key": "roe",
+        "width": 48,
+        "align": "right",
+        "format": "percent",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 1,
+        "name": "序号",
+        "key": "seq",
+        "width": 30,
+        "align": "center",
+        "format": "number",
+        "sortable": false,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 5,
+        "name": "开盘价",
+        "key": "open_price",
+        "width": 48,
+        "align": "right",
+        "format": "price",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 6,
+        "name": "最高价",
+        "key": "high_price",
+        "width": 48,
+        "align": "right",
+        "format": "price",
+        "sortable": true,
+        "visible": false,
+        "type": "number"
+      },
+      {
+        "col_id": -4,
+        "name": "最低价",
+        "key": "low_price",
+        "width": 48,
+        "align": "right",
+        "format": "price",
+        "sortable": true,
+        "visible": false,
+        "type": "number"
+      },
+      {
+        "col_id": -5,
+        "name": "涨跌额",
+        "key": "change_amt",
+        "width": 48,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": false,
+        "type": "number"
+      },
+      {
+        "col_id": -6,
+        "name": "成交量",
+        "key": "volume",
+        "width": 55,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": false,
+        "type": "number"
+      },
+      {
+        "col_id": 101,
+        "name": "DDX飘红",
+        "key": "ddx_red_days",
+        "width": 42,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 108,
+        "name": "量比",
+        "key": "volume_ratio",
+        "width": 42,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": false,
+        "type": "number"
+      },
+      {
+        "col_id": 287,
+        "name": "BBD",
+        "key": "bbd",
+        "width": 42,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 400,
+        "name": "主力净买",
+        "key": "main_inflow",
+        "width": 55,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      },
+      {
+        "col_id": 401,
+        "name": "DDX",
+        "key": "ddx",
+        "width": 42,
+        "align": "right",
+        "format": "number",
+        "sortable": true,
+        "visible": true,
+        "type": "number"
+      }
+    ],
+    "canvas_col_map": {
+      "2": {
+        "name": "现价",
+        "field": "current_price",
+        "w": 48
+      },
+      "-1": {
+        "name": "代码",
+        "field": "code",
+        "w": 55
+      },
+      "-2": {
+        "name": "名称",
+        "field": "name",
+        "w": 55
+      },
+      "-3": {
+        "name": "涨幅",
+        "field": "change_pct",
+        "w": 48,
+        "signed": true
+      },
+      "7": {
+        "name": "涨跌",
+        "field": "change_amt",
+        "w": 48,
+        "signed": true
+      },
+      "14": {
+        "name": "成交额",
+        "field": "amount",
+        "w": 55
+      },
+      "8": {
+        "name": "买入价",
+        "field": "bid_price",
+        "w": 48
+      },
+      "10": {
+        "name": "成交量",
+        "field": "volume",
+        "w": 55
+      },
+      "17": {
+        "name": "换手率",
+        "field": "turnover_rate",
+        "w": 48
+      },
+      "45": {
+        "name": "市盈率",
+        "field": "pe_ratio",
+        "w": 48
+      },
+      "1": {
+        "name": "序号",
+        "field": "seq",
+        "w": 30
+      },
+      "5": {
+        "name": "开盘价",
+        "field": "open_price",
+        "w": 48
+      },
+      "6": {
+        "name": "最高价",
+        "field": "high_price",
+        "w": 48
+      },
+      "-4": {
+        "name": "最低价",
+        "field": "low_price",
+        "w": 48
+      },
+      "24": {
+        "name": "换手率",
+        "field": "turnover_rate",
+        "w": 48
+      },
+      "-5": {
+        "name": "涨跌额",
+        "field": "change_amt",
+        "w": 48,
+        "signed": true
+      },
+      "-6": {
+        "name": "成交量",
+        "field": "volume",
+        "w": 55
+      },
+      "101": {
+        "name": "DDX飘红",
+        "field": "ddx_red_days",
+        "w": 42
+      },
+      "108": {
+        "name": "量比",
+        "field": "volume_ratio",
+        "w": 42
+      },
+      "287": {
+        "name": "BBD",
+        "field": "bbd",
+        "w": 42
+      },
+      "400": {
+        "name": "主力净买",
+        "field": "main_inflow",
+        "w": 55
+      },
+      "401": {
+        "name": "DDX",
+        "field": "ddx",
+        "w": 42
+      }
+    }
+  },
+  "price_fields": {
+    "version": "1.0",
+    "description": "价格字段优先级表：定义从行情数据中提取价格时的字段优先级列表",
+    "priority": [
+      {
+        "field": "last_price",
+        "desc": "最新成交价(实时行情首选)",
+        "source_types": [
+          "snapshot",
+          "tick",
+          "kline"
+        ]
+      },
+      {
+        "field": "close",
+        "desc": "最新K线收盘价(快照缺失时回退)",
+        "source_types": [
+          "kline",
+          "snapshot"
+        ]
+      },
+      {
+        "field": "current",
+        "desc": "当前价(部分数据源字段名)",
+        "source_types": [
+          "snapshot",
+          "tick"
+        ]
+      },
+      {
+        "field": "pre_close",
+        "desc": "昨收价(当无最新价时的近似)",
+        "source_types": [
+          "snapshot",
+          "kline"
+        ]
+      },
+      {
+        "field": "price",
+        "desc": "通用价格字段名",
+        "source_types": [
+          "snapshot",
+          "tick"
+        ]
+      },
+      {
+        "field": "现价",
+        "desc": "中文字段名:现价",
+        "source_types": [
+          "snapshot",
+          "tick"
+        ]
+      },
+      {
+        "field": "收盘",
+        "desc": "中文字段名:收盘价",
+        "source_types": [
+          "kline"
+        ]
+      }
+    ],
+    "resolution_policy": {
+      "desc": "价格解析策略",
+      "strategy": "first_available",
+      "fallback_to_preclose_ratio": 0.999,
+      "min_valid_price": 0.01,
+      "invalid_if_zero": true
+    },
+    "bar_ohlc_priority": {
+      "desc": "K线OHLC价格提取时的字段映射",
+      "open": [
+        "open",
+        "开盘价"
+      ],
+      "high": [
+        "high",
+        "最高价"
+      ],
+      "low": [
+        "low",
+        "最低价"
+      ],
+      "close": [
+        "close",
+        "收盘",
+        "现价",
+        "last_price"
+      ]
+    }
+  },
+  "tdx_field_visibility": {
+    "version": "1.0",
+    "description": "TDX func字段可见性矩阵（V9-R3核心发现）。行=func子字段(16个)，列=nset类型(6种)。值: valid=可用, residual=残留忽略(引擎应安全忽略), na=不存在/无意义",
+    "_legend": {
+      "valid": "✅ 该nset类型下此字段有语义意义，引擎必须读取和处理",
+      "residual": "⚠️ 残留字段 — TDX客户端统一使用16-field func结构，但此nset类型不读取该字段。值为上一次操作的残留，引擎应安全忽略不报错",
+      "na": "❌ 此nset类型下该字段逻辑上不存在"
+    },
+    "matrix": {
+      "nset": {
+        "0": "技术指标公式(Time Series) — 完整16字段全部有效",
+        "1": "条件选股公式(Signal Event) — 仅accode/nperiod/nfirst/noperate有效",
+        "2": "专家系统公式(Signal Event) — 仅accode/nperiod/nfirst(信号选择)/noperate有效",
+        "3": "最新财务选股(Scalar) — 仅ntjindexno/fsecond/noperate有效",
+        "4": "实时行情选股(Scalar) — 仅ntjindexno/fsecond/noperate有效",
+        "5": "逻辑运算/集合操作(Set Op) — 仅noperate有效"
+      },
+      "visibility": {
+        "nset_0": {
+          "nset": "valid",
+          "ntjindexno": "residual",
+          "accode": "valid",
+          "nperiod": "valid",
+          "nfirst": "valid",
+          "cfirst": "valid",
+          "noperate": "valid",
+          "nsecond": "valid",
+          "csecond": "valid",
+          "fsecond": "valid",
+          "nbeginday": "valid",
+          "nendday": "valid",
+          "bnost": "valid",
+          "bnotp": "valid",
+          "bnotq": "valid",
+          "nperiodnum": "valid"
+        },
+        "nset_1": {
+          "nset": "valid",
+          "ntjindexno": "residual",
+          "accode": "valid",
+          "nperiod": "valid",
+          "nfirst": "valid",
+          "cfirst": "residual",
+          "noperate": "valid",
+          "nsecond": "residual",
+          "csecond": "residual",
+          "fsecond": "residual",
+          "nbeginday": "residual",
+          "nendday": "residual",
+          "bnost": "residual",
+          "bnotp": "residual",
+          "bnotq": "residual",
+          "nperiodnum": "residual"
+        },
+        "nset_2": {
+          "nset": "valid",
+          "ntjindexno": "residual",
+          "accode": "valid",
+          "nperiod": "valid",
+          "nfirst": "valid",
+          "cfirst": "residual",
+          "noperate": "valid",
+          "nsecond": "residual",
+          "csecond": "residual",
+          "fsecond": "residual",
+          "nbeginday": "residual",
+          "nendday": "residual",
+          "bnost": "residual",
+          "bnotp": "residual",
+          "bnotq": "residual",
+          "nperiodnum": "residual"
+        },
+        "nset_3": {
+          "nset": "valid",
+          "ntjindexno": "valid",
+          "accode": "residual",
+          "nperiod": "residual",
+          "nfirst": "residual",
+          "cfirst": "residual",
+          "noperate": "valid",
+          "nsecond": "residual",
+          "csecond": "residual",
+          "fsecond": "valid",
+          "nbeginday": "residual",
+          "nendday": "residual",
+          "bnost": "residual",
+          "bnotp": "residual",
+          "bnotq": "residual",
+          "nperiodnum": "residual"
+        },
+        "nset_4": {
+          "nset": "valid",
+          "ntjindexno": "valid",
+          "accode": "residual",
+          "nperiod": "residual",
+          "nfirst": "residual",
+          "cfirst": "residual",
+          "noperate": "valid",
+          "nsecond": "residual",
+          "csecond": "residual",
+          "fsecond": "valid",
+          "nbeginday": "residual",
+          "nendday": "residual",
+          "bnost": "residual",
+          "bnotp": "residual",
+          "bnotq": "residual",
+          "nperiodnum": "residual"
+        },
+        "nset_5": {
+          "nset": "valid",
+          "ntjindexno": "residual",
+          "accode": "residual",
+          "nperiod": "residual",
+          "nfirst": "residual",
+          "cfirst": "residual",
+          "noperate": "valid",
+          "nsecond": "residual",
+          "csecond": "residual",
+          "fsecond": "residual",
+          "nbeginday": "residual",
+          "nendday": "residual",
+          "bnost": "residual",
+          "bnotp": "residual",
+          "bnotq": "residual",
+          "nperiodnum": "residual"
+        }
+      },
+      "noperate_availability": {
+        "nset_0": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ],
+        "nset_1": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ],
+        "nset_2": [
+          2,
+          9
+        ],
+        "nset_3": [
+          0,
+          1,
+          2,
+          4
+        ],
+        "nset_4": [
+          0,
+          1,
+          2,
+          4
+        ],
+        "nset_5": [
+          0,
+          1,
+          2
+        ]
+      },
+      "expert_signal_selector": {
+        "description": "nset=2专家系统公式 nfirst信号选择器映射（来源：4个专家系统XML样本确认）",
+        "mapping": {
+          "0": "任意交易信号",
+          "1": "多头买入信号",
+          "2": "多头卖出信号"
+        }
+      }
+    }
+  },
+  "_convergence": {
+    "merged_from": [
+      "fields.json",
+      "column_definitions.json",
+      "price_fields.json",
+      "tdx_field_visibility.json"
+    ],
+    "target_count": 30
+  }
+}

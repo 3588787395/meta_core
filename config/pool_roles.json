@@ -1,0 +1,105 @@
+{
+  "version": "1.0",
+  "description": "池角色定义表：定义不同节点的角色,用于替代engine中硬编码的baimpool=1判断",
+  "roles": {
+    "target_pool": {
+      "role_id": "target_pool",
+      "name": "目标池",
+      "baimpool_value": 1,
+      "is_target": true,
+      "is_sink": false,
+      "generate_buy_signal": true,
+      "generate_sell_on_exit": true,
+      "desc": "核心目标池,股票进入时生成BUY信号,离开时生成SELL信号",
+      "priority": 1
+    },
+    "candidate_pool": {
+      "role_id": "candidate_pool",
+      "name": "备选池",
+      "baimpool_value": null,
+      "is_target": false,
+      "is_sink": false,
+      "generate_buy_signal": false,
+      "generate_sell_on_exit": false,
+      "desc": "候选股票池,仅作为中转或观察,不生成交易信号",
+      "priority": 5
+    },
+    "sink_pool": {
+      "role_id": "sink_pool",
+      "name": "废弃池",
+      "baimpool_value": null,
+      "is_target": false,
+      "is_sink": true,
+      "generate_buy_signal": false,
+      "generate_sell_on_exit": false,
+      "desc": "废弃/丢弃池,进入此池的股票不再跟踪,可被清理",
+      "priority": 99
+    },
+    "transfer_condition": {
+      "role_id": "transfer_condition",
+      "name": "转移条件节点",
+      "baimpool_value": null,
+      "is_target": false,
+      "is_sink": false,
+      "generate_buy_signal": false,
+      "generate_sell_on_exit": false,
+      "desc": "流转条件判断节点,非实际持仓池",
+      "priority": 10
+    },
+    "market_source": {
+      "role_id": "market_source",
+      "name": "市场源",
+      "baimpool_value": null,
+      "is_target": false,
+      "is_sink": false,
+      "generate_buy_signal": false,
+      "generate_sell_on_exit": false,
+      "desc": "市场数据源节点,提供候选股票列表",
+      "priority": 20
+    },
+    "discard_pool": {
+      "role_id": "discard_pool",
+      "name": "丢弃池",
+      "baimpool_value": null,
+      "is_target": false,
+      "is_sink": true,
+      "generate_buy_signal": false,
+      "generate_sell_on_exit": false,
+      "desc": "不满足条件的股票移入此池,同sink_pool",
+      "priority": 99
+    }
+  },
+  "role_resolution": {
+    "desc": "角色解析规则:运行时如何确定节点角色",
+    "rules": [
+      {
+        "priority": 1,
+        "handler": "check_baimpool",
+        "params": {"value": 1},
+        "role": "target_pool",
+        "desc": "baimpool=1的节点为目标池"
+      },
+      {
+        "priority": 2,
+        "handler": "check_node_type",
+        "params": {"type": "market_source"},
+        "role": "market_source",
+        "desc": "市场源类型节点"
+      },
+      {
+        "priority": 3,
+        "handler": "check_node_type",
+        "params": {"type": "transfer_condition"},
+        "role": "transfer_condition",
+        "desc": "转移条件类型节点"
+      },
+      {
+        "priority": 99,
+        "handler": "default",
+        "role": "candidate_pool",
+        "desc": "默认归为备选池"
+      }
+    ],
+    "override_key": "node.config.pool_role"
+  }
+}

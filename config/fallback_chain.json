@@ -1,0 +1,86 @@
+{
+  "version": 2,
+  "chains": {
+    "formula_eval": {
+      "description": "公式评估降级链：tq 可用走真实评估，否则按 bar_data 过滤；失败时显式返回错误，禁止 pass_through 静默放行",
+      "chain": [
+        {"condition": "tq_available", "handler": "_eval_real"},
+        {"condition": "bar_data_available", "handler": "_filter_by_bar_data"}
+      ],
+      "on_exhaustion": "raise_error",
+      "on_exhaustion_message": "所有降级路径均不可用，显式失败（禁止 pass_through 静默放行）"
+    },
+    "cross_section_eval": {
+      "description": "横截面评估降级链：tq 可用走真实评估，否则按 bar_data 过滤；失败时显式返回错误，禁止 pass_through 静默放行",
+      "chain": [
+        {"condition": "tq_available", "handler": "_eval_real"},
+        {"condition": "bar_data_available", "handler": "_filter_by_bar_data"}
+      ],
+      "on_exhaustion": "raise_error",
+      "on_exhaustion_message": "所有降级路径均不可用，显式失败（禁止 pass_through 静默放行）"
+    },
+    "basic_filter": {
+      "description": "基本面过滤降级链：tq 可用走真实评估；失败时显式返回错误，禁止 pass_through 静默放行",
+      "chain": [
+        {"condition": "tq_available", "handler": "_eval_real"}
+      ],
+      "on_exhaustion": "raise_error",
+      "on_exhaustion_message": "所有降级路径均不可用，显式失败（禁止 pass_through 静默放行）"
+    },
+    "sector_filter": {
+      "description": "板块过滤降级链：tq 可用走真实评估；失败时显式返回错误，禁止 pass_through 静默放行",
+      "chain": [
+        {"condition": "tq_available", "handler": "_eval_real"}
+      ],
+      "on_exhaustion": "raise_error",
+      "on_exhaustion_message": "所有降级路径均不可用，显式失败（禁止 pass_through 静默放行）"
+    },
+    "condition_dispatcher": {
+      "description": "条件分发器降级链：tq 可用走真实评估，否则按 bar_data 过滤；失败时显式返回错误，禁止 pass_through 静默放行",
+      "chain": [
+        {"condition": "tq_available", "handler": "_eval_real"},
+        {"condition": "bar_data_available", "handler": "_filter_by_bar_data"}
+      ],
+      "on_exhaustion": "raise_error",
+      "on_exhaustion_message": "所有降级路径均不可用，显式失败（禁止 pass_through 静默放行）"
+    },
+    "dzh_condition_pool": {
+      "description": "DZH 条件池降级链：tq 可用走真实评估，否则按 bar_data 过滤；失败时显式返回错误，禁止 pass_through 静默放行",
+      "chain": [
+        {"condition": "tq_available", "handler": "_eval_real"},
+        {"condition": "bar_data_available", "handler": "_filter_by_bar_data"}
+      ],
+      "on_exhaustion": "raise_error",
+      "on_exhaustion_message": "所有降级路径均不可用，显式失败（禁止 pass_through 静默放行）"
+    },
+    "nset3_financial_scalar": {
+      "description": "nset3 财务标量降级链：tq 可用走真实评估，否则按 bar_data 过滤；失败时显式返回错误，禁止 pass_through 静默放行",
+      "chain": [
+        {"condition": "tq_available", "handler": "_eval_real"},
+        {"condition": "bar_data_available", "handler": "_filter_by_bar_data"}
+      ],
+      "on_exhaustion": "raise_error",
+      "on_exhaustion_message": "所有降级路径均不可用，显式失败（禁止 pass_through 静默放行）"
+    },
+    "nset4_market_scalar": {
+      "description": "nset4 行情标量降级链：tq 可用走真实评估，否则按 bar_data 过滤；失败时显式返回错误，禁止 pass_through 静默放行",
+      "chain": [
+        {"condition": "tq_available", "handler": "_eval_real"},
+        {"condition": "bar_data_available", "handler": "_filter_by_bar_data"}
+      ],
+      "on_exhaustion": "raise_error",
+      "on_exhaustion_message": "所有降级路径均不可用，显式失败（禁止 pass_through 静默放行）"
+    },
+    "nset5_set_operation": [
+      {"condition": "always", "handler": "_eval_real"}
+    ],
+    "formula_eval_inner_fallback": {
+      "description": "公式评估内联回退子链：FormulaRouter 失败/不可用/无有效结果时按 bar_data 过滤；bar_data 缺失时透传（与内联 _filter_by_bar_data 语义一致）",
+      "chain": [
+        {"condition": "bar_data_available", "handler": "_filter_by_bar_data"}
+      ],
+      "on_exhaustion": "pass_through",
+      "on_exhaustion_message": "bar_data 不可用，透传原 stock_list（I33：收敛 transfer_condition_check 4 处内联回退）"
+    }
+  }
+}

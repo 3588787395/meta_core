@@ -1,0 +1,2845 @@
+{
+  "version": "1.0",
+  "dispatch_rules": {
+    "INDICATOR": {
+      "condition_type": "INDICATOR",
+      "bit_mask": "0x100000",
+      "bit": 20,
+      "gateway": "formula_eval",
+      "name": "指标条件",
+      "required_fields": [],
+      "extra": {
+        "mode": "indi"
+      }
+    },
+    "RANKING": {
+      "condition_type": "RANKING",
+      "bit_mask": "0x200000",
+      "bit": 21,
+      "gateway": "formula_eval",
+      "name": "排序条件",
+      "required_fields": [],
+      "extra": {
+        "mode": "rank"
+      }
+    },
+    "SECTOR_MEMBERSHIP": {
+      "condition_type": "SECTOR_MEMBERSHIP",
+      "bit_mask": "0x80000",
+      "bit": 19,
+      "gateway": "sector_filter",
+      "name": "板块成员",
+      "required_fields": [],
+      "extra": {
+        "mode": "filter"
+      }
+    },
+    "REVERSE_TRANSFER": {
+      "condition_type": "REVERSE_TRANSFER",
+      "bit_mask": "0x40000",
+      "bit": 18,
+      "gateway": "formula_eval",
+      "name": "反向转移",
+      "required_fields": [],
+      "extra": {
+        "mode": "reverse"
+      }
+    },
+    "CROSS_SECTION": {
+      "condition_type": "CROSS_SECTION",
+      "bit_mask": "0x400000",
+      "bit": 22,
+      "gateway": "cross_section_eval",
+      "name": "横向统计",
+      "required_fields": [],
+      "extra": {
+        "mode": "cross_section"
+      }
+    },
+    "BASIC_CONDITION": {
+      "condition_type": "BASIC_CONDITION",
+      "bit_mask": "0x800",
+      "bit": 11,
+      "gateway": "basic_filter",
+      "name": "基本条件",
+      "required_fields": [],
+      "extra": {
+        "mode": "basic"
+      }
+    },
+    "PASSTHROUGH": {
+      "condition_type": "PASSTHROUGH",
+      "bit_mask": null,
+      "bit": null,
+      "gateway": "pass_through",
+      "name": "无条件直通",
+      "required_fields": [],
+      "extra": {
+        "mode": "passthrough"
+      }
+    },
+    "FORMULA": {
+      "condition_type": "FORMULA",
+      "bit_mask": null,
+      "bit": null,
+      "gateway": "formula_eval",
+      "name": "公式类型条件",
+      "required_fields": [
+        "formula_name",
+        "formula_arg"
+      ],
+      "extra": {
+        "return_count": 1,
+        "xsflag": 6
+      }
+    },
+    "TDX_INDICATOR": {
+      "condition_type": "TDX_INDICATOR",
+      "bit_mask": null,
+      "bit": null,
+      "gateway": "tdx_eval_nset0",
+      "name": "TDX技术指标条件(nset=0)",
+      "required_fields": [
+        "nset",
+        "accode",
+        "noperate"
+      ],
+      "extra": {
+        "nset": 0,
+        "data_paradigm": "time_series"
+      }
+    },
+    "TDX_CONDITION_FORMULA": {
+      "condition_type": "TDX_CONDITION_FORMULA",
+      "bit_mask": null,
+      "bit": null,
+      "gateway": "tdx_eval_nset1",
+      "name": "TDX条件选股公式(nset=1)",
+      "required_fields": [
+        "nset",
+        "accode",
+        "noperate"
+      ],
+      "extra": {
+        "nset": 1,
+        "data_paradigm": "signal_event"
+      }
+    },
+    "TDX_EXPERT_SYSTEM": {
+      "condition_type": "TDX_EXPERT_SYSTEM",
+      "bit_mask": null,
+      "bit": null,
+      "gateway": "tdx_eval_nset2",
+      "name": "TDX专家系统公式(nset=2)",
+      "required_fields": [
+        "nset",
+        "accode",
+        "nfirst",
+        "noperate"
+      ],
+      "extra": {
+        "nset": 2,
+        "data_paradigm": "signal_event"
+      }
+    },
+    "TDX_FINANCIAL": {
+      "condition_type": "TDX_FINANCIAL",
+      "bit_mask": null,
+      "bit": null,
+      "gateway": "tdx_eval_nset3",
+      "name": "TDX最新财务选股(nset=3)",
+      "required_fields": [
+        "nset",
+        "ntjindexno",
+        "noperate",
+        "fsecond"
+      ],
+      "extra": {
+        "nset": 3,
+        "data_paradigm": "scalar"
+      }
+    },
+    "TDX_MARKET": {
+      "condition_type": "TDX_MARKET",
+      "bit_mask": null,
+      "bit": null,
+      "gateway": "tdx_eval_nset4",
+      "name": "TDX实时行情选股(nset=4)",
+      "required_fields": [
+        "nset",
+        "ntjindexno",
+        "noperate",
+        "fsecond"
+      ],
+      "extra": {
+        "nset": 4,
+        "data_paradigm": "scalar"
+      }
+    },
+    "TDX_SETOP": {
+      "condition_type": "TDX_SETOP",
+      "bit_mask": null,
+      "bit": null,
+      "gateway": "tdx_eval_nset5",
+      "name": "TDX集合运算(nset=5)",
+      "required_fields": [
+        "nset",
+        "noperate"
+      ],
+      "extra": {
+        "nset": 5,
+        "data_paradigm": "set_operation"
+      }
+    }
+  },
+  "nset_dispatch": {
+    "0": {
+      "dispatch_key": "TDX_INDICATOR",
+      "evaluator": "eval_formula_nset",
+      "nset": 0,
+      "build_formula_arg": true,
+      "rank_mode_unsupported": true
+    },
+    "1": {
+      "dispatch_key": "TDX_CONDITION_FORMULA",
+      "evaluator": "eval_formula_nset",
+      "nset": 1,
+      "build_formula_arg": false,
+      "rank_mode_unsupported": false
+    },
+    "2": {
+      "dispatch_key": "TDX_EXPERT_SYSTEM",
+      "evaluator": "eval_formula_nset",
+      "nset": 2,
+      "build_formula_arg": false,
+      "rank_mode_unsupported": false
+    },
+    "3": {
+      "dispatch_key": "TDX_FINANCIAL",
+      "evaluator": "eval_scalar_nset",
+      "nset": 3,
+      "field_table": "nset_3_financial",
+      "data_method": "get_financial_scalars_batch",
+      "supports_derived": false,
+      "supports_bar_fallback": false,
+      "apply_field_map": true
+    },
+    "4": {
+      "dispatch_key": "TDX_MARKET",
+      "evaluator": "eval_scalar_nset",
+      "nset": 4,
+      "field_table": "nset_4_market",
+      "data_method": "get_market_scalars_batch",
+      "supports_derived": true,
+      "supports_bar_fallback": true
+    },
+    "5": {
+      "dispatch_key": "TDX_SETOP",
+      "evaluator": "eval_nset5_set_operation",
+      "bypass_eval_tdx_condition": true,
+      "direct_handler": "eval_nset5_set_operation"
+    }
+  },
+  "evaluator_dispatch": {
+    "TDX_INDICATOR": "eval_formula_nset",
+    "TDX_CONDITION_FORMULA": "eval_formula_nset",
+    "TDX_EXPERT_SYSTEM": "eval_formula_nset",
+    "TDX_FINANCIAL": "eval_scalar_nset",
+    "TDX_MARKET": "eval_scalar_nset",
+    "TDX_SETOP": "eval_nset5_set_operation"
+  },
+  "attr_dispatch": {
+    "indicator_condition": {
+      "bit_mask": "0x0001",
+      "description": "指标条件"
+    },
+    "basic_condition": {
+      "bit_mask": "0x0002",
+      "description": "基础条件"
+    },
+    "ranking_condition": {
+      "bit_mask": "0x0004",
+      "description": "排名条件"
+    },
+    "reverse_transfer": {
+      "bit_mask": "0x0008",
+      "description": "反向转移"
+    },
+    "cross_section": {
+      "bit_mask": "0x0010",
+      "description": "截面条件"
+    }
+  },
+  "tdx_system_indicators": {
+    "version": "1.1",
+    "description": "TDX 系统指标编号到可评估逻辑的映射表（表驱动：eval_rule + mock_pass_threshold + formula_logic + sort_field）",
+    "records": [
+      {
+        "ntjindexno": 0,
+        "name": "占位/无指标",
+        "handler_type": "pass",
+        "category": "system",
+        "description": "占位/无指标",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 1,
+        "name": "占位/无指标",
+        "handler_type": "pass",
+        "category": "system",
+        "description": "占位/无指标",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 2,
+        "name": "占位/无指标",
+        "handler_type": "pass",
+        "category": "system",
+        "description": "占位/无指标",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 6,
+        "name": "日线排序",
+        "handler_type": "pass",
+        "category": "system",
+        "description": "日线排序",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 7,
+        "name": "涨幅排序",
+        "handler_type": "sort",
+        "category": "system",
+        "description": "涨幅排序",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40,
+        "sort_field": "change_pct"
+      },
+      {
+        "ntjindexno": 11,
+        "name": "量比排序",
+        "handler_type": "sort",
+        "category": "system",
+        "description": "量比排序",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40,
+        "sort_field": "volume_ratio"
+      },
+      {
+        "ntjindexno": 106,
+        "name": "粘合",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-粘合",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 107,
+        "name": "牛股/牛启动",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-牛股/牛启动",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 35,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 110,
+        "name": "资金龙头",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-资金龙头",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 35,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 111,
+        "name": "龙头首板",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-龙头首板",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "kdj"
+        ]
+      },
+      {
+        "ntjindexno": 113,
+        "name": "止盈/止损",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-止盈/止损",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "rsi_oversold"
+        ]
+      },
+      {
+        "ntjindexno": 122,
+        "name": "反弹信号",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-反弹信号",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "kdj"
+        ]
+      },
+      {
+        "ntjindexno": 125,
+        "name": "火箭发射/买入信号",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-火箭发射/买入信号",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 35,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 133,
+        "name": "主力控盘",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-主力控盘",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 35,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 135,
+        "name": "120日内新高",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-120日内新高",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 136,
+        "name": "趋势下跌",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-趋势下跌",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": "<",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 45,
+        "formula_logic": [
+          "rsi_down"
+        ]
+      },
+      {
+        "ntjindexno": 137,
+        "name": "趋势上修",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-趋势上修",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 138,
+        "name": "强牛奔腾",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-强牛奔腾",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 35,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 139,
+        "name": "趋势上修2",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-趋势上修2",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 140,
+        "name": "追强",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-追强",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "rsi_overbought"
+        ]
+      },
+      {
+        "ntjindexno": 141,
+        "name": "趋势金步/B点信号",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-趋势金步/B点信号",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 142,
+        "name": "强牛回头",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-强牛回头",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "kdj"
+        ]
+      },
+      {
+        "ntjindexno": 149,
+        "name": "主力筑底",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "黑马系列-主力筑底",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 150,
+        "name": "昨日涨停",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "盘后/看盘快照指标-昨日涨停",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">=",
+          "threshold": 9.5
+        },
+        "mock_pass_threshold": 5,
+        "formula_logic": [
+          "kdj"
+        ]
+      },
+      {
+        "ntjindexno": 193,
+        "name": "DDE排名",
+        "handler_type": "sort",
+        "category": "system",
+        "description": "盘后/看盘快照指标-DDE排名",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 207,
+        "name": "龙头股/强势股",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "盘后/看盘快照指标-龙头股/强势股",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 35,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 209,
+        "name": "最高换手",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "盘后/看盘快照指标-最高换手",
+        "params": [],
+        "eval_rule": {
+          "field": "volume_ratio",
+          "op": ">",
+          "threshold": 1.5
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 211,
+        "name": "探底回升",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "盘后/看盘快照指标-探底回升",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "kdj",
+          "rsi_oversold"
+        ]
+      },
+      {
+        "ntjindexno": 212,
+        "name": "连涨3天",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "盘后/看盘快照指标-连涨3天",
+        "params": [],
+        "eval_rule": {
+          "check": "consecutive_rises",
+          "days_field": "nperiodnum",
+          "default_days": 3
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 213,
+        "name": "连涨5天",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "盘后/看盘快照指标-连涨5天",
+        "params": [],
+        "eval_rule": {
+          "check": "consecutive_rises",
+          "days_field": "nperiodnum",
+          "default_days": 5
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 214,
+        "name": "强势新高",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "盘后/看盘快照指标-强势新高",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 217,
+        "name": "获利超8",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "盘后/看盘快照指标-获利超8",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 219,
+        "name": "突破年线",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "盘后/看盘快照指标-突破年线",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 239,
+        "name": "龙头股(自定义)",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "大路终结池指标-龙头股(自定义)",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 250,
+        "name": "小品2_1/去ST小盘",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "大路终结池指标-小品2_1/去ST小盘",
+        "params": [],
+        "eval_rule": {
+          "check": "not_st"
+        },
+        "mock_pass_threshold": 85,
+        "formula_logic": [
+          "kdj"
+        ]
+      },
+      {
+        "ntjindexno": 251,
+        "name": "小品2_3/趋势",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "大路终结池指标-小品2_3/趋势",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "rsi_down"
+        ]
+      },
+      {
+        "ntjindexno": 253,
+        "name": "小品2_5/板块指数",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "大路终结池指标-小品2_5/板块指数",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 254,
+        "name": "小品2_7/牛股路径",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "大路终结池指标-小品2_7/牛股路径",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 255,
+        "name": "小品2_8/牛股出口",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "大路终结池指标-小品2_8/牛股出口",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 256,
+        "name": "涨跌家数",
+        "handler_type": "pass",
+        "category": "system",
+        "description": "大路终结池指标-涨跌家数",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 257,
+        "name": "去ST/日内突破",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "大路终结池指标-去ST/日内突破",
+        "params": [],
+        "eval_rule": {
+          "check": "not_st"
+        },
+        "mock_pass_threshold": 85,
+        "formula_logic": [
+          "kdj"
+        ]
+      },
+      {
+        "ntjindexno": 258,
+        "name": "小品2_9/趋势判断",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "大路终结池指标-小品2_9/趋势判断",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "rsi_down"
+        ]
+      },
+      {
+        "ntjindexno": 259,
+        "name": "小品2_10/60分钟",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "大路终结池指标-小品2_10/60分钟",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 260,
+        "name": "小品2_11/桃花依旧",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "大路终结池指标-小品2_11/桃花依旧",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 261,
+        "name": "小品2_12/60分钟2",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "大路终结池指标-小品2_12/60分钟2",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 262,
+        "name": "小品2_13/牛股延续",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "大路终结池指标-小品2_13/牛股延续",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 263,
+        "name": "小品2_6/中军参考",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "大路终结池指标-小品2_6/中军参考",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 264,
+        "name": "牛牛/热点板块",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "大路终结池指标-牛牛/热点板块",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 278,
+        "name": "短线首板",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "自定义公式指标-短线首板",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">=",
+          "threshold": 9.5
+        },
+        "mock_pass_threshold": 5,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 306,
+        "name": "日内突破(自定义)",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "自定义公式指标-日内突破(自定义)",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 360,
+        "name": "日内突破(周线)",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "自定义公式指标-日内突破(周线)",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 424,
+        "name": "热点板块",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "自定义公式指标-热点板块",
+        "params": [],
+        "eval_rule": {
+          "field": "change_pct",
+          "op": ">",
+          "threshold": 0
+        },
+        "mock_pass_threshold": 40,
+        "formula_logic": [
+          "macd"
+        ]
+      },
+      {
+        "ntjindexno": 549,
+        "name": "KK",
+        "handler_type": "pass",
+        "category": "system",
+        "description": "自定义公式指标-KK",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 552,
+        "name": "行业均值",
+        "handler_type": "sort",
+        "category": "system",
+        "description": "自定义公式指标-行业均值",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 553,
+        "name": "榜一成分",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "自定义公式指标-榜一成分",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 554,
+        "name": "榜二成分",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "自定义公式指标-榜二成分",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 555,
+        "name": "榜三成分",
+        "handler_type": "condition",
+        "category": "system",
+        "description": "自定义公式指标-榜三成分",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 556,
+        "name": "二日均价",
+        "handler_type": "pass",
+        "category": "system",
+        "description": "自定义公式指标-二日均价",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 557,
+        "name": "价量涨速",
+        "handler_type": "pass",
+        "category": "system",
+        "description": "自定义公式指标-价量涨速",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 558,
+        "name": "板块异动",
+        "handler_type": "pass",
+        "category": "system",
+        "description": "自定义公式指标-板块异动",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 598,
+        "name": "ZDRG",
+        "handler_type": "pass",
+        "category": "system",
+        "description": "自定义公式指标-ZDRG",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      },
+      {
+        "ntjindexno": 599,
+        "name": "新板块",
+        "handler_type": "pass",
+        "category": "system",
+        "description": "自定义公式指标-新板块",
+        "params": [],
+        "eval_rule": {
+          "check": "pass_through"
+        },
+        "mock_pass_threshold": 40
+      }
+    ],
+    "handler_strategies": {
+      "pass": {
+        "strategy": "direct_pass"
+      },
+      "sort": {
+        "strategy": "rank",
+        "order": "desc"
+      },
+      "condition": {
+        "strategy": "eval_rule"
+      }
+    },
+    "eval_rules": {
+      "macd": {
+        "eval_method": "cross",
+        "params": {
+          "line_a": "DIF",
+          "line_b": "DEA",
+          "cross_type": "golden"
+        }
+      },
+      "kdj": {
+        "eval_method": "cross_and_threshold",
+        "params": {
+          "line_a": "K",
+          "line_b": "D",
+          "cross_type": "golden",
+          "indicator_key": "K",
+          "threshold": 20,
+          "compare": "less"
+        }
+      },
+      "rsi_oversold": {
+        "eval_method": "threshold",
+        "params": {
+          "indicator_key": "RSI1",
+          "threshold": 30,
+          "compare": "less"
+        }
+      },
+      "rsi_overbought": {
+        "eval_method": "threshold",
+        "params": {
+          "indicator_key": "RSI1",
+          "threshold": 70,
+          "compare": "greater"
+        }
+      },
+      "rsi_down": {
+        "eval_method": "threshold",
+        "params": {
+          "indicator_key": "RSI1",
+          "threshold": 40,
+          "compare": "less"
+        }
+      },
+      "boll": {
+        "eval_method": "threshold",
+        "params": {
+          "indicator_key": "BOLL",
+          "threshold": 0,
+          "compare": "greater"
+        }
+      }
+    },
+    "cross_rules": {
+      "golden": {
+        "prev_cmp": "lt",
+        "curr_cmp": "gte"
+      },
+      "death": {
+        "prev_cmp": "gt",
+        "curr_cmp": "lte"
+      }
+    },
+    "formula_name_logic": {
+      "MACD": "macd",
+      "KDJ": "kdj",
+      "RSI": "rsi_oversold",
+      "BOLL": "boll"
+    },
+    "logic_priority": [
+      "macd",
+      "kdj",
+      "rsi_oversold",
+      "rsi_overbought",
+      "rsi_down",
+      "boll"
+    ]
+  },
+  "tdx_indicators": {
+    "version": "1.0",
+    "description": "TDX系统指标编号配置表",
+    "indicators": [
+      {
+        "value": 6,
+        "label": "6 - 日线排序"
+      },
+      {
+        "value": 7,
+        "label": "7 - 涨幅排序"
+      },
+      {
+        "value": 11,
+        "label": "11 - 量比排序"
+      },
+      {
+        "value": 106,
+        "label": "106 - 粘合"
+      },
+      {
+        "value": 107,
+        "label": "107 - 牛股/牛启动"
+      },
+      {
+        "value": 110,
+        "label": "110 - 资金龙头"
+      },
+      {
+        "value": 111,
+        "label": "111 - 龙头首板"
+      },
+      {
+        "value": 113,
+        "label": "113 - 止盈/止损"
+      },
+      {
+        "value": 122,
+        "label": "122 - 反弹信号"
+      },
+      {
+        "value": 125,
+        "label": "125 - 火箭发射/买入信号"
+      },
+      {
+        "value": 133,
+        "label": "133 - 主力控盘"
+      },
+      {
+        "value": 135,
+        "label": "135 - 120日内新高"
+      },
+      {
+        "value": 136,
+        "label": "136 - 趋势下跌"
+      },
+      {
+        "value": 137,
+        "label": "137 - 趋势上修"
+      },
+      {
+        "value": 138,
+        "label": "138 - 强牛奔腾"
+      },
+      {
+        "value": 139,
+        "label": "139 - 趋势上修2"
+      },
+      {
+        "value": 140,
+        "label": "140 - 追强"
+      },
+      {
+        "value": 141,
+        "label": "141 - 趋势金步/B点信号"
+      },
+      {
+        "value": 142,
+        "label": "142 - 强牛回头"
+      },
+      {
+        "value": 149,
+        "label": "149 - 主力筑底"
+      },
+      {
+        "value": 150,
+        "label": "150 - 昨日涨停"
+      },
+      {
+        "value": 193,
+        "label": "193 - DDE排名"
+      },
+      {
+        "value": 207,
+        "label": "207 - 龙头股/强势股"
+      },
+      {
+        "value": 209,
+        "label": "209 - 最高换手"
+      },
+      {
+        "value": 211,
+        "label": "211 - 探底回升"
+      },
+      {
+        "value": 212,
+        "label": "212 - 连涨3天"
+      },
+      {
+        "value": 213,
+        "label": "213 - 连涨5天"
+      },
+      {
+        "value": 214,
+        "label": "214 - 强势新高"
+      },
+      {
+        "value": 217,
+        "label": "217 - 获利超8"
+      },
+      {
+        "value": 219,
+        "label": "219 - 突破年线"
+      },
+      {
+        "value": 239,
+        "label": "239 - 龙头股(自定义)"
+      },
+      {
+        "value": 250,
+        "label": "250 - 小品2_1/去ST小盘"
+      },
+      {
+        "value": 251,
+        "label": "251 - 小品2_3/趋势"
+      },
+      {
+        "value": 253,
+        "label": "253 - 小品2_5/板块指数"
+      },
+      {
+        "value": 254,
+        "label": "254 - 小品2_7/牛股路径"
+      },
+      {
+        "value": 255,
+        "label": "255 - 小品2_8/牛股出口"
+      },
+      {
+        "value": 256,
+        "label": "256 - 涨跌家数"
+      },
+      {
+        "value": 257,
+        "label": "257 - 去ST/日内突破"
+      },
+      {
+        "value": 258,
+        "label": "258 - 小品2_9/趋势判断"
+      },
+      {
+        "value": 259,
+        "label": "259 - 小品2_10/60分钟"
+      },
+      {
+        "value": 260,
+        "label": "260 - 小品2_11/桃花依旧"
+      },
+      {
+        "value": 261,
+        "label": "261 - 小品2_12/60分钟2"
+      },
+      {
+        "value": 262,
+        "label": "262 - 小品2_13/牛股延续"
+      },
+      {
+        "value": 263,
+        "label": "263 - 小品2_6/中军参考"
+      },
+      {
+        "value": 264,
+        "label": "264 - 牛牛/热点板块"
+      },
+      {
+        "value": 278,
+        "label": "278 - 短线首板"
+      },
+      {
+        "value": 306,
+        "label": "306 - 日内突破(自定义)"
+      },
+      {
+        "value": 360,
+        "label": "360 - 日内突破(周线)"
+      },
+      {
+        "value": 424,
+        "label": "424 - 热点板块"
+      },
+      {
+        "value": 552,
+        "label": "552 - 行业均值"
+      },
+      {
+        "value": 553,
+        "label": "553 - 第一成份"
+      },
+      {
+        "value": 554,
+        "label": "554 - 第二成份"
+      },
+      {
+        "value": 555,
+        "label": "555 - 第三成份"
+      }
+    ],
+    "common_indicators": {
+      "MACD": {
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "outputs": [
+          "DIF",
+          "DEA",
+          "MACD"
+        ],
+        "xsflag": 6,
+        "description": "指数平滑异同移动平均线"
+      },
+      "KDJ": {
+        "formula_name": "KDJ",
+        "formula_arg": "9,3,3",
+        "return_count": 3,
+        "outputs": [
+          "K",
+          "D",
+          "J"
+        ],
+        "xsflag": 6,
+        "description": "随机指标"
+      },
+      "RSI": {
+        "formula_name": "RSI",
+        "formula_arg": "6,12,24",
+        "return_count": 3,
+        "outputs": [
+          "RSI1",
+          "RSI2",
+          "RSI3"
+        ],
+        "xsflag": 6,
+        "description": "相对强弱指标"
+      },
+      "BOLL": {
+        "formula_name": "BOLL",
+        "formula_arg": "20",
+        "return_count": 3,
+        "outputs": [
+          "MID",
+          "UPPER",
+          "LOWER"
+        ],
+        "xsflag": 6,
+        "description": "布林带"
+      },
+      "MA": {
+        "formula_name": "MA",
+        "formula_arg": "5,10,20,60",
+        "return_count": 4,
+        "outputs": [
+          "MA5",
+          "MA10",
+          "MA20",
+          "MA60"
+        ],
+        "xsflag": 6,
+        "description": "移动平均线"
+      },
+      "CCI": {
+        "formula_name": "CCI",
+        "formula_arg": "14",
+        "return_count": 1,
+        "outputs": [
+          "CCI"
+        ],
+        "xsflag": 6,
+        "description": "商品通道指数"
+      },
+      "WR": {
+        "formula_name": "WR",
+        "formula_arg": "10,6",
+        "return_count": 2,
+        "outputs": [
+          "WR1",
+          "WR2"
+        ],
+        "xsflag": 6,
+        "description": "威廉指标"
+      },
+      "OBV": {
+        "formula_name": "OBV",
+        "formula_arg": "",
+        "return_count": 1,
+        "outputs": [
+          "OBV"
+        ],
+        "xsflag": 6,
+        "description": "能量潮"
+      },
+      "BIAS": {
+        "formula_name": "BIAS",
+        "formula_arg": "6,12,24",
+        "return_count": 3,
+        "outputs": [
+          "BIAS6",
+          "BIAS12",
+          "BIAS24"
+        ],
+        "xsflag": 6,
+        "description": "乖离率"
+      },
+      "PSY": {
+        "formula_name": "PSY",
+        "formula_arg": "12",
+        "return_count": 1,
+        "outputs": [
+          "PSY"
+        ],
+        "xsflag": 6,
+        "description": "心理线"
+      }
+    },
+    "formula_arg_priority": [
+      "nfirst",
+      "nsecond",
+      "cfirst",
+      "csecond"
+    ]
+  },
+  "tdx_ntjindexno_lookup": {
+    "version": "1.0",
+    "description": "TDX ntjindexno查找表（V9-R3最终确认）。nset=3为最新财务选股30项，nset=4为实时行情选股12项",
+    "nset_4_market": {
+      "description": "实时行情选股字段索引（nset=4, ntjindexno 0-11），数据来源：实时行情选股.xml全部12节点交叉验证",
+      "fields": [
+        {
+          "value": 0,
+          "label": "现价",
+          "tq_field": "close",
+          "unit": "元",
+          "desc": "最新成交价"
+        },
+        {
+          "value": 1,
+          "label": "最高",
+          "tq_field": "high",
+          "unit": "元",
+          "desc": "当日最高价"
+        },
+        {
+          "value": 2,
+          "label": "最低",
+          "tq_field": "low",
+          "unit": "元",
+          "desc": "当日最低价"
+        },
+        {
+          "value": 3,
+          "label": "今开",
+          "tq_field": "open",
+          "unit": "元",
+          "desc": "当日开盘价"
+        },
+        {
+          "value": 4,
+          "label": "昨收",
+          "tq_field": "pre_close",
+          "unit": "元",
+          "desc": "前一交易日收盘价"
+        },
+        {
+          "value": 5,
+          "label": "总量(成交量)",
+          "tq_field": "volume",
+          "unit": "手",
+          "desc": "当日累计成交量（手）"
+        },
+        {
+          "value": 6,
+          "label": "总金额(成交额)",
+          "tq_field": "amount",
+          "unit": "元",
+          "desc": "当日累计成交金额（元）"
+        },
+        {
+          "value": 7,
+          "label": "涨幅%",
+          "tq_field": "_derived_pct_change",
+          "unit": "%",
+          "desc": "(现价-昨收)/昨收*100，衍生计算字段"
+        },
+        {
+          "value": 8,
+          "label": "振幅%",
+          "tq_field": "_derived_amplitude",
+          "unit": "%",
+          "desc": "(最高-最低)/昨收*100，衍生计算字段"
+        },
+        {
+          "value": 9,
+          "label": "市盈(动态)",
+          "tq_field": "pe",
+          "unit": "倍",
+          "desc": "动态市盈率"
+        },
+        {
+          "value": 10,
+          "label": "换手率%",
+          "tq_field": "turnover_rate",
+          "unit": "%",
+          "desc": "成交量/流通股本*100"
+        },
+        {
+          "value": 11,
+          "label": "量比",
+          "tq_field": "volume_ratio",
+          "unit": "倍",
+          "desc": "当前成交量/历史同期均量"
+        }
+      ]
+    },
+    "nset_3_financial": {
+      "description": "最新财务选股字段索引（nset=3, ntjindexno 0-29）。数据来源：最新财务选股.xml(5个样本)+最新财务选股1/2.png UI截图树结构推断。用户修正: #17=净利润 #18=未分配利润",
+      "fields": [
+        {
+          "value": 0,
+          "label": "总股本",
+          "tq_field": "zgb",
+          "unit": "万股",
+          "tq_api": "get_stock_info",
+          "desc": "公司发行的全部股票数量"
+        },
+        {
+          "value": 1,
+          "label": "流通A股",
+          "tq_field": "ltg",
+          "unit": "万股",
+          "tq_api": "get_stock_info",
+          "desc": "可在交易所自由买卖的A股数量"
+        },
+        {
+          "value": 2,
+          "label": "B股",
+          "tq_field": "bg",
+          "unit": "万股",
+          "tq_api": "get_stock_info",
+          "desc": "境内上市外资股(B股)"
+        },
+        {
+          "value": 3,
+          "label": "H股",
+          "tq_field": "hg",
+          "unit": "万股",
+          "tq_api": "get_stock_info",
+          "desc": "香港上市的H股"
+        },
+        {
+          "value": 4,
+          "label": "AB股总市值",
+          "tq_field": "total_mv",
+          "unit": "万元",
+          "tq_api": "get_stock_info",
+          "desc": "A+B股合计市值"
+        },
+        {
+          "value": 5,
+          "label": "流通市值",
+          "tq_field": "circulating_mv",
+          "unit": "万元",
+          "tq_api": "get_stock_info",
+          "desc": "可流通股票的市值"
+        },
+        {
+          "value": 6,
+          "label": "总资产",
+          "tq_field": "total_assets",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "公司资产总计"
+        },
+        {
+          "value": 7,
+          "label": "流动资产",
+          "tq_field": "current_assets",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "一年内可变现的资产"
+        },
+        {
+          "value": 8,
+          "label": "无形资产",
+          "tq_field": "intangible_assets",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "专利/商标等无形资产价值"
+        },
+        {
+          "value": 9,
+          "label": "流动负债",
+          "tq_field": "current_liabilities",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "一年内需偿还的债务"
+        },
+        {
+          "value": 10,
+          "label": "资本公积金",
+          "tq_field": "capital_reserve",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "股本溢价等资本公积"
+        },
+        {
+          "value": 11,
+          "label": "应收账款",
+          "tq_field": "accounts_receivable",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "应收未收款项"
+        },
+        {
+          "value": 12,
+          "label": "营业利润",
+          "tq_field": "operating_profit",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "主营业务利润"
+        },
+        {
+          "value": 13,
+          "label": "投资收益",
+          "tq_field": "investment_income",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "对外投资获得的收益"
+        },
+        {
+          "value": 14,
+          "label": "经营现金流量",
+          "tq_field": "ocf",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "经营活动产生的现金流"
+        },
+        {
+          "value": 15,
+          "label": "总现金流量",
+          "tq_field": "ncf",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "经营活动+投资+筹资现金流量净额"
+        },
+        {
+          "value": 16,
+          "label": "存货",
+          "tq_field": "inventory",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "库存商品/原材料等"
+        },
+        {
+          "value": 17,
+          "label": "净利润",
+          "tq_field": "net_profit",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "归属于母公司净利润（用户修正确认）"
+        },
+        {
+          "value": 18,
+          "label": "未分配利润",
+          "tq_field": "retained_earnings",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "历年留存收益（用户修正确认）"
+        },
+        {
+          "value": 19,
+          "label": "净资产(股东权益)",
+          "tq_field": "net_assets",
+          "unit": "万元",
+          "tq_api": "get_stock_info/get_financial_data",
+          "desc": "资产减负债，即股东权益"
+        },
+        {
+          "value": 20,
+          "label": "每股净资产",
+          "tq_field": "bps",
+          "unit": "元/股",
+          "tq_api": "get_stock_info",
+          "desc": "Book Value Per Share，净资产/总股本"
+        },
+        {
+          "value": 21,
+          "label": "每股公积金",
+          "tq_field": "reserve_per_share",
+          "unit": "元/股",
+          "tq_api": "get_stock_info",
+          "desc": "资本公积金/总股本"
+        },
+        {
+          "value": 22,
+          "label": "每股未分配利润",
+          "tq_field": "undistributed_per_share",
+          "unit": "元/股",
+          "tq_api": "get_stock_info",
+          "desc": "未分配利润/总股本"
+        },
+        {
+          "value": 23,
+          "label": "每股收益(EPS)",
+          "tq_field": "eps",
+          "unit": "元/股",
+          "tq_api": "get_stock_info",
+          "desc": "Earnings Per Share，净利润/总股本"
+        },
+        {
+          "value": 24,
+          "label": "股东权益比",
+          "tq_field": "equity_ratio",
+          "unit": "%",
+          "tq_api": "get_financial_data",
+          "desc": "净资产/总资产*100"
+        },
+        {
+          "value": 25,
+          "label": "少数股权",
+          "tq_field": "minority_interest",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "子公司中非控股权益"
+        },
+        {
+          "value": 26,
+          "label": "营业收入",
+          "tq_field": "revenue",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "主营业务收入总额"
+        },
+        {
+          "value": 27,
+          "label": "利润总额",
+          "tq_field": "total_profit",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "税前利润总额"
+        },
+        {
+          "value": 28,
+          "label": "税后利润(净利润)",
+          "tq_field": "net_profit_after_tax",
+          "unit": "万元",
+          "tq_api": "get_financial_data",
+          "desc": "扣除所得税后的净利润（与#17可能为不同统计口径）"
+        },
+        {
+          "value": 29,
+          "label": "净资产收益率(ROE)",
+          "tq_field": "roe",
+          "unit": "%",
+          "tq_api": "get_financial_data",
+          "desc": "Return on Equity，净利润/净资产*100"
+        }
+      ]
+    }
+  },
+  "tdx_indicator_formula_map": {
+    "version": "1.0",
+    "description": "TDX 系统指标编号到公式计算映射表，供 TqAdapter.eval_formula_zb() 使用",
+    "records": [
+      {
+        "ntjindexno": 0,
+        "formula_name": "CYX",
+        "formula_arg": "",
+        "return_count": 1,
+        "formula": "CYX()",
+        "mock_pass_threshold": 0.5,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 1,
+        "formula_name": "CYX",
+        "formula_arg": "",
+        "return_count": 1,
+        "formula": "CYX()",
+        "mock_pass_threshold": 0.5,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 2,
+        "formula_name": "CYX",
+        "formula_arg": "",
+        "return_count": 1,
+        "formula": "CYX()",
+        "mock_pass_threshold": 0.5,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 6,
+        "formula_name": "CYX",
+        "formula_arg": "",
+        "return_count": 1,
+        "formula": "CYX()",
+        "mock_pass_threshold": 0.5,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 7,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.35,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 11,
+        "formula_name": "VOL",
+        "formula_arg": "",
+        "return_count": 2,
+        "formula": "VOL()",
+        "mock_pass_threshold": 0.5,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 106,
+        "formula_name": "BOLL",
+        "formula_arg": "20",
+        "return_count": 3,
+        "formula": "BOLL(20)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 107,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.35,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 110,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.35,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 111,
+        "formula_name": "KDJ",
+        "formula_arg": "9,3,3",
+        "return_count": 3,
+        "formula": "KDJ(9,3,3)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 113,
+        "formula_name": "RSI",
+        "formula_arg": "6,12,24",
+        "return_count": 3,
+        "formula": "RSI(6,12,24)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 122,
+        "formula_name": "KDJ",
+        "formula_arg": "9,3,3",
+        "return_count": 3,
+        "formula": "KDJ(9,3,3)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 125,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.35,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 133,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.35,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 135,
+        "formula_name": "MA",
+        "formula_arg": "5,10,20,60",
+        "return_count": 4,
+        "formula": "MA(5,10,20,60)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 136,
+        "formula_name": "RSI",
+        "formula_arg": "6,12,24",
+        "return_count": 3,
+        "formula": "RSI(6,12,24)",
+        "mock_pass_threshold": 0.45,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 137,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 138,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.35,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 139,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 140,
+        "formula_name": "RSI",
+        "formula_arg": "6,12,24",
+        "return_count": 3,
+        "formula": "RSI(6,12,24)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 141,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 142,
+        "formula_name": "KDJ",
+        "formula_arg": "9,3,3",
+        "return_count": 3,
+        "formula": "KDJ(9,3,3)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 149,
+        "formula_name": "BOLL",
+        "formula_arg": "20",
+        "return_count": 3,
+        "formula": "BOLL(20)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 150,
+        "formula_name": "KDJ",
+        "formula_arg": "9,3,3",
+        "return_count": 3,
+        "formula": "KDJ(9,3,3)",
+        "mock_pass_threshold": 0.05,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 193,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 207,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.35,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 209,
+        "formula_name": "VOL",
+        "formula_arg": "",
+        "return_count": 2,
+        "formula": "VOL()",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 211,
+        "formula_name": "KDJ",
+        "formula_arg": "9,3,3",
+        "return_count": 3,
+        "formula": "KDJ(9,3,3)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 212,
+        "formula_name": "UPNDAY",
+        "formula_arg": "3",
+        "return_count": 1,
+        "formula": "UPNDAY(3)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 213,
+        "formula_name": "UPNDAY",
+        "formula_arg": "5",
+        "return_count": 1,
+        "formula": "UPNDAY(5)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 214,
+        "formula_name": "MA",
+        "formula_arg": "5,10,20,60",
+        "return_count": 4,
+        "formula": "MA(5,10,20,60)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 217,
+        "formula_name": "RSI",
+        "formula_arg": "6,12,24",
+        "return_count": 3,
+        "formula": "RSI(6,12,24)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 219,
+        "formula_name": "MA",
+        "formula_arg": "5,10,20,60",
+        "return_count": 4,
+        "formula": "MA(5,10,20,60)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 239,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 250,
+        "formula_name": "KDJ",
+        "formula_arg": "9,3,3",
+        "return_count": 3,
+        "formula": "KDJ(9,3,3)",
+        "mock_pass_threshold": 0.85,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 251,
+        "formula_name": "RSI",
+        "formula_arg": "6,12,24",
+        "return_count": 3,
+        "formula": "RSI(6,12,24)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 253,
+        "formula_name": "MA",
+        "formula_arg": "5,10,20,60",
+        "return_count": 4,
+        "formula": "MA(5,10,20,60)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 254,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 255,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 256,
+        "formula_name": "CYX",
+        "formula_arg": "",
+        "return_count": 1,
+        "formula": "CYX()",
+        "mock_pass_threshold": 0.5,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 257,
+        "formula_name": "KDJ",
+        "formula_arg": "9,3,3",
+        "return_count": 3,
+        "formula": "KDJ(9,3,3)",
+        "mock_pass_threshold": 0.85,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 258,
+        "formula_name": "RSI",
+        "formula_arg": "6,12,24",
+        "return_count": 3,
+        "formula": "RSI(6,12,24)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 259,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 260,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 261,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 262,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 263,
+        "formula_name": "MA",
+        "formula_arg": "5,10,20,60",
+        "return_count": 4,
+        "formula": "MA(5,10,20,60)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 264,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 278,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.05,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 306,
+        "formula_name": "BOLL",
+        "formula_arg": "20",
+        "return_count": 3,
+        "formula": "BOLL(20)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 360,
+        "formula_name": "BOLL",
+        "formula_arg": "20",
+        "return_count": 3,
+        "formula": "BOLL(20)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 424,
+        "formula_name": "MACD",
+        "formula_arg": "12,26,9",
+        "return_count": 3,
+        "formula": "MACD(12,26,9)",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 549,
+        "formula_name": "CYX",
+        "formula_arg": "",
+        "return_count": 1,
+        "formula": "CYX()",
+        "mock_pass_threshold": 0.5,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 552,
+        "formula_name": "MA",
+        "formula_arg": "5,10,20,60",
+        "return_count": 4,
+        "formula": "MA(5,10,20,60)",
+        "mock_pass_threshold": 0.5,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 553,
+        "formula_name": "CYX",
+        "formula_arg": "",
+        "return_count": 1,
+        "formula": "CYX()",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 554,
+        "formula_name": "CYX",
+        "formula_arg": "",
+        "return_count": 1,
+        "formula": "CYX()",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 555,
+        "formula_name": "CYX",
+        "formula_arg": "",
+        "return_count": 1,
+        "formula": "CYX()",
+        "mock_pass_threshold": 0.4,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 556,
+        "formula_name": "CYX",
+        "formula_arg": "",
+        "return_count": 1,
+        "formula": "CYX()",
+        "mock_pass_threshold": 0.5,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 557,
+        "formula_name": "CYX",
+        "formula_arg": "",
+        "return_count": 1,
+        "formula": "CYX()",
+        "mock_pass_threshold": 0.5,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 558,
+        "formula_name": "CYX",
+        "formula_arg": "",
+        "return_count": 1,
+        "formula": "CYX()",
+        "mock_pass_threshold": 0.5,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 598,
+        "formula_name": "CYX",
+        "formula_arg": "",
+        "return_count": 1,
+        "formula": "CYX()",
+        "mock_pass_threshold": 0.5,
+        "nset_compat": [
+          0,
+          1
+        ]
+      },
+      {
+        "ntjindexno": 599,
+        "formula_name": "CYX",
+        "formula_arg": "",
+        "return_count": 1,
+        "formula": "CYX()",
+        "mock_pass_threshold": 0.5,
+        "nset_compat": [
+          0,
+          1
+        ]
+      }
+    ]
+  },
+  "tdx_noperate_rules": {
+    "version": "1.2",
+    "description": "TDX noperate 操作符规则定义表，驱动通用比较器 _eval_op 与 _resolve_rank。计算逻辑由 expr/prev_expr/curr_expr/combine 字段（表达式字符串）承载，_eval_op 调 _eval_derived_expr 求值，无 if/elif 分支。mode 字段驱动 _eval_nset0_result 顶层分派（compare/rank/inflection），消除 noperate id 硬编码元组判断。",
+    "records": [
+      {
+        "id": "0",
+        "name": "等于",
+        "mode": "compare",
+        "description": "两序列当前值近似相等（绝对容差 1e-8，相对容差 1e-4）",
+        "compare": "abs_lt",
+        "params": {
+          "tolerance_abs": 1e-08,
+          "tolerance_rel": 0.0001
+        },
+        "expr": "abs_diff < tol"
+      },
+      {
+        "id": "1",
+        "name": "大于",
+        "mode": "compare",
+        "description": "line1 当前值大于 line2 当前值",
+        "compare": "gt",
+        "expr": "a > b"
+      },
+      {
+        "id": "2",
+        "name": "小于",
+        "mode": "compare",
+        "description": "line1 当前值小于 line2 当前值",
+        "compare": "lt",
+        "expr": "a < b"
+      },
+      {
+        "id": "3",
+        "name": "上穿",
+        "mode": "compare",
+        "description": "line1 前一周期低于 line2，当前周期大于等于 line2（金叉）",
+        "compare": "cross",
+        "direction": "above",
+        "params": {
+          "window": 2
+        },
+        "prev_expr": "line1[-2] < line2[-2]",
+        "curr_expr": "line1[-1] >= line2[-1]",
+        "combine": "and"
+      },
+      {
+        "id": "4",
+        "name": "下破",
+        "mode": "compare",
+        "description": "line1 前一周期高于 line2，当前周期小于等于 line2（死叉）",
+        "compare": "cross",
+        "direction": "below",
+        "params": {
+          "window": 2
+        },
+        "prev_expr": "line1[-2] > line2[-2]",
+        "curr_expr": "line1[-1] <= line2[-1]",
+        "combine": "and"
+      },
+      {
+        "id": "5",
+        "name": "排名为",
+        "mode": "rank",
+        "description": "排名操作占位：精确第N名（处理并列），由调用方统一收集后处理",
+        "compare": "rank",
+        "tie_handling": "exact_rank",
+        "target_rank": "n"
+      },
+      {
+        "id": "6",
+        "name": "排名前N",
+        "mode": "rank",
+        "description": "按 line1 当前值降序取前 N 名",
+        "compare": "rank",
+        "order": "desc",
+        "slice": "top_n",
+        "params": {
+          "default_n": 10
+        }
+      },
+      {
+        "id": "7",
+        "name": "排名后N",
+        "mode": "rank",
+        "description": "按 line1 当前值升序取前 N 名（即倒数后 N 名）",
+        "compare": "rank",
+        "order": "asc",
+        "slice": "top_n",
+        "params": {
+          "default_n": 10
+        }
+      },
+      {
+        "id": "8",
+        "name": "上拐",
+        "mode": "inflection",
+        "description": "曲线由降转升：前一期的前期值 < 前一期值 <= 当前值",
+        "compare": "inflection",
+        "direction": "up",
+        "params": {
+          "window": 3
+        },
+        "prev_expr": "line1[-2] - line1[-3] < 0",
+        "curr_expr": "line1[-1] - line1[-2] >= 0",
+        "combine": "and"
+      },
+      {
+        "id": "9",
+        "name": "下拐",
+        "mode": "inflection",
+        "description": "曲线由升转降：前一期的前期值 > 前一期值 >= 当前值",
+        "compare": "inflection",
+        "direction": "down",
+        "params": {
+          "window": 3
+        },
+        "prev_expr": "line1[-2] - line1[-3] > 0",
+        "curr_expr": "line1[-1] - line1[-2] <= 0",
+        "combine": "and"
+      }
+    ],
+    "rank_modes": {
+      "5": {
+        "order": "desc",
+        "tie_handling": "exact_rank",
+        "target_rank": "n"
+      },
+      "6": {
+        "order": "desc",
+        "tie_handling": "none",
+        "slice": "top_n",
+        "params": {
+          "default_n": 10
+        }
+      },
+      "7": {
+        "order": "asc",
+        "tie_handling": "none",
+        "slice": "top_n",
+        "params": {
+          "default_n": 10
+        }
+      }
+    }
+  },
+  "_convergence": {
+    "merged_from": [
+      "tdx_system_indicators.json",
+      "tdx_indicators.json",
+      "tdx_ntjindexno_lookup.json",
+      "tdx_indicator_formula_map.json",
+      "tdx_noperate_rules.json"
+    ],
+    "target_count": 30
+  }
+}

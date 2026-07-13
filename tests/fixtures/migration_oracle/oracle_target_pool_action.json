@@ -1,0 +1,152 @@
+{
+  "engine_events": [
+    {
+      "edge_count": 1,
+      "event": "pool_start",
+      "node_count": 2,
+      "pool_id": "oracle_target_pool_action",
+      "pool_name": "目标池动作",
+      "started_at": "TIMESTAMP"
+    },
+    {
+      "event": "flow_fired",
+      "exited_codes": [],
+      "fired": true,
+      "flow_id": "e1",
+      "mode": "copy",
+      "source_id": "candidate",
+      "source_remaining": 2,
+      "target_count": 2,
+      "target_id": "target",
+      "transferred_codes": [
+        "600000",
+        "000001"
+      ]
+    },
+    {
+      "event": "pool_end",
+      "finished_at": "TIMESTAMP",
+      "flow_fired_count": 1,
+      "pool_id": "oracle_target_pool_action",
+      "total_transferred": 4
+    }
+  ],
+  "error": null,
+  "node_stock_codes": {
+    "candidate": [
+      "000001",
+      "600000"
+    ],
+    "target": [
+      "000001",
+      "600000"
+    ]
+  },
+  "node_stocks": {
+    "candidate": [
+      {
+        "code": "600000",
+        "label": "浦发银行"
+      },
+      {
+        "code": "000001",
+        "label": "平安银行"
+      }
+    ],
+    "target": [
+      {
+        "code": "600000",
+        "label": "浦发银行"
+      },
+      {
+        "code": "000001",
+        "label": "平安银行"
+      }
+    ]
+  },
+  "pool_id": "oracle_target_pool_action",
+  "queue_events": [
+    {
+      "code": "600000",
+      "details": {
+        "flow_id": "e1",
+        "mode": "copy",
+        "price": 10.2,
+        "source_id": "candidate",
+        "timestamp": "TIMESTAMP"
+      },
+      "pool_id": "target",
+      "time": "TIMESTAMP",
+      "event_type": "ENTER"
+    },
+    {
+      "code": "000001",
+      "details": {
+        "flow_id": "e1",
+        "mode": "copy",
+        "price": 15.1,
+        "source_id": "candidate",
+        "timestamp": "TIMESTAMP"
+      },
+      "pool_id": "target",
+      "time": "TIMESTAMP",
+      "event_type": "ENTER"
+    }
+  ],
+  "run_type": "run_pool",
+  "runtime_tables": {
+    "_dirty_nodes": [],
+    "_first_run": false,
+    "_flow_exec_counts": {
+      "e1": 1
+    },
+    "_flow_first_fire_ts": {
+      "e1": "TIMESTAMP"
+    },
+    "_node_snapshots": {
+      "candidate": [
+        "000001",
+        "600000"
+      ],
+      "target": [
+        "000001",
+        "600000"
+      ]
+    }
+  },
+  "signals": [
+    {
+      "code": "600000",
+      "condition": "e1",
+      "hold_days": 0,
+      "pool_id": "target",
+      "price": 10.2,
+      "profit_pct": 0.0,
+      "signal_type": "BUY",
+      "ts": "TIMESTAMP"
+    },
+    {
+      "code": "000001",
+      "condition": "e1",
+      "hold_days": 0,
+      "pool_id": "target",
+      "price": 15.1,
+      "profit_pct": 0.0,
+      "signal_type": "BUY",
+      "ts": "TIMESTAMP"
+    }
+  ],
+  "success": true,
+  "transfer_events": [
+    {
+      "flow_id": "e1",
+      "mode": "copy",
+      "source_id": "candidate",
+      "target_id": "target",
+      "transferred_codes": [
+        "000001",
+        "600000"
+      ]
+    }
+  ]
+}

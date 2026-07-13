@@ -1,0 +1,37 @@
+{
+  "version": "1.0",
+  "description": "市场分类规则：代码前缀→市场/setcode/ETF类型/市场筛选（消除 akshare_provider 中的硬编码分支）",
+  "exchange_prefixes": ["SH", "SZ", "BJ"],
+  "code_prefix_rules": [
+    {"prefix": "6", "setcode": 1, "market": "SH"},
+    {"prefix": "0", "setcode": 0, "market": "SZ"},
+    {"prefix": "3", "setcode": 0, "market": "SZ"},
+    {"prefix": "4", "setcode": 2, "market": "BJ"},
+    {"prefix": "8", "setcode": 2, "market": "BJ"}
+  ],
+  "short_to_dzh": {
+    "sh_a": "SH#上证A股",
+    "sh_b": "SH#上证B股",
+    "sz_a": "SZ#深证A股",
+    "sz_b": "SZ#深证B股",
+    "bj_a": "BJ#北证A股",
+    "sme": "SZ#中小企业",
+    "gem": "SZ#创业板",
+    "sector_index": "B$#板块指数",
+    "hot_concept": "B$#热门概念"
+  },
+  "market_filters": {
+    "SH#上证A股": {"prefix": "6"},
+    "SZ#深证A股": {"prefixes": ["0", "3"]},
+    "SZ#创业板": {"prefix": "3"},
+    "SZ#中小企业": {"prefix": "002"},
+    "BJ#北证A股": {"prefixes": ["4", "8"]}
+  },
+  "etf_type_rules": [
+    {"keywords": ["货币", "money", "cash"], "type": "money_market"},
+    {"keywords": ["债券", "bond"], "type": "bond"},
+    {"keywords": ["商品", "commodity", "黄金", "gold"], "type": "commodity"},
+    {"keywords": ["跨境", "qdii", "纳斯达克", "标普"], "type": "cross_border"},
+    {"default": "equity"}
+  ]
+}

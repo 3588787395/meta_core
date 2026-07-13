@@ -1,0 +1,78 @@
+{
+  "mode_state": {
+    "inject": false,
+    "node_stock_codes": {
+      "dst": [
+        "000001",
+        "600000"
+      ],
+      "src": [
+        "000001",
+        "600000"
+      ]
+    }
+  },
+  "node_stock_codes": {
+    "dst": [
+      "000001",
+      "600000"
+    ],
+    "src": [
+      "000001",
+      "600000"
+    ]
+  },
+  "node_stocks": {
+    "dst": [
+      {
+        "code": "600000",
+        "label": "浦发银行"
+      },
+      {
+        "code": "000001",
+        "label": "平安银行"
+      }
+    ],
+    "src": [
+      {
+        "code": "600000",
+        "label": "浦发银行"
+      },
+      {
+        "code": "000001",
+        "label": "平安银行"
+      }
+    ]
+  },
+  "pool_id": "oracle_replay_mode_tick",
+  "queue_events": [
+    {
+      "code": "600000",
+      "details": {
+        "flow_id": "e1",
+        "mode": "copy",
+        "price": 10.2,
+        "source_id": "src",
+        "timestamp": "TIMESTAMP"
+      },
+      "pool_id": "dst",
+      "time": "TIMESTAMP",
+      "event_type": "ENTER"
+    },
+    {
+      "code": "000001",
+      "details": {
+        "flow_id": "e1",
+        "mode": "copy",
+        "price": 15.1,
+        "source_id": "src",
+        "timestamp": "TIMESTAMP"
+      },
+      "pool_id": "dst",
+      "time": "TIMESTAMP",
+      "event_type": "ENTER"
+    }
+  ],
+  "run_type": "run_mode:replay_tick",
+  "signals": []
+}

@@ -1,0 +1,25 @@
+{
+  "version": "1.1",
+  "description": "池类型→执行器映射表，run_pool 根据此表动态路由到正确的执行器",
+  "pool_types": {
+    "dzh": {
+      "name": "大智慧股票池",
+      "executor": "_run_dzh_pool",
+      "executor_method": "_execute_flows",
+      "desc": "标准大智慧股票池格式执行"
+    },
+    "tdx": {
+      "name": "通达信股票池",
+      "executor": "_run_tdx_pool_from_config",
+      "desc": "通达信股票池格式执行（内部调用 TdxPoolExecutor）"
+    },
+    "custom": {
+      "name": "自定义股票池",
+      "executor": null,
+      "desc": "自定义模式：放宽所有权限制，所有属性均可编辑；布局查找回退到 dzh/tdx",
+      "layout_fallback_chain": ["dzh", "tdx"],
+      "bypass_ownership_restrictions": true
+    }
+  },
+  "default_type": "dzh"
+}

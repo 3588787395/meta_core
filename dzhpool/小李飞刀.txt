@@ -1,0 +1,48 @@
+均线:=ma(c,3);
+角度:=ATAN((均线/REF(均线,1)-1)*100)*180/3.1416;
+XG:c>ma(c,3) and ma(c,3)>ma(c,10) and ma(c,10)>ma(c,20) and 角度>45;
+
+
+{去停牌和ST股}
+ST:=STRFIND(stkname,'ST',1)>0;
+S:=STRFIND(stkname,'S',1)>0;
+停牌:=(DYNAINFO(4)=0);
+A:=DYNAINFO(14) >-0.025 AND DYNAINFO(14) < 0.05;
+not(ST) and not(停牌) and not(S) and FINANCE2(37)<=1000000 and A ;
+
+
+大涨:=c>ref(c,3)*1.3;
+yzb:=IF(REF(C,1)*1.1-C<0.01 and l=h  ,1,0);
+count(count(yzb,4)=4,10)=0 and count(大涨,5)=0;
+
+
+分比：
+开盘量:=REF(V,BARSSINCE(V>0));
+LT:=CAPITAL/1000000;
+XG:IF(LT<0.3 , 开盘量>600, IF(LT<0.6 AND LT>0.3,开盘量>800,
+IF(LT>0.6 AND LT<1,开盘量>1000,IF(LT>1 AND LT<2,开盘量>1500,
+IF(LT>2 AND  LT<4,开盘量>2000,IF(LT>4 AND LT<6,开盘量>2500,
+IF(LT>6 AND LT<10,开盘量>3000,IF(LT>10 ,开盘量>6000,0))))))));
+
+
+ZT:=IF(REF(C,1)*1.1-C<0.01 ,1,0);
+if(zt=1,count(zt,10)>1,count(zt,10)>0) and 
+DYNAINFO(7)>0 and between(DYNAINFO(4)/DYNAINFO(3),1.05, 0.95) 
+and  between(o,4, 100) ;
+
+
+a1:=100*DYNAINFO(14);
+a2:=10*ATAN(DYNAINFO(17));
+a3:=100*(DYNAINFO(38)/capital);
+a4:=if(c>ma(c,5),c/ma(c,5),0);
+a5:=1.2/(c/ma(c,10));
+a1*a2*a3*a4*a5;
+
+分比
+{MC:=(0.3609454219*C-0.03309329629*REF(C,1)-0.04241822779*REF(C,2)-0.026737249*REF(C,3)-0.007010041271*REF(C,4)-0.002652859952*REF(C,5)-0.0008415042966*REF(C,6)-0.0002891931964*REF(C,7)-0.0000956265934*REF(C,8)-0.0000321286052*REF(C,9)-0.0000106773454*REF(C,10)-0.0000035457562*REF(C,11)-0.0000011670713*REF(C,12) )/ (1-0.7522406533 );
+(MC-C)/C*100;}
+xx:ref(if(ISBUYORDER,1/capital,0),BARSSINCE(v>0));
+
+
+日线
+AA5:(70.040001 + DYNAINFO(14) * 1000) * DYNAINFO(17);

@@ -1,0 +1,1109 @@
+{
+  "hasData": true,
+  "data": {
+    "nodes": [
+      {
+        "id": "138",
+        "dzh_cell_type": 3,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "139",
+        "dzh_cell_type": 3,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "140",
+        "dzh_cell_type": 3,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "141",
+        "dzh_cell_type": 3,
+        "label": "",
+        "clr": 15263718,
+        "params": {
+          "attr": 512
+        }
+      },
+      {
+        "id": "142",
+        "dzh_cell_type": 3,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "143",
+        "dzh_cell_type": 1,
+        "label": "1.近期资金,连续流入",
+        "clr": 16777234,
+        "params": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "144",
+        "dzh_cell_type": 1,
+        "label": "2.平台整理,强势整理",
+        "clr": 16777234,
+        "params": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "145",
+        "dzh_cell_type": 1,
+        "label": "3.量能预测,当天流入",
+        "clr": 16777234,
+        "params": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "146",
+        "dzh_cell_type": 1,
+        "label": "4.量比分析,涨幅限制",
+        "clr": 16777234,
+        "params": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "147",
+        "dzh_cell_type": 1,
+        "label": "5.盘中异动,委比分析",
+        "clr": 16777234,
+        "params": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "148",
+        "dzh_cell_type": 1,
+        "label": "入池原理",
+        "clr": 16777234,
+        "params": {
+          "attr": 19
+        }
+      },
+      {
+        "id": "149",
+        "dzh_cell_type": 1,
+        "label": "除ST停牌，连续飘红>2日，10日内5日以上做多",
+        "clr": 16777226,
+        "params": {
+          "attr": 98
+        }
+      },
+      {
+        "id": "150",
+        "dzh_cell_type": 1,
+        "label": "平台横盘回抽整理",
+        "clr": 16777226,
+        "params": {
+          "attr": 98
+        }
+      },
+      {
+        "id": "151",
+        "dzh_cell_type": 1,
+        "label": "资金流入量能放大",
+        "clr": 16777226,
+        "params": {
+          "attr": 98
+        }
+      },
+      {
+        "id": "152",
+        "dzh_cell_type": 1,
+        "label": "量比及振幅分析",
+        "clr": 16777226,
+        "params": {
+          "attr": 98
+        }
+      },
+      {
+        "id": "153",
+        "dzh_cell_type": 1,
+        "label": "分笔成交异动扫描，委比委差分析",
+        "clr": 16777226,
+        "params": {
+          "attr": 98
+        }
+      },
+      {
+        "id": "154",
+        "dzh_cell_type": 1,
+        "label": "收益超过5%进入英雄榜,下跌超过4%进入观察池",
+        "clr": 16777229,
+        "params": {
+          "attr": 98
+        }
+      },
+      {
+        "id": "155",
+        "dzh_cell_type": 1,
+        "label": "大智慧超赢股票池",
+        "clr": 16777229,
+        "params": {
+          "attr": 57
+        }
+      },
+      {
+        "id": "156",
+        "dzh_cell_type": 6,
+        "label": "",
+        "clr": 16777229,
+        "params": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "157",
+        "dzh_cell_type": 1,
+        "label": "“超赢7号”中短线模型",
+        "clr": 16777235,
+        "params": {
+          "attr": 92
+        }
+      },
+      {
+        "id": "158",
+        "dzh_cell_type": 1,
+        "label": "版本号：V2.0",
+        "clr": 16777229,
+        "params": {
+          "attr": 20
+        }
+      },
+      {
+        "id": "159",
+        "dzh_cell_type": 1,
+        "label": "本股票池基于数据分析模型，电脑自动运行，非人为干预，据此操作，风险自担！",
+        "clr": -1,
+        "params": {
+          "attr": 23
+        }
+      },
+      {
+        "id": "168",
+        "dzh_cell_type": 1,
+        "label": "风险提示：在通过多层筛选后进入超赢7号池时为瞬间分笔异动监控扫描，对网速慢的有一定的不确定性，可提前关注超赢追踪池。弱势市场中控制风险！",
+        "clr": 16777231,
+        "params": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "170",
+        "dzh_cell_type": 1,
+        "label": "盘中实时选股・雨扬数据",
+        "clr": -1,
+        "params": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "18",
+        "dzh_cell_type": 202,
+        "label": "沪深A股",
+        "clr": 16777225,
+        "params": {
+          "attr": 128,
+          "attrtext": "SH#上证A股 SZ#深证A股 SZ#中小企业",
+          "lastload": 1779557970,
+          "reload_sec": 0
+        }
+      },
+      {
+        "id": "19",
+        "dzh_cell_type": 200,
+        "label": "初步筛选",
+        "clr": 16777232,
+        "params": {
+          "attr": 0,
+          "deltype": 0,
+          "endtime": 0,
+          "delstocktype": 0,
+          "col": "2,-1,-2,-3,7,14,8,10,17,45",
+          "width": "55,42,42,42,42,42,42,42,42,42",
+          "hold_sec": 64800
+        }
+      },
+      {
+        "id": "20",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 3147776,
+          "inditype": "indi",
+          "crc": -602028611,
+          "indi": "HBlAJPch0x8ZNeHGv3GZCTanW74UII8C3EzfvkAaW4MiPwL20EJ8WWPQ/G533AlaSutBux74jzyCKe7sVt8LWGklWbIxNUF2GVwedEpO+44CTimeeNtDnnvj++tzEgN44PP6OX3QqH0ee82L1AGupOtj49tY4eqO50rknWM32G577AezjxF0tOistxlplmCakhO7BNMelEb8PPIedzyrFw0VNNhhPzcLOH3+5BmUh/1vdChUKSA7DQoA"
+        }
+      },
+      {
+        "id": "61",
+        "dzh_cell_type": 200,
+        "label": "英雄榜",
+        "clr": 16777229,
+        "params": {
+          "attr": -109051904,
+          "deltype": 0,
+          "endtime": 0,
+          "delstocktype": 0,
+          "histana": 1000,
+          "col": "2,-1,-2,-3,-5,14,7,8,10,17,45",
+          "width": "55,42,42,42,51,42,42,42,42,42,42",
+          "hold_sec": 2592000
+        }
+      },
+      {
+        "id": "83",
+        "dzh_cell_type": 200,
+        "label": "超赢备选",
+        "clr": 16777233,
+        "params": {
+          "attr": 0,
+          "deltype": 0,
+          "endtime": 0,
+          "delstocktype": 0,
+          "col": "2,-1,-2,-3,7,14,8,10,17,45",
+          "width": "55,42,42,42,42,42,42,42,42,42",
+          "hold_sec": 64800
+        }
+      },
+      {
+        "id": "84",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 3147776,
+          "inditype": "indi",
+          "crc": -1390639972,
+          "indi": "zGK3s3q32DvMHRFNqH/X2Amev4eTcdjwT+byVTA+9A503D7+l8e5oefC/8YNN8znwIhE3ZX+9+GJR/DsFAOsulOGxiNoXKFid/bKKbtjpra8R3u4LZ2vn97MiBgj/oeYw/yDZH7FScgPD5J/oFuzfPKNhtHLcLhwX0tI4xlGFj+s5G3u5ASf7aAwsqQjnneydZVngnM21hlg2O4EWPoC0WAlZynN2mzNtEMoOwzeeNqAziB0waeaNdQ+DyVLDSrcVnnfgGbCqiHn2hOSgM5IxLQoVGmjtBrSk79M433sa0DtDYnkg0313jE8b+rI/ghAOw0KAA=="
+        }
+      },
+      {
+        "id": "87",
+        "dzh_cell_type": 200,
+        "label": "超赢价值A",
+        "clr": 16744576,
+        "params": {
+          "attr": 0,
+          "deltype": 0,
+          "endtime": 0,
+          "delstocktype": 0,
+          "col": "2,-1,-2,-3,7,14,8,10,17,45",
+          "width": "55,42,42,42,42,42,42,42,42,42",
+          "hold_sec": 64800
+        }
+      },
+      {
+        "id": "88",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 3147776,
+          "inditype": "indi",
+          "crc": -2074241539,
+          "indi": "zGK3s3q32DvMHRFNqH/X2Amev4eTcdjwT+byVTA+9A503D7+l8e5oefC/8YNN8znwIhE3ZX+9+GJR/DsFAOsulOGxiNoXKFid/bKKbtjpra8R3u4LZ2vn97MiBgj/oeYw/yDZH7FScgPD5J/oFuzfPKNhtHLcLhwX0tI4xlGFj+s5G3u5ASf7aAwsqQjnneydZVngnM21hlg2O4EWPoC0WAlZynN2mzNtEMoOwzeeNp5H3hTLB4Al3ltk52JykWX9pH4h9g3HWum9Ta/z/7PHFldB8vXc6aaAaayaNvAJ7KNuKh5i0SX4yy3a3Eh4Jxrr+KkKI9TuaAgBy5g9fAuVuD1RXbsUpgnsl5gmyW2/yTIwg4ct0VG4FJS7uimyrQq7X0NCg0KDQoA"
+        }
+      },
+      {
+        "id": "89",
+        "dzh_cell_type": 200,
+        "label": "超赢强势",
+        "clr": 16777222,
+        "params": {
+          "attr": 0,
+          "deltype": 0,
+          "endtime": 0,
+          "delstocktype": 0,
+          "col": "2,-1,-2,-3,7,14,8,10,17,45",
+          "width": "55,42,42,42,42,42,42,42,42,42",
+          "hold_sec": 64800
+        }
+      },
+      {
+        "id": "102",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 3147776,
+          "inditype": "indi",
+          "crc": -490237657,
+          "indi": "zGK3s3q32DvMHRFNqH/X2Amev4eTcdjwT+byVTA+9A503D7+l8e5oefC/8YNN8znwIhE3ZX+9+GJR/DsFAOsulOGxiNoXKFid/bKKbtjpra8R3u4LZ2vn97MiBgj/oeYw/yDZH7FScgPD5J/oFuzfPKNhtHLcLhwX0tI4xlGFj+s5G3u5ASf7aAwsqQjnneydZVngnM21hlg2O4EWPoC0WAlZynN2mzNtEMoOwzeeNq0TS5HVMPARlUAemQu1Dgehyqwym3ggzL+NQh/aJIe+KyXWkrEiLY5H3tJAB9/63MlB8HQK6oVc9y+KyB7n8W/RkWRg/KnuNnog0v3vPU3k2RJsnB0cqWHhd/MlxmsnHiIaYdr/sxYiucOK70jeGAPDq8NDWzPSmxvivUn4N/YExZecNcqx2VFE9K4SCZkGjRpZpV06AoIf6fOLimES/KqZuRZbq5kmFGZpUcQVOe0l6AyKaAFLUXgLJPwmVLHG796esi+IsqxAGsRegeb3XZwBbf4Vp2gyaxBlwjtESbznBDKht5w9E7nT2XQsnZ4PiAZa/nRo4sGF7ZbaOmXbgSDh0AoOAcWks6CepPfZeHlBmjfoUUD/0+kOa/Q37BO5W8Q9pVOBoqO8MfbcpEubybBegFosS30rbt5GaPsiT6SX3RnbQw9fQWMzgSRM2BsjSIi+HrZBKrq2zk8apOlm4tiZuWeMMDJAfY1nHiTWtsxyZvAC4k2XYoJ6LxMMNlMwwaX2aGo+OROc2h3Op2QSpUPDjFf/nyfRYSzgFO2dCH2wf8S6jYtKl9FnyHqnKfBxy1CitKjVgt9DCgKxzYg2vbQeT4wOwA="
+        }
+      },
+      {
+        "id": "103",
+        "dzh_cell_type": 200,
+        "label": "超赢价值B",
+        "clr": 16744576,
+        "params": {
+          "attr": 0,
+          "deltype": 0,
+          "endtime": 0,
+          "delstocktype": 0,
+          "col": "2,-1,-2,-3,7,14,8,10,17,45",
+          "width": "55,42,42,42,42,42,42,42,42,42",
+          "hold_sec": 64800
+        }
+      },
+      {
+        "id": "105",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 3147776,
+          "inditype": "indi",
+          "crc": 1497660356,
+          "indi": "zGK3s3q32DvMHRFNqH/X2Amev4eTcdjwT+byVTA+9A503D7+l8e5oefC/8YNN8znwIhE3ZX+9+GJR/DsFAOsulOGxiNoXKFid/bKKbtjpra8R3u4LZ2vn97MiBgj/oeYw/yDZH7FScgPD5J/oFuzfPKNhtHLcLhwX0tI4xlGFj+s5G3u5ASf7aAwsqQjnneydZVngnM21hlg2O4EWPoC0WAlZynN2mzNtEMoOwzeeNovrcdWtU4zIFtMmdomr64k9ASNGHU5Ht6r3AcU22h9LtO1etAHTHJjs5VZBUzf5QZCSwlUAw5DUzSAAHdgBfTUSi+/OEghnb+sDWvH6Plj2246TM7x5tqj+OQAzN5q4B71XGORsiiTpl/y7hfUId4N7X0NCgA="
+        }
+      },
+      {
+        "id": "107",
+        "dzh_cell_type": 200,
+        "label": "超赢买点",
+        "clr": 16777222,
+        "params": {
+          "attr": 0,
+          "deltype": 0,
+          "endtime": 0,
+          "delstocktype": 0,
+          "col": "2,-1,-2,-3,7,14,8,10,17,45",
+          "width": "55,42,42,42,42,42,42,42,42,42",
+          "hold_sec": 64800
+        }
+      },
+      {
+        "id": "108",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 3147776,
+          "inditype": "indi",
+          "crc": 732812557,
+          "indi": "zGK3s3q32DvMHRFNqH/X2Amev4eTcdjwT+byVTA+9A503D7+l8e5oefC/8YNN8znwIhE3ZX+9+GJR/DsFAOsulOGxiNoXKFid/bKKbtjpra8R3u4LZ2vn97MiBgj/oeYw/yDZH7FScgPD5J/oFuzfPKNhtHLcLhwX0tI4xlGFj+s5G3u5ASf7aAwsqQjnneydZVngnM21hlg2O4EWPoC0WAlZynN2mzNtEMoOwzeeNq0TS5HVMPARlUAemQu1Dgehyqwym3ggzL+NQh/aJIe+KyXWkrEiLY5H3tJAB9/63MlB8HQK6oVc9y+KyB7n8W/RkWRg/KnuNnog0v3vPU3k2RJsnB0cqWHhd/MlxmsnHiIaYdr/sxYiucOK70jeGAPDq8NDWzPSmxvivUn4N/YExZecNcqx2VFE9K4SCZkGjRpZpV06AoIf6fOLimES/KqZuRZbq5kmFGZpUcQVOe0l6AyKaAFLUXgLJPwmVLHG796esi+IsqxAGsRegeb3XZwTkuhlO1miVDNdeo/lNvNYWQgZGR5PjA7AA=="
+        }
+      },
+      {
+        "id": "119",
+        "dzh_cell_type": 200,
+        "label": "超赢追踪",
+        "clr": -1,
+        "params": {
+          "attr": -117440512,
+          "deltype": 0,
+          "endtime": 0,
+          "delstocktype": 0,
+          "col": "2,-1,-2,-3,7,14,8,10,17,45",
+          "width": "55,42,42,42,42,42,42,42,42,42",
+          "hold_sec": 64800
+        }
+      },
+      {
+        "id": "123",
+        "dzh_cell_type": 200,
+        "label": "超赢7号",
+        "clr": 11876806,
+        "params": {
+          "attr": -117440512,
+          "deltype": 0,
+          "endtime": 0,
+          "delstocktype": 0,
+          "histana": 1000,
+          "col": "2,-1,-2,-3,-5,14,7,8,10,17,45",
+          "width": "55,42,42,42,51,42,42,42,42,42,42",
+          "hold_sec": 2592000
+        }
+      },
+      {
+        "id": "126",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 2048,
+          "inditype": "indi",
+          "crc": 1605822838,
+          "indi": "LfT15PF7By0YQoYEh/PXTFiXUYljEgD2HhNmfbNaiTWAwf9tMP6grRpbnKIXzu7RyNMAccKiDnYbggDUOxsmHzU7IAA="
+        }
+      },
+      {
+        "id": "131",
+        "dzh_cell_type": 200,
+        "label": "强势整理",
+        "clr": 16711808,
+        "params": {
+          "attr": 0,
+          "deltype": 0,
+          "endtime": 0,
+          "delstocktype": 0,
+          "col": "2,-1,-2,-3,7,14,8,10,17,45",
+          "width": "55,42,42,42,42,42,42,42,42,42",
+          "hold_sec": 64800
+        }
+      },
+      {
+        "id": "132",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 3147776,
+          "inditype": "indi",
+          "crc": 1387768151,
+          "indi": "QLOs+8H6ZPAnftYionSL2M6Oa+7Twr1Xc47FATDMe9wdUcnDHIsKgZvA7hL/uGCFvui/L7nzs/+7/YKQJcgYY8GNuoly60/R28q0D554FGQJtcCdMByCuobSWwuHas8T1Z7LTIycZlRUGUZxaEEqo9joD125/J28oVrGMNg2vWffmb5+7IP71+POloHZfKYkwO19AA=="
+        }
+      },
+      {
+        "id": "133",
+        "dzh_cell_type": 200,
+        "label": "超赢整理",
+        "clr": -1,
+        "params": {
+          "attr": -117440512,
+          "deltype": 0,
+          "endtime": 0,
+          "delstocktype": 0,
+          "col": "2,-1,-2,-3,7,14,8,10,17,45",
+          "width": "55,42,42,42,42,42,42,42,42,42",
+          "hold_sec": 64800
+        }
+      },
+      {
+        "id": "160",
+        "dzh_cell_type": 200,
+        "label": "超赢分析",
+        "clr": 16777227,
+        "params": {
+          "attr": 0,
+          "deltype": 0,
+          "endtime": 0,
+          "delstocktype": 0,
+          "col": "2,-1,-2,-3,7,14,8,10,17,45",
+          "width": "55,42,42,42,42,42,42,42,42,42",
+          "hold_sec": 64800
+        }
+      },
+      {
+        "id": "161",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 3147776,
+          "inditype": "indi",
+          "crc": 732812557,
+          "indi": "zGK3s3q32DvMHRFNqH/X2Amev4eTcdjwT+byVTA+9A503D7+l8e5oefC/8YNN8znwIhE3ZX+9+GJR/DsFAOsulOGxiNoXKFid/bKKbtjpra8R3u4LZ2vn97MiBgj/oeYw/yDZH7FScgPD5J/oFuzfPKNhtHLcLhwX0tI4xlGFj+s5G3u5ASf7aAwsqQjnneydZVngnM21hlg2O4EWPoC0WAlZynN2mzNtEMoOwzeeNq0TS5HVMPARlUAemQu1Dgehyqwym3ggzL+NQh/aJIe+KyXWkrEiLY5H3tJAB9/63MlB8HQK6oVc9y+KyB7n8W/RkWRg/KnuNnog0v3vPU3k2RJsnB0cqWHhd/MlxmsnHiIaYdr/sxYiucOK70jeGAPDq8NDWzPSmxvivUn4N/YExZecNcqx2VFE9K4SCZkGjRpZpV06AoIf6fOLimES/KqZuRZbq5kmFGZpUcQVOe0l6AyKaAFLUXgLJPwmVLHG796esi+IsqxAGsRegeb3XZwTkuhlO1miVDNdeo/lNvNYWQgZGR5PjA7AA=="
+        }
+      },
+      {
+        "id": "162",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 1050624,
+          "inditype": "indi",
+          "crc": 1910018520,
+          "indi": "rcxzcyubYvMFbIca8YJswLkBpy0LBQALcQ5YNjgATp5HsM1vMNUm0FSSgDdUUw+1ahecfgSzz5f+Fv0MRSfunaJVEjLsRwdz+RbocQgewsT8ZcY71ClSecPDbJdMy3OL7KQ+YX/5SGdselqFNJsut1XsHv/xvKo+vpQ17ZWDnTqrCvrz8dWRzGxJbldQPL3fpIYA1LqABLwnH5zUbDnp9IKOx1pGkHGXbaQWyQHYn2fk3vLp3v3a1FyoG0+6cfG/tGycc1JvOC9u0xNgKXit0ZeQca9agrkV3PQFgx2FmkvnwlQ27tFYgfo77sNbhAbNlZM5YnZ8cV8XWOYW3evCfZy4jPmEQ5e84kfISYfhKjsiIa5Db38eb5O2MqnpxjKjvmM/7O5SyTfjhkQCeJfFfLxDHeatlW8B9zBBSqkQ3w91bnQoYyksNCkpOwA="
+        }
+      },
+      {
+        "id": "163",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 1048576,
+          "inditype": "indi",
+          "crc": 1910018520,
+          "indi": "rcxzcyubYvMFbIca8YJswLkBpy0LBQALcQ5YNjgATp5HsM1vMNUm0FSSgDdUUw+1ahecfgSzz5f+Fv0MRSfunaJVEjLsRwdz+RbocQgewsT8ZcY71ClSecPDbJdMy3OL7KQ+YX/5SGdselqFNJsut1XsHv/xvKo+vpQ17ZWDnTqrCvrz8dWRzGxJbldQPL3fpIYA1LqABLwnH5zUbDnp9IKOx1pGkHGXbaQWyQHYn2fk3vLp3v3a1FyoG0+6cfG/tGycc1JvOC9u0xNgKXit0ZeQca9agrkV3PQFgx2FmkvnwlQ27tFYgfo77sNbhAbNlZM5YnZ8cV8XWOYW3evCfZy4jPmEQ5e84kfISYfhKjsiIa5Db38eb5O2MqnpxjKjvmM/7O5SyTfjhkQCeJfFfLxDHeatlW8B9zBBSqkQ3w91bnQoYyksNCkpOwA="
+        }
+      },
+      {
+        "id": "164",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 0,
+          "inditype": "indi",
+          "crc": 230310394,
+          "indi": "HdXRzu9LsRoKAFlQArIZU0mxQYDh/KYihH2VIlqtsldpSqn1d0tu2v4Gu6nHzfKLTygxNik+MjAwOwA="
+        }
+      },
+      {
+        "id": "165",
+        "dzh_cell_type": 200,
+        "label": "观察池",
+        "clr": 16744448,
+        "params": {
+          "attr": 8388608,
+          "deltype": 0,
+          "endtime": 0,
+          "delstocktype": 0,
+          "col": "2,-1,-2,-3,-5,7,14,8,10,17,45",
+          "width": "55,42,42,42,51,42,42,42,42,42,42",
+          "hold_sec": 2592000
+        }
+      },
+      {
+        "id": "166",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 0,
+          "inditype": "indi",
+          "crc": -1473700599,
+          "indi": "LfT15PF7By0YQoYEh/PXTFiXUYljEgD2HhNmfbNaiTWAwf9tMP6grRpbnKIXzu7Rw6BVzIj+Gh/AtPSKcaXlyy00OyAA"
+        }
+      },
+      {
+        "id": "167",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 0,
+          "inditype": "indi",
+          "crc": -215681116,
+          "indi": "LfT15PF7By0YQoYEh/PXTGz5zAZwR/7LI5HNhzz1NrOLARHzpgYTYfREQuxQzHFKXPL8vyTyaNDZwpOTGsiChjE7IAA="
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "18_20",
+        "source": {
+          "node_id": "18"
+        },
+        "target": {
+          "node_id": "20"
+        },
+        "params": {
+          "count": 146,
+          "begin": 1,
+          "begint": 0,
+          "end": 0,
+          "endt": 19800,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "19_84",
+        "source": {
+          "node_id": "19"
+        },
+        "target": {
+          "node_id": "84"
+        },
+        "params": {
+          "count": 146,
+          "begin": 1,
+          "begint": 0,
+          "end": 0,
+          "endt": 19800,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "83_88",
+        "source": {
+          "node_id": "83"
+        },
+        "target": {
+          "node_id": "88"
+        },
+        "params": {
+          "count": 146,
+          "begin": 1,
+          "begint": 0,
+          "end": 0,
+          "endt": 19800,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "83_105",
+        "source": {
+          "node_id": "83"
+        },
+        "target": {
+          "node_id": "105"
+        },
+        "params": {
+          "count": 146,
+          "begin": 1,
+          "begint": 0,
+          "end": 0,
+          "endt": 19800,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "19_132",
+        "source": {
+          "node_id": "19"
+        },
+        "target": {
+          "node_id": "132"
+        },
+        "params": {
+          "count": 146,
+          "begin": 1,
+          "begint": 0,
+          "end": 0,
+          "endt": 19800,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "87_102",
+        "source": {
+          "node_id": "87"
+        },
+        "target": {
+          "node_id": "102"
+        },
+        "params": {
+          "count": 146,
+          "begin": 1,
+          "begint": 0,
+          "end": 0,
+          "endt": 19800,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "103_108",
+        "source": {
+          "node_id": "103"
+        },
+        "target": {
+          "node_id": "108"
+        },
+        "params": {
+          "count": 146,
+          "begin": 1,
+          "begint": 0,
+          "end": 0,
+          "endt": 19800,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "131_161",
+        "source": {
+          "node_id": "131"
+        },
+        "target": {
+          "node_id": "161"
+        },
+        "params": {
+          "count": 146,
+          "begin": 1,
+          "begint": 0,
+          "end": 0,
+          "endt": 19800,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "160_162",
+        "source": {
+          "node_id": "160"
+        },
+        "target": {
+          "node_id": "162"
+        },
+        "params": {
+          "count": 146,
+          "begin": 1,
+          "begint": 0,
+          "end": 0,
+          "endt": 19800,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "123_126",
+        "source": {
+          "node_id": "123"
+        },
+        "target": {
+          "node_id": "126"
+        },
+        "params": {
+          "count": 146,
+          "begin": 1,
+          "begint": 0,
+          "end": 0,
+          "endt": 19800,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "20_19",
+        "source": {
+          "node_id": "20"
+        },
+        "target": {
+          "node_id": "19"
+        },
+        "params": {},
+        "attr": {
+          "attr": 4097
+        }
+      },
+      {
+        "id": "84_83",
+        "source": {
+          "node_id": "84"
+        },
+        "target": {
+          "node_id": "83"
+        },
+        "params": {},
+        "attr": {
+          "attr": 4097
+        }
+      },
+      {
+        "id": "88_87",
+        "source": {
+          "node_id": "88"
+        },
+        "target": {
+          "node_id": "87"
+        },
+        "params": {},
+        "attr": {
+          "attr": 4097
+        }
+      },
+      {
+        "id": "102_89",
+        "source": {
+          "node_id": "102"
+        },
+        "target": {
+          "node_id": "89"
+        },
+        "params": {},
+        "attr": {
+          "attr": 4097
+        }
+      },
+      {
+        "id": "105_103",
+        "source": {
+          "node_id": "105"
+        },
+        "target": {
+          "node_id": "103"
+        },
+        "params": {},
+        "attr": {
+          "attr": 4097
+        }
+      },
+      {
+        "id": "108_107",
+        "source": {
+          "node_id": "108"
+        },
+        "target": {
+          "node_id": "107"
+        },
+        "params": {},
+        "attr": {
+          "attr": 4097
+        }
+      },
+      {
+        "id": "126_61",
+        "source": {
+          "node_id": "126"
+        },
+        "target": {
+          "node_id": "61"
+        },
+        "params": {},
+        "attr": {
+          "attr": 4097
+        }
+      },
+      {
+        "id": "132_131",
+        "source": {
+          "node_id": "132"
+        },
+        "target": {
+          "node_id": "131"
+        },
+        "params": {},
+        "attr": {
+          "attr": 4097
+        }
+      },
+      {
+        "id": "161_160",
+        "source": {
+          "node_id": "161"
+        },
+        "target": {
+          "node_id": "160"
+        },
+        "params": {},
+        "attr": {
+          "attr": 4097
+        }
+      },
+      {
+        "id": "162_133",
+        "source": {
+          "node_id": "162"
+        },
+        "target": {
+          "node_id": "133"
+        },
+        "params": {},
+        "attr": {
+          "attr": 4097
+        }
+      },
+      {
+        "id": "89_163",
+        "source": {
+          "node_id": "89"
+        },
+        "target": {
+          "node_id": "163"
+        },
+        "params": {
+          "count": 146,
+          "begin": 1,
+          "begint": 0,
+          "end": 0,
+          "endt": 19800,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "107_163",
+        "source": {
+          "node_id": "107"
+        },
+        "target": {
+          "node_id": "163"
+        },
+        "params": {
+          "count": 146,
+          "begin": 1,
+          "begint": 0,
+          "end": 0,
+          "endt": 19800,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "163_119",
+        "source": {
+          "node_id": "163"
+        },
+        "target": {
+          "node_id": "119"
+        },
+        "params": {},
+        "attr": {
+          "attr": 4097
+        }
+      },
+      {
+        "id": "119_164",
+        "source": {
+          "node_id": "119"
+        },
+        "target": {
+          "node_id": "164"
+        },
+        "params": {
+          "count": 146,
+          "begin": 1,
+          "begint": 0,
+          "end": 0,
+          "endt": 19200,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "133_164",
+        "source": {
+          "node_id": "133"
+        },
+        "target": {
+          "node_id": "164"
+        },
+        "params": {
+          "count": 146,
+          "begin": 1,
+          "begint": 0,
+          "end": 0,
+          "endt": 19200,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "164_123",
+        "source": {
+          "node_id": "164"
+        },
+        "target": {
+          "node_id": "123"
+        },
+        "params": {},
+        "attr": {
+          "attr": 4097
+        }
+      },
+      {
+        "id": "123_166",
+        "source": {
+          "node_id": "123"
+        },
+        "target": {
+          "node_id": "166"
+        },
+        "params": {
+          "count": 146,
+          "begin": 0,
+          "begint": 0,
+          "end": 0,
+          "endt": 2147483647,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "166_165",
+        "source": {
+          "node_id": "166"
+        },
+        "target": {
+          "node_id": "165"
+        },
+        "params": {},
+        "attr": {
+          "attr": 4097
+        }
+      },
+      {
+        "id": "165_167",
+        "source": {
+          "node_id": "165"
+        },
+        "target": {
+          "node_id": "167"
+        },
+        "params": {
+          "count": 146,
+          "begin": 0,
+          "begint": 0,
+          "end": 0,
+          "endt": 2147483647,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 4096
+        }
+      },
+      {
+        "id": "167_123",
+        "source": {
+          "node_id": "167"
+        },
+        "target": {
+          "node_id": "123"
+        },
+        "params": {},
+        "attr": {
+          "attr": 4097
+        }
+      }
+    ],
+    "pool_meta": {
+      "type": "tdx",
+      "ver": "1.0",
+      "mode": "1"
+    }
+  }
+}

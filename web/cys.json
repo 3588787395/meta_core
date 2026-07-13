@@ -1,0 +1,592 @@
+{
+  "hasData": true,
+  "data": {
+    "nodes": [
+      {
+        "id": "6",
+        "dzh_cell_type": 1,
+        "label": "大智慧股票池",
+        "clr": 221,
+        "params": {
+          "attr": 26
+        }
+      },
+      {
+        "id": "8",
+        "dzh_cell_type": 6,
+        "label": "",
+        "clr": 221,
+        "params": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "9",
+        "dzh_cell_type": 1,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "10",
+        "dzh_cell_type": 1,
+        "label": "“cys送钱分析系统”模型",
+        "clr": 16777226,
+        "params": {
+          "attr": 95
+        }
+      },
+      {
+        "id": "437",
+        "dzh_cell_type": 1,
+        "label": "本股票池基于数据分析模型，电脑自动运行，非人为干预，据此操作，风险自担！",
+        "clr": -1,
+        "params": {
+          "attr": 21
+        }
+      },
+      {
+        "id": "94",
+        "dzh_cell_type": 202,
+        "label": "沪深AB股",
+        "clr": 16777223,
+        "params": {
+          "attr": 128,
+          "attrtext": "SH#上证A股 SZ#深证A股",
+          "lastload": 1346070413,
+          "reload_sec": 0
+        }
+      },
+      {
+        "id": "102",
+        "dzh_cell_type": 200,
+        "label": "初步筛选",
+        "clr": 13611578,
+        "params": {
+          "attr": 671121408,
+          "col": "2,1,-1,-2,-3,7,14,8,10,17,45",
+          "hold_sec": 64800
+        }
+      },
+      {
+        "id": "160",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 1050624,
+          "inditype": "indi",
+          "crc": 1428761097,
+          "indi": "PH5z3rE1IfBPNWnb9jr+Ib2OoleSB9ZeUz8maKJdET4i2iP3+kV1BdjIw+V5+hVRQkvXamMzNsmxB5XxqRoSv9F3O4qr/2w7UDAqK16LMqOf2V7r8jxBVZXOYusBEBotK1Jhto8+UlqJtmLLIDlUJDeYUGXWmGHyNmHLILI/gXeSOPoNmpfxkmRRk6w2rfCbLRLZSYEssV4zOT0oiTd778hBgaaJi0eZfK1jrSYc/nAzVjZD8L4XiyGV58YSht5GApfQqjKi7BNhvMv66L1Ir6gJ7NBijDlhl92OE9iXbjQGVyDWIYzvky+eUHL0h/ELYjt9DQoxOw0KAA=="
+        }
+      },
+      {
+        "id": "414",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 1048576,
+          "inditype": "indi",
+          "crc": 640358731,
+          "indi": "ClSnBx8N3hBZvndo77bXYXVnRfzAxeILl0fp27sV39INCmFhPC01Ow0KAA=="
+        }
+      },
+      {
+        "id": "415",
+        "dzh_cell_type": 200,
+        "label": "CYS-5",
+        "clr": 4227327,
+        "params": {
+          "attr": 134221824,
+          "histana": 1000,
+          "col": "2,1,-1,-2,-3,7,14,8,10,17,45",
+          "hold_sec": 4320000
+        }
+      },
+      {
+        "id": "416",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 0,
+          "inditype": "indi",
+          "crc": -1060289683,
+          "indi": "ClSnBx8N3hBZvndo77bXYXVnRfzAxeILl0fp27sV39INCmFhPC0xMDsNCgA="
+        }
+      },
+      {
+        "id": "417",
+        "dzh_cell_type": 200,
+        "label": "CYS-10",
+        "clr": 33023,
+        "params": {
+          "attr": 134221824,
+          "histana": 1000,
+          "col": "2,1,-1,-2,-3,7,14,8,10,17,45",
+          "hold_sec": 4320000
+        }
+      },
+      {
+        "id": "418",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 0,
+          "inditype": "indi",
+          "crc": 628777018,
+          "indi": "ClSnBx8N3hBZvndo77bXYXVnRfzAxeILl0fp27sV39INCmFhPC0xNTsNCgA="
+        }
+      },
+      {
+        "id": "419",
+        "dzh_cell_type": 200,
+        "label": "CYS-15",
+        "clr": 16777229,
+        "params": {
+          "attr": 134217728,
+          "histana": 1000,
+          "col": "2,1,-1,-2,-3,7,14,8,10,17,45",
+          "hold_sec": 4320000
+        }
+      },
+      {
+        "id": "434",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 0,
+          "inditype": "indi",
+          "crc": 1378717069,
+          "indi": "ClSnBx8N3hBZvndo77bXYXVnRfzAxeILl0fp27sV39INCmFhPC0yMDsNCgA="
+        }
+      },
+      {
+        "id": "435",
+        "dzh_cell_type": 200,
+        "label": "CYS-20",
+        "clr": 16777229,
+        "params": {
+          "attr": 0,
+          "col": "2,1,-1,-2,-3,7,14,8,10,17,45",
+          "hold_sec": 4320000
+        }
+      },
+      {
+        "id": "488",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 7340032,
+          "inditype": "indi",
+          "crc": 1442394329,
+          "indi": "jgv30NQEiV29jiQ+QM+rdJvAs+lbvVc3AliqDiVqR5jRF0eFBBzq9FjoBsJY2BQ6Xs0f/1tot4QfymSjkTlJS9/dYATI5CbXZT3r+J1kv9gOKPM6kWGZlIXsWmSkaJawgaTD6co3arWoU06Y7JV0CDpx/i5RYNOJqC4tDWYbsUKI/XvvzlRLwDqvDyXcQXn6YjVBbdfrO/deCgLsGCDVAjcsgAqYowscDn5uoGEZjX4SAFxRZAWFL3hM74tyDcYTj67je4LlAZT+KksFBHlgx1HRI27veu7FKrgbnKmnsWn4f74BnzqiJ9UHwlcQT3pk1RkEZuU8rMjGVm+9BC3CF4wpAU/EFvfJolCeSajXSZJ8aBmEdeWB7T4tuanCT7+xL0t5ZyUQEqD59ldEFMhFvMYN2oFVO5nsRmAnS9Bd7FUek2BWwUNZE8rkVHwPwR/mAA=="
+        }
+      },
+      {
+        "id": "489",
+        "dzh_cell_type": 200,
+        "label": "背离2",
+        "clr": 16777233,
+        "params": {
+          "attr": 134217728,
+          "col": "2,-1,-2,-3,7,14,8,10,17,45",
+          "hold_sec": 1728000
+        }
+      },
+      {
+        "id": "494",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 7340032,
+          "inditype": "indi",
+          "crc": 1993840183,
+          "indi": "JGy3485MNmqdPH9+2/yinxQzho67eAjJXZMSuDFAy6M/kO6y5C2ptCNx25EO/jJfRLY5BeVwgy7ZTfyuCLolqHspxvZ/pJhiZcPBY2ryd0JPDXHHDzAOw6KouBiO15z2A6/SoXnU/cwgfPnUkuwss285SMCkwu8TAYxQx+SoKTEALQxHMyP/MUQez6x+OGCczPmYkCwjiU4g1lqbrFed5+B6vY/HrirnrTkqqhjrxsE1ehKZLPTSomPFHNvInkO7uniMOF/gx9dESUWNR5GSP2U1tK5haQm0K0cyV/7jcAGQqT2NSGIj6GkOQgTKiicrh8yvF/oNrMU5r3XdTA9htr1aOggV8r5NQiqrEpxlpXGtLZ7xu+BhlOflwU9wzS4fshOytYg4Y6dcbdEWxusaqot7praQZWYEZNYTwwvQaGNGyIrnN6Ksl6K4U8zio0K9AA=="
+        }
+      },
+      {
+        "id": "496",
+        "dzh_cell_type": 200,
+        "label": "背离3",
+        "clr": 16777233,
+        "params": {
+          "attr": 134217728,
+          "histana": 1000,
+          "col": "2,-1,-2,-3,7,14,8,10,17,45",
+          "hold_sec": 2592000
+        }
+      },
+      {
+        "id": "500",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 1048576,
+          "inditype": "indi",
+          "crc": 1442394329,
+          "indi": "jgv30NQEiV29jiQ+QM+rdJvAs+lbvVc3AliqDiVqR5jRF0eFBBzq9FjoBsJY2BQ6Xs0f/1tot4QfymSjkTlJS9/dYATI5CbXZT3r+J1kv9gOKPM6kWGZlIXsWmSkaJawgaTD6co3arWoU06Y7JV0CDpx/i5RYNOJqC4tDWYbsUKI/XvvzlRLwDqvDyXcQXn6YjVBbdfrO/deCgLsGCDVAjcsgAqYowscDn5uoGEZjX4SAFxRZAWFL3hM74tyDcYTj67je4LlAZT+KksFBHlgx1HRI27veu7FKrgbnKmnsWn4f74BnzqiJ9UHwlcQT3pk1RkEZuU8rMjGVm+9BC3CF4wpAU/EFvfJolCeSajXSZJ8aBmEdeWB7T4tuanCT7+xL0t5ZyUQEqD59ldEFMhFvMYN2oFVO5nsRmAnS9Bd7FUek2BWwUNZE8rkVHwPwR/mAA=="
+        }
+      },
+      {
+        "id": "501",
+        "dzh_cell_type": 200,
+        "label": "背离4",
+        "clr": 16777233,
+        "params": {
+          "attr": 0,
+          "histana": 1000,
+          "col": "2,-1,-2,-3,7,14,8,10,17,45",
+          "hold_sec": 2592000
+        }
+      },
+      {
+        "id": "503",
+        "dzh_cell_type": 201,
+        "label": "",
+        "clr": -1,
+        "params": {
+          "attr": 0,
+          "inditype": "indi",
+          "crc": 2019359196,
+          "indi": "ClSnBx8N3hBZvndo77bXYXVnRfzAxeILl0fp27sV39INCmFhPC0yNTsNCg0KAA=="
+        }
+      },
+      {
+        "id": "504",
+        "dzh_cell_type": 200,
+        "label": "cys25",
+        "clr": -1,
+        "params": {
+          "attr": 0,
+          "histana": 1000,
+          "col": "2,-1,-2,-3,7,14,8,10,17,45",
+          "hold_sec": 4320000
+        }
+      }
+    ],
+    "edges": [
+      {
+        "id": "94_160",
+        "source": {
+          "node_id": "94"
+        },
+        "target": {
+          "node_id": "160"
+        },
+        "params": {
+          "count": -12242,
+          "begin": 3,
+          "begint": 93100,
+          "end": 0,
+          "endt": 19800,
+          "interval": 120
+        },
+        "attr": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "160_102",
+        "source": {
+          "node_id": "160"
+        },
+        "target": {
+          "node_id": "102"
+        },
+        "params": {},
+        "attr": {
+          "attr": 1
+        }
+      },
+      {
+        "id": "102_414",
+        "source": {
+          "node_id": "102"
+        },
+        "target": {
+          "node_id": "414"
+        },
+        "params": {
+          "count": 15295,
+          "begin": 3,
+          "begint": 93110,
+          "end": 0,
+          "endt": 19800,
+          "interval": 100
+        },
+        "attr": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "414_415",
+        "source": {
+          "node_id": "414"
+        },
+        "target": {
+          "node_id": "415"
+        },
+        "params": {},
+        "attr": {
+          "attr": 1
+        }
+      },
+      {
+        "id": "415_416",
+        "source": {
+          "node_id": "415"
+        },
+        "target": {
+          "node_id": "416"
+        },
+        "params": {
+          "count": 15568,
+          "mid": 138,
+          "begin": 3,
+          "begint": 93108,
+          "end": 0,
+          "endt": 19800,
+          "interval": 120
+        },
+        "attr": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "416_417",
+        "source": {
+          "node_id": "416"
+        },
+        "target": {
+          "node_id": "417"
+        },
+        "params": {},
+        "attr": {
+          "attr": 1
+        }
+      },
+      {
+        "id": "417_418",
+        "source": {
+          "node_id": "417"
+        },
+        "target": {
+          "node_id": "418"
+        },
+        "params": {
+          "count": 15567,
+          "mid": 24,
+          "begin": 3,
+          "begint": 93035,
+          "end": 0,
+          "endt": 19800,
+          "interval": 120
+        },
+        "attr": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "418_419",
+        "source": {
+          "node_id": "418"
+        },
+        "target": {
+          "node_id": "419"
+        },
+        "params": {
+          "mid": 212
+        },
+        "attr": {
+          "attr": 1
+        }
+      },
+      {
+        "id": "419_434",
+        "source": {
+          "node_id": "419"
+        },
+        "target": {
+          "node_id": "434"
+        },
+        "params": {
+          "count": 10763,
+          "mid": 201,
+          "begin": 3,
+          "begint": 93010,
+          "end": 0,
+          "endt": 19800,
+          "interval": 200
+        },
+        "attr": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "434_435",
+        "source": {
+          "node_id": "434"
+        },
+        "target": {
+          "node_id": "435"
+        },
+        "params": {
+          "mid": 261
+        },
+        "attr": {
+          "attr": 1
+        }
+      },
+      {
+        "id": "488_489",
+        "source": {
+          "node_id": "488"
+        },
+        "target": {
+          "node_id": "489"
+        },
+        "params": {},
+        "attr": {
+          "attr": 1
+        }
+      },
+      {
+        "id": "417_488",
+        "source": {
+          "node_id": "417"
+        },
+        "target": {
+          "node_id": "488"
+        },
+        "params": {
+          "count": 6152,
+          "mid": 180,
+          "begin": 3,
+          "begint": 93016,
+          "end": 0,
+          "endt": 19800,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "494_496",
+        "source": {
+          "node_id": "494"
+        },
+        "target": {
+          "node_id": "496"
+        },
+        "params": {},
+        "attr": {
+          "attr": 1
+        }
+      },
+      {
+        "id": "419_494",
+        "source": {
+          "node_id": "419"
+        },
+        "target": {
+          "node_id": "494"
+        },
+        "params": {
+          "count": 6142,
+          "mid": 125,
+          "begin": 3,
+          "begint": 93010,
+          "end": 0,
+          "endt": 19800,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "500_501",
+        "source": {
+          "node_id": "500"
+        },
+        "target": {
+          "node_id": "501"
+        },
+        "params": {},
+        "attr": {
+          "attr": 1
+        }
+      },
+      {
+        "id": "435_500",
+        "source": {
+          "node_id": "435"
+        },
+        "target": {
+          "node_id": "500"
+        },
+        "params": {
+          "count": 75,
+          "mid": 115,
+          "begin": 3,
+          "begint": 93024,
+          "end": 0,
+          "endt": 19800,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 0
+        }
+      },
+      {
+        "id": "503_504",
+        "source": {
+          "node_id": "503"
+        },
+        "target": {
+          "node_id": "504"
+        },
+        "params": {},
+        "attr": {
+          "attr": 1
+        }
+      },
+      {
+        "id": "435_503",
+        "source": {
+          "node_id": "435"
+        },
+        "target": {
+          "node_id": "503"
+        },
+        "params": {
+          "count": 1,
+          "mid": 126,
+          "begin": 3,
+          "begint": 93015,
+          "end": 0,
+          "endt": 18000,
+          "interval": 60
+        },
+        "attr": {
+          "attr": 0
+        }
+      }
+    ],
+    "pool_meta": {
+      "type": "tdx",
+      "ver": "1.0",
+      "mode": "1"
+    }
+  }
+}

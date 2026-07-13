@@ -1,0 +1,143 @@
+{
+  "version": "1.0",
+  "description": "TDX XML import/export mapping table",
+  "dzh_to_tdx_type": {
+    "200": 8, "201": 3, "202": 7, "1": 1, "2": 2, "3": 3, "4": 2, "5": 0, "6": 0, "203": 8, "7": 7, "8": 8
+  },
+  "tdx_to_frontend_type": {
+    "0": "tdx_text_label", "1": "tdx_text_label", "2": "tdx_container",
+    "3": "tdx_condition", "7": "tdx_candidate", "8": "tdx_state_pool"
+  },
+  "frontend_to_tdx_type": {
+    "tdx_text_label": 0, "tdx_container": 2,
+    "tdx_condition": 3, "tdx_candidate": 7, "tdx_state_pool": 8
+  },
+  "pool": {
+    "root_element": "root",
+    "pool_element": "pool",
+    "pool_attributes": [
+      {"field": "pool_meta.nextid", "attr": "nextid", "default": 100},
+      {"field": "pool_meta.backcolor", "attr": "backcolor", "default": 16777216}
+    ],
+    "pool_children": [
+      {"element": "cells", "item_def": "cell", "source_collection": "nodes"},
+      {"element": "flows", "item_def": "flow", "source_collection": "edges"}
+    ]
+  },
+  "cell": {
+    "element": "cell",
+    "type_source": {"field": "dzh_cell_type", "lookup": "dzh_to_tdx_type", "fallback": "raw"},
+    "attributes": [
+      {"field": "id", "attr": "id", "default": "0"},
+      {"field": "_tdx_type", "attr": "type", "compute": "_tdx_type"},
+      {"field": "params.attr", "attr": "attr", "alt_field": "params.attr_int", "default": 0},
+      {"field": "_pos", "attr": "pos", "compute": "_pos"},
+      {"field": "params.clr", "attr": "clr", "alt_field": "clr", "default": "0", "empty_as_default": true},
+      {"field": "params.clrtext", "attr": "clrtext", "default": ""},
+      {"field": "params.solid", "attr": "solid", "type_conditional_default": {"for_types": [3, 7, 8], "value": "1", "else_value": "0"}},
+      {"field": "_text", "attr": "text", "compute": "_text", "default": ""}
+    ],
+    "children_by_type": {
+      "3": [
+        {"field": "params.tdx_func", "element": "func", "mode": "dict_attrs"}
+      ],
+      "8": [
+        {"field": "params.tdx_psatt", "element": "psatt", "mode": "dict_attrs"},
+        {"field": "params.tdx_stocks", "alt_field": "params.stocks", "element": "stk", "mode": "list_of_dicts", "item_attrs": [
+          {"field": "setcode", "attr": "setcode", "default": 0},
+          {"field": "code", "attr": "code", "default": ""},
+          {"field": "indate", "attr": "indate", "default": ""},
+          {"field": "intime", "attr": "intime", "default": ""},
+          {"field": "inprice", "attr": "inprice", "default": ""},
+          {"field": "income", "attr": "income", "default": "0.00"},
+          {"field": "now", "attr": "now", "default": ""},
+          {"field": "rise", "attr": "rise", "default": ""},
+          {"field": "volume", "attr": "volume", "default": ""},
+          {"field": "maxrate", "attr": "maxrate", "default": "0.00"},
+          {"field": "maxperiod", "attr": "maxperiod", "default": "0"},
+          {"field": "maxtime", "attr": "maxtime", "default": "0"},
+          {"field": "maxprice", "attr": "maxprice", "default": "0.00"},
+          {"field": "idaynum", "attr": "idaynum", "default": "0"}
+        ]}
+      ],
+      "7": [
+        {"field": "params.tdx_spinfo", "element": "spinfo", "mode": "dict_attrs"},
+        {"field": "params.tdx_stocks", "alt_field": "params.stocks", "element": "stk", "mode": "list_of_dicts", "item_attrs": [
+          {"field": "setcode", "attr": "setcode", "default": 0},
+          {"field": "code", "attr": "code", "default": ""},
+          {"field": "indate", "attr": "indate", "default": ""},
+          {"field": "intime", "attr": "intime", "default": ""},
+          {"field": "inprice", "attr": "inprice", "default": ""},
+          {"field": "income", "attr": "income", "default": "0.00"},
+          {"field": "now", "attr": "now", "default": ""},
+          {"field": "rise", "attr": "rise", "default": ""},
+          {"field": "volume", "attr": "volume", "default": ""},
+          {"field": "maxrate", "attr": "maxrate", "default": "0.00"},
+          {"field": "maxperiod", "attr": "maxperiod", "default": "0"},
+          {"field": "maxtime", "attr": "maxtime", "default": "0"},
+          {"field": "maxprice", "attr": "maxprice", "default": "0.00"},
+          {"field": "idaynum", "attr": "idaynum", "default": "0"}
+        ]}
+      ]
+    }
+  },
+  "flow": {
+    "element": "flow",
+    "attributes": [
+      {"field": "source.node_id", "attr": "startid", "compute": "source.node_id", "alt_field": "from", "default": "0"},
+      {"field": "target.node_id", "attr": "endid", "compute": "target.node_id", "alt_field": "to", "default": "0"},
+      {"field": "params.size", "attr": "size", "default": 1},
+      {"field": "params.tran", "attr": "tran", "default": 0},
+      {"field": "params.emptyps", "attr": "emptyps", "default": 0},
+      {"field": "params.starttype", "attr": "starttype", "default": 0},
+      {"field": "params.starttime", "attr": "starttime", "default": 0},
+      {"field": "params.starttimetype", "attr": "starttimetype", "default": 0},
+      {"field": "params.starttimehms", "attr": "starttimehms", "default": 0},
+      {"field": "params.cxtype", "attr": "cxtype", "default": 0},
+      {"field": "params.cxtime", "attr": "cxtime", "default": 2147483647},
+      {"field": "params.cxtimetype", "attr": "cxtimetype", "default": 0},
+      {"field": "params.jgtime", "attr": "jgtime", "alt_field": "params.interval_sec", "default": 60},
+      {"field": "params.clr", "attr": "clr", "default": "127", "empty_as_default": true}
+    ]
+  },
+  "frontend_node": {
+    "type_lookup": "tdx_to_frontend_type",
+    "type_default": "tdx_text_label",
+    "fields": [
+      {"source": "id", "target": "id", "transform": "str"},
+      {"source": "type", "target": "type", "lookup": "tdx_to_frontend_type", "default": "tdx_text_label"},
+      {"source": "type", "target": "dzh_cell_type"},
+      {"source": "text", "target": "label", "default": ""},
+      {"source": "text", "target": "text", "default": ""}
+    ],
+    "position": {
+      "x": "pos_x", "y": "pos_y", "width": "width", "height": "height",
+      "min_width": 40, "min_height": 30
+    },
+    "params": [
+      {"source": "clr", "target": "clr", "transform": "clr_to_str"},
+      {"source": "clrtext", "target": "clrtext", "transform": "clrtext_to_str"},
+      {"source": "solid", "target": "solid"},
+      {"source": "attr", "target": "attr"},
+      {"source": "attr", "target": "attr_int"}
+    ],
+    "sub_objects": [
+      {"source_attr": "func", "target_keys": ["tdx_func", "func"]},
+      {"source_attr": "psatt", "target_keys": ["tdx_psatt", "psatt"]},
+      {"source_attr": "spinfo", "target_keys": ["tdx_spinfo", "spinfo"]},
+      {"source_attr": "stks", "target_keys": ["tdx_stocks", "stocks"], "count_key": "stock_count"}
+    ]
+  },
+  "frontend_edge": {
+    "id_template": "{startid}_{endid}",
+    "source_field": "startid",
+    "target_field": "endid",
+    "params_copy_all": true,
+    "special_params": [
+      {"source": "tran", "target": "tran", "conditional_set": {"when_value": 1, "also_set": {"delete_source": true}}},
+      {"source": "clr", "target": "clr", "transform": "clr_to_str"},
+      {"source": "size", "target": "size"},
+      {"source": "jgtime", "target": "interval_sec", "default": 60}
+    ]
+  }
+}

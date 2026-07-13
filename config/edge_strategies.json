@@ -1,0 +1,1809 @@
+{
+  "version": "1.5",
+  "pool_node_types": [
+    "stock_state_pool"
+  ],
+  "output_types": [
+    "stock_state_pool",
+    "market_source",
+    "tdx_state_pool"
+  ],
+  "source_node_types": [
+    "market_source"
+  ],
+  "mutex_bits": {
+    "keep_source": "delete_source",
+    "delete_source": "keep_source"
+  },
+  "bar_data_injection": {
+    "bar_fields": [
+      "open",
+      "high",
+      "low",
+      "close",
+      "volume",
+      "amount"
+    ]
+  },
+  "toggle_handlers": {
+    "field_toggles": [
+      "nset_fields",
+      "bdel_fields",
+      "bsound_fields",
+      "bsavetoblock_fields",
+      "starttype_fields",
+      "cxtype_fields"
+    ],
+    "active_when": 1,
+    "nsoundtype": {
+      "show_nsyssound_when": [
+        0
+      ],
+      "show_soundfile_when": [
+        1
+      ]
+    },
+    "starttimetype": {
+      "show_starttimehms_when": [
+        1
+      ]
+    },
+    "hhmmss_modes": [
+      3,
+      4,
+      7
+    ]
+  },
+  "node_init": {
+    "market_source": {
+      "op": "init_market_source"
+    },
+    "stock_state_pool": {
+      "op": "init_stock_state_pool"
+    },
+    "tdx_candidate": {
+      "op": "init_tdx_candidate"
+    }
+  },
+  "node_init_ops": {
+    "init_market_source": {
+      "method": "init_market_source",
+      "desc": "市场源初始化"
+    },
+    "init_stock_state_pool": {
+      "method": "init_stock_state_pool",
+      "desc": "状态池初始化"
+    },
+    "init_tdx_candidate": {
+      "method": "init_tdx_candidate",
+      "desc": "TDX 候选池初始化"
+    }
+  },
+  "strategies": {
+    "market_source:*": {
+      "action": "resolve_and_pass",
+      "pre_inject": {
+        "from_source_params": [
+          "markets",
+          "sector_codes",
+          "custom_stocks"
+        ],
+        "from_source_attrtext": true
+      },
+      "params": {
+        "resolve_target": "sid",
+        "resolve_fn": "candidate_resolve"
+      },
+      "desc": "市场源解析候选股并传递到下游节点"
+    },
+    "market_source:transfer_condition": {
+      "action": "pass_through",
+      "pre_inject": {
+        "from_source_params": [
+          "markets",
+          "sector_codes",
+          "custom_stocks"
+        ],
+        "from_source_attrtext": true
+      },
+      "params": {
+        "pass_target": "tid"
+      },
+      "desc": "备选池股票直通传递到转移条件"
+    },
+    "market_source:stock_state_pool": {
+      "action": "resolve_and_pass",
+      "pre_inject": {
+        "from_source_params": [
+          "markets",
+          "sector_codes",
+          "custom_stocks"
+        ],
+        "from_source_attrtext": true
+      },
+      "params": {
+        "resolve_target": "sid",
+        "resolve_fn": "candidate_resolve"
+      },
+      "desc": "市场源解析候选股直接传入状态池"
+    },
+    "market_source:discard_pool": {
+      "action": "pass_through",
+      "pre_inject": {
+        "from_source_params": [
+          "markets",
+          "sector_codes",
+          "custom_stocks"
+        ],
+        "from_source_attrtext": true
+      },
+      "params": {
+        "pass_target": "tid"
+      },
+      "desc": "市场源股票直通传递到丢弃池"
+    },
+    "transfer_condition:stock_state_pool": {
+      "action": "apply_filter",
+      "pre_inject": {
+        "from_source_stocks_as": [
+          "stock_list",
+          "stocks"
+        ],
+        "from_source_node": true
+      },
+      "params": {
+        "filter_target": "sid",
+        "propagate_target": "tid",
+        "dispatch_fn": "condition_dispatcher"
+      },
+      "desc": "转移条件过滤后传入股票状态池"
+    },
+    "stock_state_pool:transfer_condition": {
+      "action": "pass_pool_stocks",
+      "params": {
+        "pass_target": "tid"
+      },
+      "desc": "股票状态池传递持仓到转移条件"
+    },
+    "stock_state_pool:stock_state_pool": {
+      "action": "transfer_between_pools",
+      "params": {
+        "transfer_target": "tid",
+        "highlight": true
+      },
+      "desc": "股票在状态池之间转移"
+    },
+    "stock_state_pool:discard_pool": {
+      "action": "remove_from_pool",
+      "pre_inject": {
+        "from_source_stocks_as": [
+          "stocks"
+        ],
+        "set_source_node": true
+      },
+      "params": {
+        "remove_target": "sid"
+      },
+      "desc": "股票从状态池移入丢弃池"
+    },
+    "transfer_condition:discard_pool": {
+      "action": "discard_rejected",
+      "pre_inject": {
+        "from_source_stocks_as": [
+          "stocks"
+        ],
+        "set_source_node": true
+      },
+      "params": {
+        "remove_target": "sid"
+      },
+      "desc": "不满足条件的股票移入丢弃池"
+    },
+    "stock_state_pool:transfer_condition:keep_source": {
+      "action": "pass_pool_stocks",
+      "params": {
+        "pass_target": "tid",
+        "keep_source": true
+      },
+      "desc": "股票状态池传递持仓到转移条件(保留源池股票)"
+    },
+    "tdx_candidate:tdx_condition": {
+      "action": "tdx_condition_eval",
+      "pre_inject": {
+        "from_source_stocks_as": [
+          "stock_list",
+          "stocks"
+        ],
+        "from_source_node": true
+      },
+      "params": {
+        "filter_target": "tid"
+      },
+      "desc": "TDX 候选池到条件节点的公式评估"
+    },
+    "tdx_candidate:tdx_state_pool": {
+      "action": "transfer_between_pools",
+      "pre_inject": {
+        "from_source_stocks_as": [
+          "stocks"
+        ]
+      },
+      "params": {
+        "transfer_target": "tid",
+        "highlight": true
+      },
+      "desc": "TDX 候选池股票转移到状态池"
+    },
+    "tdx_condition:tdx_state_pool": {
+      "action": "transfer_between_pools",
+      "pre_inject": {
+        "from_source_stocks_as": [
+          "stocks"
+        ]
+      },
+      "params": {
+        "transfer_target": "tid",
+        "highlight": true
+      },
+      "desc": "TDX 条件节点股票转移到状态池"
+    },
+    "dzh_condition_pool:*": {
+      "action": "apply_dzh_filter",
+      "pre_inject": {
+        "from_source_stocks_as": [
+          "stock_list",
+          "stocks"
+        ],
+        "from_source_node": true,
+        "from_source_params": [
+          "hold_sec",
+          "col_list",
+          "enter_action",
+          "exit_action",
+          "sort_type",
+          "formula_raw",
+          "formula_crc",
+          "formula_inditype",
+          "indiparam",
+          "condition_type",
+          "show_overview",
+          "record_history",
+          "calc_profit_from_prev",
+          "simple_intermediate",
+          "keep_source",
+          "clear_dest_first",
+          "delete_source",
+          "output_constituent",
+          "analysis_cycle",
+          "indi"
+        ]
+      },
+      "params": {
+        "hold_sec": 432000,
+        "col_list": [],
+        "enter_action": {},
+        "exit_action": {}
+      },
+      "desc": "DZH 条件池走统一 filter 路径（formula_eval），策略参数: hold_sec/col_list/enter_action/exit_action"
+    },
+    "dzh_condition_pool:stock_state_pool": {
+      "action": "apply_dzh_filter",
+      "pre_inject": {
+        "from_source_stocks_as": [
+          "stock_list",
+          "stocks"
+        ],
+        "from_source_node": true,
+        "from_source_params": [
+          "hold_sec",
+          "col_list",
+          "enter_action",
+          "exit_action",
+          "sort_type",
+          "formula_raw",
+          "formula_crc",
+          "formula_inditype",
+          "indiparam",
+          "condition_type",
+          "show_overview",
+          "record_history",
+          "calc_profit_from_prev",
+          "simple_intermediate",
+          "keep_source",
+          "clear_dest_first",
+          "delete_source",
+          "output_constituent",
+          "analysis_cycle",
+          "indi"
+        ]
+      },
+      "params": {
+        "hold_sec": 432000,
+        "col_list": [],
+        "enter_action": {},
+        "exit_action": {}
+      },
+      "desc": "DZH 条件池过滤后传入股票状态池（formula_eval 统一路径）"
+    },
+    "*:*": {
+      "action": "default_transfer",
+      "params": {},
+      "desc": "通用默认转移：当无更具体的策略匹配时，执行 copy/move 转移"
+    },
+    "stock_state_pool:stock_state_pool:formula_eval": {
+      "action": "formula_eval",
+      "pre_inject": {
+        "from_source_stocks_as": [
+          "stocks"
+        ],
+        "from_source_node": true
+      },
+      "params": {
+        "filter_target": "tid",
+        "period": "1d"
+      },
+      "desc": "公式批量求值策略：从源节点取公式与股票，调 formula_router.eval_batch 批量求值后转移满足条件的股票"
+    }
+  },
+  "action_ops": {
+    "resolve_and_pass": {
+      "method": "_action_resolve_and_pass",
+      "desc": "解析候选股并传递"
+    },
+    "pass_through": {
+      "method": "_action_pass_pool_stocks",
+      "desc": "直通传递"
+    },
+    "pass_pool_stocks": {
+      "method": "_action_pass_pool_stocks",
+      "desc": "池股票传递"
+    },
+    "apply_filter": {
+      "method": "_action_apply_filter",
+      "desc": "条件过滤后传递"
+    },
+    "transfer_between_pools": {
+      "method": "_action_transfer_between_pools",
+      "desc": "池间转移"
+    },
+    "remove_from_pool": {
+      "method": "_action_remove_from_pool",
+      "desc": "从池中移除"
+    },
+    "discard_rejected": {
+      "method": "_action_remove_from_pool",
+      "desc": "丢弃不满足条件的"
+    },
+    "tdx_condition_eval": {
+      "method": "tdx_condition_evaluator",
+      "desc": "TDX 条件评估"
+    },
+    "apply_dzh_filter": {
+      "method": "_action_dzh_condition_filter",
+      "desc": "DZH 条件过滤"
+    },
+    "formula_eval": {
+      "method": "_filter_formula_eval",
+      "desc": "公式批量求值"
+    },
+    "default_transfer": {
+      "method": "edge_default_transfer",
+      "desc": "通用默认转移"
+    }
+  },
+  "transformation_unit_strategies": {
+    "tdx_condition": {
+      "in_edge_action": "pass_through",
+      "condition_action": "tdx_condition_eval",
+      "out_edge_action": "transfer_between_pools",
+      "in_filter_type": "conditional",
+      "out_filter_type": "unconditional",
+      "desc": "TDX条件节点变换单元：入边透传→条件公式评估→出边转移到状态池"
+    },
+    "transfer_condition": {
+      "in_edge_action": "pass_through",
+      "condition_action": "apply_filter",
+      "out_edge_action": "transfer_between_pools",
+      "in_filter_type": "conditional",
+      "out_filter_type": "unconditional",
+      "desc": "DZH转移条件变换单元：入边透传→条件过滤→出边转移到状态池"
+    },
+    "dzh_condition_pool": {
+      "in_edge_action": "pass_through",
+      "condition_action": "apply_dzh_filter",
+      "out_edge_action": "transfer_between_pools",
+      "in_filter_type": "conditional",
+      "out_filter_type": "unconditional",
+      "desc": "DZH条件池变换单元：入边透传→DZH条件过滤→出边转移到状态池"
+    },
+    "_fallback": {
+      "desc": "未命中单元策略时，回退到 strategies 段的边级策略逐边处理",
+      "use_edge_strategies": true
+    }
+  },
+  "edge_filter_registry": {
+    "unconditional": {
+      "op": "identity",
+      "propagate_mode": "builtin_propagate",
+      "desc": "无条件边：全部源池股票通过（恒等 Filter），内置 propagate"
+    },
+    "conditional": {
+      "op": "nset_dispatch",
+      "propagate_mode": "internal",
+      "desc": "条件边：nset 分派，filter 内部完成传播"
+    },
+    "formula_eval": {
+      "op": "formula_batch",
+      "propagate_mode": "manual_codes",
+      "desc": "公式边：formula_router.eval_batch，手动 codes 传播"
+    }
+  },
+  "filter_ops": {
+    "identity": {
+      "method": "_filter_identity",
+      "desc": "恒等过滤：全部通过"
+    },
+    "nset_dispatch": {
+      "method": "_filter_nset_dispatch",
+      "desc": "nset 分派过滤"
+    },
+    "formula_batch": {
+      "method": "_filter_formula_batch",
+      "desc": "公式批量求值过滤"
+    }
+  },
+  "transformations": {
+    "unconditional": {
+      "passed": {
+        "op": "all_source_codes"
+      },
+      "target_update": {
+        "op": "merge_or_replace"
+      },
+      "source_update": {
+        "op": "remove_passed_if_move"
+      }
+    },
+    "formula_eval": {
+      "passed": {
+        "op": "formula_eval_batch"
+      },
+      "target_update": {
+        "op": "merge_or_replace"
+      },
+      "source_update": {
+        "op": "remove_passed_if_move"
+      }
+    },
+    "nset_dispatch": {
+      "passed": {
+        "op": "precomputed_by_strategy"
+      },
+      "target_update": {
+        "op": "noop"
+      },
+      "source_update": {
+        "op": "noop"
+      }
+    },
+    "conditional": {
+      "passed": {
+        "op": "precomputed_by_strategy"
+      },
+      "target_update": {
+        "op": "noop"
+      },
+      "source_update": {
+        "op": "noop"
+      }
+    }
+  },
+  "post_propagate_hooks": [
+    {
+      "order": 1,
+      "op": "record_execution",
+      "desc": "记录执行次数和时间戳"
+    },
+    {
+      "order": 2,
+      "op": "handle_new_entries",
+      "desc": "检测新入池+创建tracker+发射事件+回调"
+    },
+    {
+      "order": 3,
+      "op": "apply_ttl",
+      "when": "ctx.get('tt') in config('tdx_psatt.auto_ttl_node_types')",
+      "desc": "TTL 过期检查"
+    }
+  ],
+  "hook_ops": {
+    "record_execution": {
+      "method": "_post_record_execution",
+      "desc": "记录执行"
+    },
+    "handle_new_entries": {
+      "method": "_post_handle_new_entries",
+      "desc": "处理新入池"
+    },
+    "apply_ttl": {
+      "method": "_post_apply_ttl",
+      "desc": "TTL 淘汰"
+    }
+  },
+  "stage_ops": {
+    "pk_ranking": {
+      "method": "_execute_stage",
+      "desc": "PK排名"
+    },
+    "analysis_angles": {
+      "method": "_execute_stage",
+      "desc": "多分析角度"
+    },
+    "dashboard": {
+      "method": "_execute_stage",
+      "desc": "看盘面板"
+    },
+    "alerts": {
+      "method": "_execute_stage",
+      "desc": "监控告警"
+    },
+    "stage_bar_data_inject": {
+      "method": "stage_bar_data_inject",
+      "desc": "数据注入"
+    },
+    "stage_minute_aggregator_feed": {
+      "method": "stage_minute_aggregator_feed",
+      "desc": "minute_aggregator 喂数据"
+    }
+  },
+  "canvas_edge_widths": {
+    "pass": 1.5,
+    "copy": 1.5,
+    "overwrite": 2,
+    "move": 2,
+    "force": 3,
+    "reject": 2
+  },
+  "canvas_strategy_colors": {
+    "pass": "#FFD700",
+    "copy": "#FFA500",
+    "overwrite": "#FF8800",
+    "move": "#FF4400",
+    "force": "#FF0000"
+  },
+  "pipeline_phases": [
+    {
+      "order": 1,
+      "step": "gate",
+      "op": "gate",
+      "desc": "Gate守门：eval_gate 查 runtime_modes 路由"
+    },
+    {
+      "order": 2,
+      "step": "src_change_detect",
+      "op": "src_change_detect",
+      "condition": {
+        "filter_type": [
+          "unconditional"
+        ]
+      },
+      "desc": "源变更检测：仅无条件边需要"
+    },
+    {
+      "order": 3,
+      "step": "replay_guard",
+      "op": "replay_guard",
+      "condition": {
+        "filter_type": [
+          "conditional",
+          "formula_eval"
+        ],
+        "mode_id": [
+          "replay"
+        ]
+      },
+      "desc": "Replay守门：回放模式下的 begin/end/interval"
+    },
+    {
+      "order": 4,
+      "step": "tdx_guard",
+      "op": "tdx_guard",
+      "condition": {
+        "filter_type": [
+          "conditional",
+          "formula_eval"
+        ]
+      },
+      "desc": "TDX守门：starttype 表驱动"
+    },
+    {
+      "order": 5,
+      "step": "duration_guard",
+      "op": "duration_guard",
+      "condition": {
+        "filter_type": [
+          "conditional",
+          "formula_eval"
+        ]
+      },
+      "desc": "Duration守门：cxtype 过期检查"
+    },
+    {
+      "order": 6,
+      "step": "flow_resolve",
+      "op": "flow_resolve",
+      "desc": "Flow属性解析：attr/tran → is_move/is_overwrite"
+    },
+    {
+      "order": 6.1,
+      "step": "nset_change_detect",
+      "op": "change_detect",
+      "condition": {
+        "filter_type": [
+          "conditional"
+        ]
+      },
+      "desc": "nset 变更检测：计算 src/bar 变更标志 + 空源早退"
+    },
+    {
+      "order": 6.2,
+      "step": "nset_cache_lookup",
+      "op": "cache_lookup",
+      "condition": {
+        "filter_type": [
+          "conditional"
+        ]
+      },
+      "desc": "nset 缓存查找：无变更时查 _filter_cache 复用结果"
+    },
+    {
+      "order": 6.3,
+      "step": "nset_execute",
+      "op": "nset_execute",
+      "condition": {
+        "filter_type": [
+          "conditional"
+        ]
+      },
+      "desc": "nset 策略解析 + 执行分派（合并原 strategy_resolve + hr_dispatch）"
+    },
+    {
+      "order": 6.4,
+      "step": "nset_cache_write",
+      "op": "cache_write",
+      "condition": {
+        "filter_type": [
+          "conditional"
+        ]
+      },
+      "desc": "nset 缓存写入：将结果写入 _filter_cache"
+    },
+    {
+      "order": 7,
+      "step": "transform",
+      "op": "transform",
+      "desc": "变换：读 transformations 表，按 passed/target_update/source_update 执行"
+    },
+    {
+      "order": 8,
+      "step": "post_process",
+      "op": "post_process",
+      "desc": "后处理链：count/ts→trackers→events→callback→TTL"
+    }
+  ],
+  "phase_ops": {
+    "gate": {
+      "method": "_phase_gate",
+      "desc": "Gate守门"
+    },
+    "src_change_detect": {
+      "method": "_phase_src_change_detect",
+      "desc": "源变更检测"
+    },
+    "replay_guard": {
+      "method": "_phase_replay_guard",
+      "desc": "回放守门"
+    },
+    "tdx_guard": {
+      "method": "_phase_tdx_guard",
+      "desc": "TDX守门"
+    },
+    "duration_guard": {
+      "method": "_phase_duration_guard",
+      "desc": "持续期守门"
+    },
+    "flow_resolve": {
+      "method": "_phase_flow_resolve",
+      "desc": "流转属性解析"
+    },
+    "transform": {
+      "method": "_phase_transform",
+      "desc": "变换执行"
+    },
+    "post_process": {
+      "method": "_phase_post_process",
+      "desc": "后处理"
+    },
+    "change_detect": {
+      "method": "_phase_nset_change_detect",
+      "desc": "变更检测 + 空源早退"
+    },
+    "cache_lookup": {
+      "method": "_phase_nset_cache_lookup",
+      "desc": "缓存查找 + 应用缓存结果"
+    },
+    "nset_execute": {
+      "method": "_phase_nset_execute",
+      "desc": "策略解析 + 执行分派（合并）"
+    },
+    "strategy_resolve": {
+      "method": "_phase_nset_strategy_resolve",
+      "desc": "策略解析得 handler 名（向后兼容）"
+    },
+    "hr_dispatch": {
+      "method": "_phase_nset_hr_dispatch",
+      "desc": "HR 分派执行实际变换（向后兼容）"
+    },
+    "cache_write": {
+      "method": "_phase_nset_cache_write",
+      "desc": "缓存写入"
+    }
+  },
+  "event_domain_templates": {
+    "resolvers": {
+      "role_source_types": {
+        "node": {
+          "method": "_resolve_role_from_node",
+          "desc": "从节点解析池角色"
+        }
+      },
+      "cond_source_types": {
+        "edge_condition": {
+          "method": "_resolve_cond_from_edge",
+          "desc": "从边条件解析转移条件"
+        },
+        "constant": {
+          "method": "_resolve_cond_from_constant",
+          "desc": "常量条件"
+        }
+      },
+      "tracker_source_types": {
+        "exit_tracker": {
+          "method": "_resolve_tracker_from_exit",
+          "desc": "从离池 tracker 解析详情"
+        }
+      }
+    },
+    "pool_enter": {
+      "trigger_match": {
+        "type": "pool_enter"
+      },
+      "signal_trigger": "pool_enter",
+      "signal_route": "eventbus",
+      "role_ref": "target_role",
+      "codes_source": {
+        "op": "transfer",
+        "field": "transferred_codes"
+      },
+      "role_source": {
+        "type": "node",
+        "nid_field": "target_id"
+      },
+      "pool_id_field": "tid",
+      "cond_source": {
+        "type": "edge_condition",
+        "fid_field": "flow_id"
+      },
+      "tracker_source": null,
+      "mode_filter": null,
+      "skip_if_present_in": null,
+      "context_fields": {
+        "event.source_node_id": {
+          "path": "ctx.sid",
+          "default": ""
+        },
+        "transfer.mode": {
+          "path": "ctx.mode",
+          "default": ""
+        },
+        "edge.id": {
+          "path": "ctx.fid",
+          "default": ""
+        },
+        "quote.price": {
+          "path": "stock._tracker.entry_price",
+          "default": 0.0
+        },
+        "context.now_ts": {
+          "path": "ctx._now",
+          "default": 0
+        }
+      },
+      "field_resolution": {
+        "price": {
+          "chain": [
+            "quote.price",
+            "tracker.snapshot.exit_price",
+            "tracker.detail.exit_price"
+          ],
+          "default": 0
+        },
+        "profit_pct": {
+          "chain": [
+            "tracker.snapshot.profit_pct",
+            "tracker.detail.profit_pct"
+          ],
+          "default": 0
+        },
+        "hold_days": {
+          "chain": [
+            "tracker.snapshot.hold_days",
+            "tracker.detail.hold_days"
+          ],
+          "default": 0
+        }
+      }
+    },
+    "move_exit": {
+      "trigger_match": {
+        "type": "pool_exit"
+      },
+      "signal_trigger": "move_exit",
+      "signal_route": "direct",
+      "role_ref": "source_role",
+      "codes_source": {
+        "op": "transfer",
+        "field": "exited_codes"
+      },
+      "role_source": {
+        "type": "node",
+        "nid_field": "source_id",
+        "backfill_ctx_key": "nid"
+      },
+      "pool_id_field": "sid",
+      "cond_source": {
+        "type": "edge_condition",
+        "fid_field": "flow_id"
+      },
+      "tracker_source": {
+        "type": "exit_tracker",
+        "nid_field": "source_id",
+        "ctx_field": "_exit_tracker_info"
+      },
+      "mode_filter": {
+        "field": "mode",
+        "value": "move"
+      },
+      "skip_if_present_in": null,
+      "require_holding_tracker": true,
+      "context_fields": {
+        "event.target_node_id": {
+          "path": "ctx.tid",
+          "default": ""
+        },
+        "transfer.mode": {
+          "path": "ctx.mode",
+          "default": ""
+        },
+        "edge.id": {
+          "path": "ctx.fid",
+          "default": ""
+        },
+        "tracker.snapshot": {
+          "path": "ctx._exit_tracker_info",
+          "default": {}
+        },
+        "context.now_ts": {
+          "path": "ctx._now",
+          "default": 0
+        },
+        "transfer.reason": {
+          "path": "literal.move_exit",
+          "default": "move_exit"
+        }
+      },
+      "field_resolution": {
+        "price": {
+          "chain": [
+            "tracker.snapshot.current_price",
+            "tracker.detail.current_price"
+          ],
+          "default": 0
+        },
+        "profit_pct": {
+          "chain": [
+            "tracker.snapshot.profit_pct",
+            "tracker.detail.profit_pct"
+          ],
+          "default": 0
+        },
+        "hold_days": {
+          "chain": [
+            "tracker.snapshot.hold_days",
+            "tracker.detail.hold_days"
+          ],
+          "default": 0
+        }
+      }
+    },
+    "ttl_expire": {
+      "_i70_note": "signal-only 域：trigger_match.type=ttl_expire 在 event_rules.json 无匹配 event def（TIMEOUT 已删除），故 _emit_domain_event 不发 DomainEvent，仅发 SELL 信号。TIMEOUT 事件唯一由 _run_ttl 边执行层直发，消除 EXIT+TIMEOUT 双发。",
+      "trigger_match": {
+        "type": "ttl_expire"
+      },
+      "signal_trigger": "timeout",
+      "signal_route": "direct",
+      "role_ref": "resolved_role",
+      "codes_source": {
+        "op": "diff",
+        "prev": "prev_stock_index",
+        "curr": "stock_index"
+      },
+      "role_source": {
+        "type": "node",
+        "nid_field": "nid",
+        "backfill_ctx_key": "nid"
+      },
+      "pool_id_field": "nid",
+      "cond_source": {
+        "type": "constant",
+        "value": "ttl_expired"
+      },
+      "tracker_source": {
+        "type": "exit_tracker",
+        "nid_field": "nid",
+        "ctx_field": "_tracker_info"
+      },
+      "mode_filter": null,
+      "skip_if_present_in": "move_exit_set",
+      "require_holding_tracker": true,
+      "require_holding_tracker_field": "tracker.detail",
+      "context_fields": {
+        "context.timeout_reason": {
+          "path": "literal.ttl_expired",
+          "default": "ttl_expired"
+        },
+        "tracker.detail": {
+          "path": "ctx._tracker_info",
+          "default": {}
+        },
+        "context.now_ts": {
+          "path": "ctx._now",
+          "default": 0
+        },
+        "tracker.pool_id": {
+          "path": "ctx.nid",
+          "default": ""
+        }
+      },
+      "field_resolution": {
+        "price": {
+          "chain": [
+            "tracker.detail.current_price"
+          ],
+          "default": 0
+        },
+        "profit_pct": {
+          "chain": [
+            "tracker.detail.profit_pct"
+          ],
+          "default": 0
+        },
+        "hold_days": {
+          "chain": [
+            "tracker.detail.hold_days"
+          ],
+          "default": 0
+        }
+      }
+    }
+  },
+  "codes_ops": {
+    "transfer": {
+      "method": "_codes_transfer",
+      "desc": "从 transfer_events 提取 field 字段的代码列表"
+    },
+    "diff": {
+      "method": "_codes_diff",
+      "desc": "计算 prev 与 curr 的差集"
+    },
+    "literal": {
+      "method": "_codes_literal",
+      "desc": "返回字面值列表"
+    }
+  },
+  "flow_mode_registry": {
+    "modes": {
+      "move": {
+        "name": "移动模式",
+        "desc": "股票从源池移到目标池，离开源池",
+        "attr_out": 8192,
+        "attr_in": 8193,
+        "is_move": true,
+        "is_overwrite": false,
+        "behavior": "满足条件的股票从源状态池删除并转移到目标状态池",
+        "exec_steps": [
+          "remove_from_source",
+          "add_to_dest"
+        ],
+        "detail_template": "移动{count}只股票从{source}到{dest}"
+      },
+      "overwrite": {
+        "name": "覆盖模式",
+        "desc": "先清空目标池再写入新数据，目标始终是最新的",
+        "attr_out": 4096,
+        "attr_in": 4097,
+        "is_move": false,
+        "is_overwrite": true,
+        "behavior": "先清空目的状态池的全部股票，再将满足条件的股票写入",
+        "exec_steps": [
+          "clear_dest",
+          "add_to_dest"
+        ],
+        "detail_template": "清空目标池后写入{count}只股票到{dest}"
+      },
+      "copy": {
+        "name": "复制模式",
+        "desc": "保留源同时复制到目标，多阶段可累积",
+        "attr_out": 20480,
+        "attr_in": 20481,
+        "is_move": false,
+        "is_overwrite": false,
+        "behavior": "源状态池股票不变，同时将满足条件的股票复制到目标状态池",
+        "exec_steps": [
+          "add_to_dest"
+        ],
+        "detail_template": "复制{count}只股票到{dest}(源池不变)"
+      },
+      "force_move": {
+        "name": "强制移动",
+        "desc": "强制覆盖写入，不考虑原有数据",
+        "attr_out": 3,
+        "attr_in": null,
+        "is_move": true,
+        "is_overwrite": true,
+        "behavior": "强制模式，bit0+bit1同时设置",
+        "exec_steps": [
+          "clear_dest",
+          "add_to_dest"
+        ],
+        "detail_template": "强制覆盖写入{count}只股票到{dest}"
+      },
+      "output_components": {
+        "name": "输出成份股",
+        "desc": "当源是板块时展开为个股输出",
+        "attr_out": 16384,
+        "attr_in": 16385,
+        "is_move": false,
+        "is_overwrite": false,
+        "behavior": "如果源是板块节点，则展开其成份股后输出到目标",
+        "exec_steps": [
+          "expand_sectors",
+          "add_to_dest"
+        ],
+        "detail_template": "展开{count}个板块为{expanded_count}只成份股"
+      },
+      "overwrite_copy": {
+        "name": "覆盖复制模式",
+        "desc": "先清空目标池再从源池复制，源池保留",
+        "attr_out": 12288,
+        "attr_in": null,
+        "is_move": false,
+        "is_overwrite": true,
+        "behavior": "先清空目的状态池的全部股票，再将满足条件的股票从源池复制到目标（源池保留）",
+        "exec_steps": [
+          "clear_dest",
+          "add_to_dest"
+        ],
+        "detail_template": "清空目标池后复制{count}只股票到{dest}(源池不变)"
+      },
+      "pass_through": {
+        "name": "透传模式",
+        "desc": "默认模式，直接将股票添加到目标池",
+        "attr_out": null,
+        "attr_in": null,
+        "is_move": false,
+        "is_overwrite": false,
+        "behavior": "将满足条件的股票直接添加到目标状态池",
+        "exec_steps": [
+          "add_to_dest"
+        ],
+        "detail_template": "透传{count}只股票到{dest}"
+      }
+    },
+    "attr_bits_ref": "field_definitions.bit_fields.flow",
+    "begin_types": [
+      {
+        "value": 0,
+        "name": "立即开始",
+        "param_format": "无",
+        "param_desc": "无需参数",
+        "example": "begint=0"
+      },
+      {
+        "value": 1,
+        "name": "延迟开始",
+        "param_format": "秒数",
+        "param_desc": "延迟多少秒后开始执行",
+        "example": "begint=1800(30分钟)"
+      },
+      {
+        "value": 2,
+        "name": "开市前",
+        "param_format": "秒数",
+        "param_desc": "距离开盘前多少秒开始",
+        "example": "begint=300(5分钟)"
+      },
+      {
+        "value": 3,
+        "name": "开市后",
+        "param_format": "HHMMSS",
+        "param_desc": "几点几分几秒后开始",
+        "example": "begint=93000(09:30:00)"
+      },
+      {
+        "value": 4,
+        "name": "收市前",
+        "param_format": "HHMMSS",
+        "param_desc": "距离收盘前多长时间开始",
+        "example": "begint=140000(14:00:00)"
+      },
+      {
+        "value": 5,
+        "name": "收市后",
+        "param_format": "秒数",
+        "param_desc": "收盘后多少秒开始",
+        "example": "begint=0"
+      },
+      {
+        "value": 6,
+        "name": "指定交易日时间",
+        "param_format": "-",
+        "param_desc": "特定交易日的特定时间",
+        "example": ""
+      },
+      {
+        "value": 7,
+        "name": "指定时间",
+        "param_format": "HHMMSS",
+        "param_desc": "绝对时间点",
+        "example": "begint=92500(09:25:00)"
+      }
+    ],
+    "end_types": [
+      {
+        "value": 0,
+        "name": "一直执行",
+        "param_format": "INT_MAX",
+        "param_desc": "持续执行直到收盘或手动停止",
+        "example": "endt=2147483647"
+      },
+      {
+        "value": 1,
+        "name": "执行指定时长",
+        "param_format": "秒数",
+        "param_desc": "从begin起计算持续多少秒",
+        "example": "endt=19800(5.5小时)"
+      },
+      {
+        "value": 2,
+        "name": "只执行一次",
+        "param_format": "-",
+        "param_desc": "触发一次后不再重复",
+        "example": ""
+      }
+    ],
+    "transfer_mode_combinations": [
+      {
+        "mode": "move",
+        "out_attr": 8192,
+        "in_attr": 8193,
+        "reference_pool": "超赢1号",
+        "note": "扇出汇合拓扑使用"
+      },
+      {
+        "mode": "overwrite",
+        "out_attr": 4096,
+        "in_attr": 4097,
+        "reference_pool": "超赢7号",
+        "note": "循环反馈拓扑使用"
+      },
+      {
+        "mode": "copy",
+        "out_attr": 20480,
+        "in_attr": 20481,
+        "reference_pool": "金色两点半",
+        "note": "分阶段时序拓扑使用"
+      }
+    ],
+    "version": "2.0",
+    "resolve_rules": [
+      {
+        "priority": 1,
+        "check_bits": [
+          "output_constituent"
+        ],
+        "mode": "output_components"
+      },
+      {
+        "priority": 1.5,
+        "check_bits": [
+          "clear_dest_first",
+          "keep_source"
+        ],
+        "mode": "overwrite_copy"
+      },
+      {
+        "priority": 2,
+        "check_bits": [
+          "clear_dest_first"
+        ],
+        "check_bits_absent": [
+          "keep_source"
+        ],
+        "mode": "overwrite"
+      },
+      {
+        "priority": 3,
+        "check_bits": [
+          "keep_source"
+        ],
+        "check_bits_absent": [
+          "delete_source"
+        ],
+        "mode": "copy"
+      },
+      {
+        "priority": 4,
+        "check_bits": [
+          "delete_source",
+          "force_move"
+        ],
+        "mode": "force_move"
+      },
+      {
+        "priority": 5,
+        "check_bits": [
+          "delete_source"
+        ],
+        "check_bits_absent": [
+          "keep_source"
+        ],
+        "mode": "move"
+      },
+      {
+        "priority": 99,
+        "mode": "pass_through"
+      }
+    ],
+    "propagate_rules": {
+      "copy": {
+        "read_source": true,
+        "clear_source": false,
+        "clear_dest": false,
+        "write_target": true
+      },
+      "move": {
+        "read_source": true,
+        "clear_source": true,
+        "clear_dest": false,
+        "write_target": true
+      },
+      "overwrite": {
+        "read_source": true,
+        "clear_source": false,
+        "clear_dest": true,
+        "write_target": true
+      },
+      "overwrite_copy": {
+        "read_source": true,
+        "clear_source": false,
+        "clear_dest": true,
+        "write_target": true
+      },
+      "force_move": {
+        "read_source": true,
+        "clear_source": true,
+        "clear_dest": true,
+        "write_target": true
+      },
+      "output_components": {
+        "read_source": true,
+        "clear_source": false,
+        "clear_dest": false,
+        "write_target": true
+      },
+      "pass_through": {
+        "read_source": true,
+        "clear_source": false,
+        "clear_dest": false,
+        "write_target": true
+      }
+    },
+    "propagate_flag_map": {
+      "0,0": "copy",
+      "1,0": "move",
+      "0,1": "overwrite",
+      "1,1": "force_move"
+    },
+    "tdx_tran_to_bits": {
+      "0": {
+        "keep_source": true
+      },
+      "1": {
+        "delete_source": true
+      }
+    },
+    "bit_override_rules": {
+      "delete_source": {
+        "override": "is_move",
+        "value": true
+      },
+      "clear_dest_first": {
+        "override": "is_overwrite",
+        "value": true
+      }
+    },
+    "attr_resolution_chain": [
+      {
+        "op": "parse_attr_int",
+        "input": "fa",
+        "output": "fa"
+      },
+      {
+        "op": "resolve_tran_bits",
+        "input": "ep.tran",
+        "table": "tdx_tran_to_bits",
+        "mutex_table": "mutex_bits",
+        "output": "fa"
+      },
+      {
+        "op": "merge_bit_fields",
+        "input": "ep",
+        "fields": [
+          "delete_source",
+          "clear_dest_first",
+          "keep_source",
+          "force_move",
+          "output_constituent"
+        ],
+        "mutex_table": "mutex_bits",
+        "output": "fa"
+      },
+      {
+        "op": "resolve_mode",
+        "table": "resolve_rules",
+        "modes_table": "modes",
+        "output": "mode_name"
+      },
+      {
+        "op": "derive_flags",
+        "table": "bit_override_rules",
+        "output": "flags"
+      }
+    ],
+    "step_ops": {
+      "parse_attr_int": {
+        "method": "_step_parse_attr_int",
+        "desc": "fa int → dict via DynamicFlowModel"
+      },
+      "resolve_tran_bits": {
+        "method": "_step_resolve_tran_bits",
+        "desc": "ep.tran → bits from tdx_tran_to_bits, apply mutex"
+      },
+      "merge_bit_fields": {
+        "method": "_step_merge_bit_fields",
+        "desc": "ep bit fields → fa, apply mutex"
+      },
+      "resolve_mode": {
+        "method": "_step_resolve_mode",
+        "desc": "fa → mode_name → mode_config"
+      },
+      "derive_flags": {
+        "method": "_step_derive_flags",
+        "desc": "mode_config → is_move/is_overwrite, apply override_rules"
+      }
+    },
+    "mode_colors": {
+      "move": "#1890ff",
+      "overwrite": "#fa8c16",
+      "copy": "#52c41a",
+      "force_move": "#f5222d",
+      "output_components": "#722ed1",
+      "overwrite_copy": "#eb2f96",
+      "pass_through": "#8c8c8c"
+    }
+  },
+  "flow_mode_rules": {
+    "version": "1.0",
+    "description": "DZH 流转模式识别规则表，按优先级排序，首个匹配即返回。mask_check 表达式引用 FLOW_ATTR_* 常量名，由 _eval_mask_check 在调用时求值（attr 为待识别的 attr 整数）。",
+    "flow_mode_rules": [
+      {
+        "mode": "output_components",
+        "mask_check": "attr & FLOW_ATTR_OUTPUT_CONSTITUENT",
+        "is_outflow": true
+      },
+      {
+        "mode": "overwrite",
+        "mask_check": "attr & FLOW_ATTR_CLEAR_DEST_FIRST",
+        "is_outflow": true
+      },
+      {
+        "mode": "keep_copy",
+        "mask_check": "attr & FLOW_ATTR_KEEP_SOURCE and not (attr & FLOW_ATTR_DELETE_SOURCE)",
+        "is_outflow": false
+      },
+      {
+        "mode": "unknown_keep",
+        "mask_check": "attr & FLOW_ATTR_KEEP_SOURCE",
+        "is_outflow": false
+      },
+      {
+        "mode": "force_move",
+        "mask_check": "(attr & (FLOW_ATTR_DELETE_SOURCE | FLOW_ATTR_FORCE_MOVE)) == (FLOW_ATTR_DELETE_SOURCE | FLOW_ATTR_FORCE_MOVE)",
+        "is_outflow": true
+      },
+      {
+        "mode": "move",
+        "mask_check": "attr & FLOW_ATTR_DELETE_SOURCE",
+        "is_outflow": true
+      },
+      {
+        "mode": "pass_through",
+        "mask_check": "default",
+        "is_outflow": false
+      }
+    ]
+  },
+  "topology": {
+    "version": "1.0",
+    "description": "TDX/DZH 股票池拓扑模式配置表（对照 TDX文档 §9.4 六种流转拓扑模式）",
+    "modes": {
+      "serial": {
+        "label": "串行链式",
+        "doc_ref": "模式A",
+        "desc": "备选池→条件A→状态A→条件B→状态B→... 单链逐步过滤",
+        "detect_rules": {
+          "max_out": 1,
+          "max_in": 1,
+          "min_nodes": 2
+        },
+        "reference_pool": "黑马二号池"
+      },
+      "fan_out": {
+        "label": "扇出分流",
+        "doc_ref": "模式B",
+        "desc": "单个备选池扇出到多个条件节点，各自筛选后输出到独立状态池",
+        "detect_rules": {
+          "source_count": 1,
+          "max_out_gte": 2
+        },
+        "reference_pool": "黑马全息股池"
+      },
+      "fan_in": {
+        "label": "扇入汇合",
+        "doc_ref": "模式C",
+        "desc": "多个状态池汇入同一个最终输出池",
+        "detect_rules": {
+          "sink_count": 1,
+          "max_in_gte": 2
+        },
+        "reference_pool": "黑马全息股池"
+      },
+      "funnel": {
+        "label": "多层漏斗",
+        "doc_ref": "模式D",
+        "desc": "串行链式+多条件逐步过滤，每层条件进一步过滤上一层输出",
+        "detect_rules": {
+          "max_out": 1,
+          "chain_depth_gte": 4,
+          "has_progressive_filter": true
+        },
+        "reference_pool": "黑马一号池"
+      },
+      "multi_source": {
+        "label": "多源并行",
+        "doc_ref": "模式E",
+        "desc": "多个备选池(源节点)并行启动独立路径",
+        "detect_rules": {
+          "source_count_gte": 2
+        },
+        "reference_pool": "大路终结池"
+      },
+      "multi_indicator": {
+        "label": "多指标并行",
+        "doc_ref": "模式F",
+        "desc": "单个备选池扇出到多个条件指标节点，各条件独立输出到状态池",
+        "detect_rules": {
+          "source_count": 1,
+          "max_out_gte": 2,
+          "target_is_condition": true
+        },
+        "reference_pool": "盘后.xml"
+      },
+      "loop_feedback": {
+        "label": "循环反馈",
+        "doc_ref": "DZH模式D",
+        "desc": "状态池→条件→状态池形成环路，股票可在环路中循环流转(超赢7号)",
+        "detect_rules": {
+          "has_cycle": true
+        },
+        "reference_pool": "超赢7号"
+      },
+      "dual_source": {
+        "label": "双源并行",
+        "doc_ref": "DZH模式E",
+        "desc": "两个备选池(源节点)并行启动独立路径后汇合到同一最终输出池(超赢1号)",
+        "detect_rules": {
+          "source_count": 2,
+          "sink_count": 1
+        },
+        "reference_pool": "超赢1号"
+      }
+    },
+    "detection_priority": [
+      "loop_feedback",
+      "dual_source",
+      "funnel",
+      "multi_source",
+      "multi_indicator",
+      "fan_out",
+      "fan_in",
+      "serial"
+    ],
+    "fallback_mode": "mixed",
+    "tdx_doc_mapping": {
+      "模式A": "serial",
+      "模式B": "fan_out",
+      "模式C": "fan_in",
+      "模式D": "funnel",
+      "模式E": "multi_source",
+      "模式F": "multi_indicator"
+    },
+    "dzh_doc_mapping": {
+      "模式A": "serial",
+      "模式B": "fan_out",
+      "模式C": "fan_in",
+      "模式D": "loop_feedback",
+      "模式E": "dual_source"
+    }
+  },
+  "topology_patterns": {
+    "version": "1.0",
+    "description": "股票池拓扑模式配置表：定义 DZH 5 种 + TDX 6 种拓扑模式的识别规则与默认执行策略",
+    "patterns": [
+      {
+        "pattern_id": "serial_chain",
+        "name": "串行链式",
+        "doc_source": [
+          "DZH",
+          "TDX"
+        ],
+        "desc": "备选池/状态池 → 条件 → 状态池 → 条件 → 状态池 … 单链逐步过滤",
+        "match_rules": [
+          {
+            "metric": "max_out_degree",
+            "value": 1
+          },
+          {
+            "metric": "max_in_degree",
+            "value": 1
+          },
+          {
+            "metric": "min_chain_depth",
+            "min": 2
+          },
+          {
+            "metric": "has_cycle",
+            "value": false
+          }
+        ],
+        "execution_strategy": "serial",
+        "cache_policy": "source_fingerprint",
+        "cache_key": "source_id"
+      },
+      {
+        "pattern_id": "fan_out",
+        "name": "扇出分流",
+        "doc_source": [
+          "DZH",
+          "TDX"
+        ],
+        "desc": "单个源节点扇出到多个下游节点，各分支独立筛选后输出",
+        "match_rules": [
+          {
+            "metric": "source_count",
+            "value": 1
+          },
+          {
+            "metric": "max_source_out_degree",
+            "min": 2
+          },
+          {
+            "metric": "has_cycle",
+            "value": false
+          }
+        ],
+        "execution_strategy": "parallel",
+        "cache_policy": "branch_isolated",
+        "cache_key": "branch_id"
+      },
+      {
+        "pattern_id": "fan_in",
+        "name": "扇入汇合",
+        "doc_source": [
+          "DZH",
+          "TDX"
+        ],
+        "desc": "多个上游状态池汇入同一个目标状态池",
+        "match_rules": [
+          {
+            "metric": "sink_count",
+            "value": 1
+          },
+          {
+            "metric": "max_sink_in_degree",
+            "min": 2
+          },
+          {
+            "metric": "has_cycle",
+            "value": false
+          }
+        ],
+        "execution_strategy": "serial",
+        "cache_policy": "source_fingerprint",
+        "cache_key": "source_id"
+      },
+      {
+        "pattern_id": "loop_feedback",
+        "name": "循环反馈",
+        "doc_source": [
+          "DZH"
+        ],
+        "desc": "状态池 → 条件 → 状态池形成环路，股票可在环路中循环流转",
+        "match_rules": [
+          {
+            "metric": "has_cycle",
+            "value": true
+          }
+        ],
+        "execution_strategy": "serial",
+        "cache_policy": "disabled",
+        "cache_key": "none"
+      },
+      {
+        "pattern_id": "dual_source_parallel",
+        "name": "双源并行",
+        "doc_source": [
+          "DZH"
+        ],
+        "desc": "两个备选池并行启动独立路径后汇合到同一最终输出池",
+        "match_rules": [
+          {
+            "metric": "source_count",
+            "value": 2
+          },
+          {
+            "metric": "sink_count",
+            "value": 1
+          },
+          {
+            "metric": "has_cycle",
+            "value": false
+          }
+        ],
+        "execution_strategy": "parallel",
+        "cache_policy": "branch_isolated",
+        "cache_key": "branch_id"
+      },
+      {
+        "pattern_id": "multi_layer_funnel",
+        "name": "多层漏斗",
+        "doc_source": [
+          "TDX"
+        ],
+        "desc": "串行链式 + 多条件逐步过滤，每层条件进一步过滤上一层输出",
+        "match_rules": [
+          {
+            "metric": "max_out_degree",
+            "value": 1
+          },
+          {
+            "metric": "max_in_degree",
+            "value": 1
+          },
+          {
+            "metric": "min_chain_depth",
+            "min": 4
+          },
+          {
+            "metric": "min_condition_node_count",
+            "min": 2
+          },
+          {
+            "metric": "has_cycle",
+            "value": false
+          }
+        ],
+        "execution_strategy": "serial",
+        "cache_policy": "source_fingerprint",
+        "cache_key": "source_id"
+      },
+      {
+        "pattern_id": "multi_source_parallel",
+        "name": "多源并行",
+        "doc_source": [
+          "TDX"
+        ],
+        "desc": "多个备选池(源节点)并行启动独立路径",
+        "match_rules": [
+          {
+            "metric": "min_source_count",
+            "min": 2
+          },
+          {
+            "metric": "has_cycle",
+            "value": false
+          }
+        ],
+        "execution_strategy": "parallel",
+        "cache_policy": "branch_isolated",
+        "cache_key": "branch_id"
+      },
+      {
+        "pattern_id": "multi_indicator_parallel",
+        "name": "多指标并行",
+        "doc_source": [
+          "TDX"
+        ],
+        "desc": "单个备选池扇出到多个条件指标节点，各条件独立输出到状态池",
+        "match_rules": [
+          {
+            "metric": "source_count",
+            "value": 1
+          },
+          {
+            "metric": "max_source_out_degree",
+            "min": 2
+          },
+          {
+            "metric": "targets_are_condition",
+            "value": true
+          },
+          {
+            "metric": "has_cycle",
+            "value": false
+          }
+        ],
+        "execution_strategy": "parallel",
+        "cache_policy": "branch_isolated",
+        "cache_key": "branch_id"
+      }
+    ],
+    "detection_priority": [
+      "loop_feedback",
+      "dual_source_parallel",
+      "multi_layer_funnel",
+      "multi_source_parallel",
+      "multi_indicator_parallel",
+      "fan_out",
+      "fan_in",
+      "serial_chain"
+    ],
+    "fallback": {
+      "pattern_id": "unknown",
+      "execution_strategy": "serial",
+      "cache_policy": "source_fingerprint",
+      "cache_key": "source_id"
+    }
+  },
+  "_convergence": {
+    "merged_from": [
+      "flow_mode_registry.json",
+      "flow_mode_rules.json",
+      "topology.json",
+      "topology_patterns.json"
+    ],
+    "target_count": 30
+  }
+}

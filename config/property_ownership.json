@@ -1,0 +1,225 @@
+{
+  "version": "1.0",
+  "description": "属性所有权表：定义每种节点类型在不同池类型下的属性所有权，确保导入DZH配置时禁用TDX独有属性，导入TDX配置时禁用DZH独有属性。完全由表驱动，无硬编码。",
+  "ownership": {
+    "dzh": {
+      "description": "大智慧(DZH)股票池独有的属性",
+      "exclusive_attrs": {
+        "node": [
+          "url",
+          "hold",
+          "col",
+          "histana",
+          "wizd",
+          "deltype",
+          "endtime",
+          "delstocktype",
+          "staattr",
+          "enter",
+          "exit",
+          "stocknum",
+          "tmpl",
+          "sorttype",
+          "inditype",
+          "crc",
+          "indi",
+          "indiparam",
+          "attrtext",
+          "reload",
+          "lastload",
+          "tradeattr"
+        ],
+        "edge": [
+          "begin",
+          "begint",
+          "end",
+          "endt",
+          "interval_sec",
+          "delete_source",
+          "keep_source",
+          "output_constituent",
+          "force_move",
+          "clear_dest_first"
+        ]
+      }
+    },
+    "tdx": {
+      "description": "通达信(TDX)股票池独有的属性",
+      "exclusive_attrs": {
+        "node": [
+          "clrtext",
+          "solid",
+          "spinfo",
+          "psatt",
+          "func",
+          "stocks",
+          "tdx_type",
+          "tdx_spinfo",
+          "tdx_psatt",
+          "tdx_func"
+        ],
+        "edge": [
+          "tran",
+          "emptyps",
+          "starttype",
+          "starttime",
+          "starttimetype",
+          "starttimehms",
+          "cxtype",
+          "cxtime",
+          "cxtimetype",
+          "jgtime"
+        ]
+      }
+    },
+    "shared": {
+      "description": "两种池类型共有的属性（跨池类型均可编辑）",
+      "attrs": {
+        "node": [
+          "id",
+          "type",
+          "text",
+          "attr",
+          "clr",
+          "pos",
+          "pos_x",
+          "pos_y",
+          "width",
+          "height"
+        ],
+        "edge": [
+          "from",
+          "to",
+          "clr",
+          "size",
+          "text"
+        ]
+      }
+    }
+  },
+  "type_ownership": {
+    "1": {
+      "dzh": ["id", "type", "attr", "pos", "clr", "text", "url"],
+      "tdx": ["id", "type", "attr", "pos", "text", "clr", "clrtext", "solid"]
+    },
+    "2": {
+      "dzh": ["id", "type", "attr", "pos", "clr", "text"],
+      "tdx": ["id", "type", "attr", "pos", "text", "clr", "clrtext", "solid"]
+    },
+    "200": {
+      "dzh": ["id", "type", "attr", "pos", "clr", "text", "hold", "col", "width", "histana", "wizd", "deltype", "endtime", "delstocktype", "staattr", "enter", "exit", "stocknum", "tmpl", "sorttype", "tradeattr"],
+      "tdx": ["id", "type", "text", "clr", "clrtext", "solid", "psatt", "stocks"]
+    },
+    "201": {
+      "dzh": ["id", "type", "attr", "pos", "clr", "text", "inditype", "crc", "indi", "sorttype", "indiparam"],
+      "tdx": ["id", "type", "text", "clr", "clrtext", "solid", "func"]
+    },
+    "202": {
+      "dzh": ["id", "type", "attr", "pos", "clr", "text", "attrtext", "reload", "lastload"],
+      "tdx": ["id", "type", "text", "clr", "clrtext", "solid", "spinfo", "stocks"]
+    },
+    "7": {
+      "dzh": null,
+      "tdx": ["id", "type", "attr", "pos", "spinfo", "stocks", "clr", "text", "clrtext", "solid"]
+    },
+    "8": {
+      "dzh": null,
+      "tdx": ["id", "type", "attr", "pos", "psatt", "stocks", "clr", "text", "clrtext", "solid"]
+    },
+    "3": {
+      "dzh": ["id", "type", "attr", "pos", "clr"],
+      "tdx": null
+    },
+    "tdx_3": {
+      "dzh": null,
+      "tdx": ["id", "type", "attr", "pos", "func", "clr", "text", "clrtext", "solid"]
+    },
+    "tdx_0": {
+      "dzh": null,
+      "tdx": ["id", "type", "attr", "pos", "text", "clr", "clrtext", "solid"]
+    },
+    "tdx_7": {
+      "dzh": null,
+      "tdx": ["id", "type", "attr", "pos", "spinfo", "stocks", "clr", "text", "clrtext", "solid"]
+    },
+    "tdx_8": {
+      "dzh": null,
+      "tdx": ["id", "type", "attr", "pos", "psatt", "stocks", "clr", "text", "clrtext", "solid"]
+    },
+    "0": {
+      "dzh": null,
+      "tdx": ["id", "type", "attr", "pos", "text", "clr", "clrtext", "solid"]
+    },
+    "4": {
+      "dzh": ["id", "type", "attr", "pos", "clr", "text"],
+      "tdx": null
+    },
+    "5": {
+      "dzh": ["id", "type", "attr", "pos", "clr"],
+      "tdx": null
+    },
+    "6": {
+      "dzh": ["id", "type", "attr", "pos", "clr", "text"],
+      "tdx": ["id", "type", "attr", "pos", "clr", "text", "clrtext", "solid"]
+    },
+    "203": {
+      "dzh": ["id", "type", "attr", "pos", "clr", "text", "hold", "col", "width", "histana", "wizd", "deltype", "endtime", "delstocktype", "staattr", "enter", "exit", "stocknum", "tmpl", "sorttype", "tradeattr", "attrtext", "reload", "lastload"],
+      "tdx": null
+    }
+  },
+  "type_mapping": {
+    "dzh_to_tdx": {
+      "1": "1",
+      "2": "2",
+      "6": "6",
+      "200": "8",
+      "201": "3",
+      "202": "7"
+    },
+    "tdx_to_dzh": {
+      "0": "1",
+      "1": "1",
+      "2": "2",
+      "3": "201",
+      "6": "6",
+      "7": "202",
+      "8": "200"
+    }
+  },
+  "rules": {
+    "dzh_import": {
+      "description": "导入DZH配置时，TDX独有属性必须禁止编辑",
+      "blocked_attrs": ["clrtext", "solid", "spinfo", "psatt", "func", "stocks", "tdx_type", "tdx_spinfo", "tdx_psatt", "tdx_func", "tran", "emptyps", "starttype", "starttime", "starttimetype", "starttimehms", "cxtype", "cxtime", "cxtimetype", "jgtime"]
+    },
+    "tdx_import": {
+      "description": "导入TDX配置时，DZH独有属性必须禁止编辑",
+      "blocked_attrs": ["url", "hold", "col", "histana", "wizd", "deltype", "endtime", "delstocktype", "staattr", "enter", "exit", "stocknum", "tmpl", "sorttype", "inditype", "crc", "indi", "indiparam", "attrtext", "reload", "lastload", "tradeattr", "begin", "begint", "end", "endt", "interval_sec", "delete_source", "keep_source", "output_constituent", "force_move", "clear_dest_first"]
+    }
+  },
+  "pool_type_attrs": {
+    "description": "池类型属性查表：按 pool_type 查表获取 blocked_attrs 的 rules_key 与对照池类型 other_pool，消除 if pool_type == 分支",
+    "dzh": {"rules_key": "dzh_import", "other_pool": "tdx"},
+    "tdx": {"rules_key": "tdx_import", "other_pool": "dzh", "type_prefix": "tdx_"}
+  },
+  "type_name_mapping": {
+    "tdx_state_pool": "8",
+    "tdx_candidate": "7",
+    "tdx_condition": "3",
+    "tdx_decorative": "0",
+    "stock_state_pool": "200",
+    "market_source": "202",
+    "candidate_provider": "202",
+    "transfer_condition": "201",
+    "condition_filter": "201",
+    "discard_pool": "4",
+    "discard_sink": "4",
+    "text_label": "1",
+    "container": "2",
+    "container_box": "2",
+    "flow_arrow": "6",
+    "exec_order_arrow": "6",
+    "state_column": "5",
+    "pool_meta": "0",
+    "flow": "6"
+  }
+}

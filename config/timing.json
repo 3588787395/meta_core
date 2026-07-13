@@ -1,0 +1,83 @@
+{
+  "version": 2,
+  "starttype_rules": {
+    "0": {"name": "immediate"},
+    "1": {"name": "delay"},
+    "2": {"name": "before_open"},
+    "3": {"name": "after_open"},
+    "4": {"name": "before_close"},
+    "5": {"name": "after_close"},
+    "6": {"name": "trading_time"},
+    "7": {"name": "specific_time"}
+  },
+  "cxtype_rules": {
+    "0": {"name": "forever"},
+    "1": {"name": "duration"},
+    "2": {"name": "once"}
+  },
+  "market_calendar": {
+    "open_sec": 34500,
+    "close_sec": 54000,
+    "sessions": [
+      {
+        "name": "morning",
+        "open_sec": 34500,
+        "close_sec": 41400
+      },
+      {
+        "name": "afternoon",
+        "open_sec": 46800,
+        "close_sec": 54000
+      }
+    ]
+  },
+  "tick_interval": 1,
+  "offset_units": {
+    "0": 1,
+    "1": 60,
+    "2": 3600
+  },
+  "cxtime_units": {
+    "0": 1,
+    "1": 60,
+    "2": 3600,
+    "3": 86400
+  },
+  "simulator": {
+    "default_hold_seconds": 432000,
+    "begin_type_labels": {
+      "0": "立即",
+      "1": "延迟",
+      "2": "开市前",
+      "3": "开市后",
+      "4": "收市前",
+      "5": "收市后",
+      "6": "交易日",
+      "7": "指定时间"
+    },
+    "begin_type_formatters": {
+      "0": "label_only",
+      "1": "label_with_offset",
+      "2": "label_with_offset",
+      "3": "label_with_offset",
+      "4": "label_with_offset",
+      "5": "label_with_offset",
+      "6": "label_with_offset",
+      "7": "hhmmss"
+    },
+    "edge_type_handlers": {
+      "conditional": "apply_gate_filter",
+      "unconditional": "propagate_directly"
+    }
+  },
+  "begin_mode_map": {
+    "0": "immediate",
+    "1": "delay",
+    "2": "before_open",
+    "3": "after_open",
+    "4": "before_close",
+    "5": "after_close",
+    "6": "trading_day",
+    "7": "specified_time"
+  }
+}

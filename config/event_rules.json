@@ -1,0 +1,94 @@
+{
+  "version": "1.0",
+  "description": "事件规则表：定义ENTER/EXIT事件的触发规则与detail字段映射（表驱动层）。TIMEOUT 事件由 _run_ttl 边执行层直发，不经本表（I70 范式升级）",
+  "events": {
+    "ENTER": {
+      "trigger": {
+        "type": "pool_enter",
+        "desc": "股票进入目标池时触发",
+        "condition": "stock enters target_pool AND (tracker == null OR tracker.status != 'holding')"
+      },
+      "priority": 5,
+      "stop_on_match": false,
+      "detail_mapping_key": "enter",
+      "desc": "进入事件：股票首次进入目标池"
+    },
+    "EXIT": {
+      "trigger": {
+        "type": "pool_exit",
+        "desc": "股票离开源池(move模式)时触发",
+        "condition": "transfer_mode == 'move' AND stock leaves source_pool AND tracker.status == 'holding'"
+      },
+      "priority": 5,
+      "stop_on_match": false,
+      "detail_mapping_key": "exit",
+      "desc": "退出事件：持仓股票离开源池"
+    }
+  },
+  "detail_mapping": {
+    "enter": {
+      "fields": {
+        "source_id": {
+          "source": "event.source_node_id",
+          "desc": "源节点ID(股票来源的池/节点)",
+          "required": true
+        },
+        "mode": {
+          "source": "transfer.mode",
+          "desc": "流转模式(move/overwrite/copy等)",
+          "required": true
+        },
+        "flow_id": {
+          "source": "edge.id",
+          "desc": "所属流程/边ID",
+          "required": false
+        },
+        "timestamp": {
+          "source": "context.now_ts",
+          "desc": "事件触发时间戳",
+          "required": true
+        },
+        "price": {
+          "source": "quote.price",
+          "desc": "进入时的行情价格",
+          "required": false
+        }
+      }
+    },
+    "exit": {
+      "fields": {
+        "target_id": {
+          "source": "event.target_node_id",
+          "desc": "目标节点ID(股票去往的池/节点)",
+          "required": false
+        },
+        "mode": {
+          "source": "transfer.mode",
+          "desc": "流转模式",
+          "required": true
+        },
+        "flow_id": {
+          "source": "edge.id",
+          "desc": "所属流程/边ID",
+          "required": false
+        },
+        "tracker": {
+          "source": "tracker.snapshot",
+          "desc": "持仓跟踪快照(entry_price/profit_pct/hold_days等)",
+          "required": false
+        },
+        "timestamp": {
+          "source": "context.now_ts",
+          "desc": "事件触发时间戳",
+          "required": true
+        },
+        "reason": {
+          "source": "transfer.reason",
+          "default": "move_exit",
+          "desc": "退出原因",
+          "required": false
+        }
+      }
+    }
+  }
+}

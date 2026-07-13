@@ -1,0 +1,34 @@
+{
+  "version": "1.0",
+  "description": "监控告警规则表：定义触发条件、严重级别与冷却时间",
+  "rules": {
+    "profit_threshold": {
+      "rule_id": "profit_threshold",
+      "name": "止盈告警",
+      "condition": "profit_pct >= 10",
+      "severity": "warning",
+      "cooldown_sec": 300
+    },
+    "drawdown_threshold": {
+      "rule_id": "drawdown_threshold",
+      "name": "回撤告警",
+      "condition": "max_drawdown <= -5",
+      "severity": "critical",
+      "cooldown_sec": 300
+    },
+    "rank_change": {
+      "rule_id": "rank_change",
+      "name": "排名剧烈变化",
+      "condition": "abs(profit_pct - max_profit) >= 3",
+      "severity": "warning",
+      "cooldown_sec": 60
+    },
+    "volatility_spike": {
+      "rule_id": "volatility_spike",
+      "name": "波动率突增",
+      "condition": "abs(profit_pct) >= 8",
+      "severity": "critical",
+      "cooldown_sec": 120
+    }
+  }
+}

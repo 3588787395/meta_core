@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "description": "action→handler 映射表，引擎执行边时动态查表调用",
+  "actions": {
+    "resolve_and_pass": {
+      "handler": "_action_resolve_and_pass",
+      "desc": "解析候选源并传递到下游",
+      "params": { "resolve_target": "sid" }
+    },
+    "apply_filter": {
+      "handler": "_action_apply_filter",
+      "desc": "应用转移条件过滤后传入目标池",
+      "params": { "filter_target": "sid", "propagate_target": "tid" }
+    },
+    "pass_pool_stocks": {
+      "handler": "_action_pass_pool_stocks",
+      "desc": "状态池传递持仓到转移条件",
+      "params": { "pass_target": "tid" }
+    },
+    "transfer_between_pools": {
+      "handler": "_action_transfer_between_pools",
+      "desc": "股票在状态池之间转移",
+      "params": { "transfer_target": "tid" }
+    },
+    "remove_from_pool": {
+      "handler": "_action_remove_from_pool",
+      "desc": "股票从源池移除",
+      "params": { "remove_target": "sid" }
+    }
+  }
+}

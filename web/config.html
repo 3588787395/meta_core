@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MetaCore 配置中心</title>
+<link rel="stylesheet" href="css/config-center.css?v=1">
+</head>
+<body>
+
+<div class="app">
+  <div class="hdr">
+    <div class="hdr-logo">⚙ 配置中心</div>
+    <div class="hdr-nav">
+      <a href="index.html">← 股票池</a>
+      <a href="pool_editor.html">设计器</a>
+    </div>
+    <div class="hdr-sp"></div>
+    <div class="hdr-st">
+      <div class="dot" id="dot"></div>
+      <span id="stTxt">连接中...</span>
+      <span id="tCnt"></span>
+    </div>
+    <button class="btn" id="btnVal" title="校验全部">✓ 校验</button>
+    <button class="btn" id="btnReload" title="热加载">↻ 热加载</button>
+  </div>
+
+  <div class="body">
+    <div class="side">
+      <div class="side-title">配置分类</div>
+      <div id="catList"></div>
+    </div>
+
+    <div class="list">
+      <div class="list-hdr">
+        <div class="sch-wrap">
+          <input type="text" class="sch" id="schInput" placeholder="搜索配置表...">
+        </div>
+      </div>
+      <div class="list-body" id="tList"></div>
+    </div>
+
+    <div class="ed" id="edPanel">
+      <div class="empty" id="emptySt">
+        <div class="empty-icon">📋</div>
+        <div class="empty-text">选择左侧配置表查看与编辑</div>
+      </div>
+      <div id="edContent" style="display:none;flex:1;flex-direction:column;overflow:hidden;">
+        <div class="ed-hdr">
+          <div class="ed-title" id="edTitle"></div>
+          <div class="ed-meta" id="edMeta"></div>
+          <div class="ed-acts">
+            <button class="btn" id="btnCopy">⎘ 复制</button>
+            <button class="btn" id="btnUndo" disabled>↩ 撤销</button>
+            <button class="btn pri" id="btnSave" style="display:none">💾 保存</button>
+          </div>
+        </div>
+        <div class="tabs" id="edTabs">
+          <div class="tab on" data-tab="table">表格</div>
+          <div class="tab" data-tab="json">JSON</div>
+          <div class="tab" data-tab="form">表单</div>
+          <div class="tab" data-tab="validate">校验</div>
+        </div>
+        <div class="tcontent on" id="tc-table">
+          <div class="tv" id="tableView"></div>
+        </div>
+        <div class="tcontent" id="tc-json">
+          <div class="je">
+            <textarea id="jsonEd" spellcheck="false"></textarea>
+          </div>
+        </div>
+        <div class="tcontent" id="tc-form">
+          <div class="fv" id="formView"></div>
+        </div>
+        <div class="tcontent" id="tc-validate">
+          <div class="vr" id="valView"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-c" id="toastC"></div>
+
+<script src="js/editor.js?v=2"></script>
+</body>
+</html>

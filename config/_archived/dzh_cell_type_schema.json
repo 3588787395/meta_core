@@ -1,0 +1,165 @@
+{
+  "_desc": "DZH cell 类型 schema：将 cell 类型差异隐含于表结构，通用解析器/构建器按表分派。parser/builder 字段指定处理函数名，params_fields/params_extra/param_mapping 为默认处理函数提供数据驱动规则。",
+  "cell_types": {
+    "1": {
+      "node_type": "text_label",
+      "model_class": "LabelCellModel",
+      "parser": "_parse_cell_default",
+      "builder": "_build_cell_default",
+      "position_mode": "pos",
+      "params_fields": ["attr", "clr", "url", "_orig_text", "_present_attrs"],
+      "params_extra": {
+        "text": {"src": "label"},
+        "attr_int": {"src": "attr_int"}
+      },
+      "param_mapping": {
+        "id": {"src": "cell_id"},
+        "attr": {"src": "params", "key": "attr", "transform": "safe_int", "default": 0},
+        "position": {"src": "position"},
+        "clr": {"src": "params", "key": "clr", "transform": "safe_int", "default": -1},
+        "text": {"src": "label"},
+        "url": {"src": "params", "key": "url"}
+      }
+    },
+    "2": {
+      "node_type": "container",
+      "model_class": "ContainerCellModel",
+      "parser": "_parse_cell_default",
+      "builder": "_build_cell_default",
+      "position_mode": "pos",
+      "params_fields": ["attr", "clr", "text", "_orig_text", "_present_attrs"],
+      "params_extra": {
+        "attr_int": {"src": "attr_int"},
+        "show_overview": {"expr": "bool(attr_int & 512)"}
+      },
+      "param_mapping": {
+        "id": {"src": "cell_id"},
+        "attr": {"src": "params", "key": "attr", "transform": "safe_int", "default": 0},
+        "position": {"src": "position"},
+        "clr": {"src": "params", "key": "clr", "transform": "safe_int", "default": -1},
+        "text": {"src": "label"}
+      }
+    },
+    "3": {
+      "node_type": "state_column",
+      "model_class": "StateColumnModel",
+      "parser": "_parse_cell_default",
+      "builder": "_build_cell_default",
+      "position_mode": "pos",
+      "params_fields": ["attr", "clr", "text", "_orig_text", "_present_attrs"],
+      "params_extra": {
+        "attr_int": {"src": "attr_int"},
+        "show_overview": {"expr": "bool(attr_int & 512)"}
+      },
+      "param_mapping": {
+        "id": {"src": "cell_id"},
+        "attr": {"src": "params", "key": "attr", "transform": "safe_int", "default": 0},
+        "position": {"src": "position"},
+        "clr": {"src": "params", "key": "clr", "transform": "safe_int", "default": -1},
+        "text": {"src": "label"}
+      }
+    },
+    "4": {
+      "node_type": "discard_pool",
+      "model_class": "DiscardCellModel",
+      "parser": "_parse_cell_default",
+      "builder": "_build_cell_default",
+      "position_mode": "func_pos",
+      "label_mode": "orig_text",
+      "params_fields": ["clr", "text", "_orig_text", "_present_attrs"],
+      "params_extra": {
+        "name": {"src": "label"},
+        "attr_int": {"src": "attr_int"}
+      },
+      "param_mapping": {
+        "id": {"src": "cell_id"},
+        "attr": {"src": "params", "key": "attr_int", "transform": "safe_int", "default": 0},
+        "position": {"src": "position"},
+        "clr": {"src": "params", "key": "clr", "transform": "safe_int", "default": -1},
+        "text": {"src": "label"}
+      }
+    },
+    "5": {
+      "node_type": "drawing_tool",
+      "model_class": "ArrowCellModel",
+      "parser": "_parse_cell_default",
+      "builder": "_build_cell_default",
+      "position_mode": "pos",
+      "params_fields": ["attr", "clr", "text", "line_type", "color", "style", "_orig_text", "_present_attrs"],
+      "params_extra": {
+        "attr_int": {"src": "attr_int"},
+        "_visual_only": {"const": true}
+      },
+      "node_extra": {
+        "_visual_only": true
+      },
+      "param_mapping": {
+        "id": {"src": "cell_id"},
+        "attr": {"src": "params", "key": "attr_int", "transform": "safe_int", "default": 0},
+        "position": {"src": "position"},
+        "clr": {"src": "params", "key": "clr", "transform": "safe_int", "default": -1},
+        "text": {"src": "label"}
+      }
+    },
+    "6": {
+      "node_type": "flow_arrow",
+      "aliases": ["flow_arrow_v2"],
+      "model_class": "ArrowCellModel",
+      "parser": "_parse_cell_default",
+      "builder": "_build_cell_default",
+      "position_mode": "pos",
+      "params_fields": ["clr", "text", "_orig_text", "_present_attrs"],
+      "params_extra": {},
+      "param_mapping": {
+        "id": {"src": "cell_id"},
+        "attr": {"src": "params", "key": "attr_int", "transform": "safe_int", "default": 0},
+        "position": {"src": "position"},
+        "clr": {"src": "params", "key": "clr", "transform": "safe_int", "default": -1},
+        "text": {"src": "label"}
+      }
+    },
+    "201": {
+      "node_type": "transfer_condition",
+      "model_class": "ConditionCellModel",
+      "parser": "_parse_cell_condition",
+      "builder": "_build_cell_default",
+      "position_mode": "pos",
+      "param_mapping": {
+        "id": {"src": "cell_id"},
+        "attr": {"src": "params", "key": "attr_int", "transform": "safe_int", "default": 0},
+        "position": {"src": "position"},
+        "clr": {"src": "params", "key": "clr", "transform": "safe_int", "default": -1},
+        "text": {"src": "label"},
+        "inditype": {"src": "params", "key": "inditype", "default": "indi"},
+        "crc": {"src": "params", "key": "crc"},
+        "indi": {"src": "params", "key": "indi"},
+        "sorttype": {"src": "params", "key": "sorttype"},
+        "indiparam": {"src": "params", "key": "indiparam"}
+      }
+    },
+    "200": {
+      "node_type": "stock_state_pool",
+      "aliases": ["dzh_condition_pool"],
+      "model_class": "StatePoolCellModel",
+      "parser": "_parse_cell_pool",
+      "builder": "_build_cell_pool",
+      "position_mode": "func_pos",
+      "pool_variant": "200"
+    },
+    "202": {
+      "node_type": "market_source",
+      "model_class": "CandidateCellModel",
+      "parser": "_parse_cell_market",
+      "builder": "_build_cell_market",
+      "position_mode": "func_pos"
+    },
+    "203": {
+      "node_type": "result_pool",
+      "model_class": "Type203CellModel",
+      "parser": "_parse_cell_pool",
+      "builder": "_build_cell_pool",
+      "position_mode": "func_pos",
+      "pool_variant": "203"
+    }
+  }
+}

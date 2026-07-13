@@ -1,0 +1,55 @@
+{
+  "version": "1.0",
+  "description": "价格字段优先级表：定义从行情数据中提取价格时的字段优先级列表",
+  "priority": [
+    {
+      "field": "last_price",
+      "desc": "最新成交价(实时行情首选)",
+      "source_types": ["snapshot", "tick", "kline"]
+    },
+    {
+      "field": "close",
+      "desc": "最新K线收盘价(快照缺失时回退)",
+      "source_types": ["kline", "snapshot"]
+    },
+    {
+      "field": "current",
+      "desc": "当前价(部分数据源字段名)",
+      "source_types": ["snapshot", "tick"]
+    },
+    {
+      "field": "pre_close",
+      "desc": "昨收价(当无最新价时的近似)",
+      "source_types": ["snapshot", "kline"]
+    },
+    {
+      "field": "price",
+      "desc": "通用价格字段名",
+      "source_types": ["snapshot", "tick"]
+    },
+    {
+      "field": "现价",
+      "desc": "中文字段名:现价",
+      "source_types": ["snapshot", "tick"]
+    },
+    {
+      "field": "收盘",
+      "desc": "中文字段名:收盘价",
+      "source_types": ["kline"]
+    }
+  ],
+  "resolution_policy": {
+    "desc": "价格解析策略",
+    "strategy": "first_available",
+    "fallback_to_preclose_ratio": 0.999,
+    "min_valid_price": 0.01,
+    "invalid_if_zero": true
+  },
+  "bar_ohlc_priority": {
+    "desc": "K线OHLC价格提取时的字段映射",
+    "open": ["open", "开盘价"],
+    "high": ["high", "最高价"],
+    "low": ["low", "最低价"],
+    "close": ["close", "收盘", "现价", "last_price"]
+  }
+}

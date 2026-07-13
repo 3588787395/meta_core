@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="GB2312"?>
+<root>
+<pool backcolor="1644825">
+<cells>
+<cell id="1001" type="7" attr="0" pos="157,220,227,380" clr="255" clrtext="16777215" solid="1" text="自选股">
+<spinfo type="3" customblockname="" size="7"/>
+</cell>
+<cell id="1002" type="8" attr="0" pos="514,239,614,319" clr="3289012" clrtext="16777215" solid="1" text="">
+<psatt bdel="1" ndelnum="3" ndeltype="1" baimpool="0" bsound="0" nsoundtype="0" soundfile="" btip="0" bsavetoblock="0" blockfile="" bclearblock="0" bsavehis="0"/>
+</cell>
+<cell id="1003" type="3" attr="0" pos="380,268,405,293" clr="255" clrtext="16777215" solid="1" text="">
+<func nset="4" ntjindexno="0" accode="MACD" nperiod="4" nfirst="0" cfirst="MA1" noperate="2" nsecond="-1" csecond="MA3" fsecond="10.000000" nbeginday="0" nendday="0" bnost="1" bnotp="0" bnotq="0" nperiodnum="0" />
+</cell>
+</cells>
+<flows>
+<flow startid="1001" endid="1003" clr="255" size="1" tran="1" emptyps="0" starttype="1" starttime="1" starttimetype="2" starttimehms="110000" cxtype="2" cxtime="10" cxtimetype="0" jgtime="5"/>
+<flow startid="1003" endid="1002" clr="255" size="1" tran="0" emptyps="0" starttype="0" starttime="0" starttimetype="0" starttimehms="0" cxtype="0" cxtime="0" cxtimetype="0" jgtime="0"/>
+</flows>
+</pool>
+</root>

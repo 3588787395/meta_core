@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "ttl_units": {"0": 86400, "1": 3600, "2": 60, "3": 1, "4": 1},
+  "ttl_unit_labels": {"0": "天", "1": "小时", "2": "分钟", "3": "秒", "4": "秒"},
+  "auto_ttl_node_types": ["tdx_state_pool", "200", "stock_state_pool"],
+  "time_formats": [
+    {"max_len": 2, "format": "{v:0>6}"},
+    {"max_len": 4, "format": "{v:0>6}"},
+    {"max_len": 5, "format": "0{v}"},
+    {"max_len": 6, "format": "{v}"}
+  ],
+  "dzh_ttl_units_ref": "dzh_ttl_units.json",
+  "dzh_trading_calendar_ref": "dzh_trading_calendar.json",
+  "dzh_hold_compat": {
+    "hold_mode": {"bdel": 1, "ndeltype": 4},
+    "deltype_map": {"0": 0, "1": 0, "2": 1, "3": 2, "4": 3},
+    "deltype_default": 4
+  },
+  "dzh_endtime_decode": {
+    "trading_start_sec": 34200,
+    "trading_end_sec": 54000,
+    "preferred_minute": 30
+  },
+  "ttl_mode_strategies": {
+    "0": {
+      "name": "standard_ttl",
+      "check_type": "elapsed",
+      "threshold_from": "resolved.ndelnum",
+      "units_table": "ttl_units",
+      "unit_key": "ndeltype",
+      "entry_time_keys": ["indate", "intime"],
+      "entry_time_fallback": "tracker.entry_time",
+      "skip_when_no_time": true,
+      "skip_threshold_zero": true
+    },
+    "1": {
+      "name": "specified_time",
+      "check_type": "hhmmss_ge",
+      "threshold_from": "resolved.endtime_hms",
+      "hold_for_ttl_fallback": true,
+      "hold_key": "params.hold",
+      "hold_unit_key": "params.deltype"
+    }
+  },
+  "side_effects": {
+    "bdel": {"name": "TTL删除", "type": "boolean"},
+    "bsound": {"name": "声音预警", "type": "boolean"},
+    "btip": {"name": "弹窗提示", "type": "boolean"},
+    "bsavehis": {"name": "保存历史", "type": "boolean"},
+    "bsavetoblock": {"name": "保存板块", "type": "boolean"},
+    "baimpool": {"name": "标记目标池", "type": "boolean"}
+  }
+}

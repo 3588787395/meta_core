@@ -1,0 +1,73 @@
+{
+  "version": "1.0",
+  "description": "DZH 备选池 reload 重载模式定义：魔数、歧义消解与调度策略",
+  "magic_numbers": {
+    "RELOAD_ON_STARTUP": -57387,
+    "RELOAD_DAILY_TIME": -57387,
+    "RELOAD_NEVER": 2147483647,
+    "RELOAD_ON_FILE_LOAD": 2147483646
+  },
+  "modes": {
+    "on_startup": {
+      "label": "每次启动",
+      "magic": -57387,
+      "requires_param": false,
+      "desc": "只在引擎启动时加载一次"
+    },
+    "daily_time": {
+      "label": "每天指定时间",
+      "magic": -57387,
+      "requires_param": true,
+      "param_format": "HHMMSS",
+      "desc": "每天指定 HHMMSS 时刻检查并加载"
+    },
+    "never": {
+      "label": "不重载",
+      "magic": 2147483647,
+      "requires_param": false,
+      "desc": "永不自动加载"
+    },
+    "interval": {
+      "label": "每隔一定时间",
+      "magic": "positive_integer",
+      "requires_param": true,
+      "param_unit": "seconds",
+      "desc": "每隔 N 秒加载"
+    },
+    "on_file_load": {
+      "label": "文件载入时",
+      "magic": 2147483646,
+      "requires_param": false,
+      "desc": "只在 XML/池配置加载时加载"
+    }
+  },
+  "disambiguation": {
+    "magic": -57387,
+    "fields": ["daily_time", "reload_param"],
+    "rule": "魔数 -57387 同时对应 on_startup 与 daily_time；若节点上下文存在 reload_param 或 daily_time 字段，则解码为 daily_time 并取该字段值为参数；否则解码为 on_startup"
+  },
+  "default_mode": "on_startup",
+  "scheduling": {
+    "on_startup": {
+      "method": "_schedule_on_startup",
+      "max_executions": 1,
+      "desc": "整个引擎生命周期内对同一节点只执行一次"
+    },
+    "daily_time": {
+      "method": "_schedule_daily_time",
+      "desc": "每天指定 HHMMSS 触发；参数为 6 位时间字符串 HHMMSS"
+    },
+    "interval": {
+      "method": "_schedule_interval",
+      "desc": "按正整数秒数周期触发"
+    },
+    "never": {
+      "method": "_schedule_never",
+      "desc": "不创建任何后台任务"
+    },
+    "on_file_load": {
+      "method": "_schedule_on_file_load",
+      "desc": "在 XML/池配置加载时立即执行一次"
+    }
+  }
+}

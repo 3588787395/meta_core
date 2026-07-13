@@ -1,0 +1,73 @@
+{
+  "version": "1.0",
+  "description": "运行模式配置表：绑定时间源、数据源与交易接口，统一实盘/回放/仿真三种模式",
+  "modes": {
+    "live": {
+      "mode_id": "live",
+      "name": "实盘",
+      "time_source_id": "realtime",
+      "data_source_id": "live",
+      "trade_interface_id": "live_order",
+      "tick_interval": 1.0,
+      "allow_side_effects": true,
+      "data_driver": "market_push",
+      "trigger_mechanism": "data_arrival",
+      "side_effects_scope": "live",
+      "loop_entry_policy": "internal_loop",
+      "gate_evaluator_id": "live_gate",
+      "data_injector_id": "async_multi_tf",
+      "refresh_handler": "tq_snapshot_refresh",
+      "desc": "实盘交易模式：连接通达信客户端 + TQ 量化（TPythClient.dll），实时行情与真实交易"
+    },
+    "replay": {
+      "mode_id": "replay",
+      "name": "回放",
+      "time_source_id": "kline_timeline",
+      "data_source_id": "replay_history",
+      "trade_interface_id": "noop",
+      "tick_interval": 0.0,
+      "allow_side_effects": false,
+      "data_driver": "kline_sequence",
+      "trigger_mechanism": "tick_advance",
+      "side_effects_scope": "replay",
+      "speed_factor": 1.0,
+      "loop_entry_policy": "external_driver",
+      "gate_evaluator_id": "replay_gate",
+      "data_injector_id": "sync_bar",
+      "refresh_handler": "noop_refresh",
+      "desc": "历史数据回放模式：从storage/kline_cache读取历史K线，无真实交易"
+    },
+    "simulation": {
+      "mode_id": "simulation",
+      "name": "仿真",
+      "time_source_id": "virtual_clock",
+      "data_source_id": "mock",
+      "trade_interface_id": "paper_trade",
+      "tick_interval": 0.0,
+      "allow_side_effects": false,
+      "data_driver": "on_demand",
+      "trigger_mechanism": "step_advance",
+      "side_effects_scope": "simulation",
+      "loop_entry_policy": "external_driver",
+      "gate_evaluator_id": "virtual_gate",
+      "data_injector_id": "mock_generate",
+      "refresh_handler": "mock_advance_refresh",
+      "desc": "模拟交易模式：使用Mock数据源与虚拟时钟进行策略验证"
+    }
+  },
+  "platform_essence": {
+    "statement": "三种模式不是三套代码，而是同一套核心循环（gate→filter→propagate→callback→ttl→post_tick）绑定不同的'时间源 × 数据源 × 订单接口'组合",
+    "shared_core_loop": "pre_tick → snapshot → flowsCore → trackers/events/post_tick → return",
+    "differentiation_dimensions": {
+      "time_source": "时间源（wall_clock / sequence / virtual）",
+      "data_source": "数据源（tq实时推送 / kline_cache预加载 / mock生成）",
+      "trade_interface": "订单接口（live_order / noop / paper_trade）"
+    },
+    "table_driven_routing": {
+      "gate_evaluator_id": "gate 评估器路由（live_gate / replay_gate / virtual_gate）",
+      "data_injector_id": "数据注入器路由（async_multi_tf / sync_bar / mock_generate）",
+      "refresh_handler": "行情刷新策略路由（tq_snapshot_refresh / noop_refresh / mock_advance_refresh）"
+    },
+    "mode_switching": "模式切换 = 改 runtime_modes.json 配置，零行 Python"
+  }
+}

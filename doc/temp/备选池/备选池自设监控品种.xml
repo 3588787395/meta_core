@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="GB2312"?>
+<root>
+<pool backcolor="1644825">
+<cells>
+<cell id="1516" type="7" attr="0" pos="201,201,271,361" clr="255" clrtext="16777215" solid="1" text="自设监控">
+<spinfo type="0" customblockname="TEST" size="337"/>
+<stk setcode="1" code="600000"/><stk setcode="1" code="600028"/></cell>
+</cells>
+<flows>
+</flows>
+</pool>
+</root>

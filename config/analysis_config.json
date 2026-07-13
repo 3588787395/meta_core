@@ -1,0 +1,141 @@
+{
+  "version": "2.0",
+  "description": "分析完整配置表：合并原 analysis_angles.json + analysis_types.json + analysis_results.json",
+  "angles": {
+    "momentum": {
+      "id": "momentum",
+      "name": "动量",
+      "formula": "profit_pct + (current_price - entry_price) / entry_price * 100 if entry_price > 0 else 0",
+      "weight": 0.35,
+      "sort_order": "desc",
+      "desc": "综合动量评分，结合持仓收益与价格变化"
+    },
+    "trend": {
+      "id": "trend",
+      "name": "趋势",
+      "formula": "max_profit + abs(max_drawdown)",
+      "weight": 0.35,
+      "sort_order": "desc",
+      "desc": "趋势强度评分，基于最大收益与回撤幅度"
+    },
+    "value": {
+      "id": "value",
+      "name": "价值",
+      "formula": "hold_days * profit_pct if profit_pct > 0 else -hold_days * abs(profit_pct)",
+      "weight": 0.30,
+      "sort_order": "desc",
+      "desc": "价值稳定性评分，持仓时间与收益的综合衡量"
+    }
+  },
+  "analysis_types": {
+    "intraday": {
+      "handler": "_analysis_intraday",
+      "title": "日内收益分析",
+      "data_fetch": {"method": "get_snapshot"},
+      "result_structure": "per_stock",
+      "fields": [
+        {"name": "code", "type": "string", "default": null, "formula": null, "description": "股票代码"},
+        {"name": "profit_pct", "type": "float", "default": null, "formula": "(current_price - entry_price) / entry_price * 100", "guard": "entry_price and current_price", "round": 2, "mock_formula": "round((hash(code) % 1000 - 500) / 100, 2)", "description": "收益率百分比"},
+        {"name": "entry_price", "type": "float", "default": null, "formula": null, "mock_formula": "round((hash(code + '_entry') % 9000 + 1000) / 100, 2)", "description": "入场价格"},
+        {"name": "current_price", "type": "float", "default": null, "formula": null, "mock_formula": "round((hash(code + '_curr') % 9500 + 950) / 100, 2)", "description": "当前价格"}
+      ],
+      "mock_fields": {
+        "profit_pct": "random.uniform(-5, 5)",
+        "entry_price": "random.uniform(10, 100)",
+        "current_price": "random.uniform(9.5, 105)"
+      }
+    },
+    "history": {
+      "handler": "_analysis_history",
+      "title": "历史收益分析",
+      "data_fetch": {"method": "get_kline_data", "count_key": "tq_kline_count", "period_key": "tq_kline_period"},
+      "result_structure": "per_stock",
+      "fields": [
+        {"name": "code", "type": "string", "default": null, "formula": null, "description": "股票代码"},
+        {"name": "cum_return_pct", "type": "float", "default": null, "formula": "(current_price - entry_price) / entry_price * 100", "mock_formula": "round((hash(code + '_ret') % 5000 - 2000) / 100, 2)", "description": "累计收益率百分比"},
+        {"name": "max_drawdown_pct", "type": "float", "default": null, "formula": null, "mock_formula": "round(-(hash(code + '_dd') % 2500 + 500) / 100, 2)", "description": "最大回撤百分比（负值）"},
+        {"name": "win_rate", "type": "float", "default": null, "formula": "winning_trades / total_trades", "mock_formula": "round((hash(code + '_wr') % 5000 + 3000) / 10000, 2)", "description": "胜率"}
+      ],
+      "tq_kline_period": 60,
+      "tq_kline_count": 6,
+      "mock_fields": {
+        "cum_return_pct": "random.uniform(-20, 30)",
+        "max_drawdown_pct": "random.uniform(-30, -5)",
+        "win_rate": "random.uniform(0.3, 0.8)"
+      }
+    },
+    "positioning": {
+      "handler": "_analysis_positioning",
+      "title": "持仓分析",
+      "data_fetch": {"method": "get_snapshot"},
+      "result_structure": "per_stock_with_summary",
+      "fields": [
+        {"name": "code", "type": "string", "default": null, "formula": null, "description": "股票代码"},
+        {"name": "weight", "type": "float", "default": null, "formula": "market_value / total_market_value", "guard": "market_value and total_market_value", "round": 4, "mock_formula": "round((hash(code + '_wt') % 3000) / 10000, 4)", "description": "持仓权重"},
+        {"name": "market_value", "type": "float", "default": null, "formula": "close * volume", "guard": "close and volume", "round": 2, "mock_formula": "round((hash(code + '_mv') % 990000 + 10000) / 100, 2)", "description": "市值"},
+        {"name": "cost_basis", "type": "float", "default": null, "formula": null, "mock_formula": "round((hash(code + '_cost') % 9000 + 1000) / 100, 2)", "description": "成本价"}
+      ],
+      "summary_fields": [
+        {"name": "total_market_value", "type": "float", "default": 0, "formula": "sum(market_value)", "mock_formula": "round(sum_of_market_values, 2)", "description": "总市值"}
+      ],
+      "mock_fields": {
+        "weight": "random.uniform(0, 0.3)",
+        "market_value": "random.uniform(10000, 1000000)",
+        "cost_basis": "random.uniform(10, 100)",
+        "total_market_value": "random.uniform(100000, 10000000)"
+      }
+    },
+    "market_impact": {
+      "handler": "_analysis_market_impact",
+      "title": "市场冲击分析",
+      "data_fetch": {"method": "get_snapshot"},
+      "result_structure": "aggregate",
+      "fields": [
+        {"name": "impact_score", "type": "float", "default": 0.5, "formula": null, "mock_formula": "0.5", "description": "冲击评分"},
+        {"name": "liquidity_impact", "type": "float", "default": 0.05, "formula": null, "mock_formula": "0.05", "description": "流动性冲击"},
+        {"name": "spread_impact", "type": "float", "default": 0.025, "formula": null, "mock_formula": "0.025", "description": "价差冲击"}
+      ],
+      "mock_fields": {
+        "impact_score": "random.uniform(0, 1)",
+        "liquidity_impact": "random.uniform(0, 0.1)",
+        "spread_impact": "random.uniform(0, 0.05)"
+      }
+    },
+    "distribution": {
+      "handler": "_analysis_distribution",
+      "title": "收益分布分析",
+      "result_structure": "aggregate",
+      "fields": [
+        {"name": "mean_pct", "type": "float", "default": 1.5, "formula": "mean(change_pct)", "round": 2, "mock_formula": "1.5", "description": "均值百分比"},
+        {"name": "std_pct", "type": "float", "default": 4.5, "formula": "std(change_pct)", "round": 2, "mock_formula": "4.5", "description": "标准差百分比"},
+        {"name": "skewness", "type": "float", "default": 0.0, "formula": "skewness(profit_pct)", "mock_formula": "0.0", "description": "偏度"},
+        {"name": "kurtosis", "type": "float", "default": 3.0, "formula": "kurtosis(profit_pct)", "mock_formula": "3.0", "description": "峰度"}
+      ],
+      "mock_fields": {
+        "mean_pct": "random.uniform(-2, 5)",
+        "std_pct": "random.uniform(1, 8)",
+        "skewness": "random.uniform(-1, 1)",
+        "kurtosis": "random.uniform(2, 6)"
+      }
+    }
+  },
+  "default_type": "intraday",
+  "default_sample_stocks": ["000001.SZ", "600000.SH"],
+  "aggregate_funcs": {
+    "description": "聚合函数实现查表：按公式中的函数名查表获取实现，消除 _calc_aggregate_field_from_formula 的 fn if 分支。差异显示于表内容（impl/min_count 取值不同）",
+    "mean": {"impl": "mean", "min_count": 1},
+    "std": {"impl": "stdev", "min_count": 2}
+  },
+  "formula_action_handlers": {
+    "description": "公式模式动作处理器查表：按 formula_modes.json 的 action 值查表获取处理器函数名，消除 _apply_formula_mode 的 action if 分支。差异显示于表内容（handler 取值不同）",
+    "reverse": {"handler": "_action_reverse"},
+    "pass_all": {"handler": "_action_pass_all"},
+    "default": {"handler": "_action_default"}
+  },
+  "result_structure_handlers": {
+    "description": "结果结构处理器查表：按 analysis_types[*].result_structure 值查表获取处理器函数名，消除 profit_analysis_calc 的 structure if 分支。差异显示于表内容（handler/items_key/summary_field/atype 取值不同）",
+    "aggregate": {"handler": "_build_aggregate_report"},
+    "per_stock": {"handler": "_build_per_stock_report", "items_key": "stocks"},
+    "per_stock_with_summary": {"handler": "_build_per_stock_report", "items_key": "positions", "summary_field": "total_market_value", "atype": "positioning"}
+  }
+}

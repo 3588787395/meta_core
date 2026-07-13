@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root>
+<data>
+<stk market="0" code="002372" indate="20260605" intime="1609" inprice="9.42" income="0.00" now="0.00" rise="0.00" volume="0" maxrate="0.00" maxperiod="0" maxtime="0" maxprice="0.00" idaynum="0"/>
+<stk market="0" code="002700" indate="20260605" intime="1609" inprice="8.30" income="0.00" now="0.00" rise="0.00" volume="0" maxrate="0.00" maxperiod="0" maxtime="0" maxprice="0.00" idaynum="0"/>
+<stk market="1" code="600132" indate="20260605" intime="1609" inprice="50.63" income="0.00" now="0.00" rise="0.00" volume="0" maxrate="0.00" maxperiod="0" maxtime="0" maxprice="0.00" idaynum="0"/>
+<stk market="1" code="600971" indate="20260605" intime="1609" inprice="8.48" income="0.00" now="0.00" rise="0.00" volume="0" maxrate="0.00" maxperiod="0" maxtime="0" maxprice="0.00" idaynum="0"/>
+<stk market="1" code="603721" indate="20260605" intime="1609" inprice="20.60" income="0.00" now="0.00" rise="0.00" volume="0" maxrate="0.00" maxperiod="0" maxtime="0" maxprice="0.00" idaynum="0"/>
+<stk market="1" code="603779" indate="20260605" intime="1609" inprice="8.86" income="0.00" now="0.00" rise="0.00" volume="0" maxrate="0.00" maxperiod="0" maxtime="0" maxprice="0.00" idaynum="0"/>
+</data>
+</root>

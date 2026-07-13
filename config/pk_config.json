@@ -1,0 +1,131 @@
+{
+  "version": "2.0",
+  "description": "PK排名完整配置表：合并原 pk_rules.json + pk_score_dimensions.json，定义维度、权重、排名算法与事件规则",
+  "dimensions": {
+    "profit": {
+      "id": "profit",
+      "name": "收益率",
+      "weight": 0.30,
+      "formula": "profit_pct",
+      "data_source": "tracker",
+      "desc": "当前持仓收益率,正值越高评分越高",
+      "normalization": {
+        "method": "zscore",
+        "clip_min": -5,
+        "clip_max": 5
+      }
+    },
+    "momentum": {
+      "id": "momentum",
+      "name": "动量",
+      "weight": 0.25,
+      "formula": "(close - close_5d) / close_5d * 100",
+      "data_source": "bar_data",
+      "desc": "5日价格动量,衡量短期趋势速度",
+      "normalization": {
+        "method": "minmax",
+        "scale_min": 0,
+        "scale_max": 100
+      }
+    },
+    "trend": {
+      "id": "trend",
+      "name": "趋势",
+      "weight": 0.20,
+      "formula": "ema_12 / ema_26 * 100 - 100",
+      "data_source": "bar_data",
+      "desc": "中长期趋势方向和强度,基于EMA12/EMA26",
+      "normalization": {
+        "method": "minmax",
+        "scale_min": 0,
+        "scale_max": 100
+      }
+    },
+    "volume": {
+      "id": "volume",
+      "name": "量能",
+      "weight": 0.15,
+      "formula": "volume / volume_ma_20 * 100",
+      "data_source": "bar_data",
+      "desc": "成交量相对于20日均量的比率",
+      "normalization": {
+        "method": "percentile",
+        "clip_max": 200
+      }
+    },
+    "volatility": {
+      "id": "volatility",
+      "name": "波动率",
+      "weight": 0.10,
+      "formula": "atr_14 / close * 100",
+      "data_source": "bar_data",
+      "desc": "14日ATR波动率,用于风险控制评分(波动率越低评分越高,需反向处理)",
+      "normalization": {
+        "method": "inverse_minmax",
+        "scale_min": 0,
+        "scale_max": 100
+      }
+    }
+  },
+  "aggregation": "weighted_sum",
+  "rank_algorithm": {
+    "name": "weighted_sum",
+    "desc": "综合评分 = 加权求和(各维度归一化得分 * 权重)",
+    "formula": "sum(dimension.normalized_score * dimension.weight)",
+    "score_range": {
+      "min": 0,
+      "max": 100
+    },
+    "tie_breaker": {
+      "field": "profit_pct",
+      "order": "desc",
+      "desc": "同分情况下以收益率降序排列"
+    }
+  },
+  "rank_change_rules": {
+    "thresholds": [
+      {
+        "type": "enter_top_n",
+        "n": 10,
+        "desc": "股票首次进入前N名时触发排名上升事件",
+        "event_name": "RANK_UP"
+      },
+      {
+        "type": "exit_top_n",
+        "n": 10,
+        "desc": "股票跌出前N名时触发排名下降事件",
+        "event_name": "RANK_DOWN"
+      },
+      {
+        "type": "rank_delta",
+        "delta": 5,
+        "desc": "排名单次变动超过delta时触发变化事件",
+        "event_name": "RANK_CHANGED"
+      },
+      {
+        "type": "score_cross",
+        "threshold": 70,
+        "direction": "up",
+        "desc": "综合评分向上突破阈值时触发",
+        "event_name": "SCORE_BREAKTHROUGH"
+      },
+      {
+        "type": "score_cross",
+        "threshold": 30,
+        "direction": "down",
+        "desc": "综合评分向下跌破阈值时触发",
+        "event_name": "SCORE_BREAKDOWN"
+      }
+    ],
+    "cooldown_sec": 60,
+    "desc": "排名变化事件触发后的冷却时间(秒),防止抖动"
+  },
+  "execution": {
+    "schedule": "per_tick",
+    "desc": "每个行情tick触发一次PK重算",
+    "batch_size": 500,
+    "desc_batch": "每批最多处理500只股票,超量时分批并发",
+    "concurrent_workers": 4,
+    "desc_workers": "并发计算worker数"
+  }
+}

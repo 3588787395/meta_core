@@ -1,0 +1,273 @@
+{
+  "engine_events": [
+    {
+      "edge_count": 3,
+      "event": "pool_start",
+      "node_count": 4,
+      "pool_id": "oracle_multi_level_cascade",
+      "pool_name": "多级级联",
+      "started_at": "TIMESTAMP"
+    },
+    {
+      "event": "flow_fired",
+      "exited_codes": [],
+      "fired": true,
+      "flow_id": "e_ab",
+      "mode": "copy",
+      "source_id": "A",
+      "source_remaining": 2,
+      "target_count": 2,
+      "target_id": "B",
+      "transferred_codes": [
+        "600000",
+        "000001"
+      ]
+    },
+    {
+      "event": "flow_fired",
+      "exited_codes": [],
+      "fired": true,
+      "flow_id": "e_bc",
+      "mode": "copy",
+      "source_id": "B",
+      "source_remaining": 2,
+      "target_count": 2,
+      "target_id": "C",
+      "transferred_codes": [
+        "600000",
+        "000001"
+      ]
+    },
+    {
+      "event": "flow_fired",
+      "exited_codes": [],
+      "fired": true,
+      "flow_id": "e_cd",
+      "mode": "copy",
+      "source_id": "C",
+      "source_remaining": 2,
+      "target_count": 2,
+      "target_id": "D",
+      "transferred_codes": [
+        "600000",
+        "000001"
+      ]
+    },
+    {
+      "event": "pool_end",
+      "finished_at": "TIMESTAMP",
+      "flow_fired_count": 3,
+      "pool_id": "oracle_multi_level_cascade",
+      "total_transferred": 8
+    }
+  ],
+  "error": null,
+  "node_stock_codes": {
+    "A": [
+      "000001",
+      "600000"
+    ],
+    "B": [
+      "000001",
+      "600000"
+    ],
+    "C": [
+      "000001",
+      "600000"
+    ],
+    "D": [
+      "000001",
+      "600000"
+    ]
+  },
+  "node_stocks": {
+    "A": [
+      {
+        "code": "600000",
+        "label": "浦发银行"
+      },
+      {
+        "code": "000001",
+        "label": "平安银行"
+      }
+    ],
+    "B": [
+      {
+        "code": "600000",
+        "label": "浦发银行"
+      },
+      {
+        "code": "000001",
+        "label": "平安银行"
+      }
+    ],
+    "C": [
+      {
+        "code": "600000",
+        "label": "浦发银行"
+      },
+      {
+        "code": "000001",
+        "label": "平安银行"
+      }
+    ],
+    "D": [
+      {
+        "code": "600000",
+        "label": "浦发银行"
+      },
+      {
+        "code": "000001",
+        "label": "平安银行"
+      }
+    ]
+  },
+  "pool_id": "oracle_multi_level_cascade",
+  "queue_events": [
+    {
+      "code": "600000",
+      "details": {
+        "flow_id": "e_ab",
+        "mode": "copy",
+        "price": 10.2,
+        "source_id": "A",
+        "timestamp": "TIMESTAMP"
+      },
+      "pool_id": "B",
+      "time": "TIMESTAMP",
+      "event_type": "ENTER"
+    },
+    {
+      "code": "000001",
+      "details": {
+        "flow_id": "e_ab",
+        "mode": "copy",
+        "price": 15.1,
+        "source_id": "A",
+        "timestamp": "TIMESTAMP"
+      },
+      "pool_id": "B",
+      "time": "TIMESTAMP",
+      "event_type": "ENTER"
+    },
+    {
+      "code": "600000",
+      "details": {
+        "flow_id": "e_bc",
+        "mode": "copy",
+        "price": 10.2,
+        "source_id": "B",
+        "timestamp": "TIMESTAMP"
+      },
+      "pool_id": "C",
+      "time": "TIMESTAMP",
+      "event_type": "ENTER"
+    },
+    {
+      "code": "000001",
+      "details": {
+        "flow_id": "e_bc",
+        "mode": "copy",
+        "price": 15.1,
+        "source_id": "B",
+        "timestamp": "TIMESTAMP"
+      },
+      "pool_id": "C",
+      "time": "TIMESTAMP",
+      "event_type": "ENTER"
+    },
+    {
+      "code": "600000",
+      "details": {
+        "flow_id": "e_cd",
+        "mode": "copy",
+        "price": 10.2,
+        "source_id": "C",
+        "timestamp": "TIMESTAMP"
+      },
+      "pool_id": "D",
+      "time": "TIMESTAMP",
+      "event_type": "ENTER"
+    },
+    {
+      "code": "000001",
+      "details": {
+        "flow_id": "e_cd",
+        "mode": "copy",
+        "price": 15.1,
+        "source_id": "C",
+        "timestamp": "TIMESTAMP"
+      },
+      "pool_id": "D",
+      "time": "TIMESTAMP",
+      "event_type": "ENTER"
+    }
+  ],
+  "run_type": "run_pool",
+  "runtime_tables": {
+    "_dirty_nodes": [],
+    "_first_run": false,
+    "_flow_exec_counts": {
+      "e_ab": 1,
+      "e_bc": 1,
+      "e_cd": 1
+    },
+    "_flow_first_fire_ts": {
+      "e_ab": "TIMESTAMP",
+      "e_bc": "TIMESTAMP",
+      "e_cd": "TIMESTAMP"
+    },
+    "_node_snapshots": {
+      "A": [
+        "000001",
+        "600000"
+      ],
+      "B": [
+        "000001",
+        "600000"
+      ],
+      "C": [
+        "000001",
+        "600000"
+      ],
+      "D": [
+        "000001",
+        "600000"
+      ]
+    }
+  },
+  "signals": [],
+  "success": true,
+  "transfer_events": [
+    {
+      "flow_id": "e_ab",
+      "mode": "copy",
+      "source_id": "A",
+      "target_id": "B",
+      "transferred_codes": [
+        "000001",
+        "600000"
+      ]
+    },
+    {
+      "flow_id": "e_bc",
+      "mode": "copy",
+      "source_id": "B",
+      "target_id": "C",
+      "transferred_codes": [
+        "000001",
+        "600000"
+      ]
+    },
+    {
+      "flow_id": "e_cd",
+      "mode": "copy",
+      "source_id": "C",
+      "target_id": "D",
+      "transferred_codes": [
+        "000001",
+        "600000"
+      ]
+    }
+  ]
+}

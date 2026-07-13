@@ -1,0 +1,111 @@
+{
+  "version": "1.0",
+  "description": "API 路由表——与 modules.json 和 cell_type_registry.json 联动，部分路由从配置表自动生成",
+  "routes": {
+    "GET": {
+      "/api/registry/cell-types": { "handler": "_serve_registry", "params": { "file": "cell_type_registry.json" } },
+      "/api/registry/dzh-type-map": { "handler": "_serve_registry", "params": { "file": "dzh_type_map.json" } },
+      "/api/registry/flow-modes": { "handler": "_serve_registry", "params": { "file": "flow_mode_registry.json" } },
+      "/api/registry/modules": { "handler": "_serve_registry", "params": { "file": "modules.json" } },
+      "/api/registry/dispatch": { "handler": "_serve_registry", "params": { "file": "dispatch.json" } },
+      "/api/registry/engines": { "handler": "_serve_registry", "params": { "file": "engines.json" } },
+      "/api/registry/edge-strategies": { "handler": "_serve_registry", "params": { "file": "edge_strategies.json" } },
+      "/api/registry/pool-types": { "handler": "_serve_registry", "params": { "file": "pool_types.json" } },
+      "/api/registry/defaults": { "handler": "_serve_registry", "params": { "file": "defaults.json" } },
+      "/api/registry/mock-data": { "handler": "_serve_registry", "params": { "file": "mock_data.json" } },
+      "/api/registry/analysis-types": { "handler": "_serve_registry", "params": { "file": "analysis_types.json" } },
+      "/api/registry/match-modes": { "handler": "_serve_registry", "params": { "file": "match_modes.json" } },
+      "/api/registry/actions": { "handler": "_serve_registry", "params": { "file": "actions.json" } },
+      "/api/pools": { "handler": "_list_pools" },
+      "/api/dzh/modules": { "handler": "_serve_registry", "params": { "file": "modules.json" } },
+      "/api/dzh/col-definitions": { "handler": "_col_definitions" },
+      "/api/dzh/blocks": { "handler": "_dzh_blocks_list" },
+      "/api/col-definitions": { "handler": "_col_definitions" },
+      "/api/dzh/load-demo": { "handler": "_dzh_load_demo" },
+      "/api/dzh/execute-pool": { "handler": "_execute_pool" },
+      "/api/tdx/pools": { "handler": "_tdx_list_pools" },
+      "/api/replay/status": { "handler": "_replay_status" }
+    },
+    "POST": {
+      "/api/pools/import": { "handler": "_import_pool" },
+      "/tdx/import": { "handler": "_tdx_import" },
+      "/api/dzh/tdx/import": { "handler": "_tdx_import" },
+      "/tdx/export": { "handler": "_tdx_export" },
+      "/api/tdx/export": { "handler": "_tdx_export_pool" },
+      "/api/dzh/export-meta": { "handler": "_export_meta_from_json" },
+      "/api/dzh/export": { "handler": "_export_meta_from_json" },
+      "/api/dzh/import-and-save": { "handler": "_dzh_import_and_save" },
+      "/api/dzh/execute-pool": { "handler": "_execute_pool" },
+      "/api/v1/table/panel": { "handler": "_table_panel_config" },
+      "/api/v1/table/reload": { "handler": "_table_hot_reload" },
+      "/api/dzh/validate-formula": { "handler": "_validate_formula" },
+      "/api/tdx/execute": { "handler": "_tdx_execute_pool" },
+      "/api/tdx/pools": { "handler": "_tdx_create_pool" },
+      "/api/replay/start": { "handler": "_replay_start" },
+      "/api/replay/control": { "handler": "_replay_control" },
+      "/api/pools": { "handler": "_create_pool" },
+      "/api/tdx/export-pool": { "handler": "_tdx_export_pool" }
+    },
+    "PUT": {},
+    "DELETE": {}
+  },
+  "dynamic_routes": {
+    "GET": {
+      "/api/pools/{pool_id}": { "handler": "_get_pool_data" },
+      "/api/pools/{pool_id}/export": { "handler": "_export_pool" },
+      "/api/pools/{pool_id}/cells": { "handler": "_get_cells" },
+      "/api/pools/{pool_id}/flows": { "handler": "_get_flows" },
+      "/api/pools/{pool_id}/stocks": { "handler": "_get_stocks" },
+      "/api/pools/{pool_id}/topology": { "handler": "_get_topology" },
+      "/api/pools/{pool_id}/execution-plan": { "handler": "_get_execution_plan" },
+      "/api/pools/{pool_id}/state-pools/{cell_id}/stocks": { "handler": "_get_state_pool_stocks" },
+      "/api/pools/{pool_id}/state-pools/{cell_id}/prefetch-klines": { "handler": "_prefetch_klines" },
+      "/api/dzh/blocks/{block_code}/members": { "handler": "_dzh_block_members" },
+      "/api/dzh/cells/{cell_id}/resolve-market": { "handler": "_dzh_resolve_market" },
+      "/api/dzh/cells/{cell_id}/stocks": { "handler": "_dzh_cell_stocks" },
+      "/api/tdx/pools/{name}/load": { "handler": "_tdx_load_pool" },
+      "/api/replay/{session_id}/snapshot": { "handler": "_replay_snapshot" },
+      "/api/replay/{session_id}/snapshot/{bar_index}": { "handler": "_replay_snapshot" }
+    },
+    "POST": {
+      "/api/replay/{session_id}/control": { "handler": "_replay_control" }
+    },
+    "PUT": {
+      "/api/pools/{pool_id}": { "handler": "_save_pool" },
+      "/api/pools/{pool_id}/cells/{cell_id}": { "handler": "_update_cell" },
+      "/api/pools/{pool_id}/flows/{flow_id}": { "handler": "_update_flow" },
+      "/api/dzh/cells/{cell_id}": { "handler": "_update_cell_dzh" },
+      "/api/dzh/flows/{flow_id}": { "handler": "_update_flow_dzh" },
+      "/api/tdx/pools/{name}": { "handler": "_tdx_save_pool" },
+      "/api/tdx/pools/{pool_name}/cells/{cell_id}": { "handler": "_tdx_update_cell" },
+      "/api/tdx/pools/{pool_name}/flows/{flow_id}": { "handler": "_tdx_update_flow" }
+    },
+    "DELETE": {
+      "/api/tdx/pools/{name}": { "handler": "_tdx_delete_pool" }
+    }
+  },
+  "auto_generated": {
+    "description": "以下路由由 modules.json 和 pools 数据结构自动生成",
+    "from_modules": {
+      "enabled": true,
+      "templates": {
+        "GET": [
+          "/api/modules",
+          "/api/modules/{module_id}",
+          "/api/modules/{module_id}/fields"
+        ]
+      }
+    },
+    "from_cell_types": {
+      "enabled": true,
+      "templates": {
+        "GET": [
+          "/api/cell-types",
+          "/api/cell-types/{type_id}",
+          "/api/cell-types/{type_id}/attrs",
+          "/api/cell-types/{type_id}/markets"
+        ]
+      }
+    }
+  }
+}

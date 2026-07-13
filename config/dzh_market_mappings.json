@@ -1,0 +1,203 @@
+{
+  "version": "1.0",
+  "description": "DZH attrtext 市场/板块/自选组/概念/行业解析映射配置：将 DZH 备选池 attrtext 中的各类条目映射到内部市场ID或数据源可识别的板块代码列表",
+  "separator": "\t",
+  "mappings": [
+    {
+      "pattern": "^SH#上证A股$",
+      "type": "market",
+      "name": "上证A股",
+      "resolver": "market",
+      "default_codes": ["sh_a"]
+    },
+    {
+      "pattern": "^SH#上证B股$",
+      "type": "market",
+      "name": "上证B股",
+      "resolver": "market",
+      "default_codes": ["sh_b"]
+    },
+    {
+      "pattern": "^SZ#深证A股$",
+      "type": "market",
+      "name": "深证A股",
+      "resolver": "market",
+      "default_codes": ["sz_a"]
+    },
+    {
+      "pattern": "^SZ#深证B股$",
+      "type": "market",
+      "name": "深证B股",
+      "resolver": "market",
+      "default_codes": ["sz_b"]
+    },
+    {
+      "pattern": "^SZ#中小企业$",
+      "type": "market",
+      "name": "中小企业板",
+      "resolver": "market",
+      "default_codes": ["sme"]
+    },
+    {
+      "pattern": "^SZ#创业板$",
+      "type": "market",
+      "name": "创业板",
+      "resolver": "market",
+      "default_codes": ["gem"]
+    },
+    {
+      "pattern": "^SH#科创板$",
+      "type": "market",
+      "name": "科创板",
+      "resolver": "market",
+      "default_codes": ["kcb"]
+    },
+    {
+      "pattern": "^BJ#北证A股$",
+      "type": "market",
+      "name": "北证A股",
+      "resolver": "market",
+      "default_codes": ["bj_a"]
+    },
+    {
+      "pattern": "^BJ#北交所$",
+      "type": "market",
+      "name": "北交所",
+      "resolver": "market",
+      "default_codes": ["bj_a"]
+    },
+    {
+      "pattern": "^SH#上证指数$",
+      "type": "market",
+      "name": "上证指数成份股",
+      "resolver": "market",
+      "default_codes": ["sh_index"]
+    },
+    {
+      "pattern": "^SZ#深证指数$",
+      "type": "market",
+      "name": "深证指数成份股",
+      "resolver": "market",
+      "default_codes": ["sz_index"]
+    },
+    {
+      "pattern": "^B\\$#板块指数$",
+      "type": "sector_index",
+      "name": "板块指数",
+      "resolver": "sector_index",
+      "default_codes": ["tdx_sector_index"]
+    },
+    {
+      "pattern": "^B\\$#热门概念$",
+      "type": "sector_index",
+      "name": "热门概念",
+      "resolver": "sector_index",
+      "default_codes": ["tdx_hot_concept"]
+    },
+    {
+      "pattern": "^BLK-自选股([1-9]|10)$",
+      "type": "group",
+      "name": "自选组",
+      "resolver": "user_group",
+      "default_codes": []
+    },
+    {
+      "pattern": "^BLK-概念新材料\\d{7}$",
+      "type": "concept_sector",
+      "name": "概念-新材料",
+      "resolver": "sector",
+      "default_codes": ["tdx_concept_新材料"]
+    },
+    {
+      "pattern": "^BLK-概念新能源\\d{7}$",
+      "type": "concept_sector",
+      "name": "概念-新能源",
+      "resolver": "sector",
+      "default_codes": ["tdx_concept_新能源"]
+    },
+    {
+      "pattern": "^BLK-概念人工智能\\d{7}$",
+      "type": "concept_sector",
+      "name": "概念-人工智能",
+      "resolver": "sector",
+      "default_codes": ["tdx_concept_人工智能"]
+    },
+    {
+      "pattern": "^BLK-概念芯片\\d{7}$",
+      "type": "concept_sector",
+      "name": "概念-芯片",
+      "resolver": "sector",
+      "default_codes": ["tdx_concept_芯片"]
+    },
+    {
+      "pattern": "^BLK-概念医药\\d{7}$",
+      "type": "concept_sector",
+      "name": "概念-医药",
+      "resolver": "sector",
+      "default_codes": ["tdx_concept_医药"]
+    },
+    {
+      "pattern": "^BLK-概念\\S+\\d{7}$",
+      "type": "concept_sector",
+      "name": "概念板块",
+      "resolver": "sector",
+      "default_codes": []
+    },
+    {
+      "pattern": "^BLK-农业\\d{7}$",
+      "type": "industry_sector",
+      "name": "行业-农业",
+      "resolver": "sector",
+      "default_codes": ["tdx_industry_农业"]
+    },
+    {
+      "pattern": "^BLK-银行\\d{7}$",
+      "type": "industry_sector",
+      "name": "行业-银行",
+      "resolver": "sector",
+      "default_codes": ["tdx_industry_银行"]
+    },
+    {
+      "pattern": "^BLK-房地产\\d{7}$",
+      "type": "industry_sector",
+      "name": "行业-房地产",
+      "resolver": "sector",
+      "default_codes": ["tdx_industry_房地产"]
+    },
+    {
+      "pattern": "^BLK-电力\\d{7}$",
+      "type": "industry_sector",
+      "name": "行业-电力",
+      "resolver": "sector",
+      "default_codes": ["tdx_industry_电力"]
+    },
+    {
+      "pattern": "^BLK-证券\\d{7}$",
+      "type": "industry_sector",
+      "name": "行业-证券",
+      "resolver": "sector",
+      "default_codes": ["tdx_industry_证券"]
+    },
+    {
+      "pattern": "^BLK-(?!自选股|概念)[^\\d]+\\d{7}$",
+      "type": "industry_sector",
+      "name": "行业板块",
+      "resolver": "sector",
+      "default_codes": []
+    },
+    {
+      "pattern": "^BLK-证监板块$",
+      "type": "classic_sector",
+      "name": "经典行业-证监板块",
+      "resolver": "sector",
+      "default_codes": ["tdx_classic_证监板块"]
+    },
+    {
+      "pattern": "^BLK-(?!自选股|概念)[^\\d]+$",
+      "type": "classic_sector",
+      "name": "经典行业",
+      "resolver": "sector",
+      "default_codes": []
+    }
+  ]
+}

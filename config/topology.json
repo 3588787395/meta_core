@@ -1,0 +1,113 @@
+{
+  "version": "1.0",
+  "description": "TDX/DZH 股票池拓扑模式配置表（对照 TDX文档 §9.4 六种流转拓扑模式）",
+  "modes": {
+    "serial": {
+      "label": "串行链式",
+      "doc_ref": "模式A",
+      "desc": "备选池→条件A→状态A→条件B→状态B→... 单链逐步过滤",
+      "detect_rules": {
+        "max_out": 1,
+        "max_in": 1,
+        "min_nodes": 2
+      },
+      "reference_pool": "黑马二号池"
+    },
+    "fan_out": {
+      "label": "扇出分流",
+      "doc_ref": "模式B",
+      "desc": "单个备选池扇出到多个条件节点，各自筛选后输出到独立状态池",
+      "detect_rules": {
+        "source_count": 1,
+        "max_out_gte": 2
+      },
+      "reference_pool": "黑马全息股池"
+    },
+    "fan_in": {
+      "label": "扇入汇合",
+      "doc_ref": "模式C",
+      "desc": "多个状态池汇入同一个最终输出池",
+      "detect_rules": {
+        "sink_count": 1,
+        "max_in_gte": 2
+      },
+      "reference_pool": "黑马全息股池"
+    },
+    "funnel": {
+      "label": "多层漏斗",
+      "doc_ref": "模式D",
+      "desc": "串行链式+多条件逐步过滤，每层条件进一步过滤上一层输出",
+      "detect_rules": {
+        "max_out": 1,
+        "chain_depth_gte": 4,
+        "has_progressive_filter": true
+      },
+      "reference_pool": "黑马一号池"
+    },
+    "multi_source": {
+      "label": "多源并行",
+      "doc_ref": "模式E",
+      "desc": "多个备选池(源节点)并行启动独立路径",
+      "detect_rules": {
+        "source_count_gte": 2
+      },
+      "reference_pool": "大路终结池"
+    },
+    "multi_indicator": {
+      "label": "多指标并行",
+      "doc_ref": "模式F",
+      "desc": "单个备选池扇出到多个条件指标节点，各条件独立输出到状态池",
+      "detect_rules": {
+        "source_count": 1,
+        "max_out_gte": 2,
+        "target_is_condition": true
+      },
+      "reference_pool": "盘后.xml"
+    },
+    "loop_feedback": {
+      "label": "循环反馈",
+      "doc_ref": "DZH模式D",
+      "desc": "状态池→条件→状态池形成环路，股票可在环路中循环流转(超赢7号)",
+      "detect_rules": {
+        "has_cycle": true
+      },
+      "reference_pool": "超赢7号"
+    },
+    "dual_source": {
+      "label": "双源并行",
+      "doc_ref": "DZH模式E",
+      "desc": "两个备选池(源节点)并行启动独立路径后汇合到同一最终输出池(超赢1号)",
+      "detect_rules": {
+        "source_count": 2,
+        "sink_count": 1
+      },
+      "reference_pool": "超赢1号"
+    }
+  },
+  "detection_priority": [
+    "loop_feedback",
+    "dual_source",
+    "funnel",
+    "multi_source",
+    "multi_indicator",
+    "fan_out",
+    "fan_in",
+    "serial"
+  ],
+  "fallback_mode": "mixed",
+  "tdx_doc_mapping": {
+    "模式A": "serial",
+    "模式B": "fan_out",
+    "模式C": "fan_in",
+    "模式D": "funnel",
+    "模式E": "multi_source",
+    "模式F": "multi_indicator"
+  },
+  "dzh_doc_mapping": {
+    "模式A": "serial",
+    "模式B": "fan_out",
+    "模式C": "fan_in",
+    "模式D": "loop_feedback",
+    "模式E": "dual_source"
+  }
+}

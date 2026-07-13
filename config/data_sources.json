@@ -1,0 +1,65 @@
+{
+  "version": "1.0",
+  "description": "数据源配置表：收敛 data_source_contract.json，为三种运行模式提供统一数据源行",
+  "data_sources": {
+    "live": {
+      "data_source_id": "live",
+      "name": "实盘行情",
+      "driver": "market_push",
+      "provider": "tq_dll",
+      "probe": {
+        "method": "_probe",
+        "timeout_ms": 2000,
+        "description": "调用 is_ready() + get_market_data() 探测通达信 TQ 量化接口"
+      },
+      "injector": "async_multi_tf",
+      "fetcher": "tq_async_fetcher",
+      "on_unavailable": "raise",
+      "mock_fallback_allowed": false,
+      "desc": "实盘交易模式：连接通达信客户端 + TQ 量化（TPythClient.dll），实时行情推送"
+    },
+    "replay_history": {
+      "data_source_id": "replay_history",
+      "name": "历史 K 线",
+      "driver": "kline_sequence",
+      "provider": "kline_cache",
+      "probe": {
+        "method": "_probe",
+        "timeout_ms": 500,
+        "description": "检测本地 K 线缓存或 storage 中是否存在目标区间历史数据"
+      },
+      "injector": "sync_bar",
+      "fetcher": "kline_cache_fetcher",
+      "on_unavailable": "warn",
+      "mock_fallback_allowed": false,
+      "desc": "历史数据回放模式：从 storage/kline_cache 读取历史 K 线序列"
+    },
+    "mock": {
+      "data_source_id": "mock",
+      "name": "模拟数据",
+      "driver": "on_demand",
+      "provider": "mock_provider",
+      "probe": {
+        "method": "_probe",
+        "timeout_ms": 100,
+        "description": "Mock 数据源始终可用，但需显式选择"
+      },
+      "injector": "mock_generate",
+      "fetcher": "mock_fetcher",
+      "on_unavailable": "raise",
+      "mock_fallback_allowed": true,
+      "explicit_only": true,
+      "desc": "模拟交易模式：使用 Mock 数据源按需生成行情，无外部依赖"
+    }
+  },
+  "default_chain": ["live"],
+  "global_policy": {
+    "auto_fallback": false,
+    "require_explicit_user_consent_for_mock": true,
+    "log_data_source_state": true
+  },
+  "notes": {
+    "convergence": "本表由 data_source_contract.json 收敛而来，保留 provider/probe/injector/fetcher 等关键字段。",
+    "default_chain_policy": "default_chain is explicit candidate order only, no silent fallback; mock requires explicit consent."
+  }
+}

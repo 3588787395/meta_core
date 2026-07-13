@@ -1,0 +1,165 @@
+{
+  "modes": {
+    "move": {
+      "name": "移动模式",
+      "desc": "股票从源池移到目标池，离开源池",
+      "attr_out": 8192,
+      "attr_in": 8193,
+      "is_move": true,
+      "is_overwrite": false,
+      "behavior": "满足条件的股票从源状态池删除并转移到目标状态池",
+      "exec_steps": ["remove_from_source", "add_to_dest"],
+      "detail_template": "移动{count}只股票从{source}到{dest}"
+    },
+    "overwrite": {
+      "name": "覆盖模式",
+      "desc": "先清空目标池再写入新数据，目标始终是最新的",
+      "attr_out": 4096,
+      "attr_in": 4097,
+      "is_move": false,
+      "is_overwrite": true,
+      "behavior": "先清空目的状态池的全部股票，再将满足条件的股票写入",
+      "exec_steps": ["clear_dest", "add_to_dest"],
+      "detail_template": "清空目标池后写入{count}只股票到{dest}"
+    },
+    "copy": {
+      "name": "复制模式",
+      "desc": "保留源同时复制到目标，多阶段可累积",
+      "attr_out": 20480,
+      "attr_in": 20481,
+      "is_move": false,
+      "is_overwrite": false,
+      "behavior": "源状态池股票不变，同时将满足条件的股票复制到目标状态池",
+      "exec_steps": ["add_to_dest"],
+      "detail_template": "复制{count}只股票到{dest}(源池不变)"
+    },
+    "force_move": {
+      "name": "强制移动",
+      "desc": "强制覆盖写入，不考虑原有数据",
+      "attr_out": 3,
+      "attr_in": null,
+      "is_move": true,
+      "is_overwrite": true,
+      "behavior": "强制模式，bit0+bit1同时设置",
+      "exec_steps": ["clear_dest", "add_to_dest"],
+      "detail_template": "强制覆盖写入{count}只股票到{dest}"
+    },
+    "output_components": {
+      "name": "输出成份股",
+      "desc": "当源是板块时展开为个股输出",
+      "attr_out": 16384,
+      "attr_in": 16385,
+      "is_move": false,
+      "is_overwrite": false,
+      "behavior": "如果源是板块节点，则展开其成份股后输出到目标",
+      "exec_steps": ["expand_sectors", "add_to_dest"],
+      "detail_template": "展开{count}个板块为{expanded_count}只成份股"
+    },
+    "overwrite_copy": {
+      "name": "覆盖复制模式",
+      "desc": "先清空目标池再从源池复制，源池保留",
+      "attr_out": 12288,
+      "attr_in": null,
+      "is_move": false,
+      "is_overwrite": true,
+      "behavior": "先清空目的状态池的全部股票，再将满足条件的股票从源池复制到目标（源池保留）",
+      "exec_steps": ["clear_dest", "add_to_dest"],
+      "detail_template": "清空目标池后复制{count}只股票到{dest}(源池不变)"
+    },
+    "pass_through": {
+      "name": "透传模式",
+      "desc": "默认模式，直接将股票添加到目标池",
+      "attr_out": null,
+      "attr_in": null,
+      "is_move": false,
+      "is_overwrite": false,
+      "behavior": "将满足条件的股票直接添加到目标状态池",
+      "exec_steps": ["add_to_dest"],
+      "detail_template": "透传{count}只股票到{dest}"
+    }
+  },
+  "attr_bits_ref": "field_definitions.bit_fields.flow",
+  "attr_bits": {
+    "delete_source": {"bit": 0, "mask": 1},
+    "keep_source": {"bit": 1, "mask": 2},
+    "clear_dest_first": {"bit": 2, "mask": 4},
+    "output_constituent": {"bit": 3, "mask": 8},
+    "force_move": {"bit": 4, "mask": 16}
+  },
+  "begin_types": [
+    {"value": 0, "name": "立即开始", "param_format": "无", "param_desc": "无需参数", "example": "begint=0"},
+    {"value": 1, "name": "延迟开始", "param_format": "秒数", "param_desc": "延迟多少秒后开始执行", "example": "begint=1800(30分钟)"},
+    {"value": 2, "name": "开市前", "param_format": "秒数", "param_desc": "距离开盘前多少秒开始", "example": "begint=300(5分钟)"},
+    {"value": 3, "name": "开市后", "param_format": "HHMMSS", "param_desc": "几点几分几秒后开始", "example": "begint=93000(09:30:00)"},
+    {"value": 4, "name": "收市前", "param_format": "HHMMSS", "param_desc": "距离收盘前多长时间开始", "example": "begint=140000(14:00:00)"},
+    {"value": 5, "name": "收市后", "param_format": "秒数", "param_desc": "收盘后多少秒开始", "example": "begint=0"},
+    {"value": 6, "name": "指定交易日时间", "param_format": "-", "param_desc": "特定交易日的特定时间", "example": ""},
+    {"value": 7, "name": "指定时间", "param_format": "HHMMSS", "param_desc": "绝对时间点", "example": "begint=92500(09:25:00)"}
+  ],
+  "end_types": [
+    {"value": 0, "name": "一直执行", "param_format": "INT_MAX", "param_desc": "持续执行直到收盘或手动停止", "example": "endt=2147483647"},
+    {"value": 1, "name": "执行指定时长", "param_format": "秒数", "param_desc": "从begin起计算持续多少秒", "example": "endt=19800(5.5小时)"},
+    {"value": 2, "name": "只执行一次", "param_format": "-", "param_desc": "触发一次后不再重复", "example": ""}
+  ],
+  "transfer_mode_combinations": [
+    {"mode": "move", "out_attr": 8192, "in_attr": 8193, "reference_pool": "超赢1号", "note": "扇出汇合拓扑使用"},
+    {"mode": "overwrite", "out_attr": 4096, "in_attr": 4097, "reference_pool": "超赢7号", "note": "循环反馈拓扑使用"},
+    {"mode": "copy", "out_attr": 20480, "in_attr": 20481, "reference_pool": "金色两点半", "note": "分阶段时序拓扑使用"}
+  ],
+  "version": "2.0",
+  "resolve_rules": [
+    {"priority": 1, "check_bits": ["output_constituent"], "mode": "output_components"},
+    {"priority": 1.5, "check_bits": ["clear_dest_first", "keep_source"], "mode": "overwrite_copy"},
+    {"priority": 2, "check_bits": ["clear_dest_first"], "check_bits_absent": ["keep_source"], "mode": "overwrite"},
+    {"priority": 3, "check_bits": ["keep_source"], "check_bits_absent": ["delete_source"], "mode": "copy"},
+    {"priority": 4, "check_bits": ["delete_source", "force_move"], "mode": "force_move"},
+    {"priority": 5, "check_bits": ["delete_source"], "check_bits_absent": ["keep_source"], "mode": "move"},
+    {"priority": 99, "mode": "pass_through"}
+  ],
+  "propagate_rules": {
+    "copy": {"read_source": true, "clear_source": false, "clear_dest": false, "write_target": true},
+    "move": {"read_source": true, "clear_source": true, "clear_dest": false, "write_target": true},
+    "overwrite": {"read_source": true, "clear_source": false, "clear_dest": true, "write_target": true},
+    "overwrite_copy": {"read_source": true, "clear_source": false, "clear_dest": true, "write_target": true},
+    "force_move": {"read_source": true, "clear_source": true, "clear_dest": true, "write_target": true},
+    "output_components": {"read_source": true, "clear_source": false, "clear_dest": false, "write_target": true},
+    "pass_through": {"read_source": true, "clear_source": false, "clear_dest": false, "write_target": true}
+  },
+  "propagate_flag_map": {
+    "0,0": "copy",
+    "1,0": "move",
+    "0,1": "overwrite",
+    "1,1": "force_move"
+  },
+  "tdx_tran_to_bits": {
+    "0": {"keep_source": true},
+    "1": {"delete_source": true}
+  },
+  "bit_override_rules": {
+    "delete_source": {"override": "is_move", "value": true},
+    "clear_dest_first": {"override": "is_overwrite", "value": true}
+  },
+  "attr_resolution_chain": [
+    {"op": "parse_attr_int", "input": "fa", "output": "fa"},
+    {"op": "resolve_tran_bits", "input": "ep.tran", "table": "tdx_tran_to_bits", "mutex_table": "mutex_bits", "output": "fa"},
+    {"op": "merge_bit_fields", "input": "ep", "fields": ["delete_source", "clear_dest_first", "keep_source", "force_move", "output_constituent"], "mutex_table": "mutex_bits", "output": "fa"},
+    {"op": "resolve_mode", "table": "resolve_rules", "modes_table": "modes", "output": "mode_name"},
+    {"op": "derive_flags", "table": "bit_override_rules", "output": "flags"}
+  ],
+  "step_ops": {
+    "parse_attr_int": {"method": "_step_parse_attr_int", "desc": "fa int → dict via DynamicFlowModel"},
+    "resolve_tran_bits": {"method": "_step_resolve_tran_bits", "desc": "ep.tran → bits from tdx_tran_to_bits, apply mutex"},
+    "merge_bit_fields": {"method": "_step_merge_bit_fields", "desc": "ep bit fields → fa, apply mutex"},
+    "resolve_mode": {"method": "_step_resolve_mode", "desc": "fa → mode_name → mode_config"},
+    "derive_flags": {"method": "_step_derive_flags", "desc": "mode_config → is_move/is_overwrite, apply override_rules"}
+  },
+  "mode_colors": {
+    "move": "#1890ff",
+    "overwrite": "#fa8c16",
+    "copy": "#52c41a",
+    "force_move": "#f5222d",
+    "output_components": "#722ed1",
+    "overwrite_copy": "#eb2f96",
+    "pass_through": "#8c8c8c"
+  }
+}

@@ -1,0 +1,1083 @@
+{
+  "version": "2.0",
+  "description": "UI布局配置表：定义每种cell_type/edge的面板布局，驱动前端动态生成属性面板。data_path必须与poolData中的实际字段名完全一致。",
+  "layouts": {
+    "stock_state_pool": {
+      "layout_id": "stock_state_pool",
+      "name": "股票状态池属性",
+      "target_type": "200",
+      "target_scope": "node",
+      "pool_type": ["dzh"],
+      "sections": [
+        {
+          "title": "基本信息",
+          "collapsible": false,
+          "fields": [
+            {"key": "text", "comp": "text_input", "label": "名称", "data_path": "text", "default": ""},
+            {"key": "clr", "comp": "color_picker", "label": "背景色", "data_path": "clr", "default": -1, "hint": "DZH GDI 颜色值"},
+            {"key": "fontcolor", "comp": "color_picker", "label": "字体颜色", "data_path": "fontcolor", "default": "", "hint": "DZH GDI 颜色值"}
+          ]
+        },
+        {
+          "title": "基础属性标志",
+          "collapsible": true,
+          "fields": [
+            {"key": "attr_base_flags", "comp": "flag_group", "label": "基础属性 (bit0-bit9)", "data_path": "dzh_attr", "flags": [
+              {"bit": 0, "hex": "0x1", "name": "immediate_exec", "label": "立即执行"},
+              {"bit": 1, "hex": "0x2", "name": "enable_stats", "label": "启用统计"},
+              {"bit": 2, "hex": "0x4", "name": "allow_duplicate", "label": "允许重复股票"},
+              {"bit": 3, "hex": "0x8", "name": "show_header", "label": "显示列头"},
+              {"bit": 4, "hex": "0x10", "name": "show_border", "label": "显示边框"},
+              {"bit": 5, "hex": "0x20", "name": "allow_sort", "label": "允许排序"},
+              {"bit": 6, "hex": "0x40", "name": "show_grid", "label": "显示网格线"},
+              {"bit": 7, "hex": "0x80", "name": "alt_row_color", "label": "每行变色"},
+              {"bit": 8, "hex": "0x100", "name": "hide_scrollbar", "label": "隐藏滚动条"},
+              {"bit": 9, "hex": "0x200", "name": "output_to_file", "label": "输出到文件"}
+            ]}
+          ]
+        },
+        {
+          "title": "预警属性",
+          "collapsible": true,
+          "fields": [
+            {"key": "attr_alert_flags", "comp": "flag_group", "label": "预警设置", "data_path": "dzh_attr", "flags": [
+              {"bit": 7, "hex": "0x80", "name": "hidden_pool", "label": "隐藏池"},
+              {"bit": 12, "hex": "0x1000", "name": "no_delete_source", "label": "不删源状态中股票"},
+              {"bit": 13, "hex": "0x2000", "name": "clear_dest_first", "label": "先清空目的状态"},
+              {"bit": 15, "hex": "0x8000", "name": "simple_intermediate", "label": "简易中间态(缩小为极小节点)"},
+              {"bit": 23, "hex": "0x800000", "name": "calc_profit_from_prev", "label": "列表基于前一状态计算收益"},
+              {"bit": 24, "hex": "0x1000000", "name": "alert_popup", "label": "弹出预警提示"},
+              {"bit": 27, "hex": "0x8000000", "name": "history_track", "label": "记录历史轨迹"},
+              {"bit": 28, "hex": "0x10000000", "name": "alert_sound", "label": "发出预警声"},
+              {"bit": 29, "hex": "0x20000000", "name": "highlight_flash", "label": "高亮闪烁显示"},
+              {"bit": 30, "hex": "0x40000000", "name": "show_overview", "label": "显示到股票池总览"},
+              {"bit": 31, "hex": "0x80000000", "name": "alert_scroll_window", "label": "输出到滚动预警窗"}
+            ]}
+          ]
+        },
+        {
+          "title": "显示设置",
+          "collapsible": true,
+          "fields": [
+            {"key": "col_list", "comp": "text_input", "label": "显示列序号 (col_list)", "data_path": "col_list", "default": "2,-1,-2,-3,7,14,8,10,17,45", "hint": "如: 2,-1,-2,-3,7,14,8,10,17,45"},
+            {"key": "width_list", "comp": "text_input", "label": "列宽 (width_list)", "data_path": "width_list", "default": "", "hint": "与 col 一一对应，逗号分隔，像素值"},
+            {"key": "sorttype", "comp": "select", "label": "排序类型", "data_path": "sorttype", "options": [
+              {"value": "", "label": "不排序"}, {"value": "1", "label": "前1名"}, {"value": "5", "label": "前5名"},
+              {"value": "7", "label": "前7名"}, {"value": "10", "label": "前10名"}, {"value": "20", "label": "前20名"},
+              {"value": "50", "label": "前50名"}, {"value": "100", "label": "前100名"}, {"value": "200", "label": "前200名"},
+              {"value": "-1000", "label": "前1000名(降序)"}
+            ], "default": ""},
+            {"key": "tmpl", "comp": "text_input", "label": "关联模板 (tmpl)", "data_path": "tmpl", "default": "", "hint": "关联DZH内置模板名称"}
+          ]
+        },
+        {
+          "title": "保留与删除控制",
+          "collapsible": true,
+          "fields": [
+            {"key": "hold_sec", "comp": "number_input", "label": "保留天数 (0=永久)", "data_path": "hold_sec", "default": 432000, "min": 0, "max": 43200000, "step": 86400, "hint": "自动转换为秒存储 (天 × 86400)"},
+            {"key": "stocknum", "comp": "number_input", "label": "股票窗口数", "data_path": "stocknum", "default": null, "min": 0, "nullable": true, "hint": "0 = 无限制"},
+            {"key": "histana", "comp": "number_input", "label": "收益分析点数", "data_path": "histana", "default": null, "min": 0, "nullable": true},
+            {"key": "wizd", "comp": "text_input", "label": "状态说明文字", "data_path": "wizd", "default": "", "nullable": true},
+            {"key": "deltype", "comp": "select", "label": "删除控制类型", "data_path": "deltype", "options": [
+              {"value": 0, "label": "不删"}, {"value": 1, "label": "按时删"}, {"value": 2, "label": "按数删"}
+            ], "default": 0},
+            {"key": "endtime", "comp": "number_input", "label": "删除时间 (秒)", "data_path": "endtime", "default": 0, "min": 0},
+            {"key": "delstocktype", "comp": "number_input", "label": "删除数量", "data_path": "delstocktype", "default": 0, "min": 0}
+          ]
+        },
+        {
+          "title": "高级选项",
+          "collapsible": true,
+          "fields": [
+            {"key": "staattr", "comp": "select", "label": "分析线型", "data_path": "staattr", "options": [
+              {"value": "0", "label": "K线"}, {"value": "1", "label": "分时线"}
+            ], "default": "0"},
+            {"key": "intersection_status", "comp": "text_input", "label": "交集状态", "data_path": "intersection_status", "default": "", "hint": "DZH交集状态标记"},
+            {"key": "attr_raw", "comp": "readonly", "label": "DZH attr 原始值", "data_path": "dzh_attr", "display": "raw"}
+          ]
+        },
+        {
+          "title": "进入/离开动作",
+          "collapsible": true,
+          "fields": [
+            {"key": "enter_action", "comp": "action_compound", "label": "进入时执行动作", "data_path": "enter_action", "action_types": [
+              {"value": 0, "label": "无动作"}, {"value": 1, "label": "买入指定金额"}, {"value": 2, "label": "买入指定股数"}, {"value": 3, "label": "卖出股票"}
+            ]},
+            {"key": "exit_action", "comp": "action_compound", "label": "离开时执行动作", "data_path": "exit_action", "action_types": [
+              {"value": 0, "label": "无动作"}, {"value": 1, "label": "买入指定金额"}, {"value": 2, "label": "买入指定股数"}, {"value": 3, "label": "卖出股票"}
+            ]}
+          ]
+        },
+        {
+          "title": "交易属性",
+          "collapsible": true,
+          "fields": [
+            {"key": "tradeattr_accountno", "comp": "text_input", "label": "资金帐号", "data_path": "tradeattr.accountno", "default": "-1"},
+            {"key": "tradeattr_entertradetype", "comp": "text_input", "label": "进入交易类型", "data_path": "tradeattr.entertradetype", "default": "0"},
+            {"key": "tradeattr_enterrate", "comp": "text_input", "label": "进入费率", "data_path": "tradeattr.enterrate", "default": "0"},
+            {"key": "tradeattr_enterbuytype", "comp": "text_input", "label": "进入买入类型", "data_path": "tradeattr.enterbuytype", "default": "0"},
+            {"key": "tradeattr_enterbuyvalue", "comp": "text_input", "label": "进入买入值", "data_path": "tradeattr.enterbuyvalue", "default": "0"},
+            {"key": "tradeattr_enterbuypricetype", "comp": "text_input", "label": "进入买入价格类型", "data_path": "tradeattr.enterbuypricetype", "default": "0"},
+            {"key": "tradeattr_enterselltype", "comp": "text_input", "label": "进入卖出类型", "data_path": "tradeattr.enterselltype", "default": "0"},
+            {"key": "tradeattr_entersellvalue", "comp": "text_input", "label": "进入卖出值", "data_path": "tradeattr.entersellvalue", "default": "0"},
+            {"key": "tradeattr_entersellpricetype", "comp": "text_input", "label": "进入卖出价格类型", "data_path": "tradeattr.entersellpricetype", "default": "0"},
+            {"key": "tradeattr_leavetradetype", "comp": "text_input", "label": "离开交易类型", "data_path": "tradeattr.leavetradetype", "default": "0"},
+            {"key": "tradeattr_leaverate", "comp": "text_input", "label": "离开费率", "data_path": "tradeattr.leaverate", "default": "0"},
+            {"key": "tradeattr_leavebuytype", "comp": "text_input", "label": "离开买入类型", "data_path": "tradeattr.leavebuytype", "default": "0"},
+            {"key": "tradeattr_leavebuyvalue", "comp": "text_input", "label": "离开买入值", "data_path": "tradeattr.leavebuyvalue", "default": "0"},
+            {"key": "tradeattr_leavebuypricetype", "comp": "text_input", "label": "离开买入价格类型", "data_path": "tradeattr.leavebuypricetype", "default": "0"},
+            {"key": "tradeattr_leaveselltype", "comp": "text_input", "label": "离开卖出类型", "data_path": "tradeattr.leaveselltype", "default": "0"},
+            {"key": "tradeattr_leavesellvalue", "comp": "text_input", "label": "离开卖出值", "data_path": "tradeattr.leavesellvalue", "default": "0"},
+            {"key": "tradeattr_leavesellpricetype", "comp": "text_input", "label": "离开卖出价格类型", "data_path": "tradeattr.leavesellpricetype", "default": "0"},
+            {"key": "tradeattr_buycontrolnbhs", "comp": "text_input", "label": "买入控制内盘手数", "data_path": "tradeattr.buycontrolnbhs", "default": "0"},
+            {"key": "tradeattr_buycontrolmbsc", "comp": "text_input", "label": "买入控制外盘手数", "data_path": "tradeattr.buycontrolmbsc", "default": "-1"}
+          ]
+        },
+        {
+          "title": "股票列表",
+          "collapsible": true,
+          "fields": [
+            {"key": "stock_data", "comp": "stock_data_table", "label": "持仓股票", "data_path": "stocks", "default": []}
+          ]
+        }
+      ]
+    },
+    "condition_filter": {
+      "layout_id": "condition_filter",
+      "name": "转移条件属性",
+      "target_type": "201",
+      "target_scope": "node",
+      "pool_type": ["dzh"],
+      "sections": [
+        {
+          "title": "基本信息",
+          "collapsible": false,
+          "fields": [
+            {"key": "text", "comp": "text_input", "label": "条件名称", "data_path": "text", "default": ""},
+            {"key": "clr", "comp": "color_picker", "label": "节点颜色", "data_path": "clr", "default": -1, "hint": "DZH GDI 颜色值"}
+          ]
+        },
+        {
+          "title": "公式设置",
+          "collapsible": false,
+          "fields": [
+            {"key": "inditype", "comp": "select", "label": "公式类型", "data_path": "inditype", "options": [
+              {"value": "indi", "label": "技术指标"}, {"value": "", "label": "条件选股"}, {"value": "trade_sys", "label": "交易系统"}, {"value": "basic", "label": "基本面"}, {"value": "dynamic", "label": "动态行情"}, {"value": "ref", "label": "引用公式"}
+            ], "default": ""},
+            {"key": "indi", "comp": "base64_readonly", "label": "DZH公式 (Base64)", "data_path": "indi", "readonly": true},
+            {"key": "indi_decoded", "comp": "formula_editor", "label": "指标公式(解码)", "data_path": "formula_decoded", "encode_to": "indi", "hint": "修改后自动Base64编码回写"},
+            {"key": "indiparam", "comp": "text_input", "label": "指标参数", "data_path": "indiparam", "default": "", "hint": "位置参数，如 (1,25,100,30,15,30)"},
+            {"key": "formula_args", "comp": "formula_args_container", "label": "公式参数", "data_path": "formula_args", "default": {}},
+            {"key": "crc", "comp": "readonly", "label": "CRC 校验", "data_path": "crc", "default": 0}
+          ]
+        },
+        {
+          "title": "备选指标",
+          "collapsible": true,
+          "fields": [
+            {"key": "indireverse", "comp": "text_input", "label": "反向指标 (indireverse)", "data_path": "indireverse", "default": ""},
+            {"key": "indiattr", "comp": "text_input", "label": "指标属性 (indiattr)", "data_path": "indiattr", "default": ""},
+            {"key": "reload_sec", "comp": "number_input", "label": "重载间隔(秒)", "data_path": "reload_sec", "default": 0, "min": 0}
+          ]
+        },
+        {
+          "title": "条件类型 (attr 位标志)",
+          "collapsible": true,
+          "fields": [
+            {"key": "cond_type_flags", "comp": "flag_group", "label": "条件类型标志", "data_path": "attr_int", "flags": [
+              {"bit": 11, "hex": "0x800", "name": "basic_condition", "label": "基本条件"},
+              {"bit": 20, "hex": "0x100000", "name": "indicator_condition", "label": "指标条件"},
+              {"bit": 21, "hex": "0x200000", "name": "ranking_condition", "label": "排序条件"},
+              {"bit": 19, "hex": "0x80000", "name": "sector_membership", "label": "板块成员"},
+              {"bit": 18, "hex": "0x40000", "name": "reverse_transfer", "label": "反向转移"},
+              {"bit": 22, "hex": "0x400000", "name": "cross_section", "label": "横向统计"},
+              {"bit": 9, "hex": "0x200", "name": "show_overview", "label": "显示到总览"}
+            ]}
+          ]
+        },
+        {
+          "title": "执行行为 (attr 位标志)",
+          "collapsible": true,
+          "fields": [
+            {"key": "exec_behavior_flags", "comp": "flag_group", "label": "执行行为标志", "data_path": "attr_int", "flags": [
+              {"bit": 0, "hex": "0x1", "name": "keep_failed", "label": "保留不通过品种"},
+              {"bit": 1, "hex": "0x2", "name": "recalc_on_clear", "label": "备选池清空后重新计算"},
+              {"bit": 7, "hex": "0x80", "name": "no_output", "label": "不输出 (与bit0互斥)"},
+              {"bit": 8, "hex": "0x100", "name": "keep_order", "label": "备选池输出顺序不变"},
+              {"bit": 9, "hex": "0x200", "name": "output_solo", "label": "输出solo (与显示到总览共用bit9)"},
+              {"bit": 12, "hex": "0x1000", "name": "expire_clear", "label": "备选池到期即清理"},
+              {"bit": 13, "hex": "0x2000", "name": "append_mode", "label": "追加"},
+              {"bit": 16, "hex": "0x10000", "name": "allow_standalone", "label": "允许独立执行"}
+            ]}
+          ]
+        },
+        {
+          "title": "排序设置",
+          "collapsible": true,
+          "fields": [
+            {"key": "sorttype", "comp": "select", "label": "排序类型", "data_path": "sorttype", "options": [
+              {"value": "", "label": "不排序"}, {"value": "1", "label": "前1名(升序)"}, {"value": "3", "label": "前3名"},
+              {"value": "5", "label": "前5名"}, {"value": "7", "label": "前7名"}, {"value": "10", "label": "前10名"},
+              {"value": "20", "label": "前20名"}, {"value": "50", "label": "前50名"}, {"value": "100", "label": "前100名"},
+              {"value": "200", "label": "前200名"}, {"value": "500", "label": "前500名"}, {"value": "1000", "label": "前1000名"},
+              {"value": "-1", "label": "前1名(降序)"}, {"value": "-5", "label": "前5名(降序)"}, {"value": "-10", "label": "前10名(降序)"}
+            ], "default": ""}
+          ]
+        },
+        {
+          "title": "分析周期",
+          "collapsible": true,
+          "fields": [
+            {"key": "analysis_cycle", "comp": "select", "label": "周期", "data_path": "analysis_cycle", "options": [
+              {"value": "0", "label": "分笔成交"}, {"value": "1", "label": "1分钟"}, {"value": "5", "label": "5分钟"},
+              {"value": "15", "label": "15分钟"}, {"value": "30", "label": "30分钟"}, {"value": "60", "label": "60分钟"},
+              {"value": "daily", "label": "日线"}, {"value": "weekly", "label": "周线"}, {"value": "monthly", "label": "月线"}
+            ], "default": "daily"}
+          ]
+        },
+        {
+          "title": "调试信息",
+          "collapsible": true,
+          "fields": [
+            {"key": "attr_raw", "comp": "readonly", "label": "DZH attr 值", "data_path": "attr_int", "display": "raw"}
+          ]
+        },
+        {
+          "title": "指标走势预览",
+          "collapsible": true,
+          "fields": [
+            {"key": "indicator_preview", "comp": "indicator_chart", "label": "指标走势", "data_path": "indicator_preview", "default": null}
+          ]
+        }
+      ]
+    },
+    "candidate_provider": {
+      "layout_id": "candidate_provider",
+      "name": "备选池属性",
+      "target_type": "202",
+      "target_scope": "node",
+      "pool_type": ["dzh"],
+      "sections": [
+        {
+          "title": "基本信息",
+          "collapsible": false,
+          "fields": [
+            {"key": "name", "comp": "text_input", "label": "名称", "data_path": "name", "default": ""},
+            {"key": "clr", "comp": "color_picker", "label": "底色", "data_path": "clr", "default": -1}
+          ]
+        },
+        {
+          "title": "市场选择",
+          "collapsible": false,
+          "fields": [
+            {"key": "markets", "comp": "market_selector", "label": "市场选择", "data_path": "markets", "markets": [
+              {"code": "sh_a", "label": "SH#上证A股", "group": "A股"},
+              {"code": "sz_a", "label": "SZ#深证A股", "group": "A股"},
+              {"code": "sme", "label": "SZ#中小企业", "group": "A股"},
+              {"code": "gem", "label": "SZ#创业板", "group": "A股"},
+              {"code": "sh_b", "label": "SH#上证B股", "group": "B股"},
+              {"code": "sz_b", "label": "SZ#深证B股", "group": "B股"},
+              {"code": "sector_index", "label": "B$#板块指数", "group": "板块"},
+              {"code": "hot_concept", "label": "B$#热门概念", "group": "板块"}
+            ]},
+            {"key": "attr_flags", "comp": "flag_group", "label": "属性标志", "data_path": "attr_int", "flags": [
+              {"bit": 7, "hex": "0x80", "name": "candidate_mark", "label": "备选池标记"},
+              {"bit": 9, "hex": "0x200", "name": "show_overview", "label": "显示到总览"}
+            ]},
+            {"key": "attr_raw", "comp": "readonly", "label": "attr 原始值", "data_path": "attr_int", "display": "raw"}
+          ]
+        },
+        {
+          "title": "板块选择",
+          "collapsible": true,
+          "fields": [
+            {"key": "sectors", "comp": "text_input", "label": "板块名称", "data_path": "sectors", "default": "", "hint": "输入板块名称，如 B$#热点概念，多个用逗号分隔"}
+          ]
+        },
+        {
+          "title": "板块选择(树形)",
+          "collapsible": true,
+          "fields": [
+            {"key": "sector_tree", "comp": "sector_tree", "label": "板块树", "data_path": "sector_codes", "default": []}
+          ]
+        },
+        {
+          "title": "个股代码",
+          "collapsible": true,
+          "fields": [
+            {"key": "stocks_raw", "comp": "text_input", "label": "个股代码", "data_path": "stocks_raw", "default": "", "hint": "输入股票代码，如 000001,600000，多个用逗号分隔"}
+          ]
+        },
+        {
+          "title": "股票来源",
+          "collapsible": true,
+          "fields": [
+            {"key": "stock_source", "comp": "stock_source_editor", "label": "自定义股票列表", "data_path": "custom_stocks", "default": []}
+          ]
+        },
+        {
+          "title": "重新入载股票时间",
+          "collapsible": true,
+          "fields": [
+            {"key": "reload_mode", "comp": "reload_mode", "label": "重载模式", "data_path": "reload_mode", "default": "never", "options": [
+              {"value": "startup", "label": "每次启动"},
+              {"value": "daily", "label": "每天指定时间"},
+              {"value": "never", "label": "不重载"},
+              {"value": "interval", "label": "每隔 N 秒"},
+              {"value": "onfile", "label": "文件载入时"}
+            ]},
+            {"key": "reload_time", "comp": "text_input", "label": "重载时间 (HH:MM)", "data_path": "reload_time", "default": "09:25", "depends_on": "reload_mode", "active_when": ["daily"]},
+            {"key": "reload_sec", "comp": "number_input", "label": "重载间隔(秒)", "data_path": "reload_sec", "default": 0, "min": 0, "depends_on": "reload_mode", "active_when": ["interval"]},
+            {"key": "lastload", "comp": "readonly", "label": "最后加载时间", "data_path": "lastload", "default": "未加载"}
+          ]
+        },
+        {
+          "title": "原始数据",
+          "collapsible": true,
+          "fields": [
+            {"key": "raw_attrtext", "comp": "text_input", "label": "原始 attrtext", "data_path": "raw_attrtext", "default": "", "hint": "tab分隔格式: SH#上证A股\\tSZ#深证A股..."}
+          ]
+        }
+      ]
+    },
+    "discard_sink": {
+      "layout_id": "discard_sink",
+      "name": "丢弃池属性",
+      "target_type": "4",
+      "target_scope": "node",
+      "pool_type": ["dzh"],
+      "sections": [
+        {
+          "title": "基本信息",
+          "collapsible": false,
+          "fields": [
+            {"key": "name", "comp": "text_input", "label": "名称", "data_path": "name", "default": ""},
+            {"key": "clr", "comp": "color_picker", "label": "节点颜色", "data_path": "clr", "default": -1, "hint": "DZH GDI 颜色值"}
+          ]
+        },
+        {
+          "title": "属性标志",
+          "collapsible": true,
+          "fields": [
+            {"key": "attr_flags", "comp": "flag_group", "label": "属性标志", "data_path": "attr_int", "flags": [
+              {"bit": 7, "hex": "0x80", "name": "basic_mark", "label": "丢弃池标记"},
+              {"bit": 9, "hex": "0x200", "name": "show_overview", "label": "显示到总览"}
+            ]},
+            {"key": "attr_raw", "comp": "readonly", "label": "DZH attr 原始值", "data_path": "attr_int", "display": "raw"}
+          ]
+        }
+      ]
+    },
+    "text_label": {
+      "layout_id": "text_label",
+      "name": "文字标签属性",
+      "target_type": "1",
+      "target_scope": "node",
+      "pool_type": ["dzh"],
+      "sections": [
+        {
+          "title": "文字设置",
+          "collapsible": false,
+          "fields": [
+            {"key": "text", "comp": "text_input", "label": "文本内容", "data_path": "text", "default": ""},
+            {"key": "fontsize", "comp": "number_input", "label": "字体大小", "data_path": "fontsize", "default": 12, "min": 1, "hint": "像素值"},
+            {"key": "clr", "comp": "color_picker", "label": "文字颜色", "data_path": "clr", "default": -1, "hint": "DZH GDI 颜色值"}
+          ]
+        },
+        {
+          "title": "标签类型预设",
+          "collapsible": true,
+          "fields": [
+            {"key": "label_preset", "comp": "select", "label": "选择预设类型", "data_path": "attr_int", "options": [
+              {"value": "0", "label": "普通文本 (plain)"},
+              {"value": "19", "label": "章节标题 (section_header)"},
+              {"value": "21", "label": "副标题变体 (subtitle_like)"},
+              {"value": "25", "label": "描述性文字 (description_like)"},
+              {"value": "57", "label": "股票池标题 (pool_title)"},
+              {"value": "77", "label": "主标题 (title)"},
+              {"value": "85", "label": "描述文字 (description)"},
+              {"value": "88", "label": "纯文本 (text)"},
+              {"value": "89", "label": "时间标签 (time_label)"},
+              {"value": "90", "label": "时间点标记 (time_point)"},
+              {"value": "92", "label": "模型副标题 (model_subtitle)"},
+              {"value": "95", "label": "副标题 (subtitle)"},
+              {"value": "98", "label": "条件说明标签 (condition_label)"}
+            ], "default": "0", "hint": "选择后自动设置attr值"},
+            {"key": "attr_raw", "comp": "readonly", "label": "当前 attr 值", "data_path": "attr_int", "display": "raw"}
+          ]
+        },
+        {
+          "title": "字体样式 (attr 位标志)",
+          "collapsible": true,
+          "fields": [
+            {"key": "font_style_flags", "comp": "flag_group", "label": "字体样式", "data_path": "attr_int", "flags": [
+              {"bit": 0, "hex": "0x1", "name": "font_bold", "label": "bit0: 加粗/强调"},
+              {"bit": 1, "hex": "0x2", "name": "style_bit1", "label": "bit1: 样式标记1"},
+              {"bit": 2, "hex": "0x4", "name": "style_bit2", "label": "bit2: 样式标记2"},
+              {"bit": 3, "hex": "0x8", "name": "style_bit3", "label": "bit3: 样式标记3"},
+              {"bit": 4, "hex": "0x10", "name": "visible", "label": "bit4: 可见/显示"},
+              {"bit": 5, "hex": "0x20", "name": "style_bit4", "label": "bit5: 样式标记4"},
+              {"bit": 6, "hex": "0x40", "name": "style_bit5", "label": "bit6: 样式标记5"},
+              {"bit": 7, "hex": "0x80", "name": "style_bit6", "label": "bit7: 样式标记6"},
+              {"bit": 9, "hex": "0x200", "name": "hollow_bg", "label": "bit9: 空心/透明背景"}
+            ]}
+          ]
+        },
+        {
+          "title": "链接",
+          "collapsible": true,
+          "fields": [
+            {"key": "url", "comp": "text_input", "label": "超链接 (url)", "data_path": "url", "default": ""}
+          ]
+        }
+      ]
+    },
+    "container_box": {
+      "layout_id": "container_box",
+      "name": "容器属性",
+      "target_type": "2",
+      "target_scope": "node",
+      "pool_type": ["dzh"],
+      "sections": [
+        {
+          "title": "容器设置",
+          "collapsible": false,
+          "fields": [
+            {"key": "text", "comp": "text_input", "label": "标签文字", "data_path": "text", "default": ""},
+            {"key": "clr", "comp": "color_picker", "label": "颜色", "data_path": "clr", "default": -1, "hint": "DZH GDI 颜色值"}
+          ]
+        },
+        {
+          "title": "属性标志",
+          "collapsible": true,
+          "fields": [
+            {"key": "attr_flags", "comp": "flag_group", "label": "属性标志", "data_path": "attr_int", "flags": [
+              {"bit": 9, "hex": "0x200", "name": "show_overview", "label": "显示到总览"}
+            ]},
+            {"key": "attr_raw", "comp": "readonly", "label": "DZH attr 原始值", "data_path": "attr_int", "display": "raw"}
+          ]
+        },
+        {
+          "title": "尺寸",
+          "collapsible": true,
+          "fields": [
+            {"key": "pos_width", "comp": "number_input", "label": "宽度", "data_path": "pos_width", "default": 200, "min": 1, "hint": "px"},
+            {"key": "pos_height", "comp": "number_input", "label": "高度", "data_path": "pos_height", "default": 150, "min": 1, "hint": "px"}
+          ]
+        }
+      ]
+    },
+    "state_column": {
+      "layout_id": "state_column",
+      "name": "状态列属性",
+      "target_type": "3",
+      "target_scope": "node",
+      "pool_type": ["dzh"],
+      "sections": [
+        {
+          "title": "状态列设置",
+          "collapsible": false,
+          "fields": [
+            {"key": "text", "comp": "text_input", "label": "标签文字", "data_path": "text", "default": ""},
+            {"key": "clr", "comp": "color_picker", "label": "颜色", "data_path": "clr", "default": -1, "hint": "DZH GDI 颜色值"},
+            {"key": "attr_flags", "comp": "flag_group", "label": "属性标志", "data_path": "attr_int", "flags": [
+              {"bit": 9, "hex": "0x200", "name": "show_overview", "label": "显示到总览"}
+            ]},
+            {"key": "attr_raw", "comp": "readonly", "label": "DZH attr 原始值", "data_path": "attr_int", "display": "raw"}
+          ]
+        },
+        {
+          "title": "尺寸",
+          "collapsible": true,
+          "fields": [
+            {"key": "pos_height", "comp": "number_input", "label": "高度", "data_path": "pos_height", "default": 100, "min": 1, "hint": "px"}
+          ]
+        }
+      ]
+    },
+    "flow_edge": {
+      "layout_id": "flow_edge",
+      "name": "流程线属性",
+      "target_type": "flow",
+      "target_scope": "edge",
+      "pool_type": ["dzh"],
+      "sections": [
+        {
+          "title": "连线信息",
+          "collapsible": false,
+          "fields": [
+            {"key": "flow_info_src", "comp": "flow_info", "label": "源节点", "data_path": "_source_label", "default": "?"},
+            {"key": "flow_info_tgt", "comp": "flow_info", "label": "目标节点", "data_path": "_target_label", "default": "?"},
+            {"key": "flow_info_mode", "comp": "flow_mode_display", "label": "路径模式", "data_path": "attr", "default": 0},
+            {"key": "flow_info_count", "comp": "readonly", "label": "通过股票数", "data_path": "count", "default": "0"},
+            {"key": "flow_info_order", "comp": "readonly", "label": "执行顺序", "data_path": "_order", "default": "-"}
+          ]
+        },
+        {
+          "title": "转移模式",
+          "collapsible": false,
+          "fields": [
+            {"key": "transfer_mode", "comp": "transfer_mode", "label": "转移模式", "data_path": "attr", "options": [
+              {"value": "copy", "label": "复制 (保留源状态)", "desc": "keep_source=1, delete_source=0"},
+              {"value": "move", "label": "移动 (删除源状态)", "desc": "delete_source=1, keep_source=0"},
+              {"value": "overwrite", "label": "覆盖 (先清空目的状态)", "desc": "clear_dest_first=1"},
+              {"value": "constituent", "label": "输出成份股", "desc": "output_constituent=1"}
+            ]}
+          ]
+        },
+        {
+          "title": "流转选项",
+          "collapsible": true,
+          "fields": [
+            {"key": "delete_source", "comp": "select", "label": "删除源状态中股票", "data_path": "delete_source", "options": [
+              {"value": false, "label": "否"}, {"value": true, "label": "是"}
+            ], "default": false},
+            {"key": "keep_source", "comp": "select", "label": "保留源状态中股票", "data_path": "keep_source", "options": [
+              {"value": false, "label": "否"}, {"value": true, "label": "是"}
+            ], "default": true}
+          ]
+        },
+        {
+          "title": "时序控制",
+          "collapsible": true,
+          "fields": [
+            {"key": "begin", "comp": "select", "label": "开始时间", "data_path": "begin", "options": [
+              {"value": 0, "label": "立即开始"}, {"value": 1, "label": "延迟开始"}, {"value": 2, "label": "开市前"},
+              {"value": 3, "label": "开市后"}, {"value": 4, "label": "收市前"}, {"value": 5, "label": "收市后"},
+              {"value": 6, "label": "指定交易日时间"}, {"value": 7, "label": "指定时间"}
+            ], "default": 0},
+            {"key": "begint", "comp": "begint_input", "label": "开始时间参数", "data_path": "begint", "depends_on": "begin", "hhmmss_modes": [3, 4, 7]},
+            {"key": "end", "comp": "select", "label": "结束时间", "data_path": "end", "options": [
+              {"value": 0, "label": "一直执行"}, {"value": 1, "label": "指定时长"}, {"value": 2, "label": "只执行一次"}
+            ], "default": 0},
+            {"key": "endt", "comp": "number_input", "label": "结束时间参数(秒)", "data_path": "endt", "default": 2147483647, "depends_on": "end", "active_when": [1]},
+            {"key": "interval_sec", "comp": "number_input", "label": "执行间隔(秒)", "data_path": "interval_sec", "default": 60, "min": 0},
+            {"key": "cst", "comp": "text_input", "label": "自定义开始 (cst)", "data_path": "cst", "default": "", "hint": "自定义开始时间表达式"},
+            {"key": "cet", "comp": "text_input", "label": "自定义结束 (cet)", "data_path": "cet", "default": "", "hint": "自定义结束时间表达式"},
+            {"key": "c_period", "comp": "text_input", "label": "自定义周期 (c_period)", "data_path": "c_period", "default": "", "hint": "自定义执行周期"}
+          ]
+        },
+        {
+          "title": "外观",
+          "collapsible": true,
+          "fields": [
+            {"key": "clr", "comp": "color_picker", "label": "线条颜色", "data_path": "clr", "default": -1, "hint": "DZH GDI 颜色整数值"},
+            {"key": "mid", "comp": "number_input", "label": "弯曲度 (mid)", "data_path": "mid", "default": 0, "hint": "正值向右弯曲，负值向左弯曲"}
+          ]
+        }
+      ]
+    },
+    "tdx_state_pool": {
+      "layout_id": "tdx_state_pool",
+      "name": "TDX状态池属性",
+      "target_type": ["8", "tdx_8"],
+      "target_scope": "node",
+      "pool_type": ["tdx"],
+      "sections": [
+        {
+          "title": "基本属性",
+          "collapsible": false,
+          "fields": [
+            {"key": "id", "comp": "readonly", "label": "ID", "data_path": "id"},
+            {"key": "type", "comp": "readonly", "label": "类型", "data_path": "type"},
+            {"key": "text", "comp": "text_input", "label": "名称", "data_path": "text", "default": ""},
+            {"key": "clr", "comp": "number_input", "label": "填充色", "data_path": "clr", "default": 0},
+            {"key": "clrtext", "comp": "number_input", "label": "文字颜色", "data_path": "clrtext", "default": 16777215},
+            {"key": "solid", "comp": "select", "label": "填充样式", "data_path": "solid", "options": [
+              {"value": 0, "label": "空心"}, {"value": 1, "label": "实心"}
+            ], "default": 1}
+          ]
+        },
+        {
+          "title": "psatt 状态池参数",
+          "collapsible": true,
+          "fields": [
+            {"key": "bdel", "comp": "select", "label": "自动删除(入池超时淘汰)", "data_path": "params.tdx_psatt.bdel", "options": [
+              {"value": 0, "label": "否"}, {"value": 1, "label": "是"}
+            ], "default": 0},
+            {"key": "ndelnum", "comp": "number_input", "label": "时间数量(N)", "data_path": "params.tdx_psatt.ndelnum", "default": 0, "depends_on": "bdel", "active_when": [1]},
+            {"key": "ndeltype", "comp": "tdx_enum_select", "label": "时间单位", "enum_key": "ndeltype", "data_path": "params.tdx_psatt.ndeltype", "default": 0, "depends_on": "bdel", "active_when": [1]},
+            {"key": "baimpool", "comp": "select", "label": "设置为目标池", "data_path": "params.tdx_psatt.baimpool", "options": [
+              {"value": 0, "label": "否"}, {"value": 1, "label": "是"}
+            ], "default": 0},
+            {"key": "bsound", "comp": "select", "label": "发出预警提示声", "data_path": "params.tdx_psatt.bsound", "options": [
+              {"value": 0, "label": "否"}, {"value": 1, "label": "是"}
+            ], "default": 0, "depends_on": "baimpool", "active_when": [1]},
+            {"key": "nsoundtype", "comp": "select", "label": "声音类型", "data_path": "params.tdx_psatt.nsoundtype", "options": [
+              {"value": 0, "label": "系统声音"}, {"value": 1, "label": "自定义文件"}
+            ], "default": 0, "depends_on": "bsound", "active_when": [1]},
+            {"key": "nsyssound", "comp": "number_input", "label": "系统声音编号", "data_path": "params.tdx_psatt.nsyssound", "default": 0, "depends_on": "nsoundtype", "active_when": [0]},
+            {"key": "soundfile", "comp": "text_input", "label": "自定义声音文件", "data_path": "params.tdx_psatt.soundfile", "default": "", "depends_on": "nsoundtype", "active_when": [1]},
+            {"key": "btip", "comp": "select", "label": "右下角弹出股票入池提示框", "data_path": "params.tdx_psatt.btip", "options": [
+              {"value": 0, "label": "否"}, {"value": 1, "label": "是"}
+            ], "default": 0, "depends_on": "baimpool", "active_when": [1]},
+            {"key": "bsavetoblock", "comp": "select", "label": "池内股票自动加入以下板块", "data_path": "params.tdx_psatt.bsavetoblock", "options": [
+              {"value": 0, "label": "否"}, {"value": 1, "label": "是"}
+            ], "default": 0, "depends_on": "baimpool", "active_when": [1]},
+            {"key": "blockfile", "comp": "text_input", "label": "目标板块名称", "data_path": "params.tdx_psatt.blockfile", "default": "", "depends_on": "bsavetoblock", "active_when": [1]},
+            {"key": "bclearblock", "comp": "tdx_enum_select", "label": "写入模式", "enum_key": "bclearblock", "data_path": "params.tdx_psatt.bclearblock", "default": 0, "depends_on": "bsavetoblock", "active_when": [1]},
+            {"key": "bsavehis", "comp": "bsavehis_panel", "label": "保存历史数据", "data_path": "params.tdx_psatt.bsavehis", "default": 0, "depends_on": "baimpool", "active_when": [1]}
+          ]
+        },
+        {
+          "title": "股票列表 (stk 子元素)",
+          "collapsible": true,
+          "fields": [
+            {"key": "stk_table", "comp": "stock_data_table", "label": "状态池股票", "data_path": "stocks", "default": []}
+          ]
+        }
+      ]
+    },
+    "tdx_condition": {
+      "layout_id": "tdx_condition",
+      "name": "TDX转移条件属性",
+      "target_type": ["3", "tdx_3"],
+      "target_scope": "node",
+      "pool_type": ["tdx"],
+      "sections": [
+        {
+          "title": "基本属性",
+          "collapsible": false,
+          "fields": [
+            {"key": "id", "comp": "readonly", "label": "ID", "data_path": "id"},
+            {"key": "type", "comp": "readonly", "label": "类型", "data_path": "type"},
+            {"key": "text", "comp": "text_input", "label": "名称", "data_path": "text", "default": ""},
+            {"key": "clr", "comp": "number_input", "label": "填充色", "data_path": "clr", "default": 0},
+            {"key": "clrtext", "comp": "number_input", "label": "文字颜色", "data_path": "clrtext", "default": 16777215},
+            {"key": "solid", "comp": "select", "label": "填充样式", "data_path": "solid", "options": [
+              {"value": 0, "label": "空心"}, {"value": 1, "label": "实心"}
+            ], "default": 1}
+          ]
+        },
+        {
+          "title": "func 公式配置",
+          "collapsible": false,
+          "fields": [
+            {"key": "nset", "comp": "tdx_enum_select", "label": "公式类型(nset)", "data_path": "params.tdx_func.nset", "enum_key": "nset", "options": [
+              {"value": 0, "label": "技术指标公式", "desc": "使用自定义或系统技术指标公式进行选股，支持MA/MACD/KDJ等"},
+              {"value": 1, "label": "条件选股公式", "desc": "使用条件选股公式，返回0/1信号（通过/不通过）"},
+              {"value": 2, "label": "专家系统公式", "desc": "使用专家系统公式（买卖点组合决策系统）"},
+              {"value": 3, "label": "最新财务选股", "desc": "基于最新财务数据指标筛选（PE/PB/营收等）"},
+              {"value": 4, "label": "实时行情选股", "desc": "基于实时行情数据筛选（涨幅/量比/换手率等）"},
+              {"value": 5, "label": "逻辑运算选股", "desc": "直接转移或逻辑运算，不依赖公式计算"}
+            ], "default": 1},
+            {"key": "ntjindexno", "comp": "number_input", "label": "系统指标编号", "data_path": "params.tdx_func.ntjindexno", "default": 0, "depends_on": "nset", "active_when": [1, 4]},
+            {"key": "accode", "comp": "text_input", "label": "指标编码", "data_path": "params.tdx_func.accode", "default": "", "depends_on": "nset", "active_when": [0]},
+            {"key": "nperiod", "comp": "select", "label": "分析周期", "data_path": "params.tdx_func.nperiod", "options": [
+              {"value": 4, "label": "日线"}, {"value": 5, "label": "周线"}, {"value": 6, "label": "月线"},
+              {"value": 0, "label": "分笔"}, {"value": 1, "label": "1分钟"}, {"value": 2, "label": "5分钟"}, {"value": 3, "label": "15分钟"}
+            ], "default": 4, "depends_on": "nset", "active_when": [0, 1, 4]},
+            {"key": "nfirst", "comp": "number_input", "label": "第一参数(整数)", "data_path": "params.tdx_func.nfirst", "default": 0, "depends_on": "nset", "active_when": [0, 1, 4]},
+            {"key": "cfirst", "comp": "text_input", "label": "第一参数(字符串)", "data_path": "params.tdx_func.cfirst", "default": "", "depends_on": "nset", "active_when": [0]},
+            {"key": "noperate", "comp": "tdx_enum_select", "label": "操作符(noperate)", "data_path": "params.tdx_func.noperate", "enum_key": "noperate", "options": [
+              {"value": 0, "label": "等于", "desc": "指标值等于目标值时通过（如MA5=20）"},
+              {"value": 1, "label": "大于", "desc": "指标值大于目标值时通过"},
+              {"value": 2, "label": "小于", "desc": "指标值小于目标值时通过"},
+              {"value": 3, "label": "上穿(金叉)", "desc": "短线上穿长线，如MA5上穿MA20形成金叉"},
+              {"value": 4, "label": "下破(死叉)", "desc": "短线跌破长线，如MA5下破MA20形成死叉"},
+              {"value": 5, "label": "排名为", "desc": "精确排名等于目标名次（如排名第3）"},
+              {"value": 6, "label": "排名前N", "desc": "排名在目标名次之前（如前10名）"},
+              {"value": 7, "label": "排名后N", "desc": "排名在目标名次之后"},
+              {"value": 8, "label": "上拐", "desc": "曲线由降转升的拐点检测（拐点向上）"},
+              {"value": 9, "label": "下拐", "desc": "曲线由升转降的拐点检测（拐点向下）"}
+            ], "default": 0, "depends_on": "nset", "active_when": [0, 1, 4]},
+            {"key": "nsecond", "comp": "number_input", "label": "第二参数(整数)", "data_path": "params.tdx_func.nsecond", "default": -1, "depends_on": "nset", "active_when": [0, 1, 4]},
+            {"key": "csecond", "comp": "text_input", "label": "第二参数(字符串)", "data_path": "params.tdx_func.csecond", "default": "", "depends_on": "nset", "active_when": [0]},
+            {"key": "fsecond", "comp": "number_input", "label": "第二参数(浮点)", "data_path": "params.tdx_func.fsecond", "default": 0, "step": 0.01, "depends_on": "nset", "active_when": [0, 1, 4]},
+            {"key": "nbeginday", "comp": "number_input", "label": "开始天数", "data_path": "params.tdx_func.nbeginday", "default": 0, "depends_on": "nset", "active_when": [0, 1]},
+            {"key": "nendday", "comp": "number_input", "label": "结束天数", "data_path": "params.tdx_func.nendday", "default": 0, "depends_on": "nset", "active_when": [0, 1]},
+            {"key": "bnost", "comp": "select", "label": "忽略ST", "data_path": "params.tdx_func.bnost", "options": [
+              {"value": 0, "label": "否"}, {"value": 1, "label": "是"}
+            ], "default": 0, "depends_on": "nset", "active_when": [0, 1]},
+            {"key": "bnotp", "comp": "select", "label": "忽略停牌", "data_path": "params.tdx_func.bnotp", "options": [
+              {"value": 0, "label": "否"}, {"value": 1, "label": "是"}
+            ], "default": 0, "depends_on": "nset", "active_when": [0, 1]},
+            {"key": "bnotq", "comp": "select", "label": "忽略Q项", "data_path": "params.tdx_func.bnotq", "options": [
+              {"value": 0, "label": "否"}, {"value": 1, "label": "是"}
+            ], "default": 0, "depends_on": "nset", "active_when": [0, 1]},
+            {"key": "nperiodnum", "comp": "number_input", "label": "周期数量", "data_path": "params.tdx_func.nperiodnum", "default": 0, "depends_on": "nset", "active_when": [0, 1]}
+          ]
+        },
+        {
+          "title": "指标走势预览",
+          "collapsible": true,
+          "fields": [
+            {"key": "indicator_preview", "comp": "indicator_chart", "label": "指标走势", "data_path": "indicator_preview", "default": null}
+          ]
+        }
+      ]
+    },
+    "tdx_candidate": {
+      "layout_id": "tdx_candidate",
+      "name": "TDX候选池属性",
+      "target_type": ["7", "tdx_7"],
+      "target_scope": "node",
+      "pool_type": ["tdx"],
+      "sections": [
+        {
+          "title": "基本属性",
+          "collapsible": false,
+          "fields": [
+            {"key": "id", "comp": "readonly", "label": "ID", "data_path": "id"},
+            {"key": "type", "comp": "readonly", "label": "类型", "data_path": "type"},
+            {"key": "text", "comp": "text_input", "label": "名称", "data_path": "text", "default": ""},
+            {"key": "clr", "comp": "number_input", "label": "填充色", "data_path": "clr", "default": 0},
+            {"key": "clrtext", "comp": "number_input", "label": "文字颜色", "data_path": "clrtext", "default": 16777215},
+            {"key": "solid", "comp": "select", "label": "填充样式", "data_path": "solid", "options": [
+              {"value": 0, "label": "空心"}, {"value": 1, "label": "实心"}
+            ], "default": 1}
+          ]
+        },
+        {
+          "title": "spinfo 候选池信息",
+          "collapsible": true,
+          "fields": [
+            {"key": "spinfo_type", "comp": "tdx_enum_select", "label": "候选池类型(spinfo.type)", "data_path": "params.tdx_spinfo.type", "enum_key": "spinfo_type", "options": [
+              {"value": 0, "label": "全市场/自动选股", "desc": "从全市场自动筛选股票，配合公式条件使用"},
+              {"value": 2, "label": "全部A股", "desc": "沪深A股全市场，不包含ST等特殊股票需额外设置"},
+              {"value": 3, "label": "自选股", "desc": "用户自选股列表中的股票作为候选范围"},
+              {"value": 4, "label": "自定义板块", "desc": "指定板块文件（.blk）中的股票，需填写customblockname"}
+            ], "default": 0},
+            {"key": "customblockname", "comp": "text_input", "label": "自定义板块名", "data_path": "params.tdx_spinfo.customblockname", "default": "", "depends_on": "spinfo_type", "active_when": [0, 4]},
+            {"key": "size", "comp": "number_input", "label": "候选池容量", "data_path": "params.tdx_spinfo.size", "default": 0},
+            {"key": "sector_tree", "comp": "sector_tree", "label": "板块选择", "data_path": "params.tdx_spinfo.sector_codes", "default": [], "depends_on": "spinfo_type", "active_when": [4]}
+          ]
+        }
+      ]
+    },
+    "tdx_flow_edge": {
+      "layout_id": "tdx_flow_edge",
+      "name": "TDX流程线属性",
+      "target_type": "flow",
+      "target_scope": "edge",
+      "pool_type": ["tdx"],
+      "sections": [
+        {
+          "title": "连线信息",
+          "collapsible": false,
+          "fields": [
+            {"key": "startid", "comp": "readonly", "label": "源节点ID", "data_path": "startid", "default": "?"},
+            {"key": "endid", "comp": "readonly", "label": "目标节点ID", "data_path": "endid", "default": "?"}
+          ]
+        },
+        {
+          "title": "转移模式",
+          "collapsible": false,
+          "fields": [
+            {"key": "tran", "comp": "select", "label": "转移模式", "data_path": "tran", "options": [
+              {"value": 0, "label": "复制(保留源池)"}, {"value": 1, "label": "移动(清空源池)"}
+            ], "default": 0},
+            {"key": "emptyps", "comp": "select", "label": "空池触发", "data_path": "emptyps", "options": [
+              {"value": 0, "label": "不触发"}, {"value": 1, "label": "空也触发"}
+            ], "default": 0}
+          ]
+        },
+        {
+          "title": "时序控制",
+          "collapsible": true,
+          "fields": [
+            {"key": "starttype", "comp": "tdx_enum_select", "label": "开始类型(starttype)", "data_path": "starttype", "enum_key": "starttype", "options": [
+              {"value": 0, "label": "立即执行", "desc": "池启动后立即开始执行，无需等待"},
+              {"value": 1, "label": "开盘前(9:00)", "desc": "9:00(开盘前)开始执行，适合盘前准备"},
+              {"value": 2, "label": "交易日延迟", "desc": "交易日开始后延迟N秒执行，starttime=延迟秒数"},
+              {"value": 3, "label": "按间隔执行", "desc": "每隔N秒/分/小时循环执行一次，starttime=间隔值"},
+              {"value": 4, "label": "收盘前", "desc": "收盘前N秒执行，适合尾盘操作"},
+              {"value": 5, "label": "收市后(15:00)", "desc": "15:00收市后执行，starttime=收市后延迟秒数"},
+              {"value": 6, "label": "交易日时间", "desc": "交易日内的某个HHMMSS时刻执行"},
+              {"value": 7, "label": "指定时间(HHMMSS)", "desc": "指定具体的HHMMSS时刻执行"}
+            ], "default": 0},
+            {"key": "starttime", "comp": "number_input", "label": "开始时间参数(starttime)", "data_path": "starttime", "default": 0, "depends_on": "starttype", "active_when": [2, 3, 5]},
+            {"key": "starttimetype", "comp": "select", "label": "时间格式(starttimetype)", "data_path": "starttimetype", "options": [
+              {"value": 0, "label": "秒数"}, {"value": 1, "label": "HHMMSS"}, {"value": 2, "label": "小时(×3600)"}
+            ], "default": 0},
+            {"key": "starttimehms", "comp": "number_input", "label": "HHMMSS时间", "data_path": "starttimehms", "default": 0, "depends_on": "starttimetype", "active_when": [1]},
+            {"key": "cxtype", "comp": "tdx_enum_select", "label": "持续类型(cxtype)", "data_path": "cxtype", "enum_key": "cxtype", "options": [
+              {"value": 0, "label": "一直执行(无限循环)", "desc": "持续不断执行，每间隔jgtime秒循环一次，永不停止"},
+              {"value": 1, "label": "持续时长(N秒内循环)", "desc": "在cxtime时长窗口内按jgtime间隔循环，超时停止。执行次数≈⌊cxtime/jgtime⌋+1"},
+              {"value": 2, "label": "只执行一次(9:29后)", "desc": "触发一次后即停止。提示：选择只执行一次请在9:29后执行"}
+            ], "default": 0},
+            {"key": "cxtime", "comp": "number_input", "label": "持续参数", "data_path": "cxtime", "default": 0, "depends_on": "cxtype", "active_when": [1]},
+            {"key": "cxtimetype", "comp": "select", "label": "持续单位", "data_path": "cxtimetype", "options": [
+              {"value": 0, "label": "秒"}, {"value": 1, "label": "分钟"}, {"value": 2, "label": "次数"}
+            ], "default": 0, "depends_on": "cxtype", "active_when": [1]},
+            {"key": "jgtime", "comp": "number_input", "label": "执行间隔(jgtime/秒)", "data_path": "jgtime", "default": 0, "min": 0, "hint": "cxtype=1时: 执行次数≈⌊cxtime/jgtime⌋+1; cxtype=0时: 每隔N秒循环"}
+          ]
+        },
+        {
+          "title": "外观",
+          "collapsible": true,
+          "fields": [
+            {"key": "clr_color", "comp": "color_picker", "label": "连线颜色", "data_path": "clr", "default": 0, "hint": "TDX GDI 颜色值"},
+            {"key": "size", "comp": "number_input", "label": "线宽", "data_path": "size", "default": 1, "min": 1, "max": 10}
+          ]
+        }
+      ]
+    },
+    "flow_arrow": {
+      "layout_id": "flow_arrow",
+      "name": "装饰箭头属性",
+      "target_type": "6",
+      "target_scope": "node",
+      "pool_type": ["dzh"],
+      "sections": [
+        {
+          "title": "箭头设置",
+          "collapsible": false,
+          "fields": [
+            {"key": "text", "comp": "text_input", "label": "标签文字", "data_path": "text", "default": ""},
+            {"key": "clr", "comp": "color_picker", "label": "箭头颜色", "data_path": "clr", "default": -1}
+          ]
+        }
+      ]
+    },
+    "exec_order_arrow": {
+      "layout_id": "exec_order_arrow",
+      "name": "执行顺序属性",
+      "target_type": "5",
+      "target_scope": "node",
+      "pool_type": ["dzh"],
+      "sections": [
+        {
+          "title": "执行顺序设置",
+          "collapsible": false,
+          "fields": [
+            {"key": "text", "comp": "text_input", "label": "标签文字", "data_path": "text", "default": ""},
+            {"key": "clr", "comp": "color_picker", "label": "颜色", "data_path": "clr", "default": -1}
+          ]
+        }
+      ]
+    },
+    "special_pool": {
+      "layout_id": "special_pool",
+      "name": "特殊池属性",
+      "target_type": "203",
+      "target_scope": "node",
+      "pool_type": ["dzh"],
+      "sections": [
+        {
+          "title": "基本信息",
+          "collapsible": false,
+          "fields": [
+            {"key": "text", "comp": "text_input", "label": "名称", "data_path": "text", "default": ""},
+            {"key": "clr", "comp": "color_picker", "label": "背景色", "data_path": "clr", "default": -1, "hint": "DZH GDI 颜色值"},
+            {"key": "fontcolor", "comp": "color_picker", "label": "字体颜色", "data_path": "fontcolor", "default": "", "hint": "DZH GDI 颜色值"}
+          ]
+        },
+        {
+          "title": "属性标志",
+          "collapsible": true,
+          "fields": [
+            {"key": "attr_flags", "comp": "flag_group", "label": "属性标志", "data_path": "dzh_attr", "flags": [
+              {"bit": 7, "hex": "0x80", "name": "hidden_pool", "label": "隐藏池"},
+              {"bit": 15, "hex": "0x8000", "name": "simple_intermediate", "label": "简易中间态(缩小为极小节点)"},
+              {"bit": 30, "hex": "0x40000000", "name": "show_overview", "label": "显示到股票池总览"}
+            ]},
+            {"key": "attr_raw", "comp": "readonly", "label": "DZH attr 原始值", "data_path": "dzh_attr", "display": "raw"}
+          ]
+        },
+        {
+          "title": "显示设置",
+          "collapsible": true,
+          "fields": [
+            {"key": "col_list", "comp": "text_input", "label": "显示列序号 (col_list)", "data_path": "col_list", "default": "2,-1,-2,-3,7,14,8,10,17,45", "hint": "如: 2,-1,-2,-3,7,14,8,10,17,45"},
+            {"key": "width_list", "comp": "text_input", "label": "列宽 (width_list)", "data_path": "width_list", "default": "", "hint": "与 col 一一对应，逗号分隔，像素值"},
+            {"key": "sorttype", "comp": "select", "label": "排序类型", "data_path": "sorttype", "options": [
+              {"value": "", "label": "不排序"}, {"value": "1", "label": "前1名"}, {"value": "5", "label": "前5名"},
+              {"value": "7", "label": "前7名"}, {"value": "10", "label": "前10名"}, {"value": "20", "label": "前20名"},
+              {"value": "50", "label": "前50名"}, {"value": "100", "label": "前100名"}, {"value": "200", "label": "前200名"},
+              {"value": "-1000", "label": "前1000名(降序)"}
+            ], "default": ""},
+            {"key": "tmpl", "comp": "text_input", "label": "关联模板 (tmpl)", "data_path": "tmpl", "default": "", "hint": "关联DZH内置模板名称"}
+          ]
+        },
+        {
+          "title": "保留与删除控制",
+          "collapsible": true,
+          "fields": [
+            {"key": "hold_sec", "comp": "number_input", "label": "保留天数 (0=永久)", "data_path": "hold_sec", "default": 432000, "min": 0, "max": 43200000, "step": 86400, "hint": "自动转换为秒存储 (天 × 86400)"},
+            {"key": "stocknum", "comp": "number_input", "label": "股票窗口数", "data_path": "stocknum", "default": null, "min": 0, "nullable": true, "hint": "0 = 无限制"},
+            {"key": "histana", "comp": "number_input", "label": "收益分析点数", "data_path": "histana", "default": null, "min": 0, "nullable": true},
+            {"key": "wizd", "comp": "text_input", "label": "状态说明文字", "data_path": "wizd", "default": "", "nullable": true},
+            {"key": "deltype", "comp": "select", "label": "删除控制类型", "data_path": "deltype", "options": [
+              {"value": 0, "label": "不删"}, {"value": 1, "label": "按时删"}, {"value": 2, "label": "按数删"}
+            ], "default": 0},
+            {"key": "endtime", "comp": "number_input", "label": "删除时间 (秒)", "data_path": "endtime", "default": 0, "min": 0},
+            {"key": "delstocktype", "comp": "number_input", "label": "删除数量", "data_path": "delstocktype", "default": 0, "min": 0}
+          ]
+        },
+        {
+          "title": "高级选项",
+          "collapsible": true,
+          "fields": [
+            {"key": "staattr", "comp": "select", "label": "分析线型", "data_path": "staattr", "options": [
+              {"value": "0", "label": "K线"}, {"value": "1", "label": "分时线"}
+            ], "default": "0"},
+            {"key": "intersection_status", "comp": "text_input", "label": "交集状态", "data_path": "intersection_status", "default": "", "hint": "DZH交集状态标记"}
+          ]
+        },
+        {
+          "title": "进入/离开动作",
+          "collapsible": true,
+          "fields": [
+            {"key": "enter_action", "comp": "action_compound", "label": "进入时执行动作", "data_path": "enter_action", "action_types": [
+              {"value": 0, "label": "无动作"}, {"value": 1, "label": "买入指定金额"}, {"value": 2, "label": "买入指定股数"}, {"value": 3, "label": "卖出股票"}
+            ]},
+            {"key": "exit_action", "comp": "action_compound", "label": "离开时执行动作", "data_path": "exit_action", "action_types": [
+              {"value": 0, "label": "无动作"}, {"value": 1, "label": "买入指定金额"}, {"value": 2, "label": "买入指定股数"}, {"value": 3, "label": "卖出股票"}
+            ]}
+          ]
+        },
+        {
+          "title": "交易属性",
+          "collapsible": true,
+          "fields": [
+            {"key": "tradeattr_accountno", "comp": "text_input", "label": "资金帐号", "data_path": "tradeattr.accountno", "default": "-1"},
+            {"key": "tradeattr_entertradetype", "comp": "text_input", "label": "进入交易类型", "data_path": "tradeattr.entertradetype", "default": "0"},
+            {"key": "tradeattr_enterrate", "comp": "text_input", "label": "进入费率", "data_path": "tradeattr.enterrate", "default": "0"},
+            {"key": "tradeattr_enterbuytype", "comp": "text_input", "label": "进入买入类型", "data_path": "tradeattr.enterbuytype", "default": "0"},
+            {"key": "tradeattr_enterbuyvalue", "comp": "text_input", "label": "进入买入值", "data_path": "tradeattr.enterbuyvalue", "default": "0"},
+            {"key": "tradeattr_enterbuypricetype", "comp": "text_input", "label": "进入买入价格类型", "data_path": "tradeattr.enterbuypricetype", "default": "0"},
+            {"key": "tradeattr_enterselltype", "comp": "text_input", "label": "进入卖出类型", "data_path": "tradeattr.enterselltype", "default": "0"},
+            {"key": "tradeattr_entersellvalue", "comp": "text_input", "label": "进入卖出值", "data_path": "tradeattr.entersellvalue", "default": "0"},
+            {"key": "tradeattr_entersellpricetype", "comp": "text_input", "label": "进入卖出价格类型", "data_path": "tradeattr.entersellpricetype", "default": "0"},
+            {"key": "tradeattr_leavetradetype", "comp": "text_input", "label": "离开交易类型", "data_path": "tradeattr.leavetradetype", "default": "0"},
+            {"key": "tradeattr_leaverate", "comp": "text_input", "label": "离开费率", "data_path": "tradeattr.leaverate", "default": "0"},
+            {"key": "tradeattr_leavebuytype", "comp": "text_input", "label": "离开买入类型", "data_path": "tradeattr.leavebuytype", "default": "0"},
+            {"key": "tradeattr_leavebuyvalue", "comp": "text_input", "label": "离开买入值", "data_path": "tradeattr.leavebuyvalue", "default": "0"},
+            {"key": "tradeattr_leavebuypricetype", "comp": "text_input", "label": "离开买入价格类型", "data_path": "tradeattr.leavebuypricetype", "default": "0"},
+            {"key": "tradeattr_leaveselltype", "comp": "text_input", "label": "离开卖出类型", "data_path": "tradeattr.leaveselltype", "default": "0"},
+            {"key": "tradeattr_leavesellvalue", "comp": "text_input", "label": "离开卖出值", "data_path": "tradeattr.leavesellvalue", "default": "0"},
+            {"key": "tradeattr_leavesellpricetype", "comp": "text_input", "label": "离开卖出价格类型", "data_path": "tradeattr.leavesellpricetype", "default": "0"},
+            {"key": "tradeattr_buycontrolnbhs", "comp": "text_input", "label": "买入控制内盘手数", "data_path": "tradeattr.buycontrolnbhs", "default": "0"},
+            {"key": "tradeattr_buycontrolmbsc", "comp": "text_input", "label": "买入控制外盘手数", "data_path": "tradeattr.buycontrolmbsc", "default": "-1"}
+          ]
+        },
+        {
+          "title": "股票列表",
+          "collapsible": true,
+          "fields": [
+            {"key": "stock_data", "comp": "stock_data_table", "label": "持仓股票", "data_path": "stocks", "default": []}
+          ]
+        }
+      ]
+    },
+    "tdx_decorative": {
+      "layout_id": "tdx_decorative",
+      "name": "TDX装饰文字属性",
+      "target_type": ["tdx_0", "0"],
+      "target_scope": "node",
+      "pool_type": ["tdx"],
+      "sections": [
+        {
+          "title": "文字设置",
+          "collapsible": false,
+          "fields": [
+            {"key": "text", "comp": "text_input", "label": "文字内容", "data_path": "text", "default": ""},
+            {"key": "clr", "comp": "color_picker", "label": "填充颜色", "data_path": "clr", "default": 0},
+            {"key": "clrtext", "comp": "color_picker", "label": "文字颜色", "data_path": "clrtext", "default": 16777215},
+            {"key": "solid", "comp": "select", "label": "填充样式", "data_path": "solid", "options": [
+              {"value": 0, "label": "空心"}, {"value": 1, "label": "实心"}
+            ], "default": 0}
+          ]
+        }
+      ]
+    },
+    "tdx_text_label": {
+      "layout_id": "tdx_text_label",
+      "name": "TDX文字标签属性",
+      "target_type": ["tdx_1", "1"],
+      "target_scope": "node",
+      "pool_type": ["tdx"],
+      "sections": [
+        {
+          "title": "文字设置",
+          "collapsible": false,
+          "fields": [
+            {"key": "text", "comp": "text_input", "label": "文字内容", "data_path": "text", "default": ""},
+            {"key": "clr", "comp": "color_picker", "label": "填充颜色", "data_path": "clr", "default": 0},
+            {"key": "clrtext", "comp": "color_picker", "label": "文字颜色", "data_path": "clrtext", "default": 16777215},
+            {"key": "solid", "comp": "select", "label": "填充样式", "data_path": "solid", "options": [
+              {"value": 0, "label": "空心"}, {"value": 1, "label": "实心"}
+            ], "default": 0}
+          ]
+        }
+      ]
+    },
+    "tdx_container": {
+      "layout_id": "tdx_container",
+      "name": "TDX容器属性",
+      "target_type": ["tdx_2", "2"],
+      "target_scope": "node",
+      "pool_type": ["tdx"],
+      "sections": [
+        {
+          "title": "容器设置",
+          "collapsible": false,
+          "fields": [
+            {"key": "text", "comp": "text_input", "label": "标题文字", "data_path": "text", "default": ""},
+            {"key": "clr", "comp": "color_picker", "label": "填充颜色", "data_path": "clr", "default": 0},
+            {"key": "clrtext", "comp": "color_picker", "label": "文字颜色", "data_path": "clrtext", "default": 16777215},
+            {"key": "solid", "comp": "select", "label": "填充样式", "data_path": "solid", "options": [
+              {"value": 0, "label": "空心"}, {"value": 1, "label": "实心"}
+            ], "default": 0}
+          ]
+        },
+        {
+          "title": "容器样式预设",
+          "collapsible": true,
+          "fields": [
+            {"key": "attr_preset", "comp": "select", "label": "样式预设", "data_path": "attr_int", "options": [
+              {"value": "0", "label": "普通容器"},
+              {"value": "140", "label": "说明/注释样式"},
+              {"value": "201", "label": "标题样式A(竖向文字条)"},
+              {"value": "220", "label": "日期标注样式"},
+              {"value": "281", "label": "标题样式B"},
+              {"value": "461", "label": "标题样式C(主标题)"}
+            ], "default": "0", "hint": "TDX容器attr预设值"},
+            {"key": "attr_raw", "comp": "readonly", "label": "attr 原始值", "data_path": "attr_int", "display": "raw"}
+          ]
+        }
+      ]
+    },
+    "tdx_decorative_line": {
+      "layout_id": "tdx_decorative_line",
+      "name": "TDX装饰线属性",
+      "target_type": ["tdx_6", "6"],
+      "target_scope": "node",
+      "pool_type": ["tdx"],
+      "sections": [
+        {
+          "title": "线条设置",
+          "collapsible": false,
+          "fields": [
+            {"key": "clr", "comp": "color_picker", "label": "线条颜色", "data_path": "clr", "default": 0},
+            {"key": "clrtext", "comp": "color_picker", "label": "文字颜色", "data_path": "clrtext", "default": 16777215},
+            {"key": "solid", "comp": "select", "label": "填充样式", "data_path": "solid", "options": [
+              {"value": 0, "label": "空心"}, {"value": 1, "label": "实心"}
+            ], "default": 0}
+          ]
+        }
+      ]
+    },
+    "pool_meta": {
+      "layout_id": "pool_meta",
+      "title": "股票池属性",
+      "pool_type": "any",
+      "target_type": "pool_meta",
+      "target_scope": "global",
+      "sections": [
+        {
+          "title": "基本信息",
+          "fields": [
+            {"key": "type", "label": "类型", "comp": "text_input", "readonly": true, "data_path": "pool_meta.type"},
+            {"key": "ver", "label": "版本", "comp": "text_input", "readonly": true, "data_path": "pool_meta.ver"},
+            {"key": "mode", "label": "模式", "comp": "number_input", "readonly": true, "data_path": "pool_meta.mode"},
+            {"key": "nextid", "label": "下一个ID", "comp": "number_input", "readonly": true, "data_path": "pool_meta.nextid"},
+            {"key": "backcolor", "label": "背景色", "comp": "color_input", "data_path": "pool_meta.backcolor"},
+            {"key": "name", "label": "名称", "comp": "text_input", "data_path": "name"}
+          ]
+        }
+      ]
+    }
+  }
+}

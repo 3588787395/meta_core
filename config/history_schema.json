@@ -1,0 +1,83 @@
+{
+  "version": "1.0",
+  "_comment": "历史数据读写表驱动配置 - 定义 .dat/.log 文件格式和字段映射",
+
+  "xml_declaration": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+  "xml_encoding": "utf-8",
+  "root_element": "root",
+  "data_element": "data",
+  "stock_element": "stk",
+
+  "dat_format": {
+    "_comment": ".dat 文件：完整字段（含跟踪字段）",
+    "fields": [
+      {"name": "market",   "type": "str",  "default": "0",       "format": "str",   "python_key": "market"},
+      {"name": "code",     "type": "str",  "default": "",        "format": "str",   "python_key": "code"},
+      {"name": "indate",   "type": "str",  "default": "{today}", "format": "str",   "python_key": "indate"},
+      {"name": "intime",   "type": "str",  "default": "000000",  "format": "zfill6","python_key": "intime"},
+      {"name": "inprice",  "type": "float","default": 0,         "format": ".2f",   "python_key": "inprice"},
+      {"name": "income",   "type": "float","default": 0,         "format": ".2f",   "python_key": "income"},
+      {"name": "now",      "type": "float","default": 0,         "format": ".2f",   "python_key": "now"},
+      {"name": "rise",     "type": "float","default": 0,         "format": ".2f",   "python_key": "rise"},
+      {"name": "volume",   "type": "int",  "default": 0,         "format": "str",   "python_key": "volume"},
+      {"name": "maxrate",  "type": "float","default": 0,         "format": ".2f",   "python_key": "maxrate"},
+      {"name": "maxperiod","type": "int",  "default": 0,         "format": "str",   "python_key": "maxperiod"},
+      {"name": "maxtime",  "type": "int",  "default": 0,         "format": "str",   "python_key": "maxtime"},
+      {"name": "maxprice", "type": "float","default": 0,         "format": ".2f",   "python_key": "maxprice"},
+      {"name": "idaynum",  "type": "int",  "default": 0,         "format": "str",   "python_key": "idaynum"}
+    ]
+  },
+
+  "log_format": {
+    "_comment": ".log 文件：精简格式（仅核心字段）",
+    "fields": [
+      {"name": "market",   "type": "str",  "default": "0",       "format": "str",   "python_key": "market"},
+      {"name": "code",     "type": "str",  "default": "",        "format": "str",   "python_key": "code"},
+      {"name": "indate",   "type": "str",  "default": "{today}", "format": "str",   "python_key": "indate"},
+      {"name": "intime",   "type": "str",  "default": "000000",  "format": "zfill6","python_key": "intime"},
+      {"name": "inprice",  "type": "float","default": 0,         "format": ".2f",   "python_key": "inprice"}
+    ]
+  },
+
+  "read_mapping": {
+    "_comment": "读取 .dat/.log 文件时，XML属性 → Python dict 的映射",
+    "fields": [
+      {"xml_attr": "market",    "python_key": "market",   "default": "0"},
+      {"xml_attr": "code",      "python_key": "code",     "default": ""},
+      {"xml_attr": "indate",    "python_key": "indate",   "default": ""},
+      {"xml_attr": "intime",    "python_key": "intime",   "default": "0",  "transform": "format_intime"},
+      {"xml_attr": "inprice",   "python_key": "inprice",  "default": ""},
+      {"xml_attr": "income",    "python_key": "income",   "default": "0"},
+      {"xml_attr": "maxrate",   "python_key": "maxrate",  "default": "0.00"},
+      {"xml_attr": "maxperiod", "python_key": "maxperiod", "default": "0"},
+      {"xml_attr": "maxtime",   "python_key": "maxdate",  "default": "",  "_comment": "maxtime字段存的是日期，映射为maxdate"},
+      {"xml_attr": "maxprice",  "python_key": "maxprice", "default": "0.00"}
+    ]
+  },
+
+  "intime_format": {
+    "_comment": "intime 解析规则：HHMMSS格式 vs 秒数格式",
+    "hhmmss_threshold": 235959,
+    "hhmmss_min_length": 5,
+    "hhmmss_format": "{h:02d}:{m:02d}",
+    "seconds_format": "{h:02d}:{m:02d}"
+  },
+
+  "write_defaults": {
+    "_comment": "写入时非dict股票的默认值",
+    "non_dict_defaults": {
+      "indate": "{today}",
+      "intime": "000000",
+      "inprice": 0,
+      "income": 0,
+      "now": 0,
+      "rise": 0,
+      "volume": 0,
+      "maxrate": 0,
+      "maxperiod": 0,
+      "maxtime": 0,
+      "maxprice": 0,
+      "idaynum": 0
+    }
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "version": "2.0",
+  "valid_live_statuses": ["tdx_tq_ready", "akshare_ready", "user_selected_mock"],
+  "description": "数据源提供者配置表。主选 TDX 通达信客户端 + TQ 量化（TPythClient.dll），mock 仅在用户显式选择时使用。default_chain 的唯一真相源为 data_source_contract.json。",
+  "mock_explicit_only": true,
+  "capability_labels": {
+    "kline": "K线",
+    "snapshot": "快照",
+    "market": "市场",
+    "formula": "公式",
+    "formula_zb": "公式",
+    "formula_xg": "公式",
+    "formula_exp": "公式",
+    "sector": "板块",
+    "replay": "回放",
+    "financial": "财务",
+    "user_block": "自选",
+    "send_warn": "告警",
+    "send_message": "消息",
+    "order_stock": "下单"
+  },
+  "providers": {
+    "local_file": {
+      "class": "LocalFileProvider",
+      "module": "meta_core.services.providers.local_file_provider",
+      "priority": 0,
+      "always_ready": true,
+      "label": "本地文件数据",
+      "description": "解析通达信/大智慧/同花顺本地配置文件（zxg.cfg 自选股、blocknew.cfg 自定义板块）作为备选池基础数据库，优先级最高，不可用时降级到 tq_dll",
+      "capabilities": [
+        "market",
+        "sector",
+        "user_block"
+      ],
+      "paths_config": "config/local_file_paths.json"
+    },
+    "tq_dll": {
+      "class": "TqDllProvider",
+      "module": "meta_core.services.providers.tq",
+      "priority": 1,
+      "always_ready": false,
+      "label": "通达信TQ量化",
+      "description": "通过 TPythClient.dll 与本地通达信客户端通信，调用 tq.get_market_data / get_market_snapshot / formula_zb / formula_xg / formula_exp / order_stock 等API",
+      "capabilities": [
+        "kline",
+        "snapshot",
+        "market",
+        "formula_zb",
+        "formula_xg",
+        "formula_exp",
+        "sector",
+        "replay",
+        "financial",
+        "user_block",
+        "send_warn",
+        "send_message",
+        "order_stock"
+      ],
+      "dll_path": "TPythClient.dll"
+    },
+    "tq_sdk": {
+      "class": "TqSdkProvider",
+      "module": "meta_core.services.providers.tq",
+      "priority": 10,
+      "always_ready": false,
+      "label": "天勤TQ SDK",
+      "description": "TQ SDK 数据源（独立数据源，不在默认降级链中，需显式选择）",
+      "capabilities": [
+        "kline",
+        "snapshot",
+        "market",
+        "formula",
+        "sector",
+        "replay",
+        "financial",
+        "user_block"
+      ]
+    },
+    "akshare": {
+      "class": "AkShareProvider",
+      "module": "meta_core.services.providers.akshare_provider",
+      "priority": 20,
+      "always_ready": false,
+      "label": "AkShare",
+      "description": "AkShare 第三方数据源作为最后备选",
+      "capabilities": [
+        "kline",
+        "snapshot",
+        "market",
+        "sector",
+        "financial"
+      ]
+    },
+    "dfcf": {
+      "class": "DfcfProvider",
+      "module": "meta_core.services.providers.dfcf_provider",
+      "priority": 21,
+      "always_ready": false,
+      "label": "东方财富",
+      "description": "东方财富在线数据源，通过 AKShare 的东方财富接口获取板块和成分股数据。在线数据源，可能不可用。",
+      "capabilities": [
+        "market",
+        "sector"
+      ]
+    },
+    "mock": {
+      "class": "MockProvider",
+      "module": "meta_core.services.providers.mock_provider",
+      "priority": 99,
+      "always_ready": true,
+      "explicit_only": true,
+      "label": "模拟数据",
+      "description": "Mock 模拟数据，**仅在用户显式调用 set_active_source('mock') 时使用**。不在降级链中自动选择。",
+      "capabilities": [
+        "kline",
+        "snapshot",
+        "market",
+        "formula",
+        "sector",
+        "replay",
+        "financial"
+      ]
+    }
+  }
+}
