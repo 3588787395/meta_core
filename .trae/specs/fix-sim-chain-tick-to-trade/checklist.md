@@ -1,0 +1,17 @@
+- [x] Checkpoint 1: _bar_bucket_ts函数使用本地时区，K线时间整点对齐（已修复：UTC→本地时区）
+- [x] Checkpoint 2: BarComposed事件在K线合成后正确发布
+- [x] Checkpoint 3: TradeModule订阅TTLExpired事件（已修复：添加订阅和_on_ttl_expired方法）
+- [x] Checkpoint 4: TTL到期出池触发SELL Signal平全部持仓（已修复：TTL action无条件发布SELL Signal，TradeModule处理qty=0卖全部）
+- [x] Checkpoint 5: baimpool=1目标池入池触发BUY Signal(100股)（已修复：action_table.json添加baimpool注册）
+- [x] Checkpoint 6: 市价单按股票最新成交价成交（非0）（已修复：TradeModule添加_latest_prices缓存，price=0取最新价）
+- [x] Checkpoint 7: OrderPlaced→OrderFilled→PositionUpdated事件链完整
+- [x] Checkpoint 8: 首次运行source节点被标记dirty（验证：每次tick mark_data_dirty()，source_ids中节点被触发）
+- [x] Checkpoint 9: INTERSECTION条件正确计算set(A) & set(B)（验证：evaluate_intersection实现集合交集）
+- [x] Checkpoint 10: TTL时间解析正确（ndeltype=2为分钟，转换为秒）
+- [x] Checkpoint 11: A池TTL=100分钟，B池TTL=200分钟，C池TTL=20分钟正确
+- [x] Checkpoint 12: 核心处理逻辑无mode==simulation分支判断（验证：仅RuntimeModeModule自身自动步进循环有判断）
+- [x] Checkpoint 13: runtime_modes.json表驱动配置正确加载
+- [x] Checkpoint 14: ModeChanged事件驱动TickBar/Trade/Execution模块切换
+- [x] Checkpoint 15: target_pool_100.json边配置正确（interval、formula_ref、INTERSECTION）
+- [x] Checkpoint 16: KDJ_5MIN_CROSS和MACD_1MIN_CROSS公式定义正确（已修复：KDJ金叉从CROSS(J,K)改为CROSS(K,D)）
+- [x] Checkpoint 17: 所有Python文件编译通过，JSON文件格式有效

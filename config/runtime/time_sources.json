@@ -1,0 +1,49 @@
+{
+  "version": "1.0",
+  "description": "时间源配置表：统一实盘/回放/仿真三种运行模式的时间驱动规范",
+  "time_sources": {
+    "realtime": {
+      "time_source_id": "realtime",
+      "name": "实时系统时钟",
+      "driver_type": "wall_clock",
+      "now_expr": "datetime.now()",
+      "wait_expr": "asyncio.sleep(tick_interval)",
+      "gate_time_expr": "datetime.now()",
+      "desc": "基于系统真实时钟的时间源，用于实盘交易模式"
+    },
+    "kline_timeline": {
+      "time_source_id": "kline_timeline",
+      "name": "历史K线时间轴",
+      "driver_type": "sequence",
+      "sequence_source": "_timeline",
+      "speed_factor": 1.0,
+      "now_expr": "current_bar.timestamp",
+      "wait_expr": "asyncio.sleep(tick_interval / speed_factor)",
+      "gate_time_expr": "current_bar.timestamp",
+      "desc": "按回放引擎预加载的K线时间戳序列顺序推进，用于历史数据回放模式"
+    },
+    "virtual_clock": {
+      "time_source_id": "virtual_clock",
+      "name": "虚拟时钟",
+      "driver_type": "virtual",
+      "start_value": 0,
+      "step_expr": "step(delta)",
+      "now_expr": "virtual_clock",
+      "gate_time_expr": "virtual_clock",
+      "desc": "从0开始通过step累加的虚拟时间源，无真实等待，用于模拟交易模式"
+    }
+  },
+  "is_trading_time_expr": {
+    "handler": "PoolEngine._is_trading_time",
+    "description": "交易时间判断表达式：查 timing.json:market_calendar.sessions 表，当前秒数落在任一 session 的 [open_sec, close_sec] 区间内则为交易时间",
+    "current_sec_expr": "now.hour * 3600 + now.minute * 60 + now.second",
+    "fallback_evaluate": "market_calendar.open_sec <= current_sec <= market_calendar.close_sec",
+    "evaluate": "any(s.open_sec <= current_sec <= s.close_sec for s in market_calendar.sessions)",
+    "config_table": "timing.json:market_calendar",
+    "depends_on": [
+      "timing.json:market_calendar.sessions",
+      "timing.json:market_calendar.open_sec",
+      "timing.json:market_calendar.close_sec"
+    ]
+  }
+}

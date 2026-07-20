@@ -18,27 +18,25 @@ sys.path.insert(0, META_CORE_DIR)
 import meta_core.converters  # noqa: E402
 import meta_core.native  # noqa: E402
 import meta_core.core  # noqa: E402
-import meta_core.runtime  # noqa: E402
-import meta_core.runtime.tdx_evaluators  # noqa: E402
+import meta_core.core.screening_module  # noqa: E402
 import meta_core.app  # noqa: E402
 import meta_core.core.schemas  # noqa: E402
 import meta_core.services  # noqa: E402
 import meta_core.core.table_engine  # noqa: E402
-import meta_core.runtime.kline_replay_engine  # noqa: E402
-import meta_core.runtime.runtime_simulator  # noqa: E402
+import meta_core.core.runtime_mode_module  # noqa: E402
 sys.modules.setdefault('converters', meta_core.converters)
 sys.modules.setdefault('native', meta_core.native)
 sys.modules.setdefault('engine', meta_core.core.engine)
-sys.modules.setdefault('tdx_evaluators', meta_core.runtime.tdx_evaluators)
+sys.modules.setdefault('tdx_evaluators', meta_core.core.screening_module)
 sys.modules.setdefault('app', meta_core.app)
 sys.modules.setdefault('schemas', meta_core.core.schemas)
 sys.modules.setdefault('services', meta_core.services)
 sys.modules.setdefault('table_engine', meta_core.core.table_engine)
-sys.modules.setdefault('kline_replay_engine', meta_core.runtime.kline_replay_engine)
-sys.modules.setdefault('runtime_simulator', meta_core.runtime.runtime_simulator)
+sys.modules.setdefault('kline_replay_engine', meta_core.core.runtime_mode_module)
+sys.modules.setdefault('runtime_simulator', meta_core.core.runtime_mode_module)
 
 import pytest  # noqa: E402
-from meta_core.core.engine import MetaEngine  # noqa: E402
+from meta_core.core.engine import PoolEngine  # noqa: E402
 
 # Re-export ALL factory functions from tests/conftest.py
 from meta_core.tests.conftest import (  # noqa: E402,F401
@@ -58,12 +56,12 @@ from meta_core.tests.conftest import (  # noqa: E402,F401
 
 @pytest.fixture
 def engine():
-    """Create a fresh MetaEngine instance for each test."""
-    return MetaEngine()
+    """Create a fresh PoolEngine instance for each test."""
+    return PoolEngine()
 
 
 @pytest.fixture
 def simulator():
     """Create a RuntimeSimulator initialized with make_tdx_simple_pool()."""
-    from meta_core.runtime.runtime_simulator import RuntimeSimulator
+    from meta_core.core.runtime_mode_module import RuntimeSimulator
     return RuntimeSimulator(make_tdx_simple_pool())

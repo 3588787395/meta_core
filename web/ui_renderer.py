@@ -6,6 +6,8 @@ UIRenderer 与 WebSocketPublisher 只订阅 EventBus 事件并读取 SnapshotBui
 from __future__ import annotations
 
 import json
+import re
+import sys
 import threading
 import time
 from dataclasses import asdict
@@ -23,7 +25,7 @@ try:
         Executed,
         Signal,
     )
-    from core.snapshot_builder import SnapshotBuilder
+    from core.monitoring_module import _SnapshotBuilder
 except ImportError:
     from meta_core.core.event_bus import (
         EVENT_DATA_CHANGED,
@@ -36,7 +38,7 @@ except ImportError:
         Executed,
         Signal,
     )
-    from meta_core.core.snapshot_builder import SnapshotBuilder
+    from meta_core.core.monitoring_module import _SnapshotBuilder
 
 
 def _event_payload(event: Any) -> Dict[str, Any]:
@@ -108,7 +110,7 @@ class UIRenderer:
     def __init__(
         self,
         event_bus: EventBus,
-        snapshot_builder: SnapshotBuilder,
+        snapshot_builder: _SnapshotBuilder,
         pool_id: str = "",
     ) -> None:
         self._snapshot_builder = snapshot_builder
@@ -214,3 +216,230 @@ class WebSocketPublisher:
                 send(text)
             except Exception:
                 pass
+
+
+# === 工具函数层（自 web/js/_convert_table_driven.py 和 web/js/_reindent.py 合并）===
+
+
+def convert_table_driven_main() -> None:
+    """Convert TableDrivenPanel and TableDrivenForm to ES6 Class.
+
+    临时脚本：将 table-driven-panel.js 中的 prototype 风格类转换为 ES6 class。
+    自 web/js/_convert_table_driven.py 合并而来；调用以执行转换。
+    """
+    filepath = r'h:\new_tdx_mock\PYPlugins\meta_core\web\js\table-driven-panel.js'
+    with open(filepath, 'r', encoding='utf-8') as f:
+        raw = f.read()
+
+    lines = raw.split('\n')
+
+    # Patterns (2-space indent)
+    ctor_pattern = re.compile(r'^  function (TableDrivenPanel|TableDrivenForm)\((.*?)\) \{$')
+    proto_pattern = re.compile(r'^  (TableDrivenPanel|TableDrivenForm)\.prototype\.(\w+) = function \((.*?)\) \{$')
+    static_prop_pattern = re.compile(r'^  (TableDrivenPanel)\.(_tdx\w+) = (.*);$')
+
+    # Find constructor declarations and their closings (first `  }` after declaration)
+    ctor_lines = {}        # line_index -> (classname, args)
+    ctor_close_lines = {}  # line_index -> classname
+    for i, line in enumerate(lines):
+        m = ctor_pattern.match(line)
+        if m:
+            classname = m.group(1)
+            args = m.group(2)
+            ctor_lines[i] = (classname, args)
+            # Find closing `  }` (exactly 2-space indent, no semicolon)
+            for j in range(i + 1, len(lines)):
+                if lines[j] == '  }':
+                    ctor_close_lines[j] = classname
+                    break
+
+    # Find prototype method declarations and their closings (first `  };` after declaration)
+    proto_lines = {}         # line_index -> (classname, methodname, args)
+    method_close_lines = {}  # line_index -> classname
+    for i, line in enumerate(lines):
+        m = proto_pattern.match(line)
+        if m:
+            classname = m.group(1)
+            methodname = m.group(2)
+            args = m.group(3)
+            proto_lines[i] = (classname, methodname, args)
+            # Find closing `  };` (exactly 2-space indent, with semicolon)
+            for j in range(i + 1, len(lines)):
+                if lines[j] == '  };':
+                    method_close_lines[j] = classname
+                    break
+
+    # Find static properties
+    static_prop_lines = {}  # line_index -> original line
+    for i, line in enumerate(lines):
+        m = static_prop_pattern.match(line)
+        if m:
+            static_prop_lines[i] = line
+
+    # Find the last method close for each class
+    last_method_close = {}  # classname -> line_index
+    for close_idx, classname in method_close_lines.items():
+        if classname not in last_method_close or close_idx > last_method_close[classname]:
+            last_method_close[classname] = close_idx
+
+    # Build output
+    output = []
+    pending_static_props = []
+
+    for i, line in enumerate(lines):
+        # Constructor declaration -> class + constructor
+        if i in ctor_lines:
+            classname, args = ctor_lines[i]
+            output.append('  class ' + classname + ' {')
+            output.append('    constructor(' + args + ') {')
+            continue
+
+        # Constructor closing -> close constructor (stay in class)
+        if i in ctor_close_lines:
+            output.append('    }')
+            continue
+
+        # Static property -> skip (will add after class)
+        if i in static_prop_lines:
+            pending_static_props.append(line)
+            continue
+
+        # Prototype method declaration -> class method
+        if i in proto_lines:
+            classname, methodname, args = proto_lines[i]
+            output.append('    ' + methodname + '(' + args + ') {')
+            continue
+
+        # Method closing -> close method, maybe close class
+        if i in method_close_lines:
+            output.append('    }')
+            classname = method_close_lines[i]
+            if i == last_method_close[classname]:
+                # Close the class
+                output.append('  }')
+                # Add static props (if any)
+                if pending_static_props:
+                    output.append('')  # blank line separator
+                    for prop in pending_static_props:
+                        output.append(prop)
+                    pending_static_props = []
+            continue
+
+        # Regular line - keep as-is
+        output.append(line)
+
+    # Close class if still open (safety)
+    if pending_static_props:
+        for prop in pending_static_props:
+            output.append(prop)
+
+    result = '\n'.join(output)
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(result)
+
+    # Verification output
+    print('Conversion complete.')
+    print('Original lines: ' + str(len(lines)))
+    print('Output lines:   ' + str(len(output)))
+    print('Constructor declarations: ' + str(ctor_lines))
+    print('Constructor closings: ' + str(ctor_close_lines))
+    print('Prototype methods: ' + str(len(proto_lines)))
+    print('Method closings: ' + str(len(method_close_lines)))
+    print('Static properties: ' + str(len(static_prop_lines)))
+    print('Last method close per class: ' + str(last_method_close))
+
+    # Verify no prototype patterns remain
+    remaining_proto = sum(1 for l in output if proto_pattern.match(l))
+    remaining_ctor = sum(1 for l in output if ctor_pattern.match(l))
+    print('Remaining prototype patterns: ' + str(remaining_proto))
+    print('Remaining constructor patterns: ' + str(remaining_ctor))
+
+
+def reindent_main() -> None:
+    """Re-indent class bodies in table-driven-panel.js after ES6 conversion.
+
+    临时脚本：在 ES6 转换后重新缩进 table-driven-panel.js 的类体。
+    自 web/js/_reindent.py 合并而来；调用以执行重缩进。
+    """
+    filepath = r'h:\new_tdx_mock\PYPlugins\meta_core\web\js\table-driven-panel.js'
+    with open(filepath, 'r', encoding='utf-8') as f:
+        raw = f.read()
+
+    lines = raw.split('\n')
+
+    # State machine using brace depth:
+    # depth 0: outside class
+    # depth 1: inside class body (between methods)
+    # depth 2+: inside method/constructor body
+    depth = 0
+    in_class = False
+    class_decl_pattern = re.compile(r'^  class \w+ \{$')
+
+    output = []
+
+    for line in lines:
+        # Outside class: output as-is, detect class start
+        if not in_class:
+            output.append(line)
+            if class_decl_pattern.match(line):
+                in_class = True
+                depth = 1
+            continue
+
+        # Inside class
+        stripped = line.strip()
+
+        # Blank lines: keep as-is
+        if stripped == '':
+            output.append(line)
+            continue
+
+        # Strip single-line comment for brace counting
+        # (verified: no // inside strings in this file)
+        code_part = line
+        comment_idx = line.find('//')
+        if comment_idx >= 0:
+            code_part = line[:comment_idx]
+
+        opens = code_part.count('{')
+        closes = code_part.count('}')
+        new_depth = depth + opens - closes
+
+        if depth == 1:
+            # Inside class body (between methods or at method declaration)
+            if new_depth >= 2:
+                # Method/constructor declaration - keep at 4-space indent
+                output.append(line)
+            elif new_depth == 1:
+                # No depth change - comment/content at class body level
+                # Add 2 spaces if not already at 4+ space indent
+                if line.startswith('    '):
+                    output.append(line)
+                else:
+                    output.append('  ' + line)
+            elif new_depth == 0:
+                # Class closing brace - keep as-is
+                output.append(line)
+                in_class = False
+                depth = 0
+                continue
+            else:
+                # Shouldn't happen (would mean negative depth)
+                output.append(line)
+        else:
+            # Inside method body (depth >= 2)
+            if new_depth == 1:
+                # Method closing - keep at 4-space indent
+                output.append(line)
+            else:
+                # Body line - add 2 spaces for proper indentation
+                output.append('  ' + line)
+
+        depth = new_depth
+
+    result = '\n'.join(output)
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(result)
+
+    print('Re-indentation complete.')
+    print('Output lines: ' + str(len(output)))

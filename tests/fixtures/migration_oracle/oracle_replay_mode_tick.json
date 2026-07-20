@@ -45,34 +45,7 @@
     ]
   },
   "pool_id": "oracle_replay_mode_tick",
-  "queue_events": [
-    {
-      "code": "600000",
-      "details": {
-        "flow_id": "e1",
-        "mode": "copy",
-        "price": 10.2,
-        "source_id": "src",
-        "timestamp": "TIMESTAMP"
-      },
-      "pool_id": "dst",
-      "time": "TIMESTAMP",
-      "event_type": "ENTER"
-    },
-    {
-      "code": "000001",
-      "details": {
-        "flow_id": "e1",
-        "mode": "copy",
-        "price": 15.1,
-        "source_id": "src",
-        "timestamp": "TIMESTAMP"
-      },
-      "pool_id": "dst",
-      "time": "TIMESTAMP",
-      "event_type": "ENTER"
-    }
-  ],
+  "queue_events": [],
   "run_type": "run_mode:replay_tick",
   "signals": []
 }

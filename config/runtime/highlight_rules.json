@@ -1,0 +1,20 @@
+{
+  "rules": {
+    "cell": {
+      "default": {
+        "duration_ms": {
+          "runtime": 2000,
+          "replay": 4000
+        }
+      }
+    },
+    "flow": {
+      "default": {
+        "duration_ms": {
+          "runtime": 1500
+        }
+      }
+    }
+  },
+  "polling_interval_ms": 500
+}

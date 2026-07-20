@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+!HQChartPy2/*.pyd
 *.egg-info/
 dist/
 build/
@@ -31,6 +32,7 @@ Desktop.ini
 
 # DLLs
 *.dll
+!HQChartPy2/*.dll
 *.exe
 *.so
 *.dylib
@@ -46,3 +48,4 @@ verify_*
 
 # Screenshots
 .playwright-mcp/
+data/meta.db

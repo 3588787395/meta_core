@@ -3,10 +3,12 @@
 合并后的模块结构：
     - data.py           : 数据服务统一入口（DataQuery / DataSourceContract / DataSyncService / MarketDataPort）
     - storage.py         : SQLite 持久化层
-    - formula_cache.py   : 公式结果 L1 进程内缓存（独立保留，职责不同于 storage）
     - tq_adapter.py      : TqAdapter 实时行情适配器
     - minute_aggregator.py : Min1Aggregator 分钟线合成器
     - 其他服务模块
+
+注：``formula_cache.py`` 已于 SubTask 28.4 合并至 ``core/formula_module.py``，
+``FormulaCache`` 由该模块内联提供。
 
 向后兼容：通过 sys.modules 注册旧模块名 data_query / data_service / market_data_port，
 旧 import 路径（如 ``from meta_core.services.data_query import DataQuery``）继续可用。

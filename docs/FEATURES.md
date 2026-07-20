@@ -409,9 +409,22 @@ MetaCore 是一个基于表驱动架构的股票池可视化编辑与执行平�
 | 方法 | 路径 | 功能 |
 |------|------|------|
 | POST | `/api/sim/start` | 启动模拟会话 |
-| POST | `/api/sim/control` | 控制模拟(pause/resume/step/stop/jump) |
+| POST | `/api/sim/control` | 控制模拟(pause/resume/step/stop/jump/speed) |
 | GET | `/api/sim/state` | 获取模拟状态 |
 | GET | `/api/sim/events` | 获取模拟事件日志 |
+
+#### 仿真模式 API（池级别）
+
+| 方法 | 路径 | 功能 |
+|------|------|------|
+| POST | `/api/pool/{name}/sim/init` | 初始化仿真会话 |
+| POST | `/api/pool/{name}/sim/start` | 执行一步仿真（别名） |
+| POST | `/api/pool/{name}/simulation/step` | 执行一步仿真 |
+| POST | `/api/pool/{name}/sim/pause` | 暂停仿真 |
+| POST | `/api/pool/{name}/sim/resume` | 恢复仿真 |
+| POST | `/api/pool/{name}/sim/stop` | 停止并清理仿真 |
+| GET | `/api/pool/{name}/sim/state` | 获取仿真状态快照 |
+| POST | `/api/pool/{name}/sim/speed` | 设置速度倍数（0.5x ~ 20x） |
 
 #### 表驱动 API
 

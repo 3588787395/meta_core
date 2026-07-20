@@ -1,0 +1,1025 @@
+{
+  "version": 1,
+  "pool_enter_actions": {
+    "baimpool": {
+      "trigger": "value == 1",
+      "desc": "入池即买入 - 发布BUY Signal触发市价买单"
+    },
+    "bsavehis": {
+      "trigger": "value == 1",
+      "op": "append_history",
+      "args": [
+        "$pool_name",
+        "$node_id",
+        "$node",
+        "$new_stocks"
+      ],
+      "log_on_success": "history_saved"
+    },
+    "bsound": {
+      "trigger": "value == 1",
+      "op": "play_sound",
+      "args": [
+        "nsoundtype:int",
+        "soundfile:str",
+        "$node_id",
+        "$new_stocks"
+      ]
+    },
+    "btip": {
+      "trigger": "value == 1",
+      "op": "show_popup",
+      "args": [
+        "$node_id",
+        "$new_stocks"
+      ]
+    },
+    "bsavetoblock": {
+      "trigger": "value == 1",
+      "op": "save_to_block",
+      "args": [
+        "blockfile:str",
+        "$new_stocks",
+        "bclearblock:int"
+      ],
+      "log_on_success": "[板块保存] 池{$node_id} → 板块'{$blockfile}' 已保存{$result}只"
+    }
+  },
+  "callback_ops": {
+    "append_history": {
+      "method": "_append_history_entry",
+      "desc": "保存历史记录"
+    },
+    "play_sound": {
+      "method": "_play_sound_alert",
+      "desc": "播放声音"
+    },
+    "show_popup": {
+      "method": "_show_popup_alert",
+      "desc": "弹窗提示"
+    },
+    "save_to_block": {
+      "method": "_save_to_tdx_block",
+      "desc": "保存到板块"
+    }
+  },
+  "behavior_actions": {
+    "version": "1.0",
+    "description": "行为动作表——注册所有 handler 函数及其输入输出契约，供引擎动态反射调用",
+    "actions": {
+      "candidate_resolve": {
+        "action_id": "candidate_resolve",
+        "module": "native.builtins",
+        "input_ports": [
+          "markets",
+          "sector_codes",
+          "custom_stocks",
+          "pool_config",
+          "node",
+          "node_stocks",
+          "tq_adapter"
+        ],
+        "output_ports": [
+          "stock_list"
+        ],
+        "description": "备选池解析——根据市场范围、板块代码和自定义股票生成候选股票列表",
+        "depends_on": [
+          "mock_data"
+        ],
+        "category": "source"
+      },
+      "resolve_market": {
+        "action_id": "resolve_market",
+        "module": "native.builtins",
+        "input_ports": [
+          "markets",
+          "tq_adapter",
+          "sector_codes",
+          "custom_stocks"
+        ],
+        "output_ports": [
+          "stock_list",
+          "count"
+        ],
+        "description": "市场解析——根据市场范围生成股票代码列表，支持板块过滤和自定义股票合并",
+        "depends_on": [
+          "mock_data"
+        ],
+        "category": "source"
+      },
+      "stock_pool_hold": {
+        "action_id": "stock_pool_hold",
+        "module": "native.builtins",
+        "input_ports": [
+          "stocks",
+          "passed",
+          "passed_list",
+          "stock_list",
+          "hold_sec",
+          "show_columns",
+          "show_overview",
+          "record_history",
+          "enable_profit",
+          "extended",
+          "enter_action",
+          "exit_action",
+          "tq_adapter"
+        ],
+        "output_ports": [
+          "stocks",
+          "hold_sec",
+          "extended",
+          "show_columns",
+          "enable_profit",
+          "record_history",
+          "show_overview",
+          "enter_action",
+          "exit_action"
+        ],
+        "description": "股票状态池持仓管理——处理股票进入状态池的持仓、列显示、收益计算和进出动作",
+        "depends_on": [],
+        "category": "accumulator"
+      },
+      "accumulate_state": {
+        "action_id": "accumulate_state",
+        "module": "native.builtins",
+        "input_ports": [
+          "result",
+          "node",
+          "node_stocks",
+          "pool_config",
+          "tq_adapter"
+        ],
+        "output_ports": [
+          "stock_list"
+        ],
+        "description": "状态累积——将处理结果累积到股票状态池中",
+        "depends_on": [],
+        "category": "accumulator"
+      },
+      "dzh_condition_pool": {
+        "action_id": "dzh_condition_pool",
+        "module": "native.builtins",
+        "input_ports": [
+          "stock_list",
+          "stocks",
+          "passed_list",
+          "passed",
+          "hold_sec",
+          "col_list",
+          "show_overview",
+          "record_history",
+          "calc_profit_from_prev",
+          "simple_intermediate",
+          "keep_source",
+          "clear_dest_first",
+          "enter_action",
+          "exit_action",
+          "condition_type",
+          "formula_raw",
+          "formula_crc",
+          "formula_inditype",
+          "indiparam",
+          "sort_type",
+          "delete_source",
+          "output_constituent",
+          "_dispatch_index",
+          "tq_adapter",
+          "indi",
+          "analysis_cycle"
+        ],
+        "output_ports": [
+          "passed",
+          "rejected",
+          "hold_sec",
+          "col_list",
+          "show_overview",
+          "record_history",
+          "calc_profit_from_prev",
+          "keep_source",
+          "clear_dest_first",
+          "delete_source",
+          "output_constituent",
+          "condition_type",
+          "formula_crc",
+          "formula_inditype",
+          "inditype_is_normal",
+          "formula_decoded",
+          "formula_size",
+          "indiparam",
+          "sort_type",
+          "sort_applied",
+          "enter_action",
+          "exit_action",
+          "stocks"
+        ],
+        "description": "通达信条件池——完整的条件筛选流程，支持公式评估、排序截取、持仓管理和进出动作",
+        "depends_on": [],
+        "category": "accumulator"
+      },
+      "transfer_condition_check": {
+        "action_id": "transfer_condition_check",
+        "module": "native.builtins",
+        "input_ports": [
+          "pool_config",
+          "node",
+          "node_stocks",
+          "tq_adapter",
+          "stock_list",
+          "stocks"
+        ],
+        "output_ports": [
+          "passed",
+          "stocks"
+        ],
+        "description": "转移条件检查——根据节点属性标志（指标条件、基本条件、排序、反向转移、横向统计等）过滤股票",
+        "depends_on": [],
+        "category": "transform"
+      },
+      "render_label": {
+        "action_id": "render_label",
+        "module": "native.builtins",
+        "input_ports": [],
+        "output_ports": [],
+        "description": "渲染文字标签——在画布上渲染文字标签节点",
+        "depends_on": [],
+        "category": "transform"
+      },
+      "render_shape": {
+        "action_id": "render_shape",
+        "module": "native.builtins",
+        "input_ports": [
+          "shape_type",
+          "tq_adapter"
+        ],
+        "output_ports": [
+          "shape_type",
+          "rendered"
+        ],
+        "description": "渲染图形形状——在画布上渲染图形节点",
+        "depends_on": [],
+        "category": "transform"
+      },
+      "time_trigger_check": {
+        "action_id": "time_trigger_check",
+        "module": "native.builtins",
+        "input_ports": [
+          "times"
+        ],
+        "output_ports": [
+          "triggered",
+          "current_time",
+          "times"
+        ],
+        "description": "时间触发器检查——检查当前时间是否匹配指定的触发时间列表",
+        "depends_on": [],
+        "category": "transform"
+      },
+      "profit_analysis_calc": {
+        "action_id": "profit_analysis_calc",
+        "module": "native.builtins",
+        "input_ports": [
+          "stocks",
+          "passed",
+          "passed_list",
+          "stock_list",
+          "analysis_type",
+          "tq_adapter"
+        ],
+        "output_ports": [
+          "report"
+        ],
+        "description": "收益分析计算——通过 analysis_types 配置表驱动分析类型路由，计算投资收益报告",
+        "depends_on": [
+          "analysis_types"
+        ],
+        "category": "transform"
+      },
+      "discard_stocks": {
+        "action_id": "discard_stocks",
+        "module": "native.builtins",
+        "input_ports": [
+          "result",
+          "node",
+          "node_stocks",
+          "pool_config"
+        ],
+        "output_ports": [],
+        "description": "丢弃股票——将不满足条件的股票移入丢弃池",
+        "depends_on": [],
+        "category": "sink"
+      },
+      "discard_sink_drop": {
+        "action_id": "discard_sink_drop",
+        "module": "native.builtins",
+        "input_ports": [
+          "stocks",
+          "rejected",
+          "rejected_list",
+          "condition",
+          "source_node"
+        ],
+        "output_ports": [
+          "stocks",
+          "count",
+          "source",
+          "condition"
+        ],
+        "description": "丢弃池收集器——收集不满足条件的股票并记录丢弃时间戳和来源信息",
+        "depends_on": [],
+        "category": "sink"
+      },
+      "condition_dispatcher": {
+        "action_id": "condition_dispatcher",
+        "module": "native.builtins",
+        "input_ports": [
+          "stock_list",
+          "conditions",
+          "_dispatch_index",
+          "tq_adapter",
+          "node"
+        ],
+        "output_ports": [
+          "passed_list",
+          "rejected_list"
+        ],
+        "description": "条件分发器——根据条件属性位掩码匹配 dispatch_rules 配置表，路由到对应的网关处理器进行条件评估",
+        "depends_on": [
+          "dispatch_rules",
+          "engines"
+        ],
+        "category": "dispatch"
+      },
+      "formula_eval": {
+        "action_id": "formula_eval",
+        "module": "native.builtins",
+        "input_ports": [
+          "condition_type",
+          "params",
+          "stock_list",
+          "stocks",
+          "passed_list",
+          "passed",
+          "mode",
+          "tq_adapter",
+          "indi",
+          "formula"
+        ],
+        "output_ports": [
+          "passed",
+          "rejected",
+          "mode"
+        ],
+        "description": "公式评估网关——根据技术指标公式对股票列表进行条件评估，支持 indi/rank/reverse 模式",
+        "depends_on": [
+          "dispatch_rules"
+        ],
+        "category": "dispatch"
+      },
+      "sector_filter": {
+        "action_id": "sector_filter",
+        "module": "native.builtins",
+        "input_ports": [
+          "stock_list",
+          "stocks",
+          "passed_list",
+          "passed",
+          "sector_code",
+          "tq_adapter"
+        ],
+        "output_ports": [
+          "passed",
+          "rejected",
+          "sector"
+        ],
+        "description": "板块过滤网关——根据板块代码过滤股票列表，只保留属于指定板块的股票",
+        "depends_on": [
+          "dispatch_rules"
+        ],
+        "category": "dispatch"
+      },
+      "basic_filter": {
+        "action_id": "basic_filter",
+        "module": "native.builtins",
+        "input_ports": [
+          "stock_list",
+          "stocks",
+          "passed_list",
+          "passed",
+          "tq_adapter",
+          "params"
+        ],
+        "output_ports": [
+          "passed",
+          "rejected"
+        ],
+        "description": "基础过滤网关——根据基本面指标（PE/PB/ROE）对股票列表进行过滤",
+        "depends_on": [
+          "dispatch_rules"
+        ],
+        "category": "dispatch"
+      },
+      "pass_through": {
+        "action_id": "pass_through",
+        "module": "native.builtins",
+        "input_ports": [
+          "stock_list",
+          "stocks",
+          "passed_list",
+          "passed"
+        ],
+        "output_ports": [
+          "passed",
+          "rejected",
+          "mode"
+        ],
+        "description": "直通网关——无条件全部通过，不对股票列表做任何过滤",
+        "depends_on": [
+          "dispatch_rules"
+        ],
+        "category": "dispatch"
+      },
+      "cross_section_eval": {
+        "action_id": "cross_section_eval",
+        "module": "native.builtins",
+        "input_ports": [
+          "stock_list",
+          "stocks",
+          "passed_list",
+          "passed",
+          "tq_adapter",
+          "params",
+          "indi"
+        ],
+        "output_ports": [
+          "passed",
+          "rejected"
+        ],
+        "description": "横向统计网关——对股票列表进行横向对比排序，按公式得分截取前N名",
+        "depends_on": [
+          "dispatch_rules"
+        ],
+        "category": "dispatch"
+      }
+    }
+  },
+  "filter_action_rules": {
+    "version": "2.0",
+    "description": "动作编解码单一数据源：high_type_map/byte_type_map 为正向单向映射，encode 时反向求逆；encoding 段声明位移与掩码",
+    "high_type_map": {
+      "1": {
+        "type": "buy_amount",
+        "unit": "元"
+      },
+      "2": {
+        "type": "buy_shares",
+        "unit": "股"
+      },
+      "3": {
+        "type": "sell_shares",
+        "unit": "股"
+      }
+    },
+    "byte_type_map": {
+      "6": {
+        "type": "buy"
+      },
+      "7": {
+        "type": "sell"
+      }
+    },
+    "encoding": {
+      "high_type_shift": 28,
+      "byte_type_shift": 16,
+      "param1_shift": 8,
+      "high_type_mask": 15,
+      "byte_type_mask": 255,
+      "param_mask": 65535,
+      "param1_mask": 255,
+      "param2_mask": 255
+    },
+    "none_type_id": 0
+  },
+  "actions": {
+    "version": "1.0",
+    "description": "action→handler 映射表，引擎执行边时动态查表调用",
+    "actions": {
+      "resolve_and_pass": {
+        "handler": "_action_resolve_and_pass",
+        "desc": "解析候选源并传递到下游",
+        "params": {
+          "resolve_target": "sid"
+        }
+      },
+      "apply_filter": {
+        "handler": "_action_apply_filter",
+        "desc": "应用转移条件过滤后传入目标池",
+        "params": {
+          "filter_target": "sid",
+          "propagate_target": "tid"
+        }
+      },
+      "pass_pool_stocks": {
+        "handler": "_action_pass_pool_stocks",
+        "desc": "状态池传递持仓到转移条件",
+        "params": {
+          "pass_target": "tid"
+        }
+      },
+      "transfer_between_pools": {
+        "handler": "_action_transfer_between_pools",
+        "desc": "股票在状态池之间转移",
+        "params": {
+          "transfer_target": "tid"
+        }
+      },
+      "remove_from_pool": {
+        "handler": "_action_remove_from_pool",
+        "desc": "股票从源池移除",
+        "params": {
+          "remove_target": "sid"
+        }
+      }
+    }
+  },
+  "action_rules": {
+    "version": "1.0",
+    "description": "行为规则表：提取硬编码逻辑为规则条目，统一驱动业务逻辑与UI联动",
+    "rules": [
+      {
+        "rule_id": "flow_mode_resolve",
+        "description": "流转模式解析：根据attr位标志确定流转模式名称",
+        "trigger": {
+          "type": "edge_attr_change",
+          "field": "attr"
+        },
+        "guard": {
+          "context": "edge"
+        },
+        "action": "resolve_flow_mode",
+        "handler_ref": "resolve_flow_mode",
+        "priority": 10,
+        "stop_on_match": false,
+        "tags": [
+          "flow",
+          "mode",
+          "resolve"
+        ]
+      },
+      {
+        "rule_id": "begint_format_switch",
+        "description": "begint字段格式切换：begin=3/4/7时使用HHMMSS格式，其余用秒数",
+        "trigger": {
+          "type": "field_change",
+          "field": "begin"
+        },
+        "guard": null,
+        "action": "switch_begint_format",
+        "handler_ref": "switch_begint_format",
+        "params_template": {
+          "hhmmss_modes": [
+            3,
+            4,
+            7
+          ]
+        },
+        "priority": 20,
+        "stop_on_match": true,
+        "tags": [
+          "flow",
+          "schedule",
+          "ui_linkage"
+        ]
+      },
+      {
+        "rule_id": "tdx_nset_linkage",
+        "description": "TDX nset联动：nset值变化时控制ntjindexno/accode字段显隐",
+        "trigger": {
+          "type": "field_change",
+          "field": "func.nset"
+        },
+        "guard": {
+          "pool_type": "tdx"
+        },
+        "action": "toggle_nset_fields",
+        "handler_ref": "toggle_nset_fields",
+        "params_template": {
+          "show_ntjindexno_when": [
+            1,
+            4
+          ],
+          "show_accode_when": [
+            0
+          ]
+        },
+        "priority": 20,
+        "stop_on_match": true,
+        "tags": [
+          "tdx",
+          "condition",
+          "ui_linkage"
+        ]
+      },
+      {
+        "rule_id": "tdx_psatt_bdel_linkage",
+        "description": "TDX psatt.bdel联动：bdel=1时启用ndelnum/ndeltype字段",
+        "trigger": {
+          "type": "field_change",
+          "field": "psatt.bdel"
+        },
+        "guard": {
+          "pool_type": "tdx"
+        },
+        "action": "toggle_bdel_fields",
+        "handler_ref": "toggle_bdel_fields",
+        "params_template": {
+          "active_when": 1
+        },
+        "priority": 20,
+        "stop_on_match": true,
+        "tags": [
+          "tdx",
+          "state_pool",
+          "ui_linkage"
+        ]
+      },
+      {
+        "rule_id": "tdx_psatt_bsound_linkage",
+        "description": "TDX psatt.bsound联动：bsound=1时启用nsoundtype/soundfile字段",
+        "trigger": {
+          "type": "field_change",
+          "field": "psatt.bsound"
+        },
+        "guard": {
+          "pool_type": "tdx"
+        },
+        "action": "toggle_bsound_fields",
+        "handler_ref": "toggle_bsound_fields",
+        "params_template": {
+          "active_when": 1
+        },
+        "priority": 20,
+        "stop_on_match": true,
+        "tags": [
+          "tdx",
+          "state_pool",
+          "ui_linkage"
+        ]
+      },
+      {
+        "rule_id": "tdx_psatt_bsavetoblock_linkage",
+        "description": "TDX psatt.bsavetoblock联动：bsavetoblock=1时启用blockfile/bclearblock字段",
+        "trigger": {
+          "type": "field_change",
+          "field": "psatt.bsavetoblock"
+        },
+        "guard": {
+          "pool_type": "tdx"
+        },
+        "action": "toggle_bsavetoblock_fields",
+        "handler_ref": "toggle_bsavetoblock_fields",
+        "params_template": {
+          "active_when": 1
+        },
+        "priority": 20,
+        "stop_on_match": true,
+        "tags": [
+          "tdx",
+          "state_pool",
+          "ui_linkage"
+        ]
+      },
+      {
+        "rule_id": "tdx_starttype_linkage",
+        "description": "TDX starttype联动：starttype=0时禁用starttime/starttimehms",
+        "trigger": {
+          "type": "field_change",
+          "field": "starttype"
+        },
+        "guard": {
+          "pool_type": "tdx"
+        },
+        "action": "toggle_starttype_fields",
+        "handler_ref": "toggle_starttype_fields",
+        "params_template": {
+          "inactive_when": 0
+        },
+        "priority": 20,
+        "stop_on_match": true,
+        "tags": [
+          "tdx",
+          "flow",
+          "ui_linkage"
+        ]
+      },
+      {
+        "rule_id": "tdx_cxtype_linkage",
+        "description": "TDX cxtype联动：cxtype=0时禁用cxtime/cxtimetype",
+        "trigger": {
+          "type": "field_change",
+          "field": "cxtype"
+        },
+        "guard": {
+          "pool_type": "tdx"
+        },
+        "action": "toggle_cxtype_fields",
+        "handler_ref": "toggle_cxtype_fields",
+        "params_template": {
+          "inactive_when": 0
+        },
+        "priority": 20,
+        "stop_on_match": true,
+        "tags": [
+          "tdx",
+          "flow",
+          "ui_linkage"
+        ]
+      },
+      {
+        "rule_id": "attr_flag_toggle",
+        "description": "位标志切换：统一处理所有cell类型的attr位标志读写",
+        "trigger": {
+          "type": "flag_toggle",
+          "field": "attr"
+        },
+        "guard": null,
+        "action": "toggle_attr_flag",
+        "handler_ref": "toggle_attr_flag",
+        "priority": 10,
+        "stop_on_match": false,
+        "tags": [
+          "attr",
+          "flag",
+          "universal"
+        ]
+      },
+      {
+        "rule_id": "action_compound_encode",
+        "description": "enter/exit动作编码：将动作类型+参数编码为整数",
+        "trigger": {
+          "type": "field_change",
+          "field": "enter|exit"
+        },
+        "guard": null,
+        "action": "encode_action_compound",
+        "handler_ref": "encode_action_compound",
+        "params_template": {
+          "type_shift": 28,
+          "param_mask": 65535
+        },
+        "priority": 10,
+        "stop_on_match": false,
+        "tags": [
+          "action",
+          "encode"
+        ]
+      },
+      {
+        "rule_id": "tdx_nsoundtype_linkage",
+        "description": "TDX nsoundtype联动：nsoundtype=0时显示nsyssound，nsoundtype=1时显示soundfile",
+        "trigger": {
+          "type": "field_change",
+          "field": "psatt.nsoundtype"
+        },
+        "guard": {
+          "pool_type": "tdx"
+        },
+        "action": "toggle_nsoundtype_fields",
+        "handler_ref": "toggle_nsoundtype_fields",
+        "params_template": {
+          "show_nsyssound_when": [
+            0
+          ],
+          "show_soundfile_when": [
+            1
+          ]
+        },
+        "priority": 20,
+        "stop_on_match": true,
+        "tags": [
+          "tdx",
+          "state_pool",
+          "ui_linkage"
+        ]
+      },
+      {
+        "rule_id": "tdx_starttimetype_linkage",
+        "description": "TDX starttimetype联动：starttimetype=1时显示starttimehms",
+        "trigger": {
+          "type": "field_change",
+          "field": "starttimetype"
+        },
+        "guard": {
+          "pool_type": "tdx"
+        },
+        "action": "toggle_starttimetype_fields",
+        "handler_ref": "toggle_starttimetype_fields",
+        "params_template": {
+          "show_starttimehms_when": [
+            1
+          ]
+        },
+        "priority": 20,
+        "stop_on_match": true,
+        "tags": [
+          "tdx",
+          "flow",
+          "ui_linkage"
+        ]
+      }
+    ],
+    "handlers": [
+      {
+        "name": "init_market_source",
+        "description": ""
+      },
+      {
+        "name": "init_stock_state_pool",
+        "description": ""
+      },
+      {
+        "name": "edge_default_transfer",
+        "description": ""
+      },
+      {
+        "name": "stock_pool_hold",
+        "description": ""
+      },
+      {
+        "name": "transfer_condition_check",
+        "description": ""
+      },
+      {
+        "name": "discard_sink_drop",
+        "description": ""
+      },
+      {
+        "name": "dzh_condition_pool",
+        "description": ""
+      },
+      {
+        "name": "formula_eval",
+        "description": ""
+      },
+      {
+        "name": "cross_section_eval",
+        "description": ""
+      },
+      {
+        "name": "basic_filter",
+        "description": ""
+      },
+      {
+        "name": "condition_dispatcher",
+        "description": ""
+      },
+      {
+        "name": "candidate_resolve",
+        "description": ""
+      },
+      {
+        "name": "resolve_market",
+        "description": ""
+      },
+      {
+        "name": "sector_filter",
+        "description": ""
+      },
+      {
+        "name": "pass_through",
+        "description": ""
+      },
+      {
+        "name": "profit_analysis_calc",
+        "description": ""
+      },
+      {
+        "name": "time_trigger_check",
+        "description": ""
+      },
+      {
+        "name": "render_label",
+        "description": ""
+      },
+      {
+        "name": "render_shape",
+        "description": ""
+      },
+      {
+        "name": "accumulate_state",
+        "description": ""
+      },
+      {
+        "name": "discard_stocks",
+        "description": ""
+      },
+      {
+        "name": "resolve_immediate",
+        "description": ""
+      },
+      {
+        "name": "resolve_delayed",
+        "description": ""
+      },
+      {
+        "name": "resolve_before_open",
+        "description": ""
+      },
+      {
+        "name": "resolve_after_open",
+        "description": ""
+      },
+      {
+        "name": "resolve_before_close",
+        "description": ""
+      },
+      {
+        "name": "resolve_after_close",
+        "description": ""
+      },
+      {
+        "name": "resolve_trading_time",
+        "description": ""
+      },
+      {
+        "name": "resolve_specific_time",
+        "description": ""
+      },
+      {
+        "name": "transfer_with_market_data_handler",
+        "description": ""
+      },
+      {
+        "name": "log_transfer_handler",
+        "description": ""
+      },
+      {
+        "name": "condition_dispatch_handler",
+        "description": ""
+      },
+      {
+        "name": "tdx_convert_from_file",
+        "description": ""
+      },
+      {
+        "name": "tdx_convert_from_pool",
+        "description": ""
+      }
+    ]
+  },
+  "action_pipeline": {
+    "version": "1.0",
+    "description": "Action pipeline 表驱动配置：每个 action 声明 steps 列表，_execute_action 按序执行 step 函数库。差异显示于 steps 内容，非独立函数体",
+    "actions": {
+      "resolve_and_pass": {
+        "steps": [
+          "resolve",
+          "pass"
+        ],
+        "desc": "解析候选源并传递到下游"
+      },
+      "apply_filter": {
+        "steps": [
+          "filter",
+          "propagate"
+        ],
+        "desc": "应用转移条件过滤后传播"
+      },
+      "dzh_condition_filter": {
+        "steps": [
+          "dzh_filter",
+          "propagate"
+        ],
+        "desc": "DZH 公式条件过滤后传播"
+      },
+      "pass_pool_stocks": {
+        "steps": [
+          "pass"
+        ],
+        "desc": "池股票传递（支持 move）"
+      },
+      "transfer_between_pools": {
+        "steps": [
+          "transfer"
+        ],
+        "desc": "池间转移并触发高亮"
+      },
+      "remove_from_pool": {
+        "steps": [
+          "remove"
+        ],
+        "desc": "从池中移除股票"
+      }
+    }
+  },
+  "_convergence": {
+    "merged_from": [
+      "behavior_actions.json",
+      "filter_action_rules.json",
+      "actions.json",
+      "action_rules.json",
+      "action_pipeline.json"
+    ],
+    "target_count": 30
+  }
+}

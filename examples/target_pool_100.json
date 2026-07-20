@@ -1,0 +1,163 @@
+{
+  "id": "target_pool_100",
+  "name": "目标股票池-100只候选",
+  "description": "100只候选股票备选池 + 转移条件节点：S→KDJ5分金叉→A池 / S→MACD1分金叉→B池 / A/B→交集→C池",
+  "version": 2,
+  "pool_type": "dzh",
+  "pool_meta": {
+    "name": "目标股票池-100只候选",
+    "pool_type": "dzh"
+  },
+  "nodes": [
+    {
+      "id": "source",
+      "type": "market_source",
+      "name": "备选池S-100只",
+      "position": {"x": 80, "y": 240, "width": 70, "height": 80},
+      "params": {
+        "stocks": [
+          {"code": "fz000001", "name": "fz000001"}, {"code": "fz000002", "name": "fz000002"}, {"code": "fz000063", "name": "fz000063"}, {"code": "fz000100", "name": "fz000100"}, {"code": "fz000333", "name": "fz000333"}, {"code": "fz000538", "name": "fz000538"}, {"code": "fz000568", "name": "fz000568"}, {"code": "fz000651", "name": "fz000651"}, {"code": "fz000725", "name": "fz000725"}, {"code": "fz000768", "name": "fz000768"},
+          {"code": "fz000858", "name": "fz000858"}, {"code": "fz000895", "name": "fz000895"}, {"code": "fz000977", "name": "fz000977"}, {"code": "fz001289", "name": "fz001289"}, {"code": "fz002001", "name": "fz002001"}, {"code": "fz002007", "name": "fz002007"}, {"code": "fz002024", "name": "fz002024"}, {"code": "fz002027", "name": "fz002027"}, {"code": "fz002049", "name": "fz002049"}, {"code": "fz002120", "name": "fz002120"},
+          {"code": "fz002142", "name": "fz002142"}, {"code": "fz002230", "name": "fz002230"}, {"code": "fz002236", "name": "fz002236"}, {"code": "fz002352", "name": "fz002352"}, {"code": "fz002415", "name": "fz002415"}, {"code": "fz002460", "name": "fz002460"}, {"code": "fz002475", "name": "fz002475"}, {"code": "fz002594", "name": "fz002594"}, {"code": "fz002714", "name": "fz002714"}, {"code": "fz002812", "name": "fz002812"},
+          {"code": "fz300003", "name": "fz300003"}, {"code": "fz300014", "name": "fz300014"}, {"code": "fz300015", "name": "fz300015"}, {"code": "fz300033", "name": "fz300033"}, {"code": "fz300059", "name": "fz300059"}, {"code": "fz300122", "name": "fz300122"}, {"code": "fz300124", "name": "fz300124"}, {"code": "fz300274", "name": "fz300274"}, {"code": "fz300408", "name": "fz300408"}, {"code": "fz300413", "name": "fz300413"},
+          {"code": "fz300433", "name": "fz300433"}, {"code": "fz300498", "name": "fz300498"}, {"code": "fz300750", "name": "fz300750"}, {"code": "fz300999", "name": "fz300999"}, {"code": "fz600000", "name": "fz600000"}, {"code": "fz600009", "name": "fz600009"}, {"code": "fz600016", "name": "fz600016"}, {"code": "fz600028", "name": "fz600028"}, {"code": "fz600029", "name": "fz600029"}, {"code": "fz600030", "name": "fz600030"},
+          {"code": "fz600031", "name": "fz600031"}, {"code": "fz600036", "name": "fz600036"}, {"code": "fz600048", "name": "fz600048"}, {"code": "fz600050", "name": "fz600050"}, {"code": "fz600104", "name": "fz600104"}, {"code": "fz600276", "name": "fz600276"}, {"code": "fz600309", "name": "fz600309"}, {"code": "fz600340", "name": "fz600340"}, {"code": "fz600406", "name": "fz600406"}, {"code": "fz600436", "name": "fz600436"},
+          {"code": "fz600438", "name": "fz600438"}, {"code": "fz600519", "name": "fz600519"}, {"code": "fz600547", "name": "fz600547"}, {"code": "fz600570", "name": "fz600570"}, {"code": "fz600585", "name": "fz600585"}, {"code": "fz600588", "name": "fz600588"}, {"code": "fz600690", "name": "fz600690"}, {"code": "fz600703", "name": "fz600703"}, {"code": "fz600745", "name": "fz600745"}, {"code": "fz600809", "name": "fz600809"},
+          {"code": "fz600837", "name": "fz600837"}, {"code": "fz600887", "name": "fz600887"}, {"code": "fz600900", "name": "fz600900"}, {"code": "fz601012", "name": "fz601012"}, {"code": "fz601066", "name": "fz601066"}, {"code": "fz601088", "name": "fz601088"}, {"code": "fz601100", "name": "fz601100"}, {"code": "fz601138", "name": "fz601138"}, {"code": "fz601166", "name": "fz601166"}, {"code": "fz601186", "name": "fz601186"},
+          {"code": "fz601211", "name": "fz601211"}, {"code": "fz601288", "name": "fz601288"}, {"code": "fz601318", "name": "fz601318"}, {"code": "fz601319", "name": "fz601319"}, {"code": "fz601336", "name": "fz601336"}, {"code": "fz601398", "name": "fz601398"}, {"code": "fz601601", "name": "fz601601"}, {"code": "fz601628", "name": "fz601628"}, {"code": "fz601668", "name": "fz601668"}, {"code": "fz601688", "name": "fz601688"},
+          {"code": "fz601766", "name": "fz601766"}, {"code": "fz601788", "name": "fz601788"}, {"code": "fz601857", "name": "fz601857"}, {"code": "fz601888", "name": "fz601888"}, {"code": "fz601899", "name": "fz601899"}, {"code": "fz601919", "name": "fz601919"}, {"code": "fz601939", "name": "fz601939"}, {"code": "fz601988", "name": "fz601988"}, {"code": "fz601995", "name": "fz601995"}, {"code": "fz603288", "name": "fz603288"}
+        ]
+      }
+    },
+    {
+      "id": "cond_KDJ_A",
+      "type": "transfer_condition",
+      "name": "KDJ5分金叉",
+      "position": {"x": 240, "y": 100, "width": 100, "height": 60}
+    },
+    {
+      "id": "pool_A",
+      "type": "statepool",
+      "name": "A池-KDJ5分钟金叉",
+      "position": {"x": 420, "y": 100, "width": 150, "height": 80},
+      "config": {"pool_role": "candidate_pool"},
+      "params": {"psatt": {"bdel": 1, "ndelnum": 100, "ndeltype": 2}}
+    },
+    {
+      "id": "cond_MACD_B",
+      "type": "transfer_condition",
+      "name": "MACD1分金叉",
+      "position": {"x": 240, "y": 360, "width": 100, "height": 60}
+    },
+    {
+      "id": "pool_B",
+      "type": "statepool",
+      "name": "B池-MACD1分钟金叉",
+      "position": {"x": 420, "y": 360, "width": 150, "height": 80},
+      "config": {"pool_role": "candidate_pool"},
+      "params": {"psatt": {"bdel": 1, "ndelnum": 200, "ndeltype": 2}}
+    },
+    {
+      "id": "cond_INT_A_C",
+      "type": "transfer_condition",
+      "name": "A∩B交集",
+      "position": {"x": 620, "y": 140, "width": 90, "height": 60}
+    },
+    {
+      "id": "cond_INT_B_C",
+      "type": "transfer_condition",
+      "name": "A∩B交集",
+      "position": {"x": 620, "y": 320, "width": 90, "height": 60}
+    },
+    {
+      "id": "pool_C",
+      "type": "statepool",
+      "name": "C池-交集买入",
+      "position": {"x": 780, "y": 230, "width": 150, "height": 80},
+      "config": {"pool_role": "target_pool"},
+      "params": {
+        "psatt": {"bdel": 1, "ndelnum": 20, "ndeltype": 2, "baimpool": 1, "bsavehis": 1},
+        "enter_action": {"type": 2, "params": 100},
+        "exit_action": {"type": 3, "params": 0}
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_source_KDJ_A",
+      "source": "source",
+      "target": "cond_KDJ_A",
+      "type": "conditional",
+      "params": {
+        "condition_type": "INDICATOR",
+        "formula_ref": "KDJ_5MIN_CROSS",
+        "time_gate_interval": 60,
+        "_order": 10
+      }
+    },
+    {
+      "id": "e_KDJ_A_to_pool",
+      "source": "cond_KDJ_A",
+      "target": "pool_A",
+      "type": "unconditional",
+      "params": {"_order": 11}
+    },
+    {
+      "id": "e_source_MACD_B",
+      "source": "source",
+      "target": "cond_MACD_B",
+      "type": "conditional",
+      "params": {
+        "condition_type": "INDICATOR",
+        "formula_ref": "MACD_1MIN_CROSS",
+        "time_gate_interval": 10,
+        "_order": 20
+      }
+    },
+    {
+      "id": "e_MACD_B_to_pool",
+      "source": "cond_MACD_B",
+      "target": "pool_B",
+      "type": "unconditional",
+      "params": {"_order": 21}
+    },
+    {
+      "id": "e_A_INT_C",
+      "source": "pool_A",
+      "target": "cond_INT_A_C",
+      "type": "conditional",
+      "params": {
+        "condition_type": "INTERSECTION",
+        "intersection_source": "pool_B",
+        "time_gate_interval": 5,
+        "_order": 30
+      }
+    },
+    {
+      "id": "e_INT_A_to_pool_C",
+      "source": "cond_INT_A_C",
+      "target": "pool_C",
+      "type": "unconditional",
+      "params": {"_order": 31}
+    },
+    {
+      "id": "e_B_INT_C",
+      "source": "pool_B",
+      "target": "cond_INT_B_C",
+      "type": "conditional",
+      "params": {
+        "condition_type": "INTERSECTION",
+        "intersection_source": "pool_A",
+        "time_gate_interval": 5,
+        "_order": 40
+      }
+    },
+    {
+      "id": "e_INT_B_to_pool_C",
+      "source": "cond_INT_B_C",
+      "target": "pool_C",
+      "type": "unconditional",
+      "params": {"_order": 41}
+    }
+  ]
+}

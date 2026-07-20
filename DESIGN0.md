@@ -78,6 +78,21 @@
 旧路径 `_execute_flows()` / `_execute_flowsCore()` / `_tick_event_driven()` /
 `_tick_simple()` 已删除；新核心路径为 `PoolEngine.run_tick()` + `EdgeExecutor.run()`。
 
+### 1.2 事件驱动架构（v4 迁移完成）
+
+`unify-stockpool-oop-event-driven` spec 实施后，系统升级为 v4 事件驱动架构：
+
+- **EventBus 为唯一通信中介**：事件类型从 4 种扩展到 30 种（`ConfigLoaded`/`ConfigChanged`/`PoolLoaded`/`TickReceived`/`DataChanged`/`BarComposed`/`FormulaEvaluated`/`CrossOverDetected`/`StockFiltered`/`EdgeFired`/`TransferExecuted`/`TTLExpired`/`Signal`/`OrderPlaced`/`OrderFilled`/`PositionUpdated`/`StatisticsUpdated`/`RankingChanged`/`AlertRaised`/`SnapshotUpdated`/`EventLogged`/`ModeChanged`/`TimeAdvanced`/`ReplayStarted`/`ReplayStep`/`SimulationStep`/`ImportStarted`/`ExportCompleted` + 原 4 种 `DataChanged`/`Executed`/`DomainEvent`/`Signal`）。
+- **16 模块化重组**：EventBus / Domain / Config / Database / DataSource / TickBar / Formula / Screening / Execution / Trade / Statistics / Monitoring / ImportExport / RuntimeMode / HotReload / API。每个模块职责单一，仅与 EventBus 交互。
+- **模块零引用约束**：除白名单（`core.event_bus` / `core.domain` / `core.schemas` / 标准库 / 第三方库）外，禁止 `from core.xxx import` / `from services.xxx import` / `from converters.xxx import`。模块构造函数仅接收 `EventBus` + 配置 dict + 可选 `Protocol` 接口。
+- **统一领域对象模型**：`core/domain/` 包含 9 个 Node 子类 + 2 个 Edge 子类 + 7 个 Spec 类（TimingSpec/FilterSpec/PropagateSpec/ActionSpec/TTLSpec/CandidateRange/ReloadSchedule）+ 6 个 Evaluator 子类，覆盖 DZH/TDX 全部功能。
+- **MetaEngine 退化为 thin compat shim**：`MetaEngine.__init__` 接收 `bus` 参数；`MetaEngine.__getattr__` 仅代理 `capability_registry`，其他属性抛 `AttributeError`。PoolEngine 成为唯一核心引擎。
+- **app.py lifespan 事件布线器**：创建 EventBus 后依次实例化 16 个模块，每个模块仅注入 EventBus + 配置 dict，不传递其他模块引用。
+- **tick 执行链 10 类事件按序发布**：TickReceived → DataChanged → BarComposed → FormulaEvaluated → StockFiltered → EdgeFired+TransferExecuted → Signal → OrderPlaced+OrderFilled+PositionUpdated → StatisticsUpdated+RankingChanged → AlertRaised+SnapshotUpdated+EventLogged。
+- **三模式事件化**：ModeChanged 事件驱动 TickBar/Execution/Trade/Database 四模块切换数据源/时间源/交易接口/副作用范围。
+
+> 注：v4 架构与 v3 共存（渐进式迁移）。`MetaEngine` 保留为兼容门面至所有调用方迁移完毕（Task 24）。`PoolEngine` 仍为运行时核心，仅通过 EventBus 与其他模块交互。
+
 ---
 
 ## 2 三种表
@@ -433,6 +448,16 @@ PoolEngine.run_tick():
   `@property` 代理到 `PoolState` / `EdgeState`，`__getattr__` 仅保留
   capability_registry 代理
 
+### 3.2 事件驱动路径（v4）
+
+`unify-stockpool-oop-event-driven` spec 实施后，核心循环增加事件驱动路径：
+
+- **`PoolEngine._run_tick_body()` 末尾发布 `TimeAdvanced` 事件**（SubTask 21.1）：`self._components["event_bus"].publish(TimeAdvanced(ts=now, source=driver_type))`。RuntimeMode 模块订阅 TimeAdvanced 推进时间（向后兼容：RuntimeMode 仍订阅 TickReceived 发布 TimeAdvanced，PoolEngine 成为主发布者）。
+- **`PoolEngine.__init__` 可选订阅 `DataChanged` 事件**（SubTask 21.2）：新增 `subscribe_data_changed: bool = False` 参数，默认关闭避免与 ExecutionModule 双重触发。启用时 `_on_data_changed_event` handler 更新 `current_ts` 后调用 `_run_tick_body`。
+- **`EdgeExecutor` 订阅 `EdgeFired` 事件执行**（SubTask 21.3）：`EdgeExecutor.__init__` 中 `if bus: bus.subscribe(EdgeFired, self._on_edge_fired)`。ExecutionModule `_run_tick` 改为 `publish(EdgeFired)` + fallback guard（`if edge_executor.bus is None: edge_executor.run(eid)`）避免双重触发。
+- **Trade 模块订阅 `TransferExecuted` 事件**（SubTask 21.4）：`TradeModule._on_transfer_executed` 按 `auto_buy_pools`/`auto_sell_pools` 配置发布 BUY/SELL Signal，支持入池即买入/出池即卖出语义。
+- **三方法已迁移到事件驱动路径**（SubTask 21.5 + 22.6）：`_update_trackers` / `_emit_transfer_events` / `_post_tick` 逻辑分别迁移到 TradeModule._on_order_filled / ExecutionModule._on_executed / StatisticsModule._on_position_updated。PoolEngine.run_pool/_tick 中的直接调用已删除（_post_tick 转为 thin no-op shim；_update_trackers / _emit_transfer_events 方法体保留供测试兼容，待 Task 24 完成后删除）。
+
 ---
 
 ## 3.1 边类型语义
@@ -680,6 +705,9 @@ async def run_mode(self, mode_id: str) -> Dict[str, Any]:
 | 25 | `tq_adapter.py` / `akshare_provider.py` / `builtins_filters.py` | 49处硬编码字段分发/源分支/动作分支 | 2处A类已剥离，47处B类已标注 | ✅（Task 6，审计标注）|
 
 > **本次深化表驱动审计验证结果（Task 7-9）**：DZH 10种Cell/6种attrtext/5种reload/5种deltype 全部完整；5种流转模式补全 loop_feedback + dual_source，topology.json 表驱动化。TDX 6种nset/8种spinfo/tran 完整；noperate=5 修复为"排名为"；补全 funnel/multi_source/multi_indicator 三种拓扑模式；operators.json 补全 7 个操作符定义。端到端测试：6种nset/6种拓扑/三模式PK全链路全部通过，0错误。5个 TODO 已转为正式 `# 注：` 注释（Task 5）。
+
+- **模块间直接引用**（v4 新增）：禁止 `from core.xxx import Yyy`（除 `core.event_bus`/`core.domain`/`core.schemas` 白名单）、`from services.xxx import Yyy`、`from converters.xxx import Yyy`。模块间仅通过 EventBus 事件交互。例外：`app.py` lifespan 装配处可 import 任何模块；8 个 aggregator module 可 import 其聚合的子组件（`MODULE_INTERNAL_WHITELIST`）。
+  > 静态检查脚本：`scripts/check_module_imports.py`。当前基线 109 处违规（83 旧 MetaEngine + 25 包内 import + 0 真正跨层违规），待 Task 24 完成后归零。
 
 ---
 

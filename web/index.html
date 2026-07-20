@@ -3,12 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MetaCore 股票池平台</title>
-<link rel="stylesheet" href="css/style.css?v=42">
-<link rel="stylesheet" href="css/table-driven-panel.css?v=40">
+<title>Meta Core 股票池平台</title>
+<link rel="stylesheet" href="css/styles.css?v=4">
 </head>
 <body>
 
+<!-- ===== 顶部导航：3 个 hash 路由入口 ===== -->
+<nav class="top-nav">
+  <a href="#/">主页</a>
+  <a href="#/config">配置中心</a>
+  <a href="#/formula">公式管理</a>
+</nav>
+
+<!-- ===== 视图：主页 (来自原 index.html) ===== -->
+<div id="view-main" class="view-container" style="display:none;">
 <div class="app-shell">
 
   <!-- ===== Top Toolbar ===== -->
@@ -27,15 +35,16 @@
     <span class="tb-sep"></span>
 
     <button class="tb-btn" id="btnNew" title="新建空白池">🆕 新建</button>
+    <button class="tb-btn" id="btnLoadDemo" title="加载示例池 target_pool_100">📊 加载示例池</button>
 
     <div class="tb-dropdown-wrapper">
       <button class="tb-btn tb-btn-dropdown" id="btnAddNode" title="添加节点">➕ 添加 <span class="tb-dropdown-arrow">▼</span></button>
       <div class="tb-dropdown-menu hidden" id="addNodeDropdown">
-        <div class="tb-dropdown-item" data-node-type="source">📦 备选池</div>
-        <div class="tb-dropdown-item" data-node-type="condition">🔀 转移条件</div>
-        <div class="tb-dropdown-item" data-node-type="statepool">🏷 状态池</div>
-        <div class="tb-dropdown-item" data-node-type="discard">🗑 丢弃池</div>
-        <div class="tb-dropdown-item" data-node-type="label">📝 文字标签</div>
+        <div class="tb-dropdown-item" data-node-type="source" data-action="addSource">📦 备选池</div>
+        <div class="tb-dropdown-item" data-node-type="condition" data-action="addCondition">🔀 转移条件</div>
+        <div class="tb-dropdown-item" data-node-type="statepool" data-action="addStatePool">🏷 状态池</div>
+        <div class="tb-dropdown-item" data-node-type="discard" data-action="addDiscard">🗑 丢弃池</div>
+        <div class="tb-dropdown-item" data-node-type="label" data-action="addLabel">📝 文字标签</div>
       </div>
     </div>
 
@@ -73,16 +82,28 @@
         <div class="tb-dropdown-item" data-linetype="straight">─ 直线</div>
       </div>
     </div>
-    <button class="tb-btn" id="btnRun" title="实盘模式">▶ 实盘</button>
-    <button class="tb-btn" id="btnReplay" title="回放模式">⏪ 回放</button>
-    <button class="tb-btn" id="btnSimulation" title="仿真模式">🔬 仿真</button>
+    <span class="tb-sep"></span>
+    <div class="run-control-group" id="runControlGroup" style="display:inline-flex;gap:2px;background:rgba(0,0,0,0.2);padding:2px;border-radius:6px;border:1px solid var(--border-color);">
+      <button class="tb-btn run-btn" id="btnStart" title="开始运行" style="background:#27ae60;color:#fff;border-color:#27ae60;">▶ 开始</button>
+      <button class="tb-btn run-btn" id="btnPause" title="暂停运行" disabled>⏸ 暂停</button>
+      <button class="tb-btn run-btn" id="btnStop" title="停止运行" disabled>⏹ 停止</button>
+    </div>
+    <span class="tb-sep"></span>
+    <div class="mode-switch-group" id="modeSwitchGroup">
+      <button class="tb-btn mode-btn active" id="btnDesign" title="设计模式切换">🎨 设计模式</button>
+    </div>
+    <div class="run-mode-group" id="runModeGroup" style="display:inline-flex;gap:2px;background:rgba(0,0,0,0.2);padding:2px;border-radius:6px;border:1px solid var(--border-color);">
+      <button class="tb-btn run-mode-btn" id="btnRun" title="实盘模式">▶ 实盘</button>
+      <button class="tb-btn run-mode-btn" id="btnReplay" title="回放模式">⏪ 回放</button>
+      <button class="tb-btn run-mode-btn active" id="btnSimulation" title="仿真模式">🔬 仿真</button>
+    </div>
     <span class="tb-sep"></span>
     <button class="tb-btn" id="btnTdxPools" title="显示/隐藏池列表侧栏">☰ 列表</button>
     <span class="tb-sep"></span>
     <button class="tb-btn" id="btnRuleEditor" title="规则配置编辑器">⚙ 规则</button>
     <button class="tb-btn" id="btnComprehensiveSettings" title="股票池流程综合设置">⚙ 综合设置</button>
-    <a href="formula.html" class="tb-btn" title="公式编辑器" style="text-decoration:none">📐 公式</a>
-    <a href="config.html" class="tb-btn" title="配置中心" style="text-decoration:none">⚙ 配置中心</a>
+    <a href="#/formula" class="tb-btn" title="公式编辑器" style="text-decoration:none">📐 公式</a>
+    <a href="#/config" class="tb-btn" title="配置中心" style="text-decoration:none">⚙ 配置中心</a>
 
     <div class="topbar-spacer"></div>
     <span class="topbar-zoom" id="topbarZoom">100%</span>
@@ -94,11 +115,11 @@
     <div class="tb-dropdown-wrapper">
       <button class="tb-btn tb-btn-dropdown" id="btnAddNodeOverflow" title="添加节点">➕ 添加 <span class="tb-dropdown-arrow">▼</span></button>
       <div class="tb-dropdown-menu hidden" id="addNodeDropdownOverflow">
-        <div class="tb-dropdown-item" data-node-type="source">📦 备选池</div>
-        <div class="tb-dropdown-item" data-node-type="condition">🔀 转移条件</div>
-        <div class="tb-dropdown-item" data-node-type="statepool">🏷 状态池</div>
-        <div class="tb-dropdown-item" data-node-type="discard">🗑 丢弃池</div>
-        <div class="tb-dropdown-item" data-node-type="label">📝 文字标签</div>
+        <div class="tb-dropdown-item" data-node-type="source" data-action="addSource">📦 备选池</div>
+        <div class="tb-dropdown-item" data-node-type="condition" data-action="addCondition">🔀 转移条件</div>
+        <div class="tb-dropdown-item" data-node-type="statepool" data-action="addStatePool">🏷 状态池</div>
+        <div class="tb-dropdown-item" data-node-type="discard" data-action="addDiscard">🗑 丢弃池</div>
+        <div class="tb-dropdown-item" data-node-type="label" data-action="addLabel">📝 文字标签</div>
       </div>
     </div>
     <div class="tb-dropdown-wrapper">
@@ -120,13 +141,14 @@
     <button class="tb-btn" id="btnFitOverflow" title="适应画布">⊡ 适应</button>
     <button class="tb-btn" id="btnExecOrderOverflow" title="执行顺序">🔢 顺序</button>
     <button class="tb-btn" id="btnFlowModeOverflow" title="连线模式">🔗 连线</button>
-    <button class="tb-btn" id="btnRunOverflow" title="实盘模式">▶ 实盘</button>
-    <button class="tb-btn" id="btnReplayOverflow" title="回放模式">⏪ 回放</button>
-    <button class="tb-btn" id="btnSimulationOverflow" title="仿真模式">🔬 仿真</button>
+    <button class="tb-btn mode-btn" id="btnDesignOverflow" title="设计模式">🎨 设计</button>
+    <button class="tb-btn mode-btn" id="btnRunOverflow" title="实盘模式">▶ 实盘</button>
+    <button class="tb-btn mode-btn" id="btnReplayOverflow" title="回放模式">⏪ 回放</button>
+    <button class="tb-btn mode-btn" id="btnSimulationOverflow" title="仿真模式">🔬 仿真</button>
     <button class="tb-btn" id="btnTdxPoolsOverflow" title="显示/隐藏池列表侧栏">☰ 列表</button>
     <button class="tb-btn" id="btnRuleEditorOverflow" title="规则配置">⚙ 规则</button>
     <button class="tb-btn" id="btnComprehensiveSettingsOverflow" title="综合设置">⚙ 综合设置</button>
-    <a href="formula.html" class="tb-btn" title="公式编辑器" style="text-decoration:none">📐 公式</a>
+    <a href="#/formula" class="tb-btn" title="公式编辑器" style="text-decoration:none">📐 公式</a>
     <button class="tb-btn" id="btnUndoOverflow" title="撤销" disabled>↩ 撤销</button>
     <button class="tb-btn" id="btnRedoOverflow" title="重做" disabled>↪ 重做</button>
   </div>
@@ -380,34 +402,26 @@
       <span class="simulation-step-count" id="simulationStepCount">步数: 0</span>
     </div>
     <div class="simulation-controls">
-      <button class="simulation-btn" id="simBtnStep" title="步进">⏭ 步进</button>
+      <button class="simulation-btn sim-btn-start" id="simBtnStart" title="启动自动步进">▶ 启动</button>
+      <button class="simulation-btn sim-btn-pause" id="simBtnPause" title="暂停自动步进" style="display:none">⏸ 暂停</button>
+      <button class="simulation-btn" id="simBtnStep" title="单步步进">⏭ 步进</button>
       <button class="simulation-btn" id="simBtnReset" title="重置">↻ 重置</button>
       <div class="simulation-delta-group">
-        <label>步长(秒)</label>
+        <label>步长</label>
         <select id="simDeltaSelect">
-          <option value="1">1s</option>
-          <option value="60" selected>60s</option>
+          <option value="1" selected>1s</option>
+          <option value="60">1min</option>
           <option value="300">5min</option>
           <option value="3600">1h</option>
         </select>
       </div>
+      <div class="simulation-speed-group">
+        <label>速度</label>
+        <input type="range" id="simSpeedSlider" min="0.5" max="20" step="0.5" value="1" title="仿真速度">
+        <span class="simulation-speed-value" id="simSpeedValue">1x</span>
+      </div>
     </div>
     <button class="simulation-btn simulation-close-btn" id="simBtnClose" title="退出仿真">✕</button>
-  </div>
-</div>
-
-<!-- ===== Event Panel ===== -->
-<div id="eventPanel">
-  <div class="event-panel-inner">
-    <div class="event-panel-header">
-      <span class="event-panel-title">事件日志</span>
-      <span class="event-panel-count" id="eventPanelCount">0</span>
-      <button class="event-panel-btn" id="eventPanelClear" title="清空">✕</button>
-      <button class="event-panel-btn" id="eventPanelToggle" title="折叠/展开">▾</button>
-    </div>
-    <div class="event-panel-body" id="eventPanelBody">
-      <div class="event-panel-empty" id="eventPanelEmpty">暂无事件</div>
-    </div>
   </div>
 </div>
 
@@ -508,16 +522,320 @@
 <!-- ===== Hidden File Input ===== -->
 <input type="file" id="fileInput" accept=".xml" style="display:none">
 
+<!-- ===== Event Panel (事件浮窗) ===== -->
+<div id="eventPanel" class="event-panel">
+  <div class="event-panel-header">
+    <span class="ep-title">📋 事件流 <span id="eventCount" class="ep-badge">0</span> 步数 <span id="stepCount" class="ep-badge" style="background:#2196F3">0</span></span>
+    <div class="ep-controls">
+      <button id="btnPauseScroll" class="ep-btn" title="暂停滚动">⏸ 滚动</button>
+      <button id="btnClearEvents" class="ep-btn" title="清空">🗑</button>
+      <button id="btnToggleEvents" class="ep-btn" title="折叠/展开">▲</button>
+    </div>
+  </div>
+  <div class="ep-filter-bar">
+    <button class="ep-filter-btn active" data-filter="all" title="全部">📋 全部</button>
+    <button class="ep-filter-btn active" data-filter="tick" title="Tick/DataChanged">📊 Tick</button>
+    <button class="ep-filter-btn active" data-filter="bar" title="Bar/BarComposed">📈 Bar</button>
+    <button class="ep-filter-btn active" data-filter="formula" title="Formula/StockFiltered">🧮 公式</button>
+    <button class="ep-filter-btn active" data-filter="edge" title="Edge/EdgeFired">⚡ 边</button>
+    <button class="ep-filter-btn active" data-filter="transfer" title="Transfer">🔄 转移</button>
+    <button class="ep-filter-btn active" data-filter="signal" title="Signal/BUY/SELL">💰 信号</button>
+    <button class="ep-filter-btn active" data-filter="order" title="Order/Position">📋 订单</button>
+    <button class="ep-filter-btn active" data-filter="ttl" title="TTL/Timeout">⏰ TTL</button>
+    <button class="ep-filter-btn active" data-filter="system" title="Mode/Time">🔧 系统</button>
+  </div>
+
+  <div id="epTimelineSection" class="ep-timeline-section">
+    <div class="ep-timeline-header" id="epTimelineToggle">
+      <span class="ep-timeline-title">⏱ 时间轴</span>
+      <div class="ep-timeline-controls">
+        <button id="btnTimelineAutoScroll" class="ep-timeline-btn active" title="暂停/继续自动滚动">⏸ 跟随</button>
+        <button id="btnTimelineZoomIn" class="ep-timeline-btn" title="放大">+</button>
+        <button id="btnTimelineZoomOut" class="ep-timeline-btn" title="缩小">-</button>
+        <button id="btnTimelineReset" class="ep-timeline-btn" title="重置视图">⟲</button>
+        <span class="ep-timeline-collapse">▼</span>
+      </div>
+    </div>
+    <div id="epTimelineContainer" class="ep-timeline-container">
+      <canvas id="epTimelineCanvas" class="ep-timeline-canvas"></canvas>
+      <div id="epTimelineTooltip" class="ep-timeline-tooltip" style="display:none;"></div>
+    </div>
+  </div>
+  <div id="eventPanelBody" class="event-panel-body">
+    <div class="ep-section-header">
+      <span>✅ 已处理事件</span>
+      <span class="ep-section-count" id="processedCount">0</span>
+    </div>
+    <div id="processedEventList" class="event-list ep-section-body"></div>
+    <div class="ep-section-header">
+      <span>⏳ 待处理/未排队事件</span>
+      <span class="ep-section-count" id="pendingCount">0</span>
+    </div>
+    <div id="pendingEventList" class="event-list ep-section-body pending"></div>
+  </div>
+</div>
+
+<!-- ===== Chart Panel (K线 & 公式) ===== -->
+<div id="chartPanel" class="chart-panel" style="display:none">
+  <div class="chart-panel-header">
+    <span>📊 K线 & 公式</span>
+    <select id="chartCodeSelect" class="cp-select"></select>
+    <select id="chartPeriodSelect" class="cp-select">
+      <option value="1min">1分钟</option>
+      <option value="5min">5分钟</option>
+    </select>
+    <button id="btnCloseChart" class="ep-btn">✕</button>
+  </div>
+  <canvas id="miniChart" width="460" height="220"></canvas>
+  <div id="formulaResult" class="formula-result"></div>
+</div>
+
 <!-- ===== Scripts ===== -->
-<script src="js/table-driven-panel.js?v=63"></script>
-<script src="js/charts.js?v=1"></script>
-<script src="js/editor.js?v=1"></script>
-<script src="js/comprehensive-settings.js?v=1"></script>
-<script type="module" src="js/canvas.js?v=86"></script>
-<script type="module" src="js/main.js?v=89"></script>
+
+
+
+
+
+
 
 <!-- 所有下拉菜单挂载到此容器，避免被 topbar overflow 裁剪 -->
 <div id="dropdownContainer" style="position:fixed;top:0;left:0;width:0;height:0;overflow:visible;z-index:9999;pointer-events:none;"></div>
+</div>
+
+<!-- ===== 视图：配置中心 (来自原 config.html) ===== -->
+<div id="view-config" class="view-container" style="display:none;">
+<div class="app">
+  <div class="hdr">
+    <div class="hdr-logo">⚙ 配置中心</div>
+    <div class="hdr-nav">
+      <a href="#/">← 股票池</a>
+      <a href="#/">设计器</a>
+    </div>
+    <div class="hdr-sp"></div>
+    <div class="hdr-st">
+      <div class="dot" id="dot"></div>
+      <span id="stTxt">连接中...</span>
+      <span id="tCnt"></span>
+    </div>
+    <button class="btn" id="btnVal" title="校验全部">✓ 校验</button>
+    <button class="btn" id="btnReload" title="热加载">↻ 热加载</button>
+  </div>
+
+  <div class="body">
+    <div class="side">
+      <div class="side-title">配置分类</div>
+      <div id="catList"></div>
+    </div>
+
+    <div class="list">
+      <div class="list-hdr">
+        <div class="sch-wrap">
+          <input type="text" class="sch" id="schInput" placeholder="搜索配置表...">
+        </div>
+      </div>
+      <div class="list-body" id="tList"></div>
+    </div>
+
+    <div class="ed" id="edPanel">
+      <div class="empty" id="emptySt">
+        <div class="empty-icon">📋</div>
+        <div class="empty-text">选择左侧配置表查看与编辑</div>
+      </div>
+      <div id="edContent" style="display:none;flex:1;flex-direction:column;overflow:hidden;">
+        <div class="ed-hdr">
+          <div class="ed-title" id="edTitle"></div>
+          <div class="ed-meta" id="edMeta"></div>
+          <div class="ed-acts">
+            <button class="btn" id="btnCopy">⎘ 复制</button>
+            <button class="btn" id="configBtnUndo" disabled>↩ 撤销</button>
+            <button class="btn pri" id="configBtnSave" style="display:none">💾 保存</button>
+          </div>
+        </div>
+        <div class="tabs" id="edTabs">
+          <div class="tab on" data-tab="table">表格</div>
+          <div class="tab" data-tab="json">JSON</div>
+          <div class="tab" data-tab="form">表单</div>
+          <div class="tab" data-tab="validate">校验</div>
+        </div>
+        <div class="tcontent on" id="tc-table">
+          <div class="tv" id="tableView"></div>
+        </div>
+        <div class="tcontent" id="tc-json">
+          <div class="je">
+            <textarea id="jsonEd" spellcheck="false"></textarea>
+          </div>
+        </div>
+        <div class="tcontent" id="tc-form">
+          <div class="fv" id="formView"></div>
+        </div>
+        <div class="tcontent" id="tc-validate">
+          <div class="vr" id="valView"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-c" id="toastC"></div>
+</div>
+
+<!-- ===== 视图：公式管理 (来自原 formula.html) ===== -->
+<div id="view-formula" class="view-container" style="display:none;">
+<div class="container">
+        <header>
+            <h1>公式管理系统</h1>
+            <div class="header-actions">
+                <button id="btn-health" class="btn">检查引擎状态</button>
+                <button id="btn-refresh" class="btn btn-primary">刷新列表</button>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <!-- 左侧：公式列表 -->
+            <div class="panel panel-left">
+                <div class="panel-header">
+                    <h2>公式列表</h2>
+                    <div class="search-box">
+                        <input type="text" id="search-input" placeholder="搜索公式名称...">
+                        <select id="filter-category">
+                            <option value="">全部分类</option>
+                            <option value="indicator">指标公式</option>
+                            <option value="xg">选股公式</option>
+                            <option value="exp">专家系统</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <div id="formula-list" class="formula-list"></div>
+                </div>
+                <div class="panel-footer">
+                    <button id="btn-create" class="btn btn-success">新建公式</button>
+                </div>
+            </div>
+
+            <!-- 右侧：公式编辑器 -->
+            <div class="panel panel-right">
+                <div class="panel-header">
+                    <h2 id="editor-title">公式编辑器</h2>
+                    <div class="editor-actions">
+                        <button id="btn-save" class="btn btn-primary">保存</button>
+                        <button id="btn-test" class="btn btn-warning">测试</button>
+                        <button id="btn-delete" class="btn btn-danger">删除</button>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <form id="formula-form">
+                        <div class="form-group">
+                            <label for="formula-name">公式名称</label>
+                            <input type="text" id="formula-name" required>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="formula-category">分类</label>
+                                <select id="formula-category" required>
+                                    <option value="indicator">指标公式</option>
+                                    <option value="xg">选股公式</option>
+                                    <option value="exp">专家系统</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="formula-type">类型</label>
+                                <select id="formula-type" required>
+                                    <option value="indicator">指标</option>
+                                    <option value="xg">选股</option>
+                                    <option value="exp">专家系统</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="formula-description">描述</label>
+                            <textarea id="formula-description" rows="2"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="formula-script">公式脚本</label>
+                            <textarea id="formula-script" rows="10" class="code-editor" required></textarea>
+                            <small class="form-text">使用 TDX/DZH 公式语法，每条语句以分号结尾</small>
+                        </div>
+                        <div class="form-group">
+                            <label>参数列表</label>
+                            <div id="formula-args" class="args-container"></div>
+                            <button type="button" id="btn-add-arg" class="btn btn-sm">添加参数</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- 测试结果面板 -->
+        <div id="test-result-panel" class="test-result-panel hidden">
+            <div class="panel-header">
+                <h2>测试结果</h2>
+                <button id="btn-close-test" class="btn btn-sm">关闭</button>
+            </div>
+            <div class="panel-content">
+                <div id="test-result-content"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 测试对话框 -->
+    <div id="test-dialog" class="dialog hidden">
+        <div class="dialog-content">
+            <div class="dialog-header">
+                <h3>测试公式</h3>
+                <button class="btn-close" onclick="closeTestDialog()">×</button>
+            </div>
+            <div class="dialog-body">
+                <div class="form-group">
+                    <label for="test-stock-code">股票代码</label>
+                    <input type="text" id="test-stock-code" value="000001" placeholder="如：000001">
+                </div>
+                <div class="form-group">
+                    <label for="test-period">周期</label>
+                    <select id="test-period">
+                        <option value="1d">日线</option>
+                        <option value="1wk">周线</option>
+                        <option value="1mon">月线</option>
+                        <option value="1m">1分钟</option>
+                        <option value="5m">5分钟</option>
+                        <option value="15m">15分钟</option>
+                        <option value="30m">30分钟</option>
+                        <option value="60m">60分钟</option>
+                    </select>
+                </div>
+                <div id="test-xg-stocks" class="form-group hidden">
+                    <label for="test-stock-list">股票列表（选股公式）</label>
+                    <textarea id="test-stock-list" rows="3" placeholder="每行一个股票代码，如：&#10;000001&#10;000002&#10;600000"></textarea>
+                </div>
+            </div>
+            <div class="dialog-footer">
+                <button class="btn" onclick="closeTestDialog()">取消</button>
+                <button class="btn btn-primary" onclick="executeTest()">执行测试</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== 合并后的 JS 引用（按依赖顺序：canvas.js → ui.js → app.js） ===== -->
+<script src="js/canvas.js?v=4"></script>
+<script src="js/ui.js?v=4"></script>
+<script src="js/app.js?v=4"></script>
+<script>
+  // Hash 路由监听器
+  function route() {
+    const hash = location.hash || '#/';
+    document.querySelectorAll('.view-container').forEach(el => el.style.display = 'none');
+    if (hash === '#/config') {
+      document.getElementById('view-config').style.display = 'block';
+    } else if (hash === '#/formula') {
+      document.getElementById('view-formula').style.display = 'block';
+    } else {
+      document.getElementById('view-main').style.display = 'block';
+    }
+  }
+  window.addEventListener('hashchange', route);
+  window.addEventListener('load', route);
+</script>
 
 </body>
 </html>

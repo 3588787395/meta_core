@@ -1,20 +1,21 @@
 import logging, re, json, os
 import asyncio
+import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request as _Request, HTTPException as _HTTPException, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, StreamingResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
 try:
-    from .core.engine import MetaEngine
+    from .core.engine import PoolEngine
 except ImportError:
-    from engine import MetaEngine
+    from core.engine import PoolEngine
 
 try:
     from .services.storage import Storage, safe_path_join
@@ -27,9 +28,9 @@ except ImportError:
     from services.tq_adapter import TqAdapter
 
 try:
-    from .services.minute_aggregator import Min1Aggregator
+    from .core.tick_bar_module import Min1Aggregator
 except ImportError:
-    from services.minute_aggregator import Min1Aggregator
+    from core.tick_bar_module import Min1Aggregator
 
 try:
     from .services.data import DataQueryService
@@ -87,14 +88,14 @@ except ImportError:
     from api import create_formula_router
 
 try:
-    from .core.replay import KLineReplayEngine
+    from .core.runtime_mode_module import KLineReplayEngine
 except ImportError:
-    from replay import KLineReplayEngine
+    from core.runtime_mode_module import KLineReplayEngine
 
 try:
-    from .converters.json_xml import _build_tdx_xml, _tdx_pool_to_frontend, _load_tdx_pool_config
+    from .converters import _build_tdx_xml, _tdx_pool_to_frontend, _load_tdx_pool_config
 except ImportError:
-    from converters.json_xml import _build_tdx_xml, _tdx_pool_to_frontend, _load_tdx_pool_config
+    from converters import _build_tdx_xml, _tdx_pool_to_frontend, _load_tdx_pool_config
 
 try:
     from .api import _enrich_tdx_node_data
@@ -102,34 +103,289 @@ except ImportError:
     from api import _enrich_tdx_node_data
 
 try:
-    from .services.trading_service import _read_history_log, _dispatch_pool_enter_actions, _quote_filename
+    from .core.trade_module import _read_history_log, _dispatch_pool_enter_actions, _quote_filename
 except ImportError:
-    from services.trading_service import _read_history_log, _dispatch_pool_enter_actions, _quote_filename
+    from core.trade_module import _read_history_log, _dispatch_pool_enter_actions, _quote_filename
 
 try:
-    from .core._market_utils import _stock_code
+    from .core.domain import _stock_code
 except ImportError:
-    from core._market_utils import _stock_code
+    from core.domain import _stock_code
+
+# ─── Task 15: 事件布线器装配层 import（app.py 是装配层，允许 import 所有模块） ──
+try:
+    from .core.event_bus import EventBus
+except ImportError:
+    from core.event_bus import EventBus
+
+try:
+    from .core.table_engine import ConfigStore
+except ImportError:
+    from core.table_engine import ConfigStore
+
+try:
+    from .core.tick_bar_module import TickBarModule
+except ImportError:
+    from core.tick_bar_module import TickBarModule
+
+try:
+    from .core.formula_module import FormulaModule
+except ImportError:
+    from core.formula_module import FormulaModule
+
+try:
+    from .core.screening_module import ScreeningModule
+except ImportError:
+    from core.screening_module import ScreeningModule
+
+try:
+    from .core.execution_module import ExecutionModule
+except ImportError:
+    from core.execution_module import ExecutionModule
+
+try:
+    from .core.trade_module import TradeModule
+except ImportError:
+    from core.trade_module import TradeModule
+
+try:
+    from .core.monitoring_module import MonitoringModule, StatisticsModule
+except ImportError:
+    from core.monitoring_module import MonitoringModule, StatisticsModule
+
+try:
+    from .core.import_export_module import ImportExportModule
+except ImportError:
+    from core.import_export_module import ImportExportModule
+
+try:
+    from .core.runtime_mode_module import RuntimeModeModule
+except ImportError:
+    from core.runtime_mode_module import RuntimeModeModule
+
+try:
+    from .services.data import CandidatePoolResolver
+except ImportError:
+    from services.data import CandidatePoolResolver
+
+try:
+    from .services.data import DataSourceContract
+except ImportError:
+    from services.data import DataSourceContract
+
+try:
+    from .core.table_engine import HotReloadManager
+except ImportError:
+    from core.table_engine import HotReloadManager
 
 _BASE = Path(__file__).parent
 _CONFIG = _BASE / "config"
 _TDXPOOL_DIR = _BASE / "tdxpool"
 web_dir = _BASE / "web"
 
+def _import_demo_pools(storage):
+    """从config/pools目录导入所有示例股票池到storage，优先导入target_pool_100.json"""
+    import json as _json
+    pools_dir = _CONFIG / "pools"
+    
+    target_file = pools_dir / "target_pool_100.json"
+    if target_file.exists():
+        files_to_import = [target_file]
+        for f in pools_dir.glob("*.json"):
+            if f.name != "target_pool_100.json" and f.name != "pool_types.json":
+                files_to_import.append(f)
+    else:
+        files_to_import = list(pools_dir.glob("*.json"))
+        files_to_import = [f for f in files_to_import if f.name != "pool_types.json"]
+    
+    for f in files_to_import:
+        try:
+            with open(f, 'r', encoding='utf-8') as fp:
+                pool_data = _json.load(fp)
+            pool_id = pool_data.get("id") or f.stem
+            existing = storage.get_pool(pool_id)
+            if existing:
+                continue
+            pool_name = pool_data.get("name") or pool_id
+            nodes = pool_data.get("nodes", [])
+            edges = pool_data.get("edges", [])
+            pool_meta = {}
+            for k, v in pool_data.items():
+                if k not in ("id", "name", "nodes", "edges"):
+                    pool_meta[k] = v
+            pool_type = pool_data.get("pool_type", "dzh")
+            storage.save_pool(pool_id, {
+                "name": pool_name,
+                "pool_type": pool_type,
+                "description": pool_data.get("description", ""),
+                "topology_mode": pool_data.get("topology_mode", "flow"),
+                "status": "active",
+                "nodes": nodes,
+                "edges": edges,
+                "pool_meta": pool_meta,
+            })
+            logging.info("导入示例股票池: %s (%s)", pool_name, pool_id)
+        except Exception as ex:
+            logging.warning("导入示例股票池失败 %s: %s", f.name, ex)
+
+def load_global_config() -> dict:
+    """加载全局配置（config/defaults.json），供模块构造函数注入。"""
+    try:
+        cfg_path = _CONFIG / "runtime" / "defaults.json"
+        with open(cfg_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
 @asynccontextmanager
 async def lifespan(app):
-    app.state.engine = MetaEngine()
-    app.state.storage = Storage()
+    """事件布线器：创建 EventBus，依次实例化所有模块，注入 EventBus。
+
+    Task 15（unify-stockpool-oop-event-driven）：
+        - 创建 EventBus 作为模块间唯一通信中介
+        - 依次实例化 16 个模块（ConfigStore / Storage / CandidatePoolResolver /
+          DataSourceContract / TickBar / Formula / Screening / Execution / Trade /
+          Statistics / Monitoring / ImportExport / RuntimeMode / HotReload），
+          每个模块仅注入 EventBus + 配置 dict
+        - 保留 legacy PoolEngine / TqAdapter / Min1Aggregator / DataQueryService /
+          DataSyncService 供现有 API 路由调用（Task 16 再迁移为事件驱动）
+        - 删除 engine.set_xxx() 跨模块依赖注入（模块间只通过 EventBus 交互）
+    """
+    # ═══ 1. 创建 EventBus（模块间唯一通信中介） ═══
+    bus = EventBus()
+    app.state.bus = bus
+
+    # ═══ 2. 加载全局配置 ═══
+    config = load_global_config()
+    config_dir = str(_CONFIG)
+
+    # ═══ 3. 依次实例化 16 个模块（仅注入 EventBus + 配置 dict） ═══
+
+    # ── 3.1 Config 模块（加载配置表，订阅 ConfigChanged 事件重载） ──
+    config_store = ConfigStore(config_dir=config_dir, bus=bus)
+    config_store.load_all()
+    app.state.config_store = config_store
+
+    # ── 3.2 Database 模块（Storage 已事件化，构造函数接收 bus） ──
+    storage = Storage(bus=bus)
+    app.state.storage = storage
+
+    # ── 3.3 DataSource 模块（候选池解析器 + 数据源契约） ──
+    candidate_resolver = CandidatePoolResolver(storage=storage, providers={}, bus=bus)
+    app.state.candidate_resolver = candidate_resolver
+    data_contract = DataSourceContract(config=config, bus=bus)
+    app.state.data_contract = data_contract
+
+    # ── 3.4 TickBar 模块 ──
+    tick_bar = TickBarModule(bus=bus, config=config)
+    app.state.tick_bar = tick_bar
+
+    # ── 3.5 Formula 模块 ──
+    # 注入 data_query（从 TickBarModule._state 获取 bars_history）+ HQChartProvider
+    # 解决 FormulaModule._on_bar_composed 中 "data_query is required" 错误
+    from core.tick_bar_module import make_bars_history_getter
+    from services.providers import HQChartProvider
+
+    class _StateBackedDataQuery:
+        """从 TickBarModule._state 派生的 data_query 适配器。
+
+        实现 IDataQuery.get_kline_series(symbol, period) 协议，
+        返回 bars_history[period][symbol] + 当前 bar 的拼接 DataFrame。
+        """
+        def __init__(self, tick_bar_module):
+            self._tick_bar = tick_bar_module
+            self._getter = None
+
+        def _ensure_getter(self):
+            state = getattr(self._tick_bar, "_state", None)
+            if state is None:
+                return None
+            # 延迟构造 getter，每次调用都重新创建以反映最新 state
+            return make_bars_history_getter(state)
+
+        def get_kline_series(self, symbol: str, period: str):
+            getter = self._ensure_getter()
+            if getter is None:
+                import pandas as pd
+                return pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
+            return getter(symbol, period)
+
+    _data_query = _StateBackedDataQuery(tick_bar)
+    try:
+        _hqchart_provider = HQChartProvider(bus=bus, config=config)
+    except Exception as ex:
+        logger.warning("HQChartProvider 初始化失败: %s", ex)
+        _hqchart_provider = None
+    formula = FormulaModule(
+        bus=bus, config=config,
+        data_query=_data_query,
+        hqchart_provider=_hqchart_provider,
+    )
+    app.state.formula = formula
+
+    # ── 3.6 Screening 模块 ──
+    screening = ScreeningModule(bus=bus, config=config)
+    app.state.screening = screening
+
+    # ── 3.7 Execution 模块 ──
+    # SubTask 8.2: 注入 PoolEngine 实例作为 meta_engine，使 ExecutionModule
+    # 在 _on_stock_filtered 中能通过 _ensure_engine() 获取 PoolEngine，
+    # 将筛选结果写入 state.filter_inputs 供 EdgeExecutor._filter 读取。
+    # 不注入会导致 StockFiltered → EdgeExecutor._filter 缓存链断裂，
+    # entered=[] 永远为空，TransferExecuted/OrderPlaced 等下游事件全部缺失。
+    pool_engine_for_execution = PoolEngine(bus=bus)
+    execution = ExecutionModule(bus=bus, config=config, meta_engine=pool_engine_for_execution)
+    app.state.execution = execution
+
+    # ── 3.8 Trade 模块 ──
+    trade = TradeModule(bus=bus, config=config)
+    app.state.trade = trade
+
+    # ── 3.9 Statistics 模块 ──
+    statistics = StatisticsModule(bus=bus, config=config)
+    app.state.statistics = statistics
+
+    # ── 3.10 Monitoring 模块 ──
+    monitoring = MonitoringModule(bus=bus, config=config)
+    app.state.monitoring = monitoring
+
+    # ── 3.11 ImportExport 模块 ──
+    import_export = ImportExportModule(bus=bus, config=config)
+    app.state.import_export = import_export
+
+    # ── 3.12 RuntimeMode 模块 ──
+    runtime_mode = RuntimeModeModule(bus=bus, config=config)
+    app.state.runtime_mode = runtime_mode
+
+    # ── 3.13 HotReload 模块（bus 注入后发布 ConfigChanged 事件） ──
+    hot_reload = HotReloadManager(
+        config_dir=config_dir,
+        config_store=config_store,
+        storage=storage,
+        bus=bus,
+        on_change=lambda changed: logging.info(f"配置变更: {changed}"),
+    )
+    app.state.hot_reload = hot_reload
+
+    # ═══ 4. 启动 HotReload watchdog 监听 ═══
+    if hasattr(hot_reload, 'start_watchdog'):
+        hot_reload.start_watchdog()
+
+    # ═══ 5. Legacy 保留：PoolEngine / TqAdapter / Min1Aggregator /
+    #         DataQueryService / DataSyncService（供现有 API 路由调用） ═══
+    # Task 15.2: 删除 engine.set_xxx() 跨模块依赖注入——模块间只通过 EventBus 交互。
+    # PoolEngine 保留为 API 层状态读取适配器（_pk_rankings / event_panel 等），
+    # 不再注入 tq_adapter / storage / minute_aggregator。
+    # SubTask 22.3: PoolEngine 接收 bus 参数，与所有模块共享同一 EventBus 实例。
+    # Task 24: MetaEngine 已合并入 PoolEngine，统一使用 PoolEngine 类名（已完成合并）。
+    # SubTask 8.2: 复用注入给 ExecutionModule 的 PoolEngine 实例，避免重复
+    # 创建导致 EventBus 重复订阅（同一事件被处理两次）。
+    app.state.engine = pool_engine_for_execution
     app.state.tq = TqAdapter(mock_mode=False)
-    app.state.engine.set_tq_adapter(app.state.tq)
-    app.state.engine.set_storage(app.state.storage)
     logging.info("TqAdapter 初始化完成，数据模式: %s", app.state.tq.get_mode_info())
-    # 实时分钟线合成器（Task 9: 接线 Min1Aggregator 实时流）
-    # symbols 初始为空，由池加载/请求处理器按需更新监控标的集合
     app.state.minute_aggregator = Min1Aggregator(symbols=[])
-    app.state.engine.set_minute_aggregator(app.state.minute_aggregator)
     logging.info("Min1Aggregator 初始化完成，监控标的数: %d", app.state.minute_aggregator.n)
-    # 数据查询/同步服务（注入 minute_aggregator，供 K 线拼接与实时流复用）
     app.state.data_query_service = DataQueryService(
         storage=app.state.storage,
         minute_aggregator=app.state.minute_aggregator,
@@ -139,26 +395,24 @@ async def lifespan(app):
         storage=app.state.storage,
         minute_aggregator=app.state.minute_aggregator,
     )
-    logging.info("DataQueryService / DataSyncService 初始化完成（已注入 minute_aggregator）")
-    set_table_engine(app.state.engine, str(Path(__file__).parent / "config"))
+    logging.info("DataQueryService / DataSyncService 初始化完成（legacy 保留）")
+
+    # ═══ 6. API 层接线（路由注册在 app.py 主体） ═══
+    # SubTask 22.5: 传递 bus 给 set_table_engine，供命令类端点发布事件
+    set_table_engine(app.state.engine, config_dir, bus=bus)
     app.state._simulators = {}  # 仿真会话池：{name: RuntimeSimulator}
-    # 初始化热加载管理器
-    from .services.hot_reload import HotReloadManager
-    config_dir = str(Path(__file__).parent / "config")
-    if hasattr(app.state.engine, '_config_store') and app.state.engine._config_store:
-        _hrm = HotReloadManager(
-            config_dir=config_dir,
-            config_store=app.state.engine._config_store,
-            storage=app.state.storage,
-            on_change=lambda changed: logging.info(f"配置变更: {changed}")
-        )
-        config_api_init(
-            config_store=app.state.engine._config_store,
-            hot_reload_manager=_hrm
-        )
-    else:
-        config_api_init(config_store=None)
+    app.state._sim_session_map = {}  # 基于 session_id 的仿真会话：{session_id: {simulator, pool_id, events}}
+
+    # 自动导入示例股票池
+    _import_demo_pools(app.state.storage)
+    # 初始化 config API（注入新 config_store + hot_reload_manager）
+    config_api_init(config_store=config_store, hot_reload_manager=hot_reload)
+
     yield
+
+    # ═══ 7. 关闭清理 ═══
+    if hasattr(hot_reload, 'stop_watchdog'):
+        hot_reload.stop_watchdog()
 
 # ─── API Key 认证中间件 ───────────────────────────────────────
 _api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -168,7 +422,7 @@ def _load_auth_config():
     try:
         import json
         from pathlib import Path
-        cfg_path = Path(__file__).parent / "config" / "defaults.json"
+        cfg_path = Path(__file__).parent / "config" / "runtime" / "defaults.json"
         with open(cfg_path, 'r', encoding='utf-8') as f:
             cfg = json.load(f)
         return cfg.get('auth', {})
@@ -180,7 +434,7 @@ def _load_cors_config():
     try:
         import json
         from pathlib import Path
-        cfg_path = Path(__file__).parent / "config" / "defaults.json"
+        cfg_path = Path(__file__).parent / "config" / "runtime" / "defaults.json"
         with open(cfg_path, 'r', encoding='utf-8') as f:
             cfg = json.load(f)
         return cfg.get('cors', {})
@@ -198,16 +452,93 @@ async def verify_api_key(api_key: str = Depends(_api_key_header)):
     if api_key != expected_key:
         raise HTTPException(status_code=401, detail="无效或缺失的 API Key")
 
-app = FastAPI(title="MetaEngine Stock Pool", version="1.0", lifespan=lifespan)
+app = FastAPI(title="PoolEngine Stock Pool", version="1.0", lifespan=lifespan)
 _cors_cfg = _load_cors_config()
 _cors_origins = _cors_cfg.get('allowed_origins', ["http://localhost:*", "http://127.0.0.1:*"])
 app.add_middleware(CORSMiddleware, allow_origins=_cors_origins, allow_methods=["*"], allow_headers=["*"], allow_credentials=True)
+
+# ══════════════════════════════════════════════════════════════════════
+#  已保存股票池 API（前端 web/js/main.js 调用，无需 API Key）
+#  放在 include_router 之前，确保优先于 /api 下 execution router 的同名端点
+# ══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/pools", tags=["pools"])
+async def api_list_pools(request: _Request):
+    """返回已保存股票池列表。"""
+    try:
+        storage = request.app.state.storage
+        pools = storage.list_pools()
+        result = []
+        for p in pools:
+            pool_id = p.get("pool_id") or p.get("id", "")
+            counts = storage.get_pool_counts(pool_id)
+            result.append({
+                "pool_id": pool_id,
+                "id": pool_id,
+                "name": p.get("name", ""),
+                "pool_type": p.get("pool_type", ""),
+                "node_count": counts.get("node_count", 0),
+                "edge_count": counts.get("edge_count", 0),
+                "updated_at": p.get("updated_at", ""),
+            })
+        return {"code": 0, "data": result}
+    except Exception as ex:
+        return {"code": 1, "msg": str(ex)}
+
+
+@app.get("/api/pools/{pool_id}", tags=["pools"])
+async def api_get_pool(pool_id: str, request: _Request):
+    """返回指定股票池的图数据。"""
+    try:
+        storage = request.app.state.storage
+        pool = storage.get_pool(pool_id)
+        if not pool:
+            return {"code": 1, "msg": f"股票池不存在: {pool_id}"}
+        params = pool.get("params") or {}
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except json.JSONDecodeError:
+                params = {}
+        graph_data = dict(params) if isinstance(params, dict) else {}
+        graph_data["name"] = pool.get("name", "")
+        graph_data["pool_type"] = pool.get("pool_type", "")
+        if "pool_meta" not in graph_data or not isinstance(graph_data["pool_meta"], dict):
+            graph_data["pool_meta"] = {}
+        graph_data["pool_meta"].setdefault("name", pool.get("name", ""))
+        graph_data["pool_meta"].setdefault("type", pool.get("pool_type", ""))
+        graph_data["pool_meta"].setdefault("pool_id", pool_id)
+        _enrich_tdx_node_data(graph_data)
+        return {"code": 0, "data": graph_data}
+    except Exception as ex:
+        return {"code": 1, "msg": str(ex)}
+
+
+@app.delete("/api/pools/{pool_id}", tags=["pools"])
+async def api_delete_pool(pool_id: str, request: _Request):
+    """删除指定股票池。"""
+    try:
+        storage = request.app.state.storage
+        if not storage.get_pool(pool_id):
+            return {"code": 1, "msg": f"股票池不存在: {pool_id}"}
+        storage.delete_pool(pool_id)
+        return {"code": 0, "data": None}
+    except Exception as ex:
+        return {"code": 1, "msg": str(ex)}
+
+
+@app.post("/api/pools/{pool_id}/state-pools/{node_id}/prefetch-klines", tags=["pools"])
+async def api_prefetch_pool_klines(pool_id: str, node_id: str, period: str = "day", request: _Request = None):
+    """预取状态池 K 线（当前仅返回空成功）。"""
+    return {"code": 0, "data": None}
+
+
 app.include_router(create_meta_router(), prefix="/api/meta", tags=["元数据"], dependencies=[Depends(verify_api_key)])
 app.include_router(create_execution_router(), prefix="/api", tags=["执行"], dependencies=[Depends(verify_api_key)])
 app.include_router(create_dzh_router(), dependencies=[Depends(verify_api_key)])
 app.include_router(create_json_router(), prefix="/api/json", tags=["JSON导入导出"], dependencies=[Depends(verify_api_key)])
-app.include_router(create_sim_router(), dependencies=[Depends(verify_api_key)])
 app.include_router(create_replay_router(), dependencies=[Depends(verify_api_key)])
+# /api/sim/* 端点由本文件下方基于 session_id 的实现提供，不再挂载 api.py 中的旧版 sim router（原 api/system_api.py 已合并到 api.py）
 app.include_router(table_router, dependencies=[Depends(verify_api_key)])
 app.include_router(table_config_router, dependencies=[Depends(verify_api_key)])
 app.include_router(config_api_router, dependencies=[Depends(verify_api_key)])
@@ -226,7 +557,7 @@ async def tdx_load_pool(name: str):
     if ".." in name or "/" in name or "\\" in name:
         raise _HTTPException(status_code=400, detail="Invalid pool name")
     try:
-        from .converters.tdx import parse_tdx_xml
+        from .converters import parse_tdx_xml
         xml_path = os.path.join(os.path.dirname(__file__), 'tdxpool', name + '.xml')
         if not os.path.isfile(xml_path): raise _HTTPException(status_code=404, detail=f"文件未找到: {name}.xml")
         pool = parse_tdx_xml(xml_path)
@@ -338,7 +669,7 @@ async def tdx_save_pool(name: str, request: _Request):
 #  数据源状态端点（H2 修复：暴露状态 + 显式切换）
 # ══════════════════════════════════════════════════════════════════════
 
-# [重复端点说明] /api/data_source/status 与 /api/meta/datasource/list (meta_api.py) 功能重叠
+# [重复端点说明] /api/data_source/status 与 /api/meta/datasource/list (api.py 中合并自 meta_api) 功能重叠
 # 主端点: /api/meta/datasource/list（更完整的数据源列表，含 ready 状态）
 @app.get("/api/data_source/status", tags=["data_source"])
 async def get_data_source_status():
@@ -364,7 +695,7 @@ async def get_data_source_status():
     }
 
 
-# [重复端点说明] /api/data_source/select/{name} 与 /api/meta/datasource/switch (meta_api.py) 功能重叠
+# [重复端点说明] /api/data_source/select/{name} 与 /api/meta/datasource/switch (api.py 中合并自 meta_api) 功能重叠
 # 主端点: /api/meta/datasource/switch（统一数据源切换接口）
 @app.post("/api/data_source/select/{name}", tags=["data_source"], dependencies=[Depends(verify_api_key)])
 async def select_data_source(name: str):
@@ -386,6 +717,451 @@ async def select_data_source(name: str):
 #  池运行时表端点（node_stocks / 事件 / 信号）
 # ══════════════════════════════════════════════════════════════════════
 
+
+def _get_engine_event_panel(request: Request):
+    """获取当前引擎 EventPanel：优先活跃仿真/回放，其次活跃池引擎。"""
+    engine = request.app.state.engine
+    sims = getattr(request.app.state, "_simulators", {})
+    if sims:
+        for sim in reversed(list(sims.values())):
+            pe = getattr(sim, "_pool_engine", None)
+            if pe is None:
+                inner = getattr(sim, "_engine", None)
+                pe = getattr(inner, "_pool_engine", None) if inner else None
+            ep = getattr(pe, "event_panel", None) if pe else None
+            if ep is not None:
+                return ep
+    sim_session_map = getattr(request.app.state, "_sim_session_map", {})
+    if sim_session_map:
+        for session in reversed(list(sim_session_map.values())):
+            simulator = session.get("simulator")
+            if simulator is None:
+                continue
+            pe = getattr(simulator, "_pool_engine", None)
+            if pe is None:
+                inner = getattr(simulator, "_engine", None)
+                pe = getattr(inner, "_pool_engine", None) if inner else None
+            ep = getattr(pe, "event_panel", None) if pe else None
+            if ep is not None:
+                return ep
+    replays = getattr(request.app.state, "_replay_engines", {})
+    if replays:
+        for re in reversed(list(replays.values())):
+            pe = getattr(re, "_pool_engine", None)
+            ep = getattr(pe, "event_panel", None) if pe else None
+            if ep is not None:
+                return ep
+    pe = getattr(engine, "_pool_engine", None)
+    if pe is not None:
+        return getattr(pe, "event_panel", None)
+    return getattr(engine, "event_panel", None)
+
+
+@app.get("/api/events/recent", tags=["events"])
+async def get_events_recent(limit: int = 100, request: Request = None):
+    """返回最近已记录的事件（EventPanel 视图）。"""
+    try:
+        ep = _get_engine_event_panel(request)
+        if ep is None:
+            return {"success": True, "events": []}
+        events = ep.get_events()[-limit:]
+        return {"success": True, "count": len(events), "events": events}
+    except Exception as ex:
+        return {"success": False, "error": str(ex)}
+
+
+@app.get("/api/events/pending", tags=["events"])
+async def get_events_pending(clear: int = 1, request: Request = None):
+    """返回未排队事件（自上次清空后新增）。clear=1 时读取后清空 pending 缓存。"""
+    try:
+        ep = _get_engine_event_panel(request)
+        if ep is None:
+            return {"success": True, "events": []}
+        events = ep.get_pending(clear=bool(clear))
+        return {"success": True, "count": len(events), "events": events}
+    except Exception as ex:
+        return {"success": False, "error": str(ex)}
+
+
+@app.get("/api/events/stream", tags=["events"])
+async def events_stream(request: Request):
+    """SSE事件流端点：订阅EventBus所有事件，实时推送到前端。"""
+    bus = request.app.state.bus
+    from datetime import datetime
+    import time as _time
+    import queue as thread_queue
+    
+    async def event_generator():
+        loop = asyncio.get_running_loop()
+        sync_queue = thread_queue.Queue(maxsize=10000)
+        pending_events = []
+        
+        def event_callback(event):
+            try:
+                ev_type = type(event).__name__
+                ev_dict = {}
+                if hasattr(event, '__dict__'):
+                    ev_dict = {k: v for k, v in event.__dict__.items() if not k.startswith('_')}
+                else:
+                    ev_dict = dict(event) if isinstance(event, dict) else {}
+                
+                code = ''
+                pool_id = ''
+                edge_id = ''
+                node_id = ''
+                ts_val = ev_dict.get('ts', 0.0) or ev_dict.get('timestamp', 0.0) or _time.time()
+                
+                if ev_type == 'Signal':
+                    signal_type = ev_dict.get('signal_type', '')
+                    if signal_type in ('BUY', 'SELL'):
+                        ev_type = signal_type
+                    code = str(ev_dict.get('code', '') or '')
+                    pool_id = str(ev_dict.get('pool_id', '') or '')
+                elif ev_type == 'OrderPlaced':
+                    order = ev_dict.get('order', {}) or {}
+                    code = str(order.get('code', '') or '')
+                elif ev_type == 'OrderFilled':
+                    fill = ev_dict.get('fill', {}) or {}
+                    code = str(fill.get('code', '') or '')
+                elif ev_type == 'PositionUpdated':
+                    tracker = ev_dict.get('tracker', {}) or {}
+                    code = str(tracker.get('code', '') or '')
+                    node_id = str(tracker.get('node_id', '') or '')
+                    pool_id = node_id
+                elif ev_type == 'TransferExecuted':
+                    codes = ev_dict.get('codes', []) or []
+                    code = ','.join(list(codes)[:5]) + ('...' if len(codes) > 5 else '')
+                    pool_id = str(ev_dict.get('tgt', '') or '')
+                    node_id = pool_id
+                elif ev_type == 'TTLExpired':
+                    codes = ev_dict.get('codes', []) or []
+                    code = ','.join(list(codes)[:5]) + ('...' if len(codes) > 5 else '')
+                    node_id = str(ev_dict.get('node_id', '') or '')
+                    pool_id = node_id
+                elif ev_type == 'EdgeFired':
+                    edge_id = str(ev_dict.get('eid', '') or '')
+                    changed_codes = ev_dict.get('changed_codes', []) or []
+                    code = ','.join(list(changed_codes)[:5]) + ('...' if len(changed_codes) > 5 else '')
+                elif ev_type == 'TickReceived':
+                    tick_data = ev_dict.get('tick_data', {}) or {}
+                    code = str(ev_dict.get('code', '') or tick_data.get('code', '') or tick_data.get('symbol', '') or '')
+                elif ev_type == 'BarComposed':
+                    code = str(ev_dict.get('code', '') or '')
+                elif ev_type == 'FormulaEvaluated':
+                    code = str(ev_dict.get('code', '') or '')
+                    if not ts_val or ts_val < 10000:
+                        ts_val = _time.time()
+                elif ev_type == 'DataChanged':
+                    codes = ev_dict.get('codes', []) or []
+                    code = ','.join(list(codes)[:5]) + ('...' if len(codes) > 5 else '')
+                else:
+                    code = str(ev_dict.get('code', '') or ev_dict.get('stock_code', '') or '')
+                    pool_id = str(ev_dict.get('pool_id', '') or ev_dict.get('target_id', '') or ev_dict.get('source_id', '') or '')
+                    edge_id = str(ev_dict.get('edge_id', '') or ev_dict.get('eid', '') or '')
+                    node_id = str(ev_dict.get('node_id', '') or ev_dict.get('nid', '') or pool_id)
+                
+                if isinstance(ts_val, (int, float)) and ts_val > 0:
+                    try:
+                        if ts_val > 1e12:
+                            ts_val = ts_val / 1000.0
+                        ts = datetime.fromtimestamp(ts_val)
+                    except (ValueError, OSError):
+                        ts = datetime.now()
+                        ts_val = _time.time()
+                else:
+                    ts = datetime.now()
+                    ts_val = _time.time()
+                
+                event_data = {
+                    "event_type": ev_type,
+                    "code": code,
+                    "pool_id": pool_id,
+                    "node_id": node_id,
+                    "edge_id": edge_id,
+                    "details": {k: v for k, v in ev_dict.items() if k not in ('code', 'pool_id', 'edge_id', 'node_id', 'time', 'ts', 'timestamp', 'tick_data', 'order', 'fill', 'tracker')},
+                    "time": ts.strftime("%H:%M:%S"),
+                    "timestamp": float(ts_val)
+                }
+                try:
+                    sync_queue.put_nowait(event_data)
+                except thread_queue.Full:
+                    pass
+            except Exception:
+                import traceback
+                traceback.print_exc()
+        
+        if bus is not None and hasattr(bus, 'subscribe_any'):
+            unsubscribe = bus.subscribe_any(event_callback)
+        else:
+            unsubscribe = None
+        
+        def drain_sync_queue():
+            drained = []
+            while True:
+                try:
+                    drained.append(sync_queue.get_nowait())
+                except thread_queue.Empty:
+                    break
+            return drained
+        
+        try:
+            yield f": connected\n\n"
+            heartbeat_interval = 1.0
+            last_heartbeat = _time.time()
+            while True:
+                if await request.is_disconnected():
+                    break
+                new_events = await loop.run_in_executor(None, drain_sync_queue)
+                for event_data in new_events:
+                    yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                now = _time.time()
+                if now - last_heartbeat >= heartbeat_interval:
+                    yield f": heartbeat\n\n"
+                    last_heartbeat = now
+                await asyncio.sleep(0.05)
+        finally:
+            if unsubscribe is not None:
+                try:
+                    unsubscribe()
+                except Exception:
+                    pass
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+@app.get("/api/pools/{pool_id}/nodes/{node_id}/stocks", tags=["pools"])
+async def api_get_node_stocks(pool_id: str, node_id: str, request: _Request):
+    """返回指定池指定节点的股票列表。"""
+    try:
+        engine = request.app.state.engine
+        storage = request.app.state.storage
+        
+        node_stocks = []
+        
+        sims = getattr(request.app.state, "_simulators", {})
+        for sim in sims.values():
+            ms = getattr(sim, "_mode_state", None)
+            if ms and isinstance(ms.get("node_stocks"), dict):
+                ns = ms["node_stocks"].get(node_id)
+                if ns and isinstance(ns, list):
+                    node_stocks = ns
+                    break
+            pe = getattr(sim, "_pool_engine", None)
+            if pe is None:
+                inner = getattr(sim, "_engine", None)
+                pe = getattr(inner, "_pool_engine", None) if inner else None
+            if pe and hasattr(pe, 'state') and hasattr(pe.state, 'node_stocks'):
+                ns = pe.state.node_stocks.get(node_id)
+                if ns and isinstance(ns, list):
+                    node_stocks = ns
+                    break
+        
+        if not node_stocks:
+            sim_session_map = getattr(request.app.state, "_sim_session_map", {})
+            for session in sim_session_map.values():
+                simulator = session.get("simulator")
+                if simulator is None:
+                    continue
+                ms = getattr(simulator, "_mode_state", None)
+                if ms and isinstance(ms.get("node_stocks"), dict):
+                    ns = ms["node_stocks"].get(node_id)
+                    if ns and isinstance(ns, list):
+                        node_stocks = ns
+                        break
+                pe = getattr(simulator, "_pool_engine", None)
+                if pe is None:
+                    inner = getattr(simulator, "_engine", None)
+                    pe = getattr(inner, "_pool_engine", None) if inner else None
+                if pe and hasattr(pe, 'state') and hasattr(pe.state, 'node_stocks'):
+                    ns = pe.state.node_stocks.get(node_id)
+                    if ns and isinstance(ns, list):
+                        node_stocks = ns
+                        break
+        
+        if not node_stocks:
+            replays = getattr(request.app.state, "_replay_engines", {})
+            for re in replays.values():
+                snapshot = re.get_current_snapshot() if hasattr(re, 'get_current_snapshot') else {}
+                sp = snapshot.get("state_pools", {})
+                ni = sp.get(node_id, {})
+                if isinstance(ni, dict):
+                    stocks = ni.get("stocks", ni.get("stock_list", []))
+                    if stocks:
+                        node_stocks = stocks
+                        break
+        
+        if not node_stocks:
+            pool = storage.get_pool(pool_id)
+            if pool:
+                for n in pool.get("nodes", []):
+                    nid = str(n.get("id", ""))
+                    if nid == str(node_id) or n.get("label") == node_id:
+                        ns = n.get("params", {}).get("stocks", n.get("stocks", []))
+                        if isinstance(ns, list):
+                            node_stocks = ns
+                        break
+        
+        result = []
+        for s in node_stocks:
+            if isinstance(s, dict):
+                code = s.get("code", s.get("symbol", ""))
+                code = str(code)
+                if len(code) == 7 and code.startswith("fz"):
+                    code = "fz" + code[2:].zfill(6)
+                elif len(code) == 6 and code.isdigit():
+                    pass
+                elif len(code) == 5 and code.isdigit():
+                    code = code.zfill(6)
+                result.append({
+                    "code": code,
+                    "name": s.get("name", s.get("stock_name", "")),
+                    "price": s.get("price", s.get("close", s.get("last_price", 0))),
+                    "change_pct": s.get("change_pct", s.get("pct_change", s.get("changepercent", 0))),
+                    "enter_time": s.get("enter_time", s.get("in_time", "")),
+                    "volume": s.get("volume", s.get("vol", 0))
+                })
+            elif isinstance(s, str):
+                code = str(s)
+                if len(code) == 7 and code.startswith("fz"):
+                    code = "fz" + code[2:].zfill(6)
+                elif len(code) == 5 and code.isdigit():
+                    code = code.zfill(6)
+                result.append({"code": code, "name": "", "price": 0, "change_pct": 0, "enter_time": "", "volume": 0})
+        
+        return {"code": 0, "data": {"node_id": node_id, "stocks": result, "count": len(result)}}
+    except Exception as ex:
+        return {"code": 1, "msg": str(ex)}
+
+
+@app.post("/api/pools/{pool_id}/control/{action}", tags=["pools"])
+async def api_control_pool(pool_id: str, action: str, request: _Request):
+    """控制股票池运行：start/pause/stop。"""
+    try:
+        engine = request.app.state.engine
+        action = action.lower()
+        
+        if action not in ("start", "pause", "resume", "stop"):
+            return {"code": 1, "msg": f"未知action: {action}，支持 start/pause/resume/stop"}
+        
+        sims = getattr(request.app.state, "_simulators", {})
+        sim = sims.get(pool_id)
+        if sim is not None:
+            if action == "start" or action == "resume":
+                if hasattr(sim, 'resume'):
+                    sim.resume()
+                return {"code": 0, "data": {"pool_id": pool_id, "action": action, "status": "running"}}
+            elif action == "pause":
+                if hasattr(sim, 'pause'):
+                    sim.pause()
+                return {"code": 0, "data": {"pool_id": pool_id, "action": action, "status": "paused"}}
+            elif action == "stop":
+                if hasattr(sim, 'stop'):
+                    try:
+                        sim.stop()
+                    except Exception:
+                        pass
+                sims.pop(pool_id, None)
+                if hasattr(sim, 'reset'):
+                    try:
+                        sim.reset()
+                    except Exception:
+                        pass
+                return {"code": 0, "data": {"pool_id": pool_id, "action": action, "status": "stopped"}}
+        
+        sim_session_map = getattr(request.app.state, "_sim_session_map", {})
+        target_session = None
+        for sid, session in sim_session_map.items():
+            if session.get("pool_id") == pool_id:
+                target_session = (sid, session)
+                break
+        
+        if target_session is not None:
+            sid, session = target_session
+            simulator = session.get("simulator")
+            if action == "start" or action == "resume":
+                if simulator and hasattr(simulator, 'resume'):
+                    simulator.resume()
+                return {"code": 0, "data": {"pool_id": pool_id, "session_id": sid, "action": action, "status": "running"}}
+            elif action == "pause":
+                if simulator and hasattr(simulator, 'pause'):
+                    simulator.pause()
+                return {"code": 0, "data": {"pool_id": pool_id, "session_id": sid, "action": action, "status": "paused"}}
+            elif action == "stop":
+                if simulator and hasattr(simulator, 'stop'):
+                    try:
+                        simulator.stop()
+                    except Exception:
+                        pass
+                sim_session_map.pop(sid, None)
+                if simulator and hasattr(simulator, 'reset'):
+                    try:
+                        simulator.reset()
+                    except Exception:
+                        pass
+                return {"code": 0, "data": {"pool_id": pool_id, "session_id": sid, "action": action, "status": "stopped"}}
+        
+        if action == "start":
+            ok, err = _ensure_mock_data_source()
+            if not ok:
+                pass
+            pool_config = _resolve_pool_config(pool_id)
+            if pool_config is None:
+                return {"code": 1, "msg": f"池不存在: {pool_id}"}
+            simulator = _create_runtime_simulator(pool_config)
+            if not hasattr(request.app.state, "_simulators"):
+                request.app.state._simulators = {}
+            request.app.state._simulators[pool_id] = simulator
+
+            try:
+                simulator.initialize()
+            except Exception as ex:
+                logger.warning("simulator.initialize() 失败: %s", ex)
+                return {"code": 1, "msg": f"仿真器初始化失败: {ex}"}
+
+            if not hasattr(request.app.state, "_sim_session_map"):
+                request.app.state._sim_session_map = {}
+            sid = uuid.uuid4().hex
+            request.app.state._sim_session_map[sid] = {
+                "simulator": simulator,
+                "pool_id": pool_id,
+                "config": pool_config,
+                "events": [],
+                "created_at": asyncio.get_event_loop().time(),
+            }
+
+            try:
+                bus = getattr(request.app.state, "bus", None)
+                if bus is not None:
+                    from core.event_bus import PoolLoaded, ModeChanged
+                    bus.publish(PoolLoaded(pool_config=pool_config, source_format="json"))
+                    bus.publish(ModeChanged(mode_id="simulation", prev_mode="live"))
+            except Exception as ex:
+                logger.warning("发布 PoolLoaded/ModeChanged 事件失败: %s", ex)
+
+            return {"code": 0, "data": {"pool_id": pool_id, "session_id": sid, "action": action, "status": "running"}}
+        elif action == "pause":
+            if hasattr(engine, 'pause_loop'):
+                engine.pause_loop()
+            return {"code": 0, "data": {"pool_id": pool_id, "action": action, "status": "paused"}}
+        elif action == "stop":
+            if hasattr(engine, 'stop_loop'):
+                try:
+                    await engine.stop_loop()
+                except Exception:
+                    pass
+            return {"code": 0, "data": {"pool_id": pool_id, "action": action, "status": "stopped"}}
+        
+        return {"code": 1, "msg": f"未找到活跃的池会话: {pool_id}"}
+    except Exception as ex:
+        return {"code": 1, "msg": str(ex)}
 
 
 @app.get("/api/pool/{name:path}/events", tags=["pool"])
@@ -434,7 +1210,7 @@ async def replay_pool(name: str, request: _Request):
     if pool_config is None:
         return {"success": False, "error": f"池不存在: {name}（未找到 XML 文件或 SQLite 记录）"}
     try:
-        replay_engine = KLineReplayEngine(engine, storage=app.state.storage)
+        replay_engine = KLineReplayEngine(engine, storage=app.state.storage, bus=app.state.bus)
         engine.kline_replay_engine = replay_engine
         load_res = replay_engine.load_kline_data(
             pool_config,
@@ -485,9 +1261,28 @@ def _get_or_create_simulator(name: str, engine) -> tuple:
     if pool_config is None:
         return None, f"池不存在: {name}（未找到 XML 文件或 SQLite 记录）"
     try:
-        from .core.simulator import RuntimeSimulator
-        simulator = RuntimeSimulator(pool_config, engine=engine)
+        try:
+            from .core.runtime_mode_module import RuntimeSimulator
+        except ImportError:
+            from core.runtime_mode_module import RuntimeSimulator
+        # 必须注入 bus，使 RuntimeSimulator.step() 末尾发布 SimulationStep 事件，
+        # 驱动 TickBarModule→ExecutionModule→TradeModule 完整事件链
+        simulator = RuntimeSimulator(
+            pool_config,
+            engine=engine,
+            bus=getattr(app.state, "bus", None),
+        )
         simulator.initialize()
+        pe = engine._pool_engine if hasattr(engine, '_pool_engine') else None
+        if pe is not None:
+            tick_source = pe._components.get("tick_source")
+            tick_bar = getattr(app.state, "tick_bar", None)
+            if tick_source is not None and tick_bar is not None:
+                tick_bar._tick_source = tick_source
+                tick_bar._mode_id = "simulation"
+                logger.info("synced SimTickSource to TickBarModule: codes=%d clock_start=%.1f",
+                            len(getattr(tick_source, '_codes', [])),
+                            getattr(tick_source, '_clock_start', 0))
         app.state._simulators[name] = simulator
         return simulator, None
     except Exception as ex:
@@ -511,7 +1306,8 @@ async def _run_simulation_step(name: str, delta: float = 60.0) -> dict:
         return {"success": False, "error": err}
 
     try:
-        events = simulator.step(d=delta)
+        effective_delta = delta * float(getattr(simulator, "speed", 1.0) or 1.0)
+        events = simulator.step(d=effective_delta)
         if not events:
             events = []
         node_stocks = (
@@ -632,6 +1428,464 @@ async def sim_start(name: str, request: _Request):
     return await _run_simulation_step(name, delta)
 
 
+@app.post("/api/pool/{name:path}/sim/speed", tags=["pool"], dependencies=[Depends(verify_api_key)])
+async def sim_set_speed(name: str, request: _Request):
+    """设置仿真速度倍数（支持 XML 和 SQLite 池）。"""
+    simulators = getattr(app.state, "_simulators", {})
+    simulator = simulators.get(name)
+    if simulator is None:
+        return {"success": False, "error": f"仿真会话不存在: {name}（请先调用 /sim/init）"}
+    try:
+        body = await request.json()
+        speed = float(body.get("speed", 1.0))
+    except Exception:
+        speed = 1.0
+    if speed <= 0:
+        speed = 1.0
+    simulator.speed = speed
+    return {"success": True, "data": {"pool": name, "speed": speed}}
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  基于 session_id 的仿真 API（供前端 web/js/main.js / web/js/event-panel.js 调用）
+# ══════════════════════════════════════════════════════════════════════
+
+def _ensure_mock_data_source():
+    """确保当前数据源为 mock，供仿真模式使用。"""
+    tq = app.state.tq
+    state = tq.get_data_source_state() if hasattr(tq, 'get_data_source_state') else {}
+    if state.get('active') == 'mock':
+        return True, None
+    if not hasattr(tq, 'set_active_source'):
+        return False, "数据源不支持切换到 mock"
+    try:
+        tq.set_active_source('mock')
+        return True, None
+    except Exception as ex:
+        return False, f"切换 mock 数据源失败: {ex}"
+
+
+def _create_runtime_simulator(pool_config: dict):
+    """创建并初始化 RuntimeSimulator（复用 _get_or_create_simulator 的核心逻辑）。
+
+    必须注入 ``bus=app.state.bus``，使 RuntimeSimulator.step() 末尾发布
+    ``SimulationStep`` 事件，驱动 TickBarModule→ExecutionModule→TradeModule
+    完整事件链。不注入 bus 会导致 SimulationStep 不发布、TickReceived/
+    BarComposed/FormulaEvaluated/StockFiltered/EdgeFired 等事件全部缺失。
+    """
+    from core.runtime_mode_module import RuntimeSimulator
+    simulator = RuntimeSimulator(
+        pool_config,
+        engine=app.state.engine,
+        bus=getattr(app.state, "bus", None),
+    )
+    simulator.initialize()
+    return simulator
+
+
+def _normalize_sim_event(ev: dict) -> dict:
+    """统一事件格式为 {event_type, code, pool_id, details, time}。
+
+    details 包含事件特有字段（eid/sid/tid/entered/exited/formula_ref/result 等），
+    使前端能展示完整事件信息，避免字段丢失。
+    """
+    if not isinstance(ev, dict):
+        return {"event_type": "UNKNOWN", "code": "", "pool_id": "", "details": {}, "time": 0}
+    # 统一字段优先取事件本身字段
+    code = ev.get("code", "")
+    pool_id = ev.get("pool_id", "")
+    t = ev.get("time")
+    if t is None:
+        t = ev.get("ts")
+    if t is None:
+        t = ev.get("timestamp", 0)
+    # details 包含所有非统一字段（保留事件特有字段供前端展示）
+    # 注意 "details" 必须在 unified_keys 中，否则遍历 ev.items() 时会把
+    # details 字段本身合并到 details 字典中，造成 details["details"] = details
+    # 的循环引用，触发 FastAPI jsonable_encoder RecursionError。
+    unified_keys = {"event_type", "code", "pool_id", "time", "ts", "timestamp",
+                    "action", "detail", "details"}
+    # 使用 dict(...) 创建副本，避免修改原事件字典（防止多次调用累积污染）
+    raw_details = ev.get("details") or ev.get("detail") or {}
+    if isinstance(raw_details, dict):
+        details = dict(raw_details)
+    else:
+        details = {"value": raw_details}
+    # 合并事件特有字段（eid/sid/tid/entered/exited/formula_ref/result 等）
+    for k, v in ev.items():
+        if k in unified_keys or k in details:
+            continue
+        details[k] = v
+    # 从 details 中提取 pool_id（Executed 事件的 sid/tid 等）
+    if not pool_id:
+        pool_id = details.get("target_id") or details.get("source_id") or details.get("sid") or details.get("tid") or ""
+    return {
+        "event_type": ev.get("event_type", ev.get("action", "UNKNOWN")),
+        "code": code,
+        "pool_id": pool_id,
+        "details": details,
+        "time": t,
+    }
+
+
+def _get_session(sim_session_map: dict, session_id: str):
+    """获取会话，并校验 simulator 是否存在。"""
+    session = sim_session_map.get(session_id)
+    if session is None:
+        return None, "会话不存在"
+    simulator = session.get("simulator")
+    if simulator is None:
+        return None, "会话已损坏"
+    return session, None
+
+
+@app.post("/api/sim/start", tags=["sim"])
+async def sim_start_session(request: _Request):
+    """启动基于 session_id 的仿真会话。
+
+    请求体: {pool_id: string, speed: number} 或 {config: object, speed: number}
+    响应: {code: 0, data: {session_id: string}}
+    """
+    try:
+        body = await request.json()
+    except Exception as ex:
+        return {"code": 1, "msg": f"请求体解析失败: {ex}"}
+
+    pool_id = body.get("pool_id")
+    config = body.get("config")
+    speed = float(body.get("speed", 1.0) or 1.0)
+    if speed <= 0:
+        speed = 1.0
+
+    if pool_id:
+        pool_config = _resolve_pool_config(pool_id)
+        if pool_config is None:
+            return {"code": 1, "msg": f"池不存在: {pool_id}"}
+    elif config and isinstance(config, dict):
+        pool_config = dict(config)
+        if "nodes" not in pool_config:
+            return {"code": 1, "msg": "config 缺少 nodes 字段"}
+        pool_id = pool_config.get("id") or pool_config.get("name") or f"sim_{uuid.uuid4().hex[:12]}"
+        pool_config["id"] = pool_id
+        _enrich_tdx_node_data(pool_config)
+    else:
+        return {"code": 1, "msg": "缺少 pool_id 或 config 参数"}
+
+    ok, err = _ensure_mock_data_source()
+    if not ok:
+        return {"code": 1, "msg": err}
+
+    try:
+        simulator = _create_runtime_simulator(pool_config)
+    except Exception as ex:
+        return {"code": 1, "msg": f"创建仿真器失败: {ex}"}
+
+    simulator.speed = speed
+    try:
+        simulator.initialize()
+    except Exception as ex:
+        logger.warning("simulator.initialize() 失败: %s", ex)
+        return {"code": 1, "msg": f"仿真器初始化失败: {ex}"}
+
+    session_id = uuid.uuid4().hex
+    if not hasattr(request.app.state, "_sim_session_map"):
+        request.app.state._sim_session_map = {}
+    request.app.state._sim_session_map[session_id] = {
+        "simulator": simulator,
+        "pool_id": pool_id,
+        "config": pool_config,
+        "events": [],
+        "created_at": asyncio.get_event_loop().time(),
+    }
+
+    try:
+        bus = getattr(request.app.state, "bus", None)
+        if bus is not None:
+            from core.event_bus import PoolLoaded, ModeChanged
+            bus.publish(PoolLoaded(
+                pool_config=pool_config,
+                source_format="json",
+            ))
+            bus.publish(ModeChanged(
+                mode_id="simulation",
+                prev_mode="live",
+            ))
+    except Exception as ex:
+        logger.warning("发布 PoolLoaded/ModeChanged 事件失败: %s", ex)
+
+    return {"code": 0, "data": {"session_id": session_id, "pool_id": pool_id}}
+
+
+@app.post("/api/sim/control", tags=["sim"])
+async def sim_control_session(request: _Request):
+    """控制仿真会话。
+
+    请求体: {session_id: string, action: string, params?: object}
+    action: stop | step | pause | resume
+    """
+    try:
+        body = await request.json()
+    except Exception as ex:
+        return {"code": 1, "msg": f"请求体解析失败: {ex}"}
+
+    session_id = body.get("session_id", "")
+    action = body.get("action", "")
+    params = body.get("params") or {}
+
+    sim_session_map = getattr(request.app.state, "_sim_session_map", {})
+    session, err = _get_session(sim_session_map, session_id)
+    if session is None:
+        return {"code": 1, "msg": err}
+
+    simulator = session["simulator"]
+    if action == "stop":
+        try:
+            simulator.stop()
+        except Exception:
+            pass
+        sim_session_map.pop(session_id, None)
+        try:
+            simulator.reset()
+        except Exception:
+            pass
+        return {"code": 0, "data": {"session_id": session_id, "stopped": True}}
+
+    if action == "pause":
+        simulator.pause()
+        return {"code": 0, "data": {"session_id": session_id, "paused": True}}
+
+    if action == "resume":
+        simulator.resume()
+        return {"code": 0, "data": {"session_id": session_id, "paused": False}}
+
+    if action == "step":
+        delta = float(params.get("delta", 60.0))
+        if delta <= 0:
+            delta = 60.0
+        effective_delta = delta * float(getattr(simulator, "speed", 1.0) or 1.0)
+        try:
+            events = simulator.step(d=effective_delta)
+        except Exception as ex:
+            return {"code": 1, "msg": f"仿真 step 失败: {ex}"}
+        if not events:
+            events = []
+        normalized = [_normalize_sim_event(ev) for ev in events]
+        session["events"].extend(normalized)
+        return {
+            "code": 0,
+            "data": {
+                "session_id": session_id,
+                "clock": simulator.clock,
+                "events": normalized,
+                "event_count": len(normalized),
+            },
+        }
+
+    return {"code": 1, "msg": f"未知 action: {action}"}
+
+
+@app.get("/api/sim/events", tags=["sim"])
+async def sim_get_events(session_id: str = "", since: str = "0", limit: int = 200):
+    """获取仿真会话自 since 索引之后的事件列表。"""
+    sim_session_map = getattr(app.state, "_sim_session_map", {})
+    session, err = _get_session(sim_session_map, session_id)
+    if session is None:
+        return {"code": 1, "msg": err}
+    try:
+        since_idx = int(since)
+    except Exception:
+        since_idx = 0
+    
+    simulator = session.get("simulator")
+    events = []
+    if simulator is not None and hasattr(simulator, 'event_log'):
+        events = list(simulator.event_log)
+    if not events:
+        events = session.get("events", [])
+    
+    if since_idx < 0:
+        since_idx = 0
+    sliced = events[since_idx:since_idx + limit] if limit > 0 else events[since_idx:]
+    
+    normalized = []
+    for ev in sliced:
+        if not isinstance(ev, dict):
+            continue
+        ev_type = ev.get("event_type", "UNKNOWN")
+        normalized.append({
+            "event_type": ev_type,
+            "code": str(ev.get("code", "") or ev.get("stock_code", "")),
+            "pool_id": str(ev.get("pool_id", "") or ev.get("target_id", "") or ev.get("source_id", "")),
+            "node_id": str(ev.get("node_id", "") or ev.get("nid", "")),
+            "edge_id": str(ev.get("edge_id", "") or ev.get("eid", "")),
+            "details": {k: v for k, v in ev.items() if k not in ("event_type", "code", "stock_code", "pool_id", "target_id", "source_id", "node_id", "nid", "edge_id", "eid", "time", "ts")},
+            "time": ev.get("time", 0),
+        })
+
+    diag = {}
+    try:
+        if simulator is not None:
+            sim_bus = getattr(simulator, "_bus", None)
+            diag["sim_bus_id"] = id(sim_bus) if sim_bus is not None else None
+            if sim_bus is not None and hasattr(sim_bus, "get_events"):
+                bus_events = sim_bus.get_events()
+                type_count = {}
+                for ev in bus_events:
+                    ev_type = type(ev).__name__
+                    type_count[ev_type] = type_count.get(ev_type, 0) + 1
+                diag["sim_bus_total"] = len(bus_events)
+                diag["sim_bus_type_distribution"] = type_count
+            pe = getattr(simulator._engine, "_pool_engine", None) if simulator._engine else None
+            if pe is not None and hasattr(pe, "_components"):
+                pe_bus = pe._components.get("event_bus")
+                diag["pe_event_bus_id"] = id(pe_bus) if pe_bus is not None else None
+                diag["pe_same_as_sim_bus"] = (pe_bus is sim_bus)
+                if pe_bus is not None and hasattr(pe_bus, "get_events"):
+                    pe_events = pe_bus.get_events()
+                    pe_type_count = {}
+                    for ev in pe_events:
+                        ev_type = type(ev).__name__
+                        pe_type_count[ev_type] = pe_type_count.get(ev_type, 0) + 1
+                    diag["pe_bus_total"] = len(pe_events)
+                    diag["pe_bus_type_distribution"] = pe_type_count
+            app_bus = getattr(app.state, "bus", None)
+            if app_bus is not None and hasattr(app_bus, "get_events"):
+                app_events = app_bus.get_events()
+                app_type_count = {}
+                for ev in app_events:
+                    ev_type = type(ev).__name__
+                    app_type_count[ev_type] = app_type_count.get(ev_type, 0) + 1
+                diag["app_bus_id"] = id(app_bus)
+                diag["app_bus_total"] = len(app_events)
+                diag["app_bus_type_distribution"] = app_type_count
+                diag["sim_bus_same_as_app_bus"] = (sim_bus is app_bus)
+            diag["event_log_count"] = len(simulator.event_log) if hasattr(simulator, 'event_log') else 0
+    except Exception as ex:
+        diag["error"] = str(ex)
+
+    return {"code": 0, "data": {"events": normalized, "total": len(events), "diag": diag}}
+
+
+@app.get("/api/sim/state", tags=["sim"])
+async def sim_get_session_state(session_id: str = ""):
+    """获取仿真会话当前状态快照。"""
+    sim_session_map = getattr(app.state, "_sim_session_map", {})
+    session, err = _get_session(sim_session_map, session_id)
+    if session is None:
+        return {"code": 1, "msg": err}
+    try:
+        snapshot = session["simulator"].get_state_snapshot()
+        return {"code": 0, "data": snapshot}
+    except Exception as ex:
+        return {"code": 1, "msg": f"获取状态失败: {ex}"}
+
+
+@app.get("/api/sim/bars", tags=["sim"])
+async def sim_get_bars(session_id: str = "", code: str = "", period: str = "1min"):
+    """获取仿真会话中某代码、某周期的 K 线数据。"""
+    sim_session_map = getattr(app.state, "_sim_session_map", {})
+    session, err = _get_session(sim_session_map, session_id)
+    if session is None:
+        return {"code": 1, "msg": err}
+
+    simulator = session["simulator"]
+    period_norm = period
+    if period in ("1m", "1min"):
+        period_norm = "1min"
+    elif period in ("5m", "5min"):
+        period_norm = "5min"
+
+    bars = []
+    try:
+        # 优先使用 simulator.get_bars()（读取 _bar_agg）
+        if hasattr(simulator, "get_bars"):
+            all_bars = simulator.get_bars(period=period_norm)
+            df = all_bars.get(code) if isinstance(all_bars, dict) else None
+            if df is None and code:
+                from .core.domain import _normalize_to_fz
+                fz_code = _normalize_to_fz(code)
+                df = all_bars.get(fz_code) if fz_code != code else None
+            if df is not None and not df.empty:
+                records = df.to_dict("records")
+                bars = [
+                    {
+                        "datetime": r.get("datetime") or r.get("time"),
+                        "open": float(r["open"]) if "open" in r else None,
+                        "high": float(r["high"]) if "high" in r else None,
+                        "low": float(r["low"]) if "low" in r else None,
+                        "close": float(r["close"]) if "close" in r else None,
+                        "volume": float(r["volume"]) if "volume" in r else None,
+                    }
+                    for r in records
+                ]
+        # 兜底：从 _mode_state['bars'] 读取
+        if not bars and simulator._mode_state:
+            ms_bars = simulator._mode_state.get("bars", {})
+            code_bars = ms_bars.get(code) if isinstance(ms_bars, dict) else None
+            if code_bars:
+                bars = list(code_bars)
+    except Exception as ex:
+        return {"code": 0, "data": {"bars": [], "error": str(ex)}}
+
+    data = {"bars": bars}
+    # 若 simulator 上有公式结果/持仓，透传给前端
+    if hasattr(simulator, "_formula_result"):
+        data["formula_result"] = simulator._formula_result
+    if hasattr(simulator, "_position"):
+        data["position"] = simulator._position
+    return {"code": 0, "data": data}
+
+
+@app.get("/api/sim/batch_step", tags=["sim"])
+async def sim_batch_step(session_id: str = "", steps: int = 10, delta: float = 60.0):
+    """批量步进仿真会话：一次推进多步并汇总事件。
+
+    参数:
+      - session_id: 会话ID
+      - steps: 步数（1~2000，默认10）
+      - delta: 每步虚拟秒数（默认60.0）
+    """
+    sim_session_map = getattr(app.state, "_sim_session_map", {})
+    session, err = _get_session(sim_session_map, session_id)
+    if session is None:
+        return {"code": 1, "msg": err}
+
+    simulator = session["simulator"]
+    steps = max(1, min(int(steps), 2000))
+    if delta <= 0:
+        delta = 60.0
+    effective_delta = delta * float(getattr(simulator, "speed", 1.0) or 1.0)
+
+    all_events = []
+    done = 0
+    last_err = None
+    for _ in range(steps):
+        try:
+            events = simulator.step(d=effective_delta)
+            done += 1
+            if events:
+                normalized = [_normalize_sim_event(ev) for ev in events]
+                session["events"].extend(normalized)
+                all_events.extend(normalized)
+        except Exception as ex:
+            last_err = str(ex)
+            break
+
+    return {
+        "code": 0,
+        "data": {
+            "session_id": session_id,
+            "stepped": done,
+            "delta": delta,
+            "clock": simulator.clock,
+            "step": getattr(simulator, "step", 0),
+            "event_count": len(all_events),
+            "events": all_events,
+            "error": last_err,
+        },
+    }
+
+
 @app.get("/api/pool/{name:path}/pk/ranking", tags=["pool"])
 async def get_pool_pk_ranking(name: str):
     """PK 排名别名端点：同 /api/pool/{name}/rankings。"""
@@ -639,7 +1893,7 @@ async def get_pool_pk_ranking(name: str):
 
 
 def _resolve_pool_config(name: str) -> dict | None:
-    """按名称解析股票池配置：先 tdxpool/{name}.xml，再 SQLite（pool_id 或 name）。"""
+    """按名称解析股票池配置：先 tdxpool/{name}.xml，再 config/{name}.json，再 SQLite（pool_id 或 name）。"""
     base_dir = os.path.join(os.path.dirname(__file__), 'tdxpool')
     xml_path = None
     try:
@@ -647,14 +1901,30 @@ def _resolve_pool_config(name: str) -> dict | None:
     except ValueError:
         pass
     if xml_path and os.path.isfile(xml_path):
-        from .converters.tdx import parse_tdx_xml
+        from .converters import parse_tdx_xml
         pool = parse_tdx_xml(xml_path)
         return _tdx_pool_to_frontend(pool, name) if hasattr(pool, 'cells') else pool
+
+    config_dir = os.path.join(os.path.dirname(__file__), 'config')
+    json_path = None
+    try:
+        json_path = safe_path_join(config_dir, name + '.json')
+    except ValueError:
+        pass
+    if json_path and os.path.isfile(json_path):
+        import json
+        with open(json_path, 'r', encoding='utf-8') as f:
+            pool = json.load(f)
+        if isinstance(pool, dict) and "nodes" in pool:
+            if "name" not in pool:
+                pool["name"] = name
+            if "pool_type" not in pool:
+                pool["pool_type"] = "sim"
+            return pool
 
     storage = app.state.storage
     pool = storage.get_pool(name)
     if pool is None or not isinstance(pool, dict):
-        # 兼容通过 name 查找 SQLite 池
         try:
             for p in storage.list_pools():
                 if isinstance(p, dict) and p.get("name") == name:
@@ -684,7 +1954,7 @@ async def live_start(name: str):
     _valid_statuses = getattr(app.state, '_valid_live_statuses', None)
     if _valid_statuses is None:
         import json as _json
-        _cfg_path = os.path.join(os.path.dirname(__file__), 'config', 'data_providers.json')
+        _cfg_path = os.path.join(os.path.dirname(__file__), 'config', 'data', 'data_providers.json')
         with open(_cfg_path, 'r', encoding='utf-8') as f:
             _valid_statuses = _json.load(f).get('valid_live_statuses', ['tdx_tq_ready', 'akshare_ready', 'user_selected_mock'])
         setattr(app.state, '_valid_live_statuses', _valid_statuses)
@@ -768,10 +2038,74 @@ async def registry_generic(reg_name: str):
 @app.get("/api/registry/cache-version", tags=["registry"])
 async def registry_cache_version(): return {"code": 0, "data": {"version": 1}}
 
+
+# ══════════════════════════════════════════════════════════════════════
+#  HighlightManager 公开配置端点
+# ══════════════════════════════════════════════════════════════════════
+
+_DEFAULT_HIGHLIGHT_RULES = {
+    "rules": {
+        "cell": {
+            "default": {
+                "duration_ms": {
+                    "runtime": 2000,
+                    "replay": 4000
+                }
+            }
+        },
+        "flow": {
+            "default": {
+                "duration_ms": {
+                    "runtime": 1500
+                }
+            }
+        }
+    },
+    "polling_interval_ms": 500
+}
+
+_DEFAULT_TABLES_DEFAULTS = {
+    "highlight": {
+        "ws": {
+            "scheme": "ws",
+            "path": "/ws/highlight"
+        }
+    }
+}
+
+
+def _load_json_file(path: Path, default):
+    if path.exists():
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as ex:
+            logger.warning("读取配置失败 %s: %s", path, ex)
+    return default
+
+
+@app.get("/api/config/tables/highlight_rules", tags=["highlight"])
+async def get_highlight_rules():
+    """返回高亮规则配置。"""
+    return _load_json_file(_CONFIG / "runtime" / "highlight_rules.json", _DEFAULT_HIGHLIGHT_RULES)
+
+
+@app.get("/api/config/tables/defaults", tags=["highlight"])
+async def get_tables_defaults():
+    """返回表格默认配置（含高亮 WebSocket 路径）。"""
+    return _load_json_file(_CONFIG / "runtime" / "defaults.json", _DEFAULT_TABLES_DEFAULTS)
+
+
+@app.get("/api/highlight-events", tags=["highlight"])
+async def get_highlight_events(since: str = "", limit: int = 50):
+    """返回高亮事件列表（当前无事件源，返回空列表）。"""
+    return {"code": 0, "events": []}
+
+
 @app.post("/api/dzh/tdx/import", tags=["tdx"], dependencies=[Depends(verify_api_key)])
 async def tdx_import_file(request: _Request):
     try:
-        from .converters.tdx import parse_tdx_xml
+        from .converters import parse_tdx_xml
         content, filename = None, "upload.xml"
         form = await request.form(); uf = form.get("file")
         if uf and hasattr(uf, "filename") and uf.filename:
@@ -810,7 +2144,7 @@ async def load_dzhpool_file(filename: str):
     if not resolved.startswith(os.path.realpath(base_dir)):
         raise _HTTPException(status_code=400, detail="Invalid filename")
     try:
-        from .converters.dzh import parse_dzh_xml
+        from .converters import parse_dzh_xml
         xml_path = resolved
         if not os.path.isfile(xml_path): return {"success": False, "error": "文件不存在"}
         with open(xml_path, 'rb') as f: pool = parse_dzh_xml(f.read(), filename)
@@ -831,7 +2165,7 @@ async def load_example_file(filename: str):
         with open(fpath, 'r', encoding='utf-8') as f: raw = json.load(f)
         # 如果是 JSON 股票池格式（有 version 字段），需要经过 import_pool_from_json 转换
         if isinstance(raw, dict) and "version" in raw:
-            from .converters.json_xml import import_pool_from_json
+            from .converters import import_pool_from_json
             data = import_pool_from_json(json_content=json.dumps(raw, ensure_ascii=False))
         else:
             data = raw
@@ -933,12 +2267,12 @@ async def get_alerts(request: _Request):
     return {"success": True, "data": alerts}
 
 # ─── 回放模式端点 ────────────────────────────────────────────
-# [重复端点说明] 以下 /api/pool/{name}/replay/* 端点与 api/replay_api.py 和 api/dzh_api.py 中的端点功能重复：
-#   - /api/pool/{name}/replay/start  ≈ /api/replay/start (replay_api.py, 主端点) ≈ /api/dzh/replay/start (dzh_api.py)
-#   - /api/pool/{name}/replay/step   ≈ /api/replay/control?action=next (replay_api.py, 主端点) ≈ /api/dzh/replay/step (dzh_api.py)
-#   - /api/pool/{name}/replay/state  ≈ /api/replay/state (replay_api.py, 主端点) ≈ /api/dzh/replay/snapshot (dzh_api.py)
-#   - /api/pool/{name}/replay/stop   ≈ /api/replay/control?action=stop (replay_api.py, 主端点) ≈ /api/dzh/replay/control (dzh_api.py)
-# 主端点为 api/replay_api.py（基于 session_id 的会话式回放，功能最完整）
+# [重复端点说明] 以下 /api/pool/{name}/replay/* 端点与 api.py（合并自原 replay_api + dzh_api）中的端点功能重复：
+#   - /api/pool/{name}/replay/start  ≈ /api/replay/start (api.py 中合并自 replay_api, 主端点) ≈ /api/dzh/replay/start (api.py 中合并自 dzh_api)
+#   - /api/pool/{name}/replay/step   ≈ /api/replay/control?action=next (api.py, 主端点) ≈ /api/dzh/replay/step (api.py)
+#   - /api/pool/{name}/replay/state  ≈ /api/replay/state (api.py, 主端点) ≈ /api/dzh/replay/snapshot (api.py)
+#   - /api/pool/{name}/replay/stop   ≈ /api/replay/control?action=stop (api.py, 主端点) ≈ /api/dzh/replay/control (api.py)
+# 主端点为 api.py 中合并自 replay_api 的实现（基于 session_id 的会话式回放，功能最完整）
 # 此处保留以兼容旧前端调用，新代码应使用 /api/replay/* 端点
 
 @app.get("/api/pool/{name}/node_stocks")
@@ -1039,12 +2373,12 @@ async def get_event_panel(name: str, limit: int = 100, request: _Request = None)
             if pe is None:
                 inner = getattr(sim, "_engine", None)
                 pe = getattr(inner, "_pool_engine", None) if inner else None
-            ep = getattr(pe, "_event_panel", None) if pe else None
+            ep = getattr(pe, "event_panel", None) if pe else None
             if ep is not None:
                 events = ep.get_events()[-limit:]
                 return {"success": True, "pool": name, "count": len(events), "events": events}
             return {"success": True, "events": []}
-        ep = getattr(engine, "_event_panel", None)
+        ep = getattr(engine, "event_panel", None)
         if ep is None:
             return {"success": True, "events": []}
         events = ep.get_events()[-limit:]
@@ -1097,7 +2431,7 @@ async def replay_start(name: str, request: _Request):
         if "injection_rules_source_node_types" not in saved:
             saved["injection_rules_source_node_types"] = list(orig_injection)
         engine._data_config.setdefault("injection_rules", {}).setdefault("bar_data", {})["source_node_types"] = [t for t in orig_injection if t not in ("tdx_state_pool", "stock_state_pool")]
-        re = KLineReplayEngine(engine, storage=storage)
+        re = KLineReplayEngine(engine, storage=storage, bus=app.state.bus)
         # 设置入池回调，使回放也能触发 history / stock_transfer_log 记录
         nm = {n.get('id', ''): n for n in cfg.get('nodes', [])}
         def _on_enter(nid, info, stocks):
@@ -1179,6 +2513,22 @@ async def pool_websocket(websocket: WebSocket, name: str):
         return
 
     engine._ensure_pool_engine(pool_config)
+
+    if engine.ws_publisher is None or getattr(engine.ui_renderer, '_snapshot_builder', None) is not engine.snapshot_builder:
+        try:
+            from web.ui_renderer import UIRenderer, WebSocketPublisher
+            pool_id = pool_config.get("id", "") if pool_config else ""
+            engine.ui_renderer = UIRenderer(
+                engine.event_bus,
+                engine.snapshot_builder,
+                pool_id=pool_id,
+            )
+            engine.ws_publisher = WebSocketPublisher(engine.ui_renderer)
+            engine.ui_renderer.attach_publisher(engine.ws_publisher)
+        except ImportError:
+            await websocket.close(code=1011, reason="Web UI module not available")
+            return
+
     publisher = engine.ws_publisher
 
     def send_callback(text: str) -> None:
@@ -1194,6 +2544,35 @@ async def pool_websocket(websocket: WebSocket, name: str):
         pass
     finally:
         publisher.remove_client(send_callback)
+
+
+@app.websocket("/ws/highlight")
+async def highlight_websocket(websocket: WebSocket):
+    """高亮事件 WebSocket 端点。
+
+    接受 ``subscribe_highlight`` 订阅消息并返回确认，之后保持连接。
+    当前无主动推送事件源，静默保持连接即可。
+    """
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_text()
+            try:
+                msg = json.loads(data)
+            except Exception:
+                msg = {"type": data.strip()}
+            msg_type = msg.get("type", "")
+            if msg_type == "subscribe_highlight":
+                await websocket.send_json({
+                    "type": "subscribe_highlight_ack",
+                    "status": "ok"
+                })
+            elif msg_type == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
 
 
 app.add_middleware(SPAMiddleware)

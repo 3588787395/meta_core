@@ -94,60 +94,7 @@
     ]
   },
   "pool_id": "oracle_conditional_transfer",
-  "queue_events": [
-    {
-      "code": "600000",
-      "details": {
-        "flow_id": "e1",
-        "mode": "copy",
-        "price": 10.2,
-        "source_id": "candidate",
-        "timestamp": "TIMESTAMP"
-      },
-      "pool_id": "condition",
-      "time": "TIMESTAMP",
-      "event_type": "ENTER"
-    },
-    {
-      "code": "000001",
-      "details": {
-        "flow_id": "e1",
-        "mode": "copy",
-        "price": 15.1,
-        "source_id": "candidate",
-        "timestamp": "TIMESTAMP"
-      },
-      "pool_id": "condition",
-      "time": "TIMESTAMP",
-      "event_type": "ENTER"
-    },
-    {
-      "code": "600000",
-      "details": {
-        "flow_id": "e2",
-        "mode": "copy",
-        "price": 10.2,
-        "source_id": "condition",
-        "timestamp": "TIMESTAMP"
-      },
-      "pool_id": "state_1",
-      "time": "TIMESTAMP",
-      "event_type": "ENTER"
-    },
-    {
-      "code": "000001",
-      "details": {
-        "flow_id": "e2",
-        "mode": "copy",
-        "price": 15.1,
-        "source_id": "condition",
-        "timestamp": "TIMESTAMP"
-      },
-      "pool_id": "state_1",
-      "time": "TIMESTAMP",
-      "event_type": "ENTER"
-    }
-  ],
+  "queue_events": [],
   "run_type": "run_pool",
   "runtime_tables": {
     "_dirty_nodes": [],

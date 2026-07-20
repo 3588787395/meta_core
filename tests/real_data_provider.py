@@ -368,7 +368,7 @@ def get_kline_as_bar_data(symbols: List[str], freq: str = 'day') -> Dict[str, Di
     """
     Get K-line data formatted as current_bar_data for engine.run_pool().
 
-    This is the format expected by MetaEngine.run_pool()'s current_bar_data parameter:
+    This is the format expected by PoolEngine.run_pool()'s current_bar_data parameter:
     {code: {open, high, low, close, volume, amount, ...}}
 
     Args:

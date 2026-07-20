@@ -1,1 +1,0 @@
-﻿    def execute_pool(self, pool_config, current_bar_data=None): return self.run_pool(pool_config, current_bar_data)

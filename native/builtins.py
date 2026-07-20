@@ -1,3 +1,4 @@
+# === 流水线层（自 native/pipeline.py 合并）===
 import ast
 import base64
 import copy
@@ -8,10 +9,25 @@ import statistics
 import time
 from typing import Any, Dict, Optional
 
-from ..services.tq_adapter import decode_formula, map_period
-from ..core.schemas import ConfigLoadError
-from ..core.evaluators import _eval_derived_expr
-from ..core._market_utils import _stock_code
+try:
+    from ..services.tq_adapter import decode_formula, map_period
+except ImportError:
+    from services.tq_adapter import decode_formula, map_period
+
+try:
+    from ..core.schemas import ConfigLoadError
+except ImportError:
+    from core.schemas import ConfigLoadError
+
+try:
+    from ..core.screening_module import _eval_derived_expr
+except ImportError:
+    from core.screening_module import _eval_derived_expr
+
+try:
+    from ..core.domain import _stock_code
+except ImportError:
+    from core.domain import _stock_code
 
 logger = logging.getLogger(__name__)
 
@@ -287,9 +303,9 @@ def _decode_action(action_val):
     if action_val is None or action_val == 0 or action_val == "": return {}
     # 表驱动：委托共用 decode_action（单一数据源 filter_action_rules.json），消除重复解码逻辑
     try:
-        from ..converters.dzh import decode_action as _shared_decode_action
+        from ..converters import decode_action as _shared_decode_action
     except ImportError:
-        from converters.dzh import decode_action as _shared_decode_action
+        from converters import decode_action as _shared_decode_action
     return _shared_decode_action(action_val) or {}
 def _apply_formula_mode(passed, rejected, mode, params):
     """按 formula_modes.json 的 action 查 formula_action_handlers 表分发。
@@ -386,7 +402,7 @@ def transfer_condition_check(inputs):
                 # 优先使用 FormulaRouter（正确路由到 Python/HQChart 引擎）
                 if formula_router and hasattr(formula_router, 'eval_batch'):
                     try:
-                        from ..core.evaluators import _run_async
+                        from ..core.screening_module import _run_async
                         # 动态分析周期与公式参数透传（替代硬编码 '1d' 与空 args）
                         tc_period = _resolve_period_str(
                             inputs.get("analysis_cycle") or params.get("analysis_cycle")
@@ -701,7 +717,7 @@ def formula_eval(inputs):
     # 执行公式评估：统一使用 FormulaRouter
     rd = {}
     try:
-        from ..core.evaluators import _run_async
+        from ..core.screening_module import _run_async
         raw = _run_async(lambda: formula_router.eval_batch(
             ft, sl, period=period, args=formula_args))
         if isinstance(raw, dict):
@@ -738,7 +754,7 @@ def cross_section_eval(inputs):
         if ft and sl:
             rd = {}
             try:
-                from ..core.evaluators import _run_async
+                from ..core.screening_module import _run_async
                 raw = _run_async(lambda: formula_router.eval_batch(ft, sl, period='1d'))
                 if isinstance(raw, dict):
                     rd = raw
@@ -800,7 +816,7 @@ def condition_dispatcher(inputs):
         if ft and stocks:
             rd = {}
             try:
-                from ..core.evaluators import _run_async
+                from ..core.screening_module import _run_async
                 raw = _run_async(lambda: formula_router.eval_batch(ft, stocks, period='1d'))
                 if isinstance(raw, dict):
                     rd = raw
@@ -985,7 +1001,7 @@ def tdx_condition_evaluator(inputs):
     sc = [_stock_code(s) for s in ss]
     try:
         if '_dispatch_cache' not in globals():
-            with open(os.path.join(os.path.dirname(__file__), "..", "config", "dispatch.json"), encoding="utf-8") as f:
+            with open(os.path.join(os.path.dirname(__file__), "..", "config", "architecture", "dispatch.json"), encoding="utf-8") as f:
                 globals()['_dispatch_cache'] = json.load(f).get("nset_dispatch", {})
         nset_dispatch = _dispatch_cache
     except Exception: nset_dispatch = {}
@@ -999,7 +1015,7 @@ def tdx_condition_evaluator(inputs):
     # bypass=true 时直接调用 direct_handler（如 nset=5 集合运算），跳过 eval_tdx_condition
     if entry and entry.get("bypass_eval_tdx_condition") and entry.get("direct_handler"):
         try:
-            from ..core.evaluators import eval_nset5_set_operation
+            from ..core.screening_module import eval_nset5_set_operation
             passed = eval_nset5_set_operation(
                 {"src_params": {"tdx_func": func}, "stock_list": sc,
                  "tq_adapter": inputs.get("tq_adapter"), "current_bar_data": inputs.get("current_bar_data"),
@@ -1012,7 +1028,7 @@ def tdx_condition_evaluator(inputs):
             passed = []
     elif entry:
         try:
-            from ..core.evaluators import eval_tdx_condition
+            from ..core.screening_module import eval_tdx_condition
             passed = eval_tdx_condition(entry.get("dispatch_key", ""),
                 {"src_params": {"tdx_func": func}, "stock_list": sc,
                  "tq_adapter": inputs.get("tq_adapter"), "current_bar_data": inputs.get("current_bar_data"),
@@ -1182,12 +1198,12 @@ def init_tdx_candidate(inputs):
     return result
 
 def tdx_convert_from_file(xml_path):
-    from ..converters.tdx import parse_tdx_xml, tdx_to_internal
-    from ..converters.tdx import convert_tdx_to_config
+    from ..converters import parse_tdx_xml, tdx_to_internal
+    from ..converters import convert_tdx_to_config
     return convert_tdx_to_config(tdx_to_internal(parse_tdx_xml(xml_path)))
 
 def tdx_convert_from_pool(pool_model):
-    from ..converters.tdx import convert_tdx_to_config
+    from ..converters import convert_tdx_to_config
     return convert_tdx_to_config(pool_model)
 
 
@@ -1483,4 +1499,85 @@ def _filter_by_bar_data_handler(inputs):
     bar_data = inputs.get("current_bar_data", {}) or {}
     passed, rejected = _filter_by_bar_data(stock_list, bar_data)
     return passed, rejected
+
+
+# ──────────────────────────────────────────────────────────────
+# Refresh 流水线 handler（自 native/pipeline.py 合并）
+# ──────────────────────────────────────────────────────────────
+# I12 大瘦身：gate/injector/pre_tick 9 个死 handler 已删（零 Python 调用方）。
+# 仅保留 Refresh 三 handler（engine._refresh_bar_data 经 getattr(_pipeline, handler_name) 消费）。
+#
+# I21：tq_snapshot_refresh / mock_advance_refresh 共享的预检 + tq.get_snapshot + 异常吞咽
+# 提取为 _apply_tq_snapshot 高阶函数；语义差异（替换 vs 合并）收敛到 merge 参数。
+# noop_refresh 因无预检不参与提取，保持单行 return。
+#
+# 注：原 pipeline.py 的 __all__ 不再单独保留——builtins.py 原本无 __all__，
+# 所有公开符号（含下列三个 refresh handler）按默认规则即可导出。
+
+# === Refresh ===
+
+def _apply_tq_snapshot(ctx, current_bar_data, merge: bool, fail_msg: str):
+    """共享预检 + tq.get_snapshot 调用 + 异常吞咽。
+
+    Args:
+        ctx: refresh 上下文，需含 engine 引用
+        current_bar_data: 刷新前的 bar 数据
+        merge: True 时合并到 current_bar_data（mock_advance 语义），
+               False 时整表替换（tq_snapshot 语义）
+        fail_msg: 异常日志模板
+
+    Returns:
+        dict: 刷新后的 bar_data（刷新失败或预检不过则返回原 current_bar_data）
+    """
+    engine = ctx.get('engine')
+    if engine is None:
+        return current_bar_data
+    tq = getattr(engine, 'tq_adapter', None)
+    if not tq or not current_bar_data:
+        return current_bar_data
+    try:
+        snapshot = tq.get_snapshot(list(current_bar_data.keys()))
+        if snapshot:
+            return {**current_bar_data, **snapshot} if merge else snapshot
+    except Exception as ex:
+        logger.warning(fail_msg, ex)
+    return current_bar_data
+
+
+def tq_snapshot_refresh(cfg, current_bar_data, **ctx):
+    """实盘模式行情刷新：调用 tq_adapter.get_snapshot(codes)，整表替换。
+
+    Args:
+        cfg: refresh 配置
+        current_bar_data: 刷新前的 bar 数据
+        **ctx: 上下文，需含 engine 引用
+
+    Returns:
+        dict: 刷新后的 bar_data（刷新失败则返回原 current_bar_data）
+    """
+    return _apply_tq_snapshot(ctx, current_bar_data, merge=False,
+                              fail_msg="行情刷新失败: %s")
+
+
+def noop_refresh(cfg, current_bar_data, **ctx):
+    """空操作刷新：直接返回原 current_bar_data。
+
+    回放模式无需刷新行情（数据由 kline_sequence 驱动）。
+    """
+    return current_bar_data
+
+
+def mock_advance_refresh(cfg, current_bar_data, **ctx):
+    """仿真模式推进刷新：调用 mock_provider 生成新 mock 数据，合并到 current_bar_data。
+
+    Args:
+        cfg: refresh 配置
+        current_bar_data: 当前 bar 数据
+        **ctx: 上下文，需含 engine 引用
+
+    Returns:
+        dict: 刷新后的 bar_data（生成失败则返回原 current_bar_data）
+    """
+    return _apply_tq_snapshot(ctx, current_bar_data, merge=True,
+                              fail_msg="mock_advance_refresh 生成 mock 数据失败: %s")
 

@@ -118,7 +118,7 @@ def run(pool_config, dataset=None, ticks: int = 1, seed: int = 42) -> RunResult:
     try:
         with log_capture:
             try:
-                from meta_core.runtime.runtime_simulator import RuntimeSimulator
+                from meta_core.core.runtime_mode_module import RuntimeSimulator
             except ImportError as e:
                 logs.append(f"BUG: Failed to import RuntimeSimulator: {e}")
                 logs.append(traceback.format_exc())

@@ -29,7 +29,7 @@ def _load_registry() -> Dict[str, Any]:
     global _registry_cache
     if _registry_cache is not None:
         return _registry_cache
-    registry_path = Path(__file__).parent.parent / "config" / "cell_type_registry.json"
+    registry_path = Path(__file__).parent.parent / "config" / "architecture" / "cell_type_registry.json"
     try:
         with open(registry_path, "r", encoding="utf-8") as f:
             _registry_cache = json.load(f)
@@ -56,7 +56,7 @@ def _load_field_defs() -> Dict[str, Any]:
     global _field_defs_cache, _bit_fields_cache
     if _field_defs_cache is not None:
         return _field_defs_cache
-    path = Path(__file__).parent.parent / "config" / "field_definitions.json"
+    path = Path(__file__).parent.parent / "config" / "ui" / "field_definitions.json"
     try:
         with open(path, "r", encoding="utf-8") as f:
             _field_defs_cache = json.load(f)
@@ -79,7 +79,7 @@ def _load_defaults() -> Dict[str, Any]:
     global _defaults_cache
     if _defaults_cache is not None:
         return _defaults_cache
-    path = Path(__file__).parent.parent / "config" / "defaults.json"
+    path = Path(__file__).parent.parent / "config" / "runtime" / "defaults.json"
     try:
         with open(path, "r", encoding="utf-8") as f:
             _defaults_cache = json.load(f)
@@ -101,7 +101,7 @@ def _load_dzh_type_map() -> Dict[str, Any]:
     global _dzh_type_map_cache
     if _dzh_type_map_cache is not None:
         return _dzh_type_map_cache
-    path = Path(__file__).parent.parent / "config" / "dzh_type_map.json"
+    path = Path(__file__).parent.parent / "config" / "architecture" / "dzh_type_map.json"
     try:
         with open(path, "r", encoding="utf-8") as f:
             _dzh_type_map_cache = json.load(f)
@@ -357,7 +357,7 @@ def _load_flow_mode_registry() -> Dict[str, Any]:
     global _flow_mode_registry_cache
     if _flow_mode_registry_cache is not None:
         return _flow_mode_registry_cache
-    path = Path(__file__).parent.parent / "config" / "flow_mode_registry.json"
+    path = Path(__file__).parent.parent / "config" / "architecture" / "flow_mode_registry.json"
     try:
         with open(path, "r", encoding="utf-8") as f:
             _flow_mode_registry_cache = json.load(f)

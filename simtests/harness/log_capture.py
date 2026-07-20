@@ -8,11 +8,9 @@ from typing import List, Dict, Any, Optional, Tuple
 
 _DEFAULT_LOGGERS: Tuple[str, ...] = (
     'engine', 'simulator', 'tq_adapter', 'builtins',
-    'meta_core.engine', 'meta_core.runtime.runtime_simulator',
+    'meta_core.engine', 'meta_core.core.runtime_mode_module',
     'meta_core.services.tq_adapter', 'meta_core.native.builtins',
-    'meta_core.core.engine', 'meta_core.core.edge_executor', 'core.engine',
-    'meta_core.core.compiler',
-    'meta_core.services.pool_validator', 'services.pool_validator',
+    'meta_core.core.engine', 'meta_core.core.execution_module', 'core.engine',
 )
 
 

@@ -1,18 +1,18 @@
 """Simulation clock helpers for simtests.
 
-Centralises setting the MetaEngine/PoolEngine virtual time source so that
-simulation tests do not depend on removed MetaEngine attributes such as
+Centralises setting the PoolEngine virtual time source so that
+simulation tests do not depend on removed legacy attributes such as
 ``_virtual_clock`` or ``_current_time_source``.
 """
 from __future__ import annotations
 
-from meta_core.core.engine import MetaEngine
+from meta_core.core.engine import PoolEngine
 
 
 _MINIMAL_POOL_CONFIG = {"id": "_simtest_clock_", "nodes": [], "edges": []}
 
 
-def ensure_pool_engine(engine: MetaEngine) -> "PoolEngine":  # type: ignore[name-defined]
+def ensure_pool_engine(engine: PoolEngine) -> "PoolEngine":
     """Return the engine's PoolEngine, creating a minimal one if absent."""
     pe = engine._pool_engine
     if pe is None:
@@ -20,7 +20,7 @@ def ensure_pool_engine(engine: MetaEngine) -> "PoolEngine":  # type: ignore[name
     return pe
 
 
-def set_engine_clock(engine: MetaEngine, clock: float) -> None:
+def set_engine_clock(engine: PoolEngine, clock: float) -> None:
     """Fix the engine's virtual time source to ``clock`` seconds since 00:00 today.
 
     ``clock`` is interpreted as an offset from today's midnight (e.g. 34500

@@ -41,8 +41,8 @@
 
 | 步骤 | 读配置表 | 写运行时索引 |
 |------|---------|-------------|
-| 加载JSON | config/*.json（33张） | self.tables |
-| 建立模块索引 | modules.json | self.module_map: Dict[id→module] |
+| 加载JSON | config/**/*.json（递归子目录，SubTask 27.14 分类后分布到 architecture/runtime/data/ui/pools 等子目录；跳过 _archived/ 与 .locks.json） | self.tables |
+| 建立模块索引 | architecture/modules.json | self.module_map: Dict[id→module] |
 | 建立引擎索引 | engines.json | self.engine_index: Dict[id→engine] |
 | 建立边策略索引 | edge_strategies.json | self._edge_strategies + self._node_init |
 | 建立条件分发索引 | dispatch.json | self.dispatch_index |
@@ -232,6 +232,22 @@ triggered[eid] = edge_fired[eid] AND (dirty.nodes[sid] OR dirty.data)
 > 代码位置: `core/engine.py` `PoolEngine.run_tick()` / `_should_fire_edge()`；
 > `core/edge_executor.py` `EdgeExecutor.run()`；
 > 运行时表真相源: `core/runtime.py` `PoolState` + `core/edge_state.py` `EdgeState`。
+
+### 4.7 事件驱动路径（v4）
+
+`unify-stockpool-oop-event-driven` spec 实施后，状态池变换五阶段对应的事件发布点：
+
+| 阶段 | 发布事件 | 订阅模块 |
+|------|---------|---------|
+| gate（时机判定） | EdgeFired | EdgeExecutor |
+| filter（强弱筛选） | StockFiltered | Execution |
+| propagate（流转模式） | TransferExecuted | Trade/Database/Monitoring |
+| callback（回调副作用） | Signal, AlertRaised | Trade/Monitoring |
+| ttl（持有退出） | TTLExpired | Database/Monitoring |
+
+**事件链**：StockFiltered → EdgeFired → TransferExecuted → Signal → OrderPlaced → OrderFilled → PositionUpdated → StatisticsUpdated → RankingChanged → AlertRaised → SnapshotUpdated → EventLogged
+
+**三模式切换**：ModeChanged 事件驱动四模块切换数据源/时间源/交易接口/副作用范围。
 
 ---
 
@@ -638,6 +654,196 @@ MetaEngine.run_mode(mode_id, pool_config, current_bar_data, **kwargs)
 
 ---
 
+## 17. Phase 9 极致合并后的最终模块架构（33 文件）
+
+> Phase 9 完成子目录包扁平化与脚本聚合，非测试 .py 文件从 62 降至 33。
+
+### 17.1 core/ 目录（14 文件）
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `__init__.py` | - | 包初始化 |
+| `engine.py` | ~1500 | PoolEngine 核心循环 |
+| `event_bus.py` | ~500 | EventBus 通信枢纽（30 事件） |
+| `schemas.py` | ~940 | Pydantic 数据模型 |
+| `table_engine.py` | ~1360 | Config 加载 + 热加载 |
+| `domain.py` | - | 统一领域对象（合并自 domain/ 6 文件） |
+| `tick_bar_module.py` | - | TickBar 模块（tick + K线） |
+| `formula_module.py` | ~1868 | Formula 模块（公式计算） |
+| `screening_module.py` | ~764 | Screening 模块（筛选 + 评估器） |
+| `execution_module.py` | ~2938 | Execution 模块（编译 + 执行 + TTL） |
+| `trade_module.py` | - | Trade 模块（交易执行） |
+| `monitoring_module.py` | ~940 | Monitoring + Statistics 模块 |
+| `import_export_module.py` | - | ImportExport 模块 |
+| `runtime_mode_module.py` | ~2521 | RuntimeMode 模块（实盘/回放/仿真） |
+
+### 17.2 services/ 目录（5 文件）
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `__init__.py` | - | 包初始化 |
+| `storage.py` | ~2552 | Database + DB Sync |
+| `data.py` | ~5368 | DataSource + CandidatePool |
+| `providers.py` | ~8915 | 6 个 Provider 适配器（合并） |
+| `tq_adapter.py` | ~543 | TQ 适配器（独立保留） |
+
+### 17.3 native/ 目录（3 文件）
+
+| 文件 | 行数 | 职责 |
+|------|------|------|
+| `__init__.py` | - | 包初始化 |
+| `builtins.py` | ~1347 | 内置函数 + Pipeline |
+| `validators.py` | ~2168 | 验证器 + 匹配器 |
+
+### 17.4 其他目录
+
+**根目录（4 文件）**:
+- `api.py`（7032 行，合并自 api/ 3 文件）
+- `app.py`（FastAPI lifespan 装配）
+- `converters.py`（8708 行，合并自 converters/ 4 文件）
+- `__init__.py`
+
+**scripts/（3 文件）**:
+- `dev_tools.py`（合并 6 个开发工具）
+- `verify_tools.py`（合并 6 个验证工具）
+- `check_module_imports.py`（独立保留）
+
+**web/（Phase 11 极致精简后，9 文件）**:
+
+| 文件 | 说明 |
+|------|------|
+| `web/index.html` | 合并 3 HTML（index+config+formula）+ hash 路由（#/ + #/config + #/formula） |
+| `web/js/canvas.js` | 画布渲染逻辑（独立保留，2800 行） |
+| `web/js/app.js` | 合并 main+data+editor（应用核心，11195 行，IIFE 包裹） |
+| `web/js/ui.js` | 合并 panel+toolbar-renderer+event-panel+formula-manager（UI 组件，6251 行，IIFE 包裹） |
+| `web/css/styles.css` | 合并 5 CSS（@layer base + @layer components，8298 行，200KB） |
+| `web/ui_renderer.py` | 前端 Python 渲染辅助（保留） |
+| `web/package.json` | npm 配置（保留） |
+| `web/jest.config.js` | Jest 测试配置（保留） |
+
+**vendor/（2 文件）**:
+- 第三方依赖（保留）
+
+### 17.5 删除清单（Phase 8 + Phase 9 + Phase 11）
+
+#### Phase 8 深度合并中进一步删除/内聚的源文件
+
+在 Phase 7 已删除 22 个文件的基础上，Phase 8 进一步合并/删除：
+
+- `core/formula_cache` → 并入 `core/formula_module.py`
+- `core/statistics_module.py` → 并入 `core/monitoring_module.py`
+- `core/hot_reload.py` → 改名为 `core/table_engine.py`
+- `core/evaluators.py`（运行时入口部分） → 并入 `core/screening_module.py`
+- `services/db_sync_service.py` → 并入 `services/storage.py`
+- `services/candidate_pool.py` → 并入 `services/data.py`
+- `services/providers/_common.py` → 并入 `services/providers/__init__.py`
+- `native/pipeline.py` → 并入 `native/builtins.py`
+- `native/matchers.py` → 并入 `native/validators.py`
+- `converters/_common.py` → 并入 `core/import_export_module.py`
+- `web/js/_convert_table_driven.py` + `web/js/_reindent.py` → 并入 `web/ui_renderer.py`
+
+#### Phase 9 极致合并删除清单（35 文件）
+
+**core/domain/ 7 文件**:
+- `core/domain/__init__.py`
+- `core/domain/base.py`
+- `core/domain/nodes.py`
+- `core/domain/edges.py`
+- `core/domain/specs.py`
+- `core/domain/evaluators.py`
+- `core/domain/tick_source.py`
+→ 合并为 `core/domain.py` 单文件
+
+**services/providers/ 7 文件**:
+- `services/providers/__init__.py`
+- `services/providers/akshare_provider.py`
+- `services/providers/dfcf_provider.py`
+- `services/providers/hqchart_provider.py`
+- `services/providers/local_file_provider.py`
+- `services/providers/mock_provider.py`
+- `services/providers/tq.py`
+→ 合并为 `services/providers.py` 单文件
+
+**converters/ 4 文件**:
+- `converters/__init__.py`
+- `converters/dzh.py`
+- `converters/tdx.py`
+- `converters/json_xml.py`
+→ 合并为 `converters.py` 单文件
+
+**api/ 3 文件**:
+- `api/__init__.py`
+- `api/pool_api.py`
+- `api/system_api.py`
+→ 合并为 `api.py` 单文件
+
+**scripts/ 13 文件**:
+- `scripts/analyze_dzh.py`
+- `scripts/config_tools.py`
+- `scripts/decode_formulas.py`
+- `scripts/debug_formula.py`
+- `scripts/merge_config_tables.py`
+- `scripts/xml_tools.py`
+→ 合并为 `scripts/dev_tools.py`
+- `scripts/e2e_verify.py`
+- `scripts/manual_mcp_verify.py`
+- `scripts/manual_mcp_verify_sim.py`
+- `scripts/run_sim_verify.py`
+- `scripts/import_target_pool_100.py`
+- `scripts/run_server.py`
+→ 合并为 `scripts/verify_tools.py`
+
+**core/ 1 文件**:
+- `core/runtime.py`
+→ 合并到 `core/runtime_mode_module.py`
+
+#### Phase 11 前端极致精简删除清单（14 文件 + 8 样本归档）
+
+Phase 11 完成 web/ 目录前端文件极致精简：原 8 个 JS 合并为 3 个，原 5 个 CSS 合并为 1 个，原 3 个 HTML 合并为 1 个。
+
+**JS 7 文件合并 → `web/js/app.js` + `web/js/ui.js`**:
+- `web/js/main.js` → 并入 `web/js/app.js`
+- `web/js/data.js` → 并入 `web/js/app.js`
+- `web/js/editor.js` → 并入 `web/js/app.js`
+- `web/js/panel.js` → 并入 `web/js/ui.js`
+- `web/js/toolbar-renderer.js` → 并入 `web/js/ui.js`
+- `web/js/event-panel.js` → 并入 `web/js/ui.js`
+- `web/js/formula-manager.js` → 并入 `web/js/ui.js`
+
+**CSS 5 文件合并 → `web/css/styles.css`**:
+- `web/css/style.css`
+- `web/css/config-center.css`
+- `web/css/event-panel.css`
+- `web/css/formula.css`
+- `web/css/table-driven-panel.css`
+
+**HTML 2 文件合并 → `web/index.html`**:
+- `web/config.html`
+- `web/formula.html`
+
+**样本文件归档（8 个 → `docs/samples/pools/`）**:
+- `cys.json`
+- `ultra7.json`
+- `ultra7_injected.json`
+- `panhou.xml`
+- `盘后.xml`
+- `超赢1号.xml`
+- `超赢7号.xml`
+- `金色两点半.xml`
+
+### 17.6 模块间通信契约（Phase 8 后仍然有效）
+
+- **唯一通信通道**：`core/event_bus.py` 的 `EventBus`（发布/订阅领域事件，30 种事件类型）。
+- **禁止直接引用**：模块不得 `import` 其他业务模块的内部类；跨模块协作一律
+  通过事件订阅/发布完成。
+- **依赖注入**：跨层依赖（数据源/公式缓存/市场数据端口）通过构造函数注入
+  工厂或 Protocol 接口，不直接 `import services.*`。
+- **向后兼容**：迁移期内原组件类公共方法签名不变，仍可被显式 import 引用，
+  但新代码应走事件驱动入口。
+- **静态校验**：`scripts/check_module_imports.py` 强制白名单，Phase 8 验证 0 违规。
+
+---
+
 ## 12. 附录
 
 ### A. col 列ID → TQ字段映射
@@ -964,7 +1170,101 @@ CREATE TABLE config_version (
 | replay（回放） | runtime_modes.json:replay；time_sources.json:sequence；kline_cache / _timeline；trade_interfaces.json:noop | 按 K 线序列时间步进，只读回放，不下单 | replay_session；replay_snapshot；stock_transfer_log |
 | simulation（仿真） | runtime_modes.json:simulation；time_sources.json:virtual；mock_data.json；trade_interfaces.json:paper_trade | 按虚拟时钟手动/自动步进，mock 行情，模拟记账 | _runtime_state；paper_trade_positions；_virtual_cash |
 
-### 17.3 数据源降级链
+### 17.3 仿真模式架构
+
+仿真模式提供完整的虚拟交易环境，支持手动步进和自动步进两种模式，速度可调节（0.5x ~ 20x）。
+
+#### 17.3.1 前端 UI 组件
+
+| 组件 | ID | 功能 |
+|------|-----|------|
+| 启动按钮 | `simBtnStart` | 开始自动步进 |
+| 暂停按钮 | `simBtnPause` | 暂停自动步进 |
+| 步进按钮 | `simBtnStep` | 手动单步执行 |
+| 重置按钮 | `simBtnReset` | 重置仿真会话 |
+| 步长选择 | `simDeltaSelect` | 1s / 1min / 5min / 1h |
+| 速度滑块 | `simSpeedSlider` | 0.5x ~ 20x 连续可调 |
+| 速度显示 | `simSpeedValue` | 当前速度倍数 |
+| 时钟显示 | `simulationClock` | 虚拟时间 HH:MM:SS |
+| 步数显示 | `simulationStepCount` | 已执行步数 |
+
+#### 17.3.2 前端状态机
+
+```
+setMode('simulation')
+  │
+  ├─ 初始化: switch data source to mock
+  ├─ 初始化: POST /api/pool/{name}/sim/init
+  ├─ 显示面板: simulationPanel + eventPanel
+  ├─ 状态: _simAutoStepping = false
+  │
+  └─ 用户操作:
+       ├─ 点击 "▶ 启动" → startSimAutoStep()
+       │    ├─ _simAutoStepping = true
+       │    └─ _simAutoTick() 循环:
+       │         ├─ runSimulationStep(delta)
+       │         ├─ 等待 interval = 1000/_simSpeed ms
+       │         └─ 重复 (直到暂停或退出)
+       │
+       ├─ 点击 "⏸ 暂停" → stopSimAutoStep()
+       │    └─ _simAutoStepping = false
+       │
+       ├─ 点击 "⏭ 步进" → stopSimAutoStep() + runSimulationStep(delta)
+       │
+       ├─ 拖动速度滑块 → _simSpeed = slider.value
+       │    └─ POST /api/pool/{name}/sim/speed {speed: _simSpeed}
+       │
+       └─ 点击 "✕ 退出" → stopSimAutoStep() + setMode('design')
+```
+
+#### 17.3.3 后端 API 端点
+
+| 端点 | 方法 | 功能 |
+|------|------|------|
+| `/api/pool/{name}/sim/init` | POST | 初始化仿真会话 |
+| `/api/pool/{name}/sim/start` | POST | 执行一步仿真（别名） |
+| `/api/pool/{name}/simulation/step` | POST | 执行一步仿真 |
+| `/api/pool/{name}/sim/pause` | POST | 暂停仿真 |
+| `/api/pool/{name}/sim/resume` | POST | 恢复仿真 |
+| `/api/pool/{name}/sim/stop` | POST | 停止并清理仿真 |
+| `/api/pool/{name}/sim/state` | GET | 获取仿真状态快照 |
+| `/api/pool/{name}/sim/speed` | POST | 设置速度倍数 |
+
+#### 17.3.4 仿真步进流程
+
+```
+runSimulationStep(delta)
+  │
+  ├─ POST /api/pool/{name}/sim/start {delta: delta}
+  │
+  └─ _run_simulation_step(name, delta)
+       ├─ 检查数据源 == mock
+       ├─ _get_or_create_simulator(name)
+       │    ├─ RuntimeSimulator(pool_config, engine)
+       │    └─ simulator.initialize()
+       ├─ effective_delta = delta * simulator.speed
+       ├─ events = simulator.step(d=effective_delta)
+       │    ├─ clock += d
+       │    ├─ _generate_tick_from_queue()    # tick 生成
+       │    ├─ _sync_stock_prices()           # K线数据同步
+       │    ├─ engine._tick()                 # 完整引擎循环
+       │    │    ├─ apply_data(bar_data)      # 数据注入
+       │    │    ├─ EventDriver.fire_due()    # 边条件计算 + 公式求值
+       │    │    ├─ _update_trackers()        # 持仓跟踪更新
+       │    │    ├─ _emit_transfer_events()   # ENTER/EXIT/TIMEOUT 事件
+       │    │    └─ _post_tick()              # 回调
+       │    └─ 收集 events + signals
+       └─ 返回 {virtual_clock, node_stocks, events}
+```
+
+#### 17.3.5 速度控制机制
+
+- **速度倍数**：存储在 `RuntimeSimulator.speed` 属性
+- **有效步长**：`effective_delta = delta * speed`
+- **自动步进间隔**：`interval = 1000 / speed` ms（前端 setTimeout）
+- **速度范围**：0.5x ~ 20x，步长 0.5
+
+### 17.4 数据源降级链
 
 数据源降级链的实际配置在 `data_source_contract.json`，而非 `fallback_chain.json`。`data_source_contract.json:sources.*.probe` 为每个数据源声明探测契约（method + timeout_ms），共定义 4 个数据源：
 
@@ -1066,6 +1366,28 @@ CREATE TABLE config_version (
 | 15 | pre_tick 流水线 | 读 pre_tick_pipeline.json → `MetaEngine._pre_tick()` 执行 stage 数组 → 写 `PoolState.latest_tick` / `PoolState.node_stocks` |
 
 **核心契约**：引擎核心循环只有 6 行（`PoolEngine.run_tick()`）：统一计算 `edge_fired` → 仅执行 triggered 边 → `clear_dirty` → `snapshot_nodes` → `sync_events_to_meta`。15 项功能全部通过查表执行，核心循环代码不随功能增加而增长。新增功能 = 加 JSON 条目，零行 Python。
+
+### §17.1 事件契约补充（v4）
+
+原 §17 表格中各功能的发布/订阅事件契约（v4 新增）：
+
+| 功能 | 发布事件 | 订阅事件 |
+|------|---------|---------|
+| 配置加载 | ConfigLoaded | ConfigChanged |
+| 池导入 | PoolLoaded, ImportStarted, ExportCompleted | - |
+| tick 接收 | TickReceived | - |
+| K线合成 | DataChanged, BarComposed | TickReceived |
+| 公式计算 | FormulaEvaluated, CrossOverDetected | DataChanged, BarComposed |
+| 股票筛选 | StockFiltered | FormulaEvaluated |
+| 边执行 | EdgeFired, TransferExecuted, TTLExpired, Signal | StockFiltered, DataChanged, TimeAdvanced, EdgeFired |
+| 交易执行 | OrderPlaced, OrderFilled, PositionUpdated, AlertRaised | Signal, TransferExecuted, OrderPlaced, OrderFilled, ModeChanged |
+| 交易统计 | StatisticsUpdated, RankingChanged | PositionUpdated, BarComposed, StatisticsUpdated |
+| 监控记录 | SnapshotUpdated, EventLogged, AlertRaised | TransferExecuted, TTLExpired, OrderPlaced, AlertRaised, 全部事件 |
+| 模式切换 | ModeChanged | - |
+| 时间推进 | TimeAdvanced | TickReceived(live), ReplayStep(replay), SimulationStep(simulation) |
+| 回放 | ReplayStarted, ReplayStep | - |
+| 仿真 | SimulationStep | - |
+| 配置热加载 | ConfigChanged | config/*.json 文件变更 |
 
 ---
 
@@ -1203,3 +1525,111 @@ mock      probe_expr: always   ← 最终兜底，永不失败
 | data_query.py | 统一 K 线查询服务（DataQueryService，屏蔽历史/今日/当前分钟区别，返回前复权连续序列） | DataQueryService | 读 kline_cache / current_bar_data；写 _kline_query_cache |
 | formula_cache.py | 公式结果多级缓存（L1 进程内，缓存键 (formula, symbol, period, context_hash)，分级 TTL） | FormulaCache | 读/写 _formula_cache_l1 |
 | minute_aggregator.py | 全市场分钟线合成器（Min1Aggregator，基于预分配 numpy 数组的无锁单线程实现，Tick→1分钟 OHLCV 合成） | Min1Aggregator | 读 tick 流；写 _min1_buffer / kline_cache |
+
+## §20 事件驱动架构（v4）
+
+`unify-stockpool-oop-event-driven` spec 实施后，系统升级为 v4 事件驱动架构。本节定义事件契约、模块依赖规则、app.py lifespan 装配规则。
+
+### §20.1 事件契约表（30 种事件类型）
+
+| # | 事件类型 | 发布者 | 订阅者 | 载荷 |
+|---|---------|--------|--------|------|
+| 1 | `ConfigLoaded` | Config | Execution/Domain/HotReload | config_tables dict |
+| 2 | `ConfigChanged` | HotReload | Config/Execution | changed_tables list |
+| 3 | `PoolLoaded` | ImportExport | Execution/Database | pool_config dict |
+| 4 | `TickReceived` | DataSource | TickBar/RuntimeMode | tick_data dict |
+| 5 | `DataChanged` | TickBar | Execution/Formula/Monitoring/PoolEngine(可选) | tick/bar dict |
+| 6 | `BarComposed` | TickBar | Formula/Statistics | bar dict |
+| 7 | `FormulaEvaluated` | Formula/FormulaRouter | Screening/Statistics | result + formula_ref |
+| 8 | `CrossOverDetected` | Formula | Screening | code + type(golden/death) |
+| 9 | `StockFiltered` | Screening | Execution | passed + rejected lists |
+| 10 | `EdgeFired` | Execution/PoolEngine | EdgeExecutor/Monitoring | edge_id + ts |
+| 11 | `TransferExecuted` | Execution | Trade/Database/Monitoring | src→tgt + codes + mode |
+| 12 | `TTLExpired` | Execution | Database/Monitoring | node_id + codes |
+| 13 | `Signal` | Execution/Trade | Trade | BUY/SELL + code + qty |
+| 14 | `OrderPlaced` | Trade | Database/Monitoring | order dict |
+| 15 | `OrderFilled` | Trade | Statistics/Database/Trade | fill dict |
+| 16 | `PositionUpdated` | Trade | Statistics/Monitoring | tracker dict |
+| 17 | `StatisticsUpdated` | Statistics | Monitoring/API | stats dict |
+| 18 | `RankingChanged` | Statistics | Monitoring | rankings dict |
+| 19 | `AlertRaised` | Monitoring/Trade | API/Database | alert dict |
+| 20 | `SnapshotUpdated` | Monitoring | API | snapshot dict |
+| 21 | `EventLogged` | Monitoring | Database | event dict |
+| 22 | `ModeChanged` | RuntimeMode | TickBar/Execution/Trade/Database/所有模块 | mode_id |
+| 23 | `TimeAdvanced` | RuntimeMode/PoolEngine | Execution | ts |
+| 24 | `ReplayStarted` | RuntimeMode | Database/Monitoring/Replay | session dict |
+| 25 | `ReplayStep` | RuntimeMode | Execution/TickBar | step dict |
+| 26 | `SimulationStep` | RuntimeMode | Execution/TickBar | step dict |
+| 27 | `ImportStarted` | ImportExport | Monitoring | format + path |
+| 28 | `ExportCompleted` | ImportExport | Monitoring | format + path + count |
+| 29-30 | `Executed`/`DomainEvent` | EdgeExecutor | Execution(转发) | 内部事件 |
+
+### §20.2 模块依赖规则（强制：只准与 EventBus 交互）
+
+**禁止行为**（任何模块违反即视为 bug）：
+- `from core.xxx import Yyy`（除 `core.event_bus`/`core.domain`/`core.schemas` 白名单外）
+- `from services.xxx import Yyy`（除在 `app.py` lifespan 装配处外）
+- `from converters.xxx import Yyy`（除在 `app.py` lifespan 装配处外）
+- 模块构造函数接收具体实现类（必须接收 `Protocol`/`ABC` 接口）
+
+**允许行为**：
+- `from core.event_bus import EventBus, Event` —— 唯一允许的跨模块 import
+- `from core.domain import ...` —— Domain 模块作为纯数据模型，可被任何模块 import
+- `from core.schemas import ...` —— Pydantic 数据模型，同上
+- 模块构造函数接收 `EventBus` 实例 + 配置 dict + 可选 `Protocol` 接口
+
+**8 个聚合器模块白名单**（允许组合同模块内组件）：
+- `core/tick_bar_module.py` ← core.tick_source / core.data_updater / core.bar_composer / services.minute_aggregator
+- `core/formula_module.py` ← core.formula / core.formula_engine / core.formula_router / services.formula_cache
+- `core/trade_module.py` ← core.trade_executor / services.trading_service
+- `core/import_export_module.py` ← converters.dzh / converters.tdx / converters.json_xml
+- `core/runtime_mode_module.py` ← core.replay / core.simulator
+- `core/execution_module.py` ← core.compiler / core.engine / core.edge_executor / core.time_util
+- `core/monitoring_module.py` ← (SubTask 27.6: core.event_panel / core.snapshot_builder 已合并入本文件，原子组件 _EventPanel / _SnapshotBuilder 为模块内私有类)
+- `core/screening_module.py` ← core.evaluators
+
+**静态检查**：`scripts/check_module_imports.py` 扫描 core/services/converters 下所有 .py 文件 import 语句。
+
+### §20.3 app.py lifespan 事件布线器
+
+```python
+async def lifespan(app):
+    bus = EventBus()
+    db = Database(bus, config)
+    data_source = DataSource(bus, config)
+    tick_bar = TickBarModule(bus, config)
+    formula = FormulaModule(bus, config)
+    screening = ScreeningModule(bus, config)
+    execution = ExecutionModule(bus, config)
+    trade = TradeModule(bus, config)
+    statistics = StatisticsModule(bus, config)
+    monitoring = MonitoringModule(bus, config)
+    import_export = ImportExportModule(bus, config)
+    runtime_mode = RuntimeModeModule(bus, config)
+    hot_reload = HotReloadManager(bus, config)
+    api = ApiModule(bus, app)
+    # 各模块在 __init__ 中订阅事件、发布事件；不持有其他模块引用
+```
+
+### §20.4 tick 执行链 10 类事件按序发布
+
+一个 tick 到达触发完整执行链：
+1. `TickReceived`（DataSource → TickBar）
+2. `DataChanged`（TickBar → Execution/Formula/Monitoring）
+3. `BarComposed`（TickBar → Formula/Statistics）
+4. `FormulaEvaluated`（Formula → Screening/Statistics）
+5. `StockFiltered`（Screening → Execution）
+6. `EdgeFired` + `TransferExecuted`（Execution → Trade/Database/Monitoring）
+7. `Signal`（Execution/Trade → Trade）
+8. `OrderPlaced` + `OrderFilled` + `PositionUpdated`（Trade → Statistics/Database/Monitoring）
+9. `StatisticsUpdated` + `RankingChanged`（Statistics → Monitoring/API）
+10. `AlertRaised` + `SnapshotUpdated` + `EventLogged`（Monitoring → API/Database）
+
+### §20.5 三模式 ModeChanged 事件订阅
+
+| 订阅模块 | 切换属性 | 模式映射 |
+|---------|---------|---------|
+| TickBar | `_mode_id` | live→tq_dll/sdk/akshare; replay→kline_cache; simulation→mock |
+| Execution | `_time_source` | live→wall_clock; replay→sequence; simulation→virtual |
+| Trade | `_interface_type` | live→live_order; replay→noop; simulation→paper_trade |
+| Database | `_side_effects_scope` | live→all; replay→readonly; simulation→optional |

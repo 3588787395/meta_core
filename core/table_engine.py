@@ -9,8 +9,16 @@
 2. 引擎仅包含通用的表解析与执行逻辑
 3. UI界面完全由配置表决定
 4. 支持热加载与校验
+
+合并说明（SubTask 28.6）：
+    ``services/hot_reload.py`` 已合并至本文件末尾的「热加载层」section，
+    ``HotReloadManager`` 现由 ``core.table_engine`` 统一提供，
+    本文件成为配置存储 + 热加载的单一入口。
 """
 
+# === 热加载层（自 services/hot_reload.py 合并）===
+
+import asyncio
 import json
 import time
 import copy
@@ -18,7 +26,9 @@ import hashlib
 import logging
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Callable
+from typing import Any, Callable, Dict, List, Optional, Set
+
+from core.event_bus import ConfigChanged, ConfigLoaded, EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +37,10 @@ logger = logging.getLogger(__name__)
 class ConfigStore:
     """配置表存储：加载、缓存、校验、热加载"""
 
-    def __init__(self, config_dir: str, storage=None):
+    def __init__(self, config_dir: Optional[str] = None, storage=None, bus: Optional[EventBus] = None):
+        # SubTask 27.14: config_dir 可选，默认为模块上级的 config/ 目录
+        if config_dir is None:
+            config_dir = Path(__file__).parent.parent / "config"
         self._config_dir = Path(config_dir)
         self._tables: Dict[str, Dict] = {}
         self._hashes: Dict[str, str] = {}  # 文件hash，用于热加载检测
@@ -45,14 +58,73 @@ class ConfigStore:
         }
         # 表锁定状态（Task 13: .locks.json）
         self._locks: Dict[str, Dict] = {}
+        # Task 15: EventBus 注入——订阅 ConfigChanged 事件自行重载，
+        # load_all() 后发布 ConfigLoaded 事件
+        self._bus: Optional[EventBus] = bus
+        if bus is not None:
+            bus.subscribe(ConfigChanged, self._on_config_changed)
+        # SubTask 27.14: 独立实例（无 bus）自动加载配置，便于验证与脚本使用
+        if bus is None:
+            self.load_all()
+
+    def _iter_config_files(self) -> List[Path]:
+        """递归枚举 config_dir 下所有 .json 文件，跳过 _archived/ 与 .locks.json。
+
+        SubTask 27.14: 配置文件按模块分类到子目录后，需递归扫描而非仅扫根目录。
+        """
+        files: List[Path] = []
+        for path in self._config_dir.rglob("*.json"):
+            # 跳过 _archived/ 目录（历史归档，不参与加载）
+            if "_archived" in path.parts:
+                continue
+            # 跳过 .locks.json（由 _load_locks 单独加载）
+            if path.name == ".locks.json":
+                continue
+            files.append(path)
+        return sorted(files)
+
+    def _find_table_path(self, name: str) -> Optional[Path]:
+        """按表名递归查找配置文件路径，跳过 _archived/。
+
+        SubTask 27.14: 配置文件移入子目录后，路径不再固定为 config_dir/name.json。
+        """
+        for path in self._config_dir.rglob(f"{name}.json"):
+            if "_archived" in path.parts:
+                continue
+            return path
+        return None
+
+    def _on_config_changed(self, event: ConfigChanged) -> None:
+        """``ConfigChanged`` 事件处理器：重载变更的配置表。
+
+        由 ``HotReloadManager`` 检测到文件变更后发布 ``ConfigChanged`` 事件触发，
+        ConfigStore 不再被 HotReloadManager 直接调用 ``check_hot_reload()``
+        （Task 14.3：删除直接调用，改为事件订阅自行重载）。
+        """
+        try:
+            changed_tables = getattr(event, "changed_tables", []) or []
+            for name in changed_tables:
+                path = self._find_table_path(name)
+                if path is not None:
+                    self._load_table(name, path)
+            if changed_tables:
+                logger.info("ConfigStore 经 ConfigChanged 事件重载表: %s", changed_tables)
+        except Exception as ex:
+            logger.warning("ConfigStore._on_config_changed 异常: %s", ex)
 
     def load_all(self) -> None:
-        """加载所有配置表"""
-        for path in sorted(self._config_dir.glob("*.json")):
+        """加载所有配置表（SubTask 27.14: 递归扫描子目录）"""
+        for path in self._iter_config_files():
             name = path.stem
             self._load_table(name, path)
         self._load_categories()
         self._load_locks()
+        # Task 15: 加载完成后发布 ConfigLoaded 事件
+        if self._bus is not None:
+            try:
+                self._bus.publish(ConfigLoaded(config_tables=dict(self._tables)))
+            except Exception as ex:
+                logger.warning("ConfigStore 发布 ConfigLoaded 异常: %s", ex)
 
     def _load_categories(self) -> None:
         """加载 table_categories.json 并与 config 目录实际 .json 文件做一致性校验。"""
@@ -63,7 +135,10 @@ class ConfigStore:
             "extra_on_disk": [],
             "consistent": False,
         }
-        categories_path = self._config_dir / "table_categories.json"
+        categories_path = self._find_table_path("table_categories")
+        if categories_path is None:
+            logger.warning("table_categories.json 未找到（递归扫描 config_dir）")
+            return
         try:
             with open(categories_path, "r", encoding="utf-8") as f:
                 cat_data = json.load(f)
@@ -82,9 +157,7 @@ class ConfigStore:
         system_files = {"table_categories", ".locks"}
         actual_tables = set()
         try:
-            for path in self._config_dir.iterdir():
-                if path.suffix != ".json":
-                    continue
+            for path in self._iter_config_files():
                 base = path.stem
                 if base in system_files or base.startswith("."):
                     continue
@@ -333,7 +406,7 @@ class ConfigStore:
         4. 配置变更时，调用 Storage.record_config_version 记录版本历史
         """
         changed = []
-        for path in self._config_dir.glob("*.json"):
+        for path in self._iter_config_files():
             name = path.stem
             try:
                 raw = path.read_text(encoding="utf-8")
@@ -441,6 +514,11 @@ class ConfigStore:
         """停止配置表热加载监控"""
         self._watch_enabled = False
         logger.info("配置表热加载监控已停止")
+
+    @property
+    def tables(self) -> Dict[str, Dict]:
+        """配置表字典（SubTask 27.14 验证用）"""
+        return self._tables
 
     @property
     def table_names(self) -> List[str]:
@@ -768,12 +846,6 @@ class DataBinder:
             return (btid << 16) | (param1 << 8) | param3
 
         return 0
-
-    # TODO: 确认无外部调用后可删除，功能与 builtins._stock_code 重复
-    @staticmethod
-    def stock_code(s):
-        if isinstance(s, str): return s
-        return s.get('code', s.get('label', str(s))) if isinstance(s, dict) else str(s)
 
 
 # ─── 面板生成引擎 ───────────────────────────────────────────────
@@ -1235,4 +1307,408 @@ class PropertyOwnershipManager:
             # 但更准确的做法是：面板中出现的字段如果属于另一种池类型的独占属性，则 disabled
             # 这里返回另一种池类型的独占属性列表，前端/后端在生成面板时逐字段检查
             return other_exclusive_list
+
+
+# ════════════════════════════════════════════════════════════════════
+# === 热加载层（自 services/hot_reload.py 合并，SubTask 28.6）===
+# ════════════════════════════════════════════════════════════════════
+# 独立的热加载模块，从 ConfigStore.check_hot_reload() 提取而来。
+# 支持：
+# 1. Watchdog 文件监控 config/ 目录
+# 2. 三级校验闭环（语法→逻辑→业务规则）
+# 3. HotSwap 原子替换
+# 4. WebSocket 推送配置变更事件
+# 5. 版本记录与回滚
+# 6. 事件驱动：发布 ConfigChanged 事件（Task 14）
+
+
+class HotReloadManager:
+    """热加载管理器：文件监控 + 原子替换 + WebSocket 推送。
+
+    事件驱动（Task 14）：
+        - ``bus`` 注入后，文件变更检测时发布 ``ConfigChanged`` 事件
+        - ``bus=None`` 时保持原行为（仅本地 swap + on_change 回调），向后兼容
+    """
+
+    def __init__(self, config_dir: str, config_store=None, storage=None,
+                 schema_validator=None, on_change: Optional[Callable] = None,
+                 bus: Optional[EventBus] = None):
+        """
+        Args:
+            config_dir: 配置目录路径
+            config_store: ConfigStore 实例（用于加载和替换配置）
+            storage: Storage 实例（用于版本记录和回滚）
+            schema_validator: SchemaValidator 实例（用于三级校验）
+            on_change: 配置变更后的回调函数，签名为 on_change(changed: List[str])
+            bus: EventBus 实例（注入后发布 ConfigChanged 事件；None 保持原行为）
+        """
+        self._config_dir = Path(config_dir)
+        self._config_store = config_store
+        self._storage = storage
+        self._schema_validator = schema_validator
+        self._on_change = on_change
+        self._bus = bus
+        self._hashes: Dict[str, str] = {}
+        self._watch_task: Optional[asyncio.Task] = None
+        self._watch_enabled = False
+        self._watch_interval = 2.0
+        self._ws_connections: Set = set()
+        self._observer = None  # watchdog observer
+        # watchdog 高频触发防抖：1 秒内只发布一次 ConfigChanged
+        self._last_check_ts: float = 0.0
+        self._debounce_interval: float = 1.0
+        # 兼容原 _pending_changes 标记（bus=None 时 watchdog 仍写入此集合）
+        self._pending_changes: Set[str] = set()
+
+        # 初始化哈希快照
+        self._snapshot_hashes()
+
+    def _snapshot_hashes(self) -> None:
+        """对当前所有配置文件计算哈希快照"""
+        self._hashes.clear()
+        for path in self._config_dir.glob("*.json"):
+            try:
+                raw = path.read_text(encoding="utf-8")
+                self._hashes[path.stem] = hashlib.md5(raw.encode()).hexdigest()
+            except Exception:
+                pass
+
+    def set_config_store(self, store) -> None:
+        self._config_store = store
+
+    def set_storage(self, storage) -> None:
+        self._storage = storage
+
+    def set_schema_validator(self, validator) -> None:
+        self._schema_validator = validator
+
+    def set_on_change(self, callback: Callable) -> None:
+        self._on_change = callback
+
+    # ─── 核心检测与替换 ───────────────────────────────────────
+
+    def detect_changes(self) -> List[str]:
+        """检测配置文件变更（仅检测，不替换，不更新 hash 缓存）"""
+        changed = []
+        for path in self._config_dir.glob("*.json"):
+            name = path.stem
+            try:
+                raw = path.read_text(encoding="utf-8")
+                file_hash = hashlib.md5(raw.encode()).hexdigest()
+                if self._hashes.get(name) != file_hash:
+                    changed.append(name)
+            except Exception:
+                pass
+        return changed
+
+    def check_changes(self) -> List[str]:
+        """检查配置文件变更并发布 ``ConfigChanged`` 事件（事件驱动入口）。
+
+        与 ``check_and_reload`` 的区别：
+            - 仅检测 + 发布事件，不做三级校验/原子替换/版本记录
+            - 由 Config 模块订阅 ``ConfigChanged`` 事件自行重载（Task 15 装配）
+            - 更新本地 hash 缓存，避免重复发布同一变更
+
+        Returns:
+            变更的表名列表（去 ``.json`` 后缀）
+        """
+        changed_tables: List[str] = []
+        for path in self._config_dir.glob("*.json"):
+            name = path.stem
+            try:
+                raw = path.read_text(encoding="utf-8")
+                cur_hash = hashlib.md5(raw.encode()).hexdigest()
+            except Exception as ex:
+                logger.warning("HotReload 计算文件 hash 失败 %s: %s", name, ex)
+                continue
+
+            prev_hash = self._hashes.get(name)
+            if prev_hash is not None and cur_hash != prev_hash:
+                changed_tables.append(name)
+            self._hashes[name] = cur_hash
+
+        if changed_tables and self._bus is not None:
+            try:
+                self._bus.publish(ConfigChanged(changed_tables=changed_tables))
+            except Exception as ex:
+                logger.warning("HotReload 发布 ConfigChanged 事件失败: %s", ex)
+
+        return changed_tables
+
+    def on_file_modified(self, event) -> None:
+        """watchdog 文件变更回调（带防抖）。
+
+        - ``bus=None`` 时保持原行为（仅标记 ``_pending_changes``）
+        - ``bus`` 注入时调用 ``check_changes()``，由其发布 ``ConfigChanged`` 事件
+        """
+        if self._bus is None:
+            # 向后兼容：保留原 _pending_changes 标记逻辑
+            try:
+                name = Path(event.src_path).stem
+                self._pending_changes.add(name)
+            except Exception:
+                pass
+            return
+
+        try:
+            now = time.time()
+            if now - self._last_check_ts < self._debounce_interval:
+                return  # 防抖窗口内，跳过
+            self._last_check_ts = now
+            # 检测 + 发布 ConfigChanged 事件
+            self.check_changes()
+        except Exception as ex:
+            logger.warning("HotReload 文件变更处理失败: %s", ex)
+
+    def validate_and_swap(self, table_name: str, new_data: Dict) -> tuple:
+        """校验并原子替换单个配置表
+
+        Returns:
+            (success: bool, errors: List[str])
+        """
+        errors = []
+
+        # 三级校验
+        if self._schema_validator is not None:
+            # 语法校验
+            syntax_results = self._schema_validator.validate_syntax(table_name, new_data)
+            syntax_errors = [r for r in syntax_results if r.level == "error"]
+            errors.extend(r.message for r in syntax_errors)
+
+            if not syntax_errors:
+                # 逻辑校验
+                logic_results = self._schema_validator.validate_logic(table_name, new_data)
+                logic_errors = [r for r in logic_results if r.level == "error"]
+                errors.extend(r.message for r in logic_errors)
+
+                if not logic_errors:
+                    # 业务规则校验
+                    business_results = self._schema_validator.validate_business(table_name, new_data)
+                    business_errors = [r for r in business_results if r.level == "error"]
+                    errors.extend(r.message for r in business_errors)
+
+        return len(errors) == 0, errors
+
+    def check_and_reload(self) -> List[str]:
+        """检测变更并执行热加载，返回变更的表名列表
+
+        三级校验闭环：
+        1. 检测文件变更
+        2. 解析新配置
+        3. 三级校验（语法→逻辑→业务规则）
+        4. 校验通过→原子替换 + 版本记录
+        5. 校验失败→保留旧配置，记录错误
+        """
+        changed = []
+
+        for path in self._config_dir.glob("*.json"):
+            name = path.stem
+            try:
+                raw = path.read_text(encoding="utf-8")
+                file_hash = hashlib.md5(raw.encode()).hexdigest()
+
+                if self._hashes.get(name) == file_hash:
+                    continue  # 无变更
+
+                # 检测到变更，先解析新配置
+                try:
+                    new_data = json.loads(raw)
+                except json.JSONDecodeError as e:
+                    logger.error(f"热加载 {name} 失败: JSON解析错误 {e}，保留旧配置")
+                    continue
+
+                # 三级校验
+                success, errors = self.validate_and_swap(name, new_data)
+                if not success:
+                    for err in errors:
+                        logger.error(f"热加载 {name} 校验失败: {err}")
+                    logger.warning(f"热加载 {name} 校验失败，保留旧配置不变")
+                    continue
+
+                # 校验通过，记录旧配置用于版本追踪
+                old_data = self._config_store.get(name) if self._config_store else None
+                old_content = json.dumps(old_data, ensure_ascii=False) if old_data else None
+                new_content = json.dumps(new_data, ensure_ascii=False)
+
+                # 原子替换：更新 ConfigStore
+                if self._config_store:
+                    self._config_store._tables[name] = new_data
+                    self._config_store._hashes[name] = file_hash
+                    self._config_store._load_times[name] = time.time()
+
+                # 更新本地哈希
+                self._hashes[name] = file_hash
+                changed.append(name)
+
+                # 记录配置版本
+                if self._storage is not None:
+                    try:
+                        change_type = 'update' if old_data else 'create'
+                        self._storage.record_config_version(
+                            table_name=name,
+                            change_type=change_type,
+                            old_content=old_content,
+                            new_content=new_content,
+                            created_by='hot_reload'
+                        )
+                    except Exception as e:
+                        logger.warning(f"记录配置版本 {name} 失败: {e}")
+
+                logger.info(f"热加载 {name} 成功 (hash={file_hash[:8]})")
+
+            except Exception as e:
+                logger.error(f"热加载检测 {name} 失败: {e}")
+
+        # 触发变更回调
+        if changed and self._on_change:
+            try:
+                self._on_change(changed)
+            except Exception as e:
+                logger.warning(f"热加载回调执行失败: {e}")
+
+        # 事件驱动：发布 ConfigChanged 事件（Task 14）
+        # Config 模块订阅后自行重载，Execution 模块订阅后重建 CompiledSchedule
+        if changed and self._bus is not None:
+            try:
+                self._bus.publish(ConfigChanged(changed_tables=changed))
+            except Exception as ex:
+                logger.warning("HotReload 发布 ConfigChanged 事件失败: %s", ex)
+
+        return changed
+
+    def rollback(self, version_id: str) -> bool:
+        """回滚配置到指定版本"""
+        if self._storage is None:
+            logger.error("回滚失败: 未设置 Storage 引用")
+            return False
+
+        try:
+            success = self._storage.rollback_config(version_id)
+            if not success:
+                logger.error(f"回滚配置版本 {version_id} 失败")
+                return False
+
+            # 回滚后重新加载所有配置
+            if self._config_store:
+                self._config_store.load_all()
+            self._snapshot_hashes()
+            logger.info(f"回滚配置版本 {version_id} 成功")
+            return True
+        except Exception as e:
+            logger.error(f"回滚配置版本 {version_id} 异常: {e}")
+            return False
+
+    # ─── 定时轮询模式 ────────────────────────────────────────
+
+    async def start_polling(self, interval: float = 2.0) -> None:
+        """启动定时轮询热加载"""
+        self._watch_enabled = True
+        self._watch_interval = interval
+        logger.info(f"热加载轮询已启动 (间隔={interval}s)")
+
+        while self._watch_enabled:
+            try:
+                changed = self.check_and_reload()
+                if changed:
+                    await self._broadcast_changes(changed)
+            except Exception as e:
+                logger.error(f"热加载轮询异常: {e}")
+            await asyncio.sleep(interval)
+
+    def stop_polling(self) -> None:
+        """停止定时轮询"""
+        self._watch_enabled = False
+        logger.info("热加载轮询已停止")
+
+    # ─── Watchdog 模式 ───────────────────────────────────────
+
+    def start_watchdog(self) -> bool:
+        """启动 watchdog 文件监控。
+
+        事件驱动（Task 14）：
+            - ``bus`` 注入时，``on_modified`` 经 ``on_file_modified`` 触发
+              ``check_changes()``，发布 ``ConfigChanged`` 事件（带 1s 防抖）
+            - ``bus=None`` 时保持原行为（仅标记 ``_pending_changes``）
+        """
+        try:
+            from watchdog.observers import Observer
+            from watchdog.events import FileSystemEventHandler
+
+            class ConfigHandler(FileSystemEventHandler):
+                def __init__(self, manager: HotReloadManager):
+                    self._manager = manager
+
+                def on_modified(self, event):
+                    if event.is_directory or not event.src_path.endswith('.json'):
+                        return
+                    name = Path(event.src_path).stem
+                    logger.debug(f"Watchdog 检测到变更: {name}")
+                    # 委托给 manager：bus 注入则发布 ConfigChanged，否则标记 _pending_changes
+                    self._manager.on_file_modified(event)
+
+            handler = ConfigHandler(self)
+            self._observer = Observer()
+            self._observer.schedule(handler, str(self._config_dir), recursive=False)
+            self._observer.daemon = True
+            self._observer.start()
+            logger.info(f"Watchdog 文件监控已启动: {self._config_dir}")
+            return True
+        except ImportError:
+            logger.warning("watchdog 未安装，使用轮询模式代替")
+            return False
+        except Exception as e:
+            logger.error(f"Watchdog 启动失败: {e}")
+            return False
+
+    def stop_watchdog(self) -> None:
+        """停止 watchdog 文件监控"""
+        if self._observer:
+            self._observer.stop()
+            self._observer.join(timeout=5)
+            self._observer = None
+            logger.info("Watchdog 文件监控已停止")
+
+    # ─── WebSocket 推送 ───────────────────────────────────────
+
+    def add_ws_connection(self, ws) -> None:
+        """添加 WebSocket 连接"""
+        self._ws_connections.add(ws)
+
+    def remove_ws_connection(self, ws) -> None:
+        """移除 WebSocket 连接"""
+        self._ws_connections.discard(ws)
+
+    async def _broadcast_changes(self, changed: List[str]) -> None:
+        """向所有 WebSocket 连接推送配置变更事件"""
+        if not self._ws_connections:
+            return
+
+        message = json.dumps({
+            "type": "config_changed",
+            "changed_tables": changed,
+            "timestamp": time.time(),
+            "checksums": {name: self._hashes.get(name, "")[:8] for name in changed}
+        }, ensure_ascii=False)
+
+        disconnected = set()
+        for ws in self._ws_connections:
+            try:
+                await ws.send_text(message)
+            except Exception:
+                disconnected.add(ws)
+
+        self._ws_connections -= disconnected
+
+    # ─── 状态查询 ──────────────────────────────────────────────
+
+    def get_status(self) -> Dict[str, Any]:
+        """获取热加载管理器状态"""
+        return {
+            "config_dir": str(self._config_dir),
+            "tables_tracked": len(self._hashes),
+            "watchdog_active": self._observer is not None and self._observer.is_alive(),
+            "polling_active": self._watch_enabled,
+            "ws_connections": len(self._ws_connections),
+            "pending_changes": list(getattr(self, '_pending_changes', set())),
+        }
 

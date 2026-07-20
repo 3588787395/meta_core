@@ -1,0 +1,175 @@
+{
+  "id": "target_pool_100",
+  "name": "目标股票池-100只候选",
+  "nodes": [
+    {
+      "id": "source",
+      "type": "market_source",
+      "name": "备选池",
+      "position": {
+        "x": 100,
+        "y": 200,
+        "width": 70,
+        "height": 80
+      },
+      "params": {
+        "stocks": [
+          {"code": "fz000001", "name": "fz000001"}, {"code": "fz000002", "name": "fz000002"}, {"code": "fz000003", "name": "fz000003"}, {"code": "fz000004", "name": "fz000004"}, {"code": "fz000005", "name": "fz000005"},
+          {"code": "fz000006", "name": "fz000006"}, {"code": "fz000007", "name": "fz000007"}, {"code": "fz000008", "name": "fz000008"}, {"code": "fz000009", "name": "fz000009"}, {"code": "fz000010", "name": "fz000010"},
+          {"code": "fz000011", "name": "fz000011"}, {"code": "fz000012", "name": "fz000012"}, {"code": "fz000013", "name": "fz000013"}, {"code": "fz000014", "name": "fz000014"}, {"code": "fz000015", "name": "fz000015"},
+          {"code": "fz000016", "name": "fz000016"}, {"code": "fz000017", "name": "fz000017"}, {"code": "fz000018", "name": "fz000018"}, {"code": "fz000019", "name": "fz000019"}, {"code": "fz000020", "name": "fz000020"},
+          {"code": "fz000021", "name": "fz000021"}, {"code": "fz000022", "name": "fz000022"}, {"code": "fz000023", "name": "fz000023"}, {"code": "fz000024", "name": "fz000024"}, {"code": "fz000025", "name": "fz000025"},
+          {"code": "fz000026", "name": "fz000026"}, {"code": "fz000027", "name": "fz000027"}, {"code": "fz000028", "name": "fz000028"}, {"code": "fz000029", "name": "fz000029"}, {"code": "fz000030", "name": "fz000030"},
+          {"code": "fz000031", "name": "fz000031"}, {"code": "fz000032", "name": "fz000032"}, {"code": "fz000033", "name": "fz000033"}, {"code": "fz000034", "name": "fz000034"}, {"code": "fz000035", "name": "fz000035"},
+          {"code": "fz000036", "name": "fz000036"}, {"code": "fz000037", "name": "fz000037"}, {"code": "fz000038", "name": "fz000038"}, {"code": "fz000039", "name": "fz000039"}, {"code": "fz000040", "name": "fz000040"},
+          {"code": "fz000041", "name": "fz000041"}, {"code": "fz000042", "name": "fz000042"}, {"code": "fz000043", "name": "fz000043"}, {"code": "fz000044", "name": "fz000044"}, {"code": "fz000045", "name": "fz000045"},
+          {"code": "fz000046", "name": "fz000046"}, {"code": "fz000047", "name": "fz000047"}, {"code": "fz000048", "name": "fz000048"}, {"code": "fz000049", "name": "fz000049"}, {"code": "fz000050", "name": "fz000050"},
+          {"code": "fz000051", "name": "fz000051"}, {"code": "fz000052", "name": "fz000052"}, {"code": "fz000053", "name": "fz000053"}, {"code": "fz000054", "name": "fz000054"}, {"code": "fz000055", "name": "fz000055"},
+          {"code": "fz000056", "name": "fz000056"}, {"code": "fz000057", "name": "fz000057"}, {"code": "fz000058", "name": "fz000058"}, {"code": "fz000059", "name": "fz000059"}, {"code": "fz000060", "name": "fz000060"},
+          {"code": "fz000061", "name": "fz000061"}, {"code": "fz000062", "name": "fz000062"}, {"code": "fz000063", "name": "fz000063"}, {"code": "fz000064", "name": "fz000064"}, {"code": "fz000065", "name": "fz000065"},
+          {"code": "fz000066", "name": "fz000066"}, {"code": "fz000067", "name": "fz000067"}, {"code": "fz000068", "name": "fz000068"}, {"code": "fz000069", "name": "fz000069"}, {"code": "fz000070", "name": "fz000070"},
+          {"code": "fz000071", "name": "fz000071"}, {"code": "fz000072", "name": "fz000072"}, {"code": "fz000073", "name": "fz000073"}, {"code": "fz000074", "name": "fz000074"}, {"code": "fz000075", "name": "fz000075"},
+          {"code": "fz000076", "name": "fz000076"}, {"code": "fz000077", "name": "fz000077"}, {"code": "fz000078", "name": "fz000078"}, {"code": "fz000079", "name": "fz000079"}, {"code": "fz000080", "name": "fz000080"},
+          {"code": "fz000081", "name": "fz000081"}, {"code": "fz000082", "name": "fz000082"}, {"code": "fz000083", "name": "fz000083"}, {"code": "fz000084", "name": "fz000084"}, {"code": "fz000085", "name": "fz000085"},
+          {"code": "fz000086", "name": "fz000086"}, {"code": "fz000087", "name": "fz000087"}, {"code": "fz000088", "name": "fz000088"}, {"code": "fz000089", "name": "fz000089"}, {"code": "fz000090", "name": "fz000090"},
+          {"code": "fz000091", "name": "fz000091"}, {"code": "fz000092", "name": "fz000092"}, {"code": "fz000093", "name": "fz000093"}, {"code": "fz000094", "name": "fz000094"}, {"code": "fz000095", "name": "fz000095"},
+          {"code": "fz000096", "name": "fz000096"}, {"code": "fz000097", "name": "fz000097"}, {"code": "fz000098", "name": "fz000098"}, {"code": "fz000099", "name": "fz000099"}, {"code": "fz000100", "name": "fz000100"}
+        ]
+      }
+    },
+    {
+      "id": "pool_A",
+      "type": "statepool",
+      "name": "A池-KDJ金叉",
+      "position": {
+        "x": 350,
+        "y": 100,
+        "width": 150,
+        "height": 80
+      },
+      "config": {
+        "pool_role": "target_pool"
+      },
+      "params": {
+        "hold_seconds": 6000,
+        "psatt": {
+          "bdel": 1,
+          "ndelnum": 100,
+          "ndeltype": 2
+        }
+      }
+    },
+    {
+      "id": "pool_B",
+      "type": "statepool",
+      "name": "B池-MACD金叉",
+      "position": {
+        "x": 350,
+        "y": 280,
+        "width": 150,
+        "height": 80
+      },
+      "config": {
+        "pool_role": "target_pool"
+      },
+      "params": {
+        "hold_seconds": 12000,
+        "psatt": {
+          "bdel": 1,
+          "ndelnum": 200,
+          "ndeltype": 2
+        }
+      }
+    },
+    {
+      "id": "pool_C",
+      "type": "statepool",
+      "name": "C池-交集买入",
+      "position": {
+        "x": 600,
+        "y": 190,
+        "width": 150,
+        "height": 80
+      },
+      "config": {
+        "pool_role": "target_pool"
+      },
+      "params": {
+        "hold_seconds": 1200,
+        "psatt": {
+          "bdel": 1,
+          "ndelnum": 20,
+          "ndeltype": 2,
+          "baimpool": 1,
+          "bsavehis": 1
+        },
+        "enter_action": {
+          "type": 2,
+          "params": 100
+        },
+        "exit_action": {
+          "type": 3,
+          "params": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "source",
+      "target": "pool_A",
+      "type": "conditional",
+      "params": {
+        "condition_type": "INDICATOR",
+        "formula_ref": "KDJ_5MIN_CROSS",
+        "time_gate_interval": 60,
+        "ttl_hold_seconds": 6000,
+        "ttl_mode": "interval",
+        "_order": 10
+      }
+    },
+    {
+      "id": "e2",
+      "source": "source",
+      "target": "pool_B",
+      "type": "conditional",
+      "params": {
+        "condition_type": "INDICATOR",
+        "formula_ref": "MACD_1MIN_CROSS",
+        "time_gate_interval": 10,
+        "ttl_hold_seconds": 12000,
+        "ttl_mode": "interval",
+        "_order": 20
+      }
+    },
+    {
+      "id": "e3",
+      "source": "pool_A",
+      "target": "pool_C",
+      "type": "conditional",
+      "params": {
+        "condition_type": "INTERSECTION",
+        "intersection_source": "pool_B",
+        "time_gate_interval": 5,
+        "ttl_hold_seconds": 1200,
+        "ttl_mode": "interval",
+        "_order": 30
+      }
+    },
+    {
+      "id": "e4",
+      "source": "pool_B",
+      "target": "pool_C",
+      "type": "conditional",
+      "params": {
+        "condition_type": "INTERSECTION",
+        "intersection_source": "pool_A",
+        "time_gate_interval": 5,
+        "ttl_hold_seconds": 1200,
+        "ttl_mode": "interval",
+        "_order": 40
+      }
+    }
+  ]
+}

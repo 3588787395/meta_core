@@ -13,15 +13,17 @@ if str(_META_CORE) not in sys.path:
 
 # HQChartPy2 依赖本地 C++ 扩展，若当前环境无法加载则跳过相关脚本级测试文件
 #（它们不是 pytest 函数式测试，而是引擎验证脚本）。
+# archive/ 下的归档测试引用了已删除的旧 API（如 MetaEngine，Task 24 已移除），不参与收集。
+collect_ignore = ["archive"]
 try:
     import HQChartPy2  # noqa: F401
 except Exception:
-    collect_ignore = ["test_engine_real.py", "test_quick.py"]
+    collect_ignore.extend(["test_engine_real.py", "test_quick.py"])
 
 # 兼容旧测试的模块别名（不创建新文件，仅注册到 sys.modules）
 if 'tdx_evaluators' not in sys.modules:
     try:
-        from meta_core.core import evaluators as _evaluators_module
+        from meta_core.core import screening_module as _evaluators_module
         sys.modules['tdx_evaluators'] = _evaluators_module
     except Exception:
         pass
@@ -399,7 +401,7 @@ def gate_starttype_passes(engine, edge, mock_time=None, pool_start=None):
     edge_executor._starttype_gate，与生产 run_pool 路径完全一致。
 
     Args:
-        engine: MetaEngine 实例
+        engine: PoolEngine 实例
         edge: 边字典（含 params.starttype/starttime/starttimetype/starttimehms）
         mock_time: 模拟当前时间（datetime），None 用 wall_clock
         pool_start: 池启动时间（datetime），用于 starttype=1 elapsed，None=now
@@ -407,9 +409,9 @@ def gate_starttype_passes(engine, edge, mock_time=None, pool_start=None):
     Returns:
         bool: True=starttype 门控放行
     """
-    from meta_core.core.compiler import Compiler
-    from meta_core.core.edge_executor import _starttype_gate, _current_seconds_of_day
-    from meta_core.core.time_util import _safe_timestamp
+    from meta_core.core.execution_module import Compiler
+    from meta_core.core.execution_module import _starttype_gate, _current_seconds_of_day
+    from meta_core.core.execution_module import _safe_timestamp
 
     spec = Compiler._build_timing_spec(edge)
     pe = engine._pool_engine
@@ -436,7 +438,7 @@ def gate_duration_expired(engine, edge, mock_time=None, first_fire=None, exec_co
     返回 True=已过期（不应执行），与 _tdx_check_duration 语义一致。
 
     Args:
-        engine: MetaEngine 实例
+        engine: PoolEngine 实例
         edge: 边字典（含 params.cxtype/cxtime/cxtimetype）
         mock_time: 模拟当前时间（datetime），None 用现有 time_source
         first_fire: 首次触发时间（datetime 或 float Unix ts），None=不设置
@@ -445,9 +447,9 @@ def gate_duration_expired(engine, edge, mock_time=None, first_fire=None, exec_co
     Returns:
         bool: True=已过期（cxtype 后置门控拒绝）
     """
-    from meta_core.core.compiler import Compiler
-    from meta_core.core.edge_executor import _CXTYPE_POST_GATES, _cxtype_forever, _now_ts
-    from meta_core.core.time_util import _safe_timestamp
+    from meta_core.core.execution_module import Compiler
+    from meta_core.core.execution_module import _CXTYPE_POST_GATES, _cxtype_forever, _now_ts
+    from meta_core.core.execution_module import _safe_timestamp
 
     spec = Compiler._build_timing_spec(edge)
     pe = engine._pool_engine
@@ -484,7 +486,7 @@ def local_provider():
 
     依赖本地安装通达信/大智慧/同花顺客户端，未安装时跳过测试。
     """
-    from services.providers.local_file_provider import LocalFileProvider
+    from services.providers import LocalFileProvider
     provider = LocalFileProvider()
     if not provider.is_ready():
         pytest.skip("本地客户端未安装，跳过依赖本地文件的测试")
@@ -493,9 +495,9 @@ def local_provider():
 
 @pytest.fixture
 def engine():
-    """返回一个重置状态的 MetaEngine 实例。"""
-    from meta_core.core.engine import MetaEngine
-    eng = MetaEngine()
+    """返回一个重置状态的 PoolEngine 实例。"""
+    from meta_core.core.engine import PoolEngine
+    eng = PoolEngine()
     # 重置运行时状态，确保每次测试独立
     eng._flow_exec_counts = {}
     eng._flow_first_fire_ts = {}

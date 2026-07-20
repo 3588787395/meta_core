@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 
 # ── 重新导出 provider 内部工具 ──────────────────────────────────────
 from .providers import DataSourceManager, DataSourceProvider
-from .providers._common import (
+from .providers import (
     decode_formula,
     map_period,
     normalize_code,
@@ -32,7 +32,7 @@ from .providers._common import (
     _format_hold_days,
     _norm_period,
 )
-from .providers._common import _MOCK_STOCK_NAMES, _MOCK_MARKET_STOCKS
+from .providers import _MOCK_STOCK_NAMES, _MOCK_MARKET_STOCKS
 from .data import (
     DataSourceContract,
     DataSourceContractError,
@@ -40,6 +40,11 @@ from .data import (
     DataSourceMockExplicitOnlyError,
     get_default_contract,
 )
+# DZH 列定义已移至 core/domain 作为领域常量，此处重新导出以保持向后兼容
+try:
+    from ..core.domain import DZH_COL_MAP
+except ImportError:  # services 作为顶层包导入时回退到绝对导入
+    from core.domain import DZH_COL_MAP
 
 
 # 暴露为类方法（保持向后兼容）
@@ -61,36 +66,12 @@ class _TQFormatterMixin:
     def to_dzh_code(code):
         return to_dzh_code(code)
 
-# ── DZH 列定义（兼容老代码）─────────────────────────────────────────
-DZH_COL_MAP: Dict[int, Dict[str, str]] = {
-    2: {'name': '代码', 'key': 'code', 'type': 'string'},
-    -1: {'name': '名称', 'key': 'name', 'type': 'string'},
-    -2: {'name': '最新价', 'key': 'latest_price', 'type': 'number'},
-    -3: {'name': '涨跌幅', 'key': 'change_pct', 'type': 'number'},
-    -5: {'name': '涨跌额', 'key': 'change_amt', 'type': 'number'},
-    -6: {'name': '成交量', 'key': 'volume', 'type': 'number'},
-    1: {'name': '序号', 'key': 'seq', 'type': 'number'},
-    7: {'name': '入池时间', 'key': 'enter_time', 'type': 'string'},
-    8: {'name': '现价', 'key': 'current_price', 'type': 'number'},
-    10: {'name': '收益率', 'key': 'profit_pct', 'type': 'number'},
-    14: {'name': '入池价', 'key': 'enter_price', 'type': 'number'},
-    17: {'name': '最大收益', 'key': 'max_profit', 'type': 'number'},
-    24: {'name': '换手率', 'key': 'turnover_rate', 'type': 'number'},
-    45: {'name': '保留天数', 'key': 'hold_days', 'type': 'number'},
-    101: {'name': 'DDX连续飘红天数', 'key': 'ddx_red_days', 'type': 'number'},
-    108: {'name': '量比', 'key': 'volume_ratio', 'type': 'number'},
-    251: {'name': '特大单买入', 'key': 'huge_buy', 'type': 'number'},
-    285: {'name': '大单买入', 'key': 'big_buy', 'type': 'number'},
-    287: {'name': 'BBD', 'key': 'bbd', 'type': 'number'},
-    401: {'name': 'DDX', 'key': 'ddx', 'type': 'number'},
-}
-
 logger = logging.getLogger(__name__)
 
 
 def _load_data_providers_config() -> Dict[str, Any]:
     """加载 data_providers.json 配置。"""
-    config_path = Path(__file__).resolve().parent.parent / "config" / "data_providers.json"
+    config_path = Path(__file__).resolve().parent.parent / "config" / "data" / "data_providers.json"
     try:
         with open(config_path, encoding="utf-8") as f:
             return json.load(f)
@@ -101,7 +82,7 @@ def _load_data_providers_config() -> Dict[str, Any]:
 
 def _load_data_source_routes() -> Dict[str, Any]:
     """加载 data_source_routes.json 配置。"""
-    config_path = Path(__file__).resolve().parent.parent / "config" / "data_source_routes.json"
+    config_path = Path(__file__).resolve().parent.parent / "config" / "data" / "data_source_routes.json"
     try:
         with open(config_path, encoding="utf-8") as f:
             return json.load(f)
@@ -289,7 +270,7 @@ class TqAdapter(_TQFormatterMixin):
     def probe_and_assert(self, source_name: Optional[str] = None) -> bool:
         """便捷方法：探测成功返回 True，失败 raise。
 
-        供 api/execution_api.py 在 /pools/{id}/run 启动前调用。
+        供 api.py（合并自原 execution_api）在 /pools/{id}/run 启动前调用。
         """
         try:
             r = self._probe(source_name=source_name)
@@ -382,7 +363,7 @@ class TqAdapter(_TQFormatterMixin):
     # Tick 推送回调（Task 9: 实时流接线）
     # ------------------------------------------------------------------
     # TQ DLL (TPythClient.dll) / tq_sdk / akshare 均为拉取式（pull）数据源，
-    # 不支持服务端 Tick 推送。系统采用轮询模式：由 MetaEngine._tick 周期性
+    # 不支持服务端 Tick 推送。系统采用轮询模式：由 PoolEngine._tick 周期性
     # 调用 get_snapshot() 拉取最新行情，再驱动 Min1Aggregator.on_tick() 合成分钟线。
     # register_tick_callback 仅记录回调列表，不会触发真实推送；保留接口以便
     # 未来切换到支持推送的数据源（如 tq_sdk 的 subscribe_quote）时无需改动调用方。
@@ -521,7 +502,7 @@ class TqAdapter(_TQFormatterMixin):
     # TqAdapter 不再提供 eval_indicator / eval_formula_xg / eval_formula_zb /
     # formula_process_mul_zb / formula_process_mul_xg / eval_formula_zb_batch /
     # formula_exp 等公式转发方法。
-    # 公式评估统一通过 FormulaRouter（core/formula_router.py）路由到
+    # 公式评估统一通过 FormulaRouter（core/formula_module.py）路由到
     # PythonFormulaEngine / HQChartProvider。
     # ------------------------------------------------------------------
 

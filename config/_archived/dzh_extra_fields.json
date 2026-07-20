@@ -1,8 +1,0 @@
-{
-  "version": "1.0",
-  "defaults": {
-    "intermediate_mode": false,
-    "analysis_cycle": "1d",
-    "mode": "indi"
-  }
-}

@@ -608,7 +608,7 @@ function lightenColor(cssColor, pct) {
 
 // ─── FlowCanvas ───────────────────────────────────────────────────────────────
 
-export class FlowCanvas {
+class FlowCanvas {
   /**
    * @param {HTMLElement} containerEl  - the canvas wrapper div
    * @param {Object} options          - { onConnect, onNodeClick, onEdgeClick, ... }
@@ -1296,6 +1296,7 @@ export class FlowCanvas {
 
     switch (node.type) {
       case 'stock_state_pool':    this._renderStatePool(node, pos); break;
+      case 'statepool':           this._renderStatePool(node, pos); break;
       case 'transfer_condition':  this._renderCondition(node, pos); break;
       case 'market_source':       this._renderCandidate(node, pos); break;
       case 'discard_pool':        this._renderDiscard(node, pos); break;
@@ -1559,17 +1560,14 @@ export class FlowCanvas {
     var rawClr = dzhColorToCss(params.clr, '');
     var clr = rawClr || '#DAA520';  // fallback: DZH原生默认金黄色(与NODE_TYPE_DEFAULTS一致)
 
-    // DZH原生模式: 备选池显示为3D圆柱体
-    var MIN_CAND_W = 60, MIN_CAND_H = 75;  // DZH原生最小圆柱体尺寸(接近XML原始67×78)
+    var MIN_CAND_W = 60, MIN_CAND_H = 75;
     var w = Math.max(pos.width || DZH_NODE_SIZES.market_source.width, MIN_CAND_W);
     var h = Math.max(pos.height || DZH_NODE_SIZES.market_source.height, MIN_CAND_H);
     if (node.position) { node.position.width = w; node.position.height = h; }
 
-    // 圆柱体参数
-    var ry = Math.min(w * 0.22, 14);  // 椭圆半径
+    var ry = Math.min(w * 0.22, 14);
     var bodyH = h - 2 * ry;
 
-    // 渐变色生成（基于clr）
     var lighterClr = lightenColor(clr, 25);
     var darkerClr = darkenColor(clr, 25);
     var darkestClr = darkenColor(clr, 40);
@@ -1579,8 +1577,14 @@ export class FlowCanvas {
 
     var cel = this._createNodeEl(node, 'node-candidate-dzh', cstyle);
 
-    // 3D圆柱体DOM结构（使用CSS中已有的.cyl-top/.cyl-body/.cyl-bottom样式）
+    var stocks = params.stocks || [];
+    var stockCountBadge = '';
+    if (stocks.length > 0) {
+      stockCountBadge = '<div style="position:absolute;top:2px;right:2px;background:#e74c3c;color:#fff;font-size:10px;font-weight:bold;line-height:1;padding:2px 5px;border-radius:8px;min-width:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.4);z-index:5;">' + stocks.length + '</div>';
+    }
+
     cel.innerHTML =
+      stockCountBadge +
       '<div class="cyl-top" style="width:100%;height:' + ry + 'px;border-radius:50%;background:linear-gradient(to bottom,' + lighterClr + ',' + clr + ');flex-shrink:0;"></div>' +
       '<div class="cyl-body" style="width:100%;height:' + bodyH + 'px;display:flex;flex-direction:column;align-items:center;justify-content:center;' +
         'border-left:2px solid ' + darkerClr + ';' +
@@ -2067,20 +2071,32 @@ export class FlowCanvas {
     var srcNode = this._findNode(srcId);
     var CONDITIONAL_SOURCE_TYPES = [
       'market_source', 'candidate_dzh', 'tdx_candidate',     // 数据源/备选池
-      'stock_state_pool', 'state_pool', 'tdx_state_pool'      // 状态池（作为源出发时）
+      'stock_state_pool', 'state_pool', 'statepool', 'tdx_state_pool'      // 状态池（作为源出发时）
     ];
     var isConditionalEdge = srcNode && CONDITIONAL_SOURCE_TYPES.indexOf(srcNode.type) !== -1;
 
     // 表驱动：从 params 中读取实际属性值
     var labelText = '';
     if (isConditionalEdge) {
-      // 条件边：显示时间间隔
-      var interval = params.interval_sec !== undefined ? parseInt(params.interval_sec) : 60;
+      // 条件边：显示时间间隔（兼容 interval_sec / time_gate_interval / jgtime）
+      var interval = params.time_gate_interval !== undefined ? parseInt(params.time_gate_interval) :
+                     (params.interval_sec !== undefined ? parseInt(params.interval_sec) :
+                     (params.jgtime !== undefined ? parseInt(params.jgtime) : 60));
       if (interval <= 0) labelText = '即时';
       else if (interval < 60) labelText = interval + 's';
       else if (interval < 3600) labelText = Math.round(interval / 60) + 'm';
       else if (interval < 86400) labelText = Math.round(interval / 3600) + 'h';
       else labelText = Math.round(interval / 86400) + 'd';
+
+      // 在标签第二行显示转移条件（公式/交集）
+      var condText = '';
+      if (params.condition_type === 'INTERSECTION' || params.condition_type === ' intersection') {
+        condText = '交集';
+      } else if (params.formula_ref) {
+        condText = String(params.formula_ref);
+      } else if (params.tdx_func && params.tdx_func.accode) {
+        condText = String(params.tdx_func.accode);
+      }
     } else {
       // 无条件边：只显示线宽（来自 params.size 或 modeInfo.width）
       var edgeWidth = params.size ? parseInt(params.size) : modeInfo.width;
@@ -2101,6 +2117,23 @@ export class FlowCanvas {
     label.setAttribute('paint-order', 'stroke');
     label.textContent = labelText;
     this._edgeLabelGroup.appendChild(label);
+
+    // 条件边额外渲染条件标签（第二行，便于一眼识别 KDJ/MACD/交集）
+    if (isConditionalEdge && condText) {
+      var condLabel = document.createElementNS(ns, 'text');
+      condLabel.setAttribute('x', mx);
+      condLabel.setAttribute('y', my + 8);
+      condLabel.setAttribute('text-anchor', 'middle');
+      condLabel.setAttribute('fill', '#ffd166');
+      condLabel.setAttribute('font-size', '9');
+      condLabel.setAttribute('font-family', 'Microsoft YaHei, sans-serif');
+      condLabel.setAttribute('pointer-events', 'none');
+      condLabel.setAttribute('stroke', 'rgba(0,0,0,0.75)');
+      condLabel.setAttribute('stroke-width', '2');
+      condLabel.setAttribute('paint-order', 'stroke');
+      condLabel.textContent = condText;
+      this._edgeLabelGroup.appendChild(condLabel);
+    }
 
     // 执行顺序编号模式：徽标仅渲染在条件边上（源节点是池类型）（DZH§6.2）
     if (this._showExecOrder && this._isConditionEdge(edge)) {
@@ -2697,7 +2730,7 @@ export class FlowCanvas {
 
   refreshStockData() {
     this._nodes.forEach(function (node) {
-      if (node.type === 'stock_state_pool' && node.params) {
+      if ((node.type === 'stock_state_pool' || node.type === 'statepool') && node.params) {
         delete node.params._stockData;
         delete node.params._stockDataFetching;
       }
@@ -2708,7 +2741,7 @@ export class FlowCanvas {
   refreshStockTables() {
     var self = this;
     this._nodes.forEach(function (node) {
-      if (node.type === 'stock_state_pool' || node.type === 'tdx_state_pool') {
+      if (node.type === 'stock_state_pool' || node.type === 'statepool' || node.type === 'tdx_state_pool') {
         var overlay = self.nodesEl.querySelector('[data-stock-overlay="' + node.id + '"]');
         if (!overlay) {
           var el = self.nodeElements.get(node.id);
@@ -2736,7 +2769,7 @@ export class FlowCanvas {
 
   refreshStatePool(cellId) {
     var node = this._findNode(cellId);
-    if (!node || (node.type !== 'stock_state_pool' && node.type !== 'tdx_state_pool')) return;
+    if (!node || (node.type !== 'stock_state_pool' && node.type !== 'statepool' && node.type !== 'tdx_state_pool')) return;
     var overlay = this.nodesEl.querySelector('[data-stock-overlay="' + cellId + '"]');
     if (!overlay) {
       var el = this.nodeElements.get(cellId);
@@ -3020,7 +3053,7 @@ export class FlowCanvas {
   _refreshAllStatePoolNodes() {
     var self = this;
     this._nodes.forEach(function (node) {
-      if (node.type === 'stock_state_pool' || node.type === 'tdx_state_pool') {
+      if (node.type === 'stock_state_pool' || node.type === 'statepool' || node.type === 'tdx_state_pool') {
         self._rerenderNode(node.id);
       }
     });
@@ -3128,3 +3161,6 @@ export class FlowCanvas {
 
   get overlay() { return this.nodesEl; }
 }
+
+// Expose to global scope for non-module script loading (index.html uses <script src="js/canvas.js">)
+window.FlowCanvas = FlowCanvas;
