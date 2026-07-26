@@ -12,11 +12,11 @@
   - [x] SubTask 2.3: 改造工具栏、右键菜单、移动端溢出菜单，统一从配置表生成，消除重复写死的菜单条目
   - [x] SubTask 2.4: 校验所有 UI 组件类型（`text_input`、`select`、`color_picker`、`flag_group` 等）在配置表与渲染器之间一一对应
 
-- [ ] Task 3: 事件驱动唯一路径实现
-  - [ ] SubTask 3.1: 统一前端事件入口为单一 `EventSource('/api/events/stream')`，事件格式与 `core/event_bus.py` 事件契约对齐
-  - [ ] SubTask 3.2: 删除前端自行构造的伪造事件、独立事件队列真值源，以及 `event-panel.js` 中的复杂事件状态机
-  - [ ] SubTask 3.3: 确保运行控制（开始/暂停/停止/模式切换）调用后端 API 后，由后端推送状态变更事件，前端仅做展示更新
-  - [ ] SubTask 3.4: 如后端缺少必要的事件 API（如 `/api/events/timer-queue`），在 `app.py`/`core/` 中补充，禁止前端绕过 API
+- [x] Task 3: 事件驱动唯一路径实现
+  - [x] SubTask 3.1: 统一前端事件入口为单一 `EventSource('/api/events/stream')`，事件格式与 `core/event_bus.py` 事件契约对齐
+  - [x] SubTask 3.2: 删除前端自行构造的伪造事件、独立事件队列真值源，以及 `event-panel.js` 中的复杂事件状态机
+  - [x] SubTask 3.3: 确保运行控制（开始/暂停/停止/模式切换）调用后端 API 后，由后端推送状态变更事件，前端仅做展示更新
+  - [x] SubTask 3.4: 如后端缺少必要的事件 API（如 `/api/events/timer-queue`），在 `app.py`/`core/` 中补充，禁止前端绕过 API
 
 - [ ] Task 4: 股票池功能正确性与模式一致性
   - [ ] SubTask 4.1: 验证节点 CRUD（备选池、转移条件、状态池、丢弃池、文字标签）在画布与配置表双向同步

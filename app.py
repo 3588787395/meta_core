@@ -1,4 +1,4 @@
-import logging, re, json, os
+import logging, re, json, os, time
 import asyncio
 import uuid
 import dataclasses
@@ -1162,24 +1162,43 @@ async def api_get_node_stocks(pool_id: str, node_id: str, request: _Request):
 
 @app.post("/api/pools/{pool_id}/control/{action}", tags=["pools"])
 async def api_control_pool(pool_id: str, action: str, request: _Request):
-    """控制股票池运行：start/pause/stop。"""
+    """控制股票池运行：start/pause/stop。
+
+    Task 3：仿真模式运行控制操作在执行后通过 EventBus 发布
+    SimulationStateChanged 事件，前端仅订阅事件更新 UI。
+    """
     try:
         engine = request.app.state.engine
         action = action.lower()
-        
+
         if action not in ("start", "pause", "resume", "stop"):
             return {"code": 1, "msg": f"未知action: {action}，支持 start/pause/resume/stop"}
-        
+
+        bus = getattr(request.app.state, "bus", None)
+        try:
+            from core.event_bus import SimulationStateChanged
+        except Exception:
+            from .core.event_bus import SimulationStateChanged
+
+        def _publish_state(state: str, session_id: str = ""):
+            if bus is not None:
+                try:
+                    bus.publish(SimulationStateChanged(state=state, session_id=session_id, ts=time.time()))
+                except Exception:
+                    pass
+
         sims = getattr(request.app.state, "_simulators", {})
         sim = sims.get(pool_id)
         if sim is not None:
             if action == "start" or action == "resume":
                 if hasattr(sim, 'resume'):
                     sim.resume()
+                _publish_state("running")
                 return {"code": 0, "data": {"pool_id": pool_id, "action": action, "status": "running"}}
             elif action == "pause":
                 if hasattr(sim, 'pause'):
                     sim.pause()
+                _publish_state("paused")
                 return {"code": 0, "data": {"pool_id": pool_id, "action": action, "status": "paused"}}
             elif action == "stop":
                 if hasattr(sim, 'stop'):
@@ -1193,25 +1212,28 @@ async def api_control_pool(pool_id: str, action: str, request: _Request):
                         sim.reset()
                     except Exception:
                         pass
+                _publish_state("stopped")
                 return {"code": 0, "data": {"pool_id": pool_id, "action": action, "status": "stopped"}}
-        
+
         sim_session_map = getattr(request.app.state, "_sim_session_map", {})
         target_session = None
         for sid, session in sim_session_map.items():
             if session.get("pool_id") == pool_id:
                 target_session = (sid, session)
                 break
-        
+
         if target_session is not None:
             sid, session = target_session
             simulator = session.get("simulator")
             if action == "start" or action == "resume":
                 if simulator and hasattr(simulator, 'resume'):
                     simulator.resume()
+                _publish_state("running", session_id=sid)
                 return {"code": 0, "data": {"pool_id": pool_id, "session_id": sid, "action": action, "status": "running"}}
             elif action == "pause":
                 if simulator and hasattr(simulator, 'pause'):
                     simulator.pause()
+                _publish_state("paused", session_id=sid)
                 return {"code": 0, "data": {"pool_id": pool_id, "session_id": sid, "action": action, "status": "paused"}}
             elif action == "stop":
                 if simulator and hasattr(simulator, 'stop'):
@@ -1225,8 +1247,9 @@ async def api_control_pool(pool_id: str, action: str, request: _Request):
                         simulator.reset()
                     except Exception:
                         pass
+                _publish_state("stopped", session_id=sid)
                 return {"code": 0, "data": {"pool_id": pool_id, "session_id": sid, "action": action, "status": "stopped"}}
-        
+
         if action == "start":
             ok, err = _ensure_mock_data_source()
             if not ok:
@@ -1236,8 +1259,7 @@ async def api_control_pool(pool_id: str, action: str, request: _Request):
                 return {"code": 1, "msg": f"池不存在: {pool_id}"}
             simulator = _create_runtime_simulator(pool_config)
             if not hasattr(request.app.state, "_simulators"):
-                request.app.state._simulators = {}
-            request.app.state._simulators[pool_id] = simulator
+                request.app.state._simulators[pool_id] = simulator
 
             try:
                 simulator.initialize()
@@ -1257,13 +1279,13 @@ async def api_control_pool(pool_id: str, action: str, request: _Request):
             }
 
             try:
-                bus = getattr(request.app.state, "bus", None)
                 if bus is not None:
                     from core.event_bus import PoolLoaded, ModeChanged
                     bus.publish(PoolLoaded(pool_config=pool_config, source_format="json"))
                     bus.publish(ModeChanged(mode_id="simulation", prev_mode="live"))
+                    bus.publish(SimulationStateChanged(state="running", session_id=sid, ts=time.time()))
             except Exception as ex:
-                logger.warning("发布 PoolLoaded/ModeChanged 事件失败: %s", ex)
+                logger.warning("发布 PoolLoaded/ModeChanged/SimulationStateChanged 事件失败: %s", ex)
 
             return {"code": 0, "data": {"pool_id": pool_id, "session_id": sid, "action": action, "status": "running"}}
         elif action == "pause":
@@ -1277,7 +1299,7 @@ async def api_control_pool(pool_id: str, action: str, request: _Request):
                 except Exception:
                     pass
             return {"code": 0, "data": {"pool_id": pool_id, "action": action, "status": "stopped"}}
-        
+
         return {"code": 1, "msg": f"未找到活跃的池会话: {pool_id}"}
     except Exception as ex:
         return {"code": 1, "msg": str(ex)}
@@ -1766,6 +1788,9 @@ async def sim_control_session(request: _Request):
 
     请求体: {session_id: string, action: string, params?: object}
     action: stop | step | pause | resume
+
+    Task 3：所有运行控制操作在执行后通过 EventBus 发布 SimulationStateChanged 事件，
+    前端仅订阅事件更新 UI，禁止按钮回调直接修改前端状态。
     """
     try:
         body = await request.json()
@@ -1785,6 +1810,19 @@ async def sim_control_session(request: _Request):
     init_event = session.get("init_event")
     initializing = init_event is not None and not init_event.is_set()
 
+    bus = getattr(request.app.state, "bus", None)
+    try:
+        from core.event_bus import SimulationStateChanged
+    except Exception:
+        from .core.event_bus import SimulationStateChanged
+
+    def _publish_state(state: str):
+        if bus is not None:
+            try:
+                bus.publish(SimulationStateChanged(state=state, session_id=session_id, ts=time.time()))
+            except Exception:
+                pass
+
     if action == "stop":
         init_task = session.get("init_task")
         if init_task is not None and not init_task.done():
@@ -1799,18 +1837,21 @@ async def sim_control_session(request: _Request):
             except Exception:
                 pass
         sim_session_map.pop(session_id, None)
+        _publish_state("stopped")
         return {"code": 0, "data": {"session_id": session_id, "stopped": True}}
 
     if action == "pause":
         if initializing or simulator is None:
             return {"code": 102, "status": "initializing", "msg": "仿真器正在后台初始化，请稍后再试"}
         simulator.pause()
+        _publish_state("paused")
         return {"code": 0, "data": {"session_id": session_id, "paused": True}}
 
     if action == "resume":
         if initializing or simulator is None:
             return {"code": 102, "status": "initializing", "msg": "仿真器正在后台初始化，请稍后再试"}
         simulator.resume()
+        _publish_state("running")
         return {"code": 0, "data": {"session_id": session_id, "paused": False}}
 
     if action == "step":

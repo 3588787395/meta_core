@@ -346,6 +346,19 @@ class SimulationStep:
 
 
 @dataclass
+class SimulationStateChanged:
+    """仿真运行状态变更事件。
+
+    由运行控制 API（start/pause/resume/stop）发布，前端据此统一更新
+    AppState.simulationState，禁止按钮回调直接修改前端状态。
+    """
+
+    state: str  # running / paused / stopped
+    session_id: str = ""
+    ts: float = 0.0
+
+
+@dataclass
 class ImportStarted:
     """导入开始事件。"""
 
@@ -393,6 +406,7 @@ EVENT_TIME_ADVANCED = "TimeAdvanced"
 EVENT_REPLAY_STARTED = "ReplayStarted"
 EVENT_REPLAY_STEP = "ReplayStep"
 EVENT_SIMULATION_STEP = "SimulationStep"
+EVENT_SIMULATION_STATE_CHANGED = "SimulationStateChanged"
 EVENT_IMPORT_STARTED = "ImportStarted"
 EVENT_EXPORT_COMPLETED = "ExportCompleted"
 

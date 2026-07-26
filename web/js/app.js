@@ -115,6 +115,16 @@
 
   window.RuntimeState.init();
 
+  // ─── 事件驱动运行控制状态：统一订阅后端 SSE 事件更新 AppState.simulationState ──
+  if (window.EventPanelBus && window.EventPanelBus.subscribe) {
+    window.EventPanelBus.subscribe(function (ev) {
+      if (!ev || !ev.event_type) return;
+      if (ev.event_type === 'SimulationStateChanged' && ev.details && ev.details.state) {
+        AppState.setSimulationState(ev.details.state);
+      }
+    });
+  }
+
   // ─── Keyboard Shortcuts (表驱动) ────────────────────────────────────────────
   function toggleSimPlayPause() {
     if (AppState.mode !== 'simulation') return;
@@ -10234,7 +10244,14 @@ var TableDrivenPanel = window.TableDrivenPanel;
   }
 
   function exitSimulationMode() {
-    stopSimAutoStep();
+    // 退出仿真模式时通知后端停止会话；本地状态立即清理，不等待响应
+    if (simSessionId) {
+      _callSimControl('stop', function () {});
+    }
+    if (_simAutoInterval) {
+      clearTimeout(_simAutoInterval);
+      _simAutoInterval = null;
+    }
     stopSimulationPolling();
     simSessionId = null;
     window.simSessionId = null;
@@ -10759,7 +10776,6 @@ var TableDrivenPanel = window.TableDrivenPanel;
         } else if (action === 'pause') {
           stopSimAutoStep();
         } else if (action === 'stop') {
-          stopSimAutoStep();
           setMode('design');
         }
         return;
@@ -11841,7 +11857,6 @@ var TableDrivenPanel = window.TableDrivenPanel;
     // Simulation panel controls — 严格判空，避免 ref 错误导致按钮点击失效
     var simBtnClose = $('simBtnClose');
     if (simBtnClose) simBtnClose.addEventListener('click', function () {
-      stopSimAutoStep();
       setMode('design');
     });
     var simBtnStart = $('simBtnStart');
@@ -12117,9 +12132,29 @@ var TableDrivenPanel = window.TableDrivenPanel;
       .catch(function () {});
   }
 
+  function _callSimControl(action, onResult) {
+    if (!simSessionId) {
+      if (onResult) onResult({ code: 1, msg: '仿真会话未启动' });
+      return;
+    }
+    fetch('/api/sim/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: simSessionId, action: action })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (onResult) onResult(data);
+      })
+      .catch(function (err) {
+        console.error('[SimControl] ' + action + ' failed:', err);
+        if (onResult) onResult({ code: 1, msg: err.message });
+      });
+  }
+
   function updateSimBtnState(isAutoStepping) {
     _simAutoStepping = isAutoStepping;
-    AppState.setSimulationState(isAutoStepping ? 'running' : 'paused');
+    // UI 按钮状态由本地参数直接更新；AppState.simulationState 仅由后端事件更新
     var startBtn = $('simBtnStart');
     var pauseBtn = $('simBtnPause');
     var stepBtn = $('simBtnStep');
@@ -12138,8 +12173,16 @@ var TableDrivenPanel = window.TableDrivenPanel;
 
   function startSimAutoStep() {
     if (_simAutoStepping) return;
-    updateSimBtnState(true);
-    _simAutoTick();
+    _callSimControl('resume', function (data) {
+      if (data.code === 0) {
+        updateSimBtnState(true);
+      } else if (data.code === 102) {
+        // 仿真器仍在初始化，稍后重试一次
+        setTimeout(startSimAutoStep, 500);
+      } else {
+        console.error('[SimControl] resume failed:', data.msg);
+      }
+    });
   }
 
   function _simAutoTick() {
@@ -12162,13 +12205,19 @@ var TableDrivenPanel = window.TableDrivenPanel;
   }
 
   function stopSimAutoStep() {
-    _simAutoStepping = false;
     if (_simAutoInterval) {
       clearTimeout(_simAutoInterval);
       _simAutoInterval = null;
     }
-    AppState.setSimulationState('paused');
-    updateSimBtnState(false);
+    _callSimControl('pause', function (data) {
+      // 会话不存在或仍在初始化均视为已停止/暂停，直接重置本地状态
+      if (data.code === 0 || data.code === 102 || data.code === 1) {
+        _simAutoStepping = false;
+        updateSimBtnState(false);
+      } else {
+        console.error('[SimControl] pause failed:', data.msg);
+      }
+    });
   }
 
   function stopSimulationPolling() {
