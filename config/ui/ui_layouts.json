@@ -164,11 +164,19 @@
             {"key": "inditype", "comp": "select", "label": "公式类型", "data_path": "inditype", "options": [
               {"value": "indi", "label": "技术指标"}, {"value": "", "label": "条件选股"}, {"value": "trade_sys", "label": "交易系统"}, {"value": "basic", "label": "基本面"}, {"value": "dynamic", "label": "动态行情"}, {"value": "ref", "label": "引用公式"}
             ], "default": ""},
+            {"key": "formula_picker", "comp": "formula_picker", "label": "公式选择", "picker_type": "dzh", "args_path": "formula_args", "script_path": "formula_decoded", "name_path": "formula_name", "indi_path": "indi", "inditype_path": "inditype"},
             {"key": "indi", "comp": "base64_readonly", "label": "DZH公式 (Base64)", "data_path": "indi", "readonly": true},
             {"key": "indi_decoded", "comp": "formula_editor", "label": "指标公式(解码)", "data_path": "formula_decoded", "encode_to": "indi", "hint": "修改后自动Base64编码回写"},
             {"key": "indiparam", "comp": "text_input", "label": "指标参数", "data_path": "indiparam", "default": "", "hint": "位置参数，如 (1,25,100,30,15,30)", "validation": {"custom": "indicator_params"}},
             {"key": "formula_args", "comp": "formula_args_container", "label": "公式参数", "data_path": "formula_args", "default": {}},
             {"key": "crc", "comp": "readonly", "label": "CRC 校验", "data_path": "crc", "default": 0}
+          ]
+        },
+        {
+          "title": "条件摘要",
+          "collapsible": false,
+          "fields": [
+            {"key": "condition_summary", "comp": "condition_summary", "label": "当前条件", "summary_type": "dzh_condition"}
           ]
         },
         {
@@ -719,6 +727,7 @@
           "title": "func 公式配置",
           "collapsible": false,
           "fields": [
+            {"key": "formula_picker", "comp": "formula_picker", "label": "公式选择", "picker_type": "tdx", "args_path": "params.tdx_func.formula_args", "script_path": "params.tdx_func.formula_script", "name_path": "params.tdx_func.formula_name", "accode_path": "params.tdx_func.accode", "nset_path": "params.tdx_func.nset", "depends_on": "nset", "active_when": [0, 1, 2]},
             {"key": "nset", "comp": "tdx_enum_select", "label": "公式类型(nset)", "data_path": "params.tdx_func.nset", "enum_key": "nset", "options": [
               {"value": 0, "label": "技术指标公式", "desc": "使用自定义或系统技术指标公式进行选股，支持MA/MACD/KDJ等"},
               {"value": 1, "label": "条件选股公式", "desc": "使用条件选股公式，返回0/1信号（通过/不通过）"},
@@ -762,6 +771,13 @@
               {"value": 0, "label": "否"}, {"value": 1, "label": "是"}
             ], "default": 0, "depends_on": "nset", "active_when": [0, 1]},
             {"key": "nperiodnum", "comp": "number_input", "label": "周期数量", "data_path": "params.tdx_func.nperiodnum", "default": 0, "depends_on": "nset", "active_when": [0, 1]}
+          ]
+        },
+        {
+          "title": "条件摘要",
+          "collapsible": false,
+          "fields": [
+            {"key": "condition_summary", "comp": "condition_summary", "label": "当前条件", "summary_type": "tdx_condition"}
           ]
         },
         {
@@ -1230,12 +1246,29 @@
         {
           "title": "基本信息",
           "fields": [
-            {"key": "type", "label": "类型", "comp": "text_input", "readonly": true, "data_path": "pool_meta.type"},
-            {"key": "ver", "label": "版本", "comp": "text_input", "readonly": true, "data_path": "pool_meta.ver"},
-            {"key": "mode", "label": "模式", "comp": "number_input", "readonly": true, "data_path": "pool_meta.mode"},
-            {"key": "nextid", "label": "下一个ID", "comp": "number_input", "readonly": true, "data_path": "pool_meta.nextid"},
-            {"key": "backcolor", "label": "背景色", "comp": "color_input", "data_path": "pool_meta.backcolor"},
+            {"key": "type", "label": "类型", "comp": "text_input", "readonly": true, "data_path": "type"},
+            {"key": "ver", "label": "版本", "comp": "text_input", "readonly": true, "data_path": "ver"},
+            {"key": "mode", "label": "模式", "comp": "number_input", "readonly": true, "data_path": "mode"},
+            {"key": "nextid", "label": "下一个ID", "comp": "number_input", "readonly": true, "data_path": "nextid"},
+            {"key": "backcolor", "label": "背景色", "comp": "color_input", "data_path": "backcolor"},
             {"key": "name", "label": "名称", "comp": "text_input", "data_path": "name"}
+          ]
+        }
+      ]
+    },
+    "test_table_driven_node": {
+      "layout_id": "test_table_driven_node",
+      "name": "测试表驱动节点",
+      "target_type": "test_node",
+      "target_scope": "node",
+      "pool_type": ["dzh", "tdx"],
+      "sections": [
+        {
+          "title": "测试字段",
+          "collapsible": false,
+          "fields": [
+            {"key": "test_formula", "comp": "formula_picker", "label": "测试公式", "picker_type": "dzh"},
+            {"key": "test_summary", "comp": "condition_summary", "label": "测试摘要", "summary_type": "dzh_condition"}
           ]
         }
       ]

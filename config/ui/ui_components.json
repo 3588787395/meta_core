@@ -417,6 +417,14 @@
       "validation_rules": [],
       "description": "条件公式摘要：边编辑器中直接显示当前条件公式"
     },
+    "formula_picker": {
+      "component_type": "formula_picker",
+      "renderer": "formula_picker_renderer",
+      "html_tag": "div",
+      "default_props": {},
+      "validation_rules": [],
+      "description": "公式选择器：从公式库选择并回填参数，TDX/DZH 由配置字段的 picker_type/args_path 等驱动"
+    },
     "formula_args_container": {
       "component_type": "formula_args_container",
       "renderer": "formula_args_container_renderer",

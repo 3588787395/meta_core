@@ -327,6 +327,167 @@
         "cell_types": ["1", "tdx_0"],
         "danger": true
       }
+    ],
+    "candidate": [
+      {
+        "id": "ctx_candidate_properties",
+        "label": "属性",
+        "icon": "🔧",
+        "action": "properties",
+        "order": 1,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_candidate_comprehensive_settings",
+        "label": "综合设置",
+        "icon": "⚙",
+        "action": "comprehensiveSettings",
+        "order": 2,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_candidate_edit_desc",
+        "label": "修改说明文字",
+        "icon": "✏",
+        "action": "editDescText",
+        "order": 3,
+        "visible_when": "always",
+        "separator_before": true,
+        "cell_types": ["all"]
+      }
+    ],
+    "condition": [
+      {
+        "id": "ctx_condition_properties",
+        "label": "属性",
+        "icon": "🔧",
+        "action": "properties",
+        "order": 1,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_condition_comprehensive_settings",
+        "label": "综合设置",
+        "icon": "⚙",
+        "action": "comprehensiveSettings",
+        "order": 2,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_condition_edit_desc",
+        "label": "修改说明文字",
+        "icon": "✏",
+        "action": "editDescText",
+        "order": 3,
+        "visible_when": "always",
+        "separator_before": true,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_condition_toggle_disabled",
+        "label": "停止/恢复运算",
+        "icon": "⏸",
+        "action": "toggleDisabled",
+        "order": 4,
+        "visible_when": "always",
+        "separator_before": true,
+        "cell_types": ["all"],
+        "checkable": true,
+        "checked_when": "params.disabled"
+      },
+      {
+        "id": "ctx_condition_view_stocks",
+        "label": "查看通过条件的股票",
+        "icon": "▼",
+        "action": "viewConditionStocks",
+        "order": 5,
+        "visible_when": "runtime",
+        "separator_before": true,
+        "cell_types": ["all"]
+      }
+    ],
+    "state_pool": [
+      {
+        "id": "ctx_state_pool_properties",
+        "label": "属性",
+        "icon": "🔧",
+        "action": "properties",
+        "order": 1,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_state_pool_comprehensive_settings",
+        "label": "综合设置",
+        "icon": "⚙",
+        "action": "comprehensiveSettings",
+        "order": 2,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_state_pool_edit_desc",
+        "label": "修改说明文字",
+        "icon": "✏",
+        "action": "editDescText",
+        "order": 3,
+        "visible_when": "always",
+        "separator_before": true,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_state_pool_add_stock",
+        "label": "手工添加股票到状态池",
+        "icon": "➕",
+        "action": "addStockToPool",
+        "order": 4,
+        "visible_when": "design_mode",
+        "separator_before": true,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_state_pool_clear_stocks",
+        "label": "清除状态池中所有股票",
+        "icon": "🗑",
+        "action": "clearAllStocks",
+        "order": 5,
+        "visible_when": "design_mode",
+        "separator_before": false,
+        "cell_types": ["all"],
+        "danger": true
+      },
+      {
+        "id": "ctx_state_pool_all_to_block",
+        "label": "所有股票加入到板块股",
+        "icon": "📋",
+        "action": "allStockToBlock",
+        "order": 6,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_state_pool_toggle_row_num",
+        "label": "显示行号",
+        "icon": "☑",
+        "action": "toggleRowNum",
+        "order": 7,
+        "visible_when": "always",
+        "separator_before": true,
+        "cell_types": ["all"],
+        "checkable": true,
+        "checked_when": "params.show_row_num"
+      }
     ]
   }
 }

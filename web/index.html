@@ -21,7 +21,7 @@
 
   <!-- ===== Top Toolbar ===== -->
   <header class="topbar" id="topbar">
-    <button class="tb-btn hamburger-btn" id="btnHamburger" title="菜单">☰</button>
+    <div class="topbar-left" id="toolbarLeft"></div>
     <div class="topbar-logo">
       <span class="logo-icon">◆</span>
       <span class="logo-text">MetaCore</span>
@@ -117,12 +117,8 @@
 
 </div>
 
-<!-- ===== Mobile Float Buttons ===== -->
-<div class="mobile-float-btns" id="mobileFloatBtns">
-  <button class="mobile-float-btn" id="mobileAddSource" title="添加备选池">🗄</button>
-  <button class="mobile-float-btn" id="mobileAddCondition" title="添加条件">⚙</button>
-  <button class="mobile-float-btn" id="mobileAddPool" title="添加状态池">📦</button>
-</div>
+<!-- ===== Mobile Float Buttons (rendered from toolbar_config.json) ===== -->
+<div class="mobile-float-btns" id="mobileFloatBtns"></div>
 
 <!-- ===== Context Menu (rendered from context_menu_config.json) ===== -->
 <div id="contextMenu"></div>

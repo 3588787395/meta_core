@@ -9565,6 +9565,8 @@ var TableDrivenPanel = window.TableDrivenPanel;
       ToolbarRenderer.init({
         toolbarContainer: $('toolbarButtons'),
         overflowContainer: $('overflowMenu'),
+        leftContainer: $('toolbarLeft'),
+        mobileContainer: $('mobileFloatBtns'),
         state: getUIState()
       }).then(function() {
         bindToolbar();
@@ -9574,8 +9576,6 @@ var TableDrivenPanel = window.TableDrivenPanel;
         bindToolbar();
       });
     } else {
-      // fallback: ToolbarRenderer 未加载时直接绑定
-      loadConfig('toolbar_config').then(function(cfg) { applyToolbarConfig(cfg); });
       bindToolbar();
     }
     loadConfig('context_menu_config');
@@ -9913,35 +9913,39 @@ var TableDrivenPanel = window.TableDrivenPanel;
   }
 
   function bindSidebar() {
-    // Hamburger button: open overflow menu + sidebar
-    $('btnHamburger').addEventListener('click', function () {
-      var sidebar = $('sidebarLeft');
-      var overflow = $('overflowMenu');
-      // Toggle overflow menu
-      if (overflow.classList.contains('open')) {
-        overflow.classList.remove('open');
-      } else {
-        overflow.classList.add('open');
-        // Also open sidebar on tablet
-        if (window.innerWidth > 768 && window.innerWidth <= 1024) {
-          sidebar.classList.add('drawer-open');
-        }
-      }
-      // On mobile, also toggle sidebar
-      if (window.innerWidth <= 768) {
-        if (sidebar.classList.contains('drawer-open')) {
-          sidebar.classList.remove('drawer-open');
+    // 汉堡菜单：表驱动渲染在 #toolbarLeft 中，通过 data-action 统一绑定
+    var toolbarLeft = $('toolbarLeft');
+    if (toolbarLeft) {
+      toolbarLeft.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action="toggleOverflowMenu"]');
+        if (!btn) return;
+        var sidebar = $('sidebarLeft');
+        var overflow = $('overflowMenu');
+        // Toggle overflow menu
+        if (overflow.classList.contains('open')) {
+          overflow.classList.remove('open');
         } else {
-          sidebar.classList.add('drawer-open');
+          overflow.classList.add('open');
+          // Also open sidebar on tablet
+          if (window.innerWidth > 768 && window.innerWidth <= 1024) {
+            sidebar.classList.add('drawer-open');
+          }
         }
-      }
-    });
+        // On mobile, also toggle sidebar
+        if (window.innerWidth <= 768) {
+          if (sidebar.classList.contains('drawer-open')) {
+            sidebar.classList.remove('drawer-open');
+          } else {
+            sidebar.classList.add('drawer-open');
+          }
+        }
+      });
+    }
 
     // Close overflow menu when clicking outside
     document.addEventListener('click', function (e) {
       var overflow = $('overflowMenu');
-      var hamburger = $('btnHamburger');
-      if (overflow.classList.contains('open') && !overflow.contains(e.target) && e.target !== hamburger) {
+      if (overflow.classList.contains('open') && !overflow.contains(e.target) && !e.target.closest('#toolbarLeft')) {
         overflow.classList.remove('open');
       }
     });
@@ -10509,23 +10513,6 @@ var TableDrivenPanel = window.TableDrivenPanel;
     };
   }
 
-  // 表驱动：评估 enabled_when 条件（委托给 ToolbarRenderer）
-  function _evalEnabledWhen(cond) {
-    if (typeof ToolbarRenderer !== 'undefined') {
-      return ToolbarRenderer.evaluateCondition(cond, getUIState());
-    }
-    // fallback：ToolbarRenderer 未加载时使用简化逻辑
-    if (!cond || cond === 'always') return true;
-    var poolLoaded = !!poolData.hasData;
-    if (cond === 'pool_loaded') return poolLoaded;
-    if (cond === 'can_undo') return poolData.canUndo();
-    if (cond === 'can_redo') return poolData.canRedo();
-    if (cond === "mode == 'edit'") return AppState.mode === 'design';
-    if (cond === "pool_loaded && mode == 'edit'") return poolLoaded && AppState.mode === 'design';
-    if (cond === 'has_unsaved_changes && pool_loaded') return poolLoaded;
-    return true;
-  }
-
   // 表驱动：从 toolbar_config 渲染下拉菜单项
   function _renderDropdownFromConfig(dropdownEl, items, dataKey) {
     if (!dropdownEl || !items || !items.length) return;
@@ -10534,29 +10521,6 @@ var TableDrivenPanel = window.TableDrivenPanel;
       var actionAttr = it.action ? ' data-action="' + it.action + '"' : '';
       return '<div class="tb-dropdown-item" ' + attr + actionAttr + '>' + (it.icon || '') + ' ' + it.label + '</div>';
     }).join('');
-  }
-
-  // 表驱动：应用 toolbar_config 到已有 HTML 按钮
-  function applyToolbarConfig(cfg) {
-    if (!cfg || !cfg.buttons) return;
-    cfg.buttons.forEach(function (btn) {
-      var el = $(btn.id);
-      if (!el) return;
-      // 更新 title
-      if (btn.label) el.title = btn.label + (btn.shortcut ? ' (' + btn.shortcut + ')' : '');
-      // 渲染下拉菜单项
-      if (btn.dropdown && btn.dropdown_items) {
-        var dropdownId = btn.id.replace('btn', '') + 'Dropdown';
-        // 转换为首字母小写: AddNode → addNode
-        dropdownId = dropdownId.charAt(0).toLowerCase() + dropdownId.slice(1);
-        var dd = $(dropdownId);
-        if (dd) {
-          var dataKey = btn.id === 'btnAddNode' ? 'node-type' : 'format';
-          _renderDropdownFromConfig(dd, btn.dropdown_items, dataKey);
-        }
-      }
-    });
-    updateToolbarButtons();
   }
 
   function bindToolbar() {
@@ -10878,86 +10842,37 @@ var TableDrivenPanel = window.TableDrivenPanel;
     initDatasourceSelector();
 
     // ── Overflow menu bindings (mobile/tablet) ──
+    // 表驱动：溢出菜单项与主工具栏共享 toolbar_config.json，通过 DOM 镜像路由到主按钮
     var om = $('overflowMenu');
     if (om) {
-      $('btnNewOverflow').addEventListener('click', function () { $('newPoolModal').classList.remove('hidden'); om.classList.remove('open'); });
-      $('btnFitOverflow').addEventListener('click', function () { canvas.fitToContent(40); om.classList.remove('open'); });
-      $('btnExecOrderOverflow').addEventListener('click', function () { $('btnExecOrder').click(); om.classList.remove('open'); });
-      $('btnFlowModeOverflow').addEventListener('click', function () { $('btnFlowMode').click(); om.classList.remove('open'); });
-      $('btnTdxPoolsOverflow').addEventListener('click', function () { $('btnTdxPools').click(); om.classList.remove('open'); });
-      $('btnRuleEditorOverflow').addEventListener('click', function () { $('btnRuleEditor').click(); om.classList.remove('open'); });
-      $('btnComprehensiveSettingsOverflow').addEventListener('click', function () { $('btnComprehensiveSettings').click(); om.classList.remove('open'); });
-      $('btnUndoOverflow').addEventListener('click', function () { $('btnUndo').click(); om.classList.remove('open'); });
-      $('btnRedoOverflow').addEventListener('click', function () { $('btnRedo').click(); om.classList.remove('open'); });
-
-      // Add Node overflow dropdown
-      $('btnAddNodeOverflow').addEventListener('click', function (e) {
-        e.stopPropagation();
-        $('importDropdownOverflow').classList.add('hidden');
-        $('exportDropdownOverflow').classList.add('hidden');
-        $('addNodeDropdownOverflow').classList.toggle('hidden');
-      });
-      $('addNodeDropdownOverflow').addEventListener('click', function (e) {
+      om.addEventListener('click', function (e) {
         var item = e.target.closest('.tb-dropdown-item');
-        if (!item) return;
-        e.stopPropagation();
-        var action = item.dataset.action;
-        $('addNodeDropdownOverflow').classList.add('hidden');
-        om.classList.remove('open');
-        if (action) {
-          var cellType = _getAddNodeCellTypeByAction(action);
-          if (cellType !== null) addNodeAtCenter(cellType);
+        if (item) {
+          e.stopPropagation();
+          var dropdown = item.closest('.tb-dropdown-menu');
+          if (dropdown && dropdown.id && dropdown.id.indexOf('Overflow') !== -1) {
+            var mainDropdownId = dropdown.id.replace(/Overflow$/, '');
+            var mainDropdown = $(mainDropdownId);
+            if (mainDropdown) {
+              var selector = '.tb-dropdown-item';
+              Object.keys(item.dataset).forEach(function (k) {
+                selector += '[data-' + k + '="' + item.dataset[k] + '"]';
+              });
+              var mainItem = mainDropdown.querySelector(selector);
+              if (mainItem) mainItem.click();
+            }
+          }
+          om.classList.remove('open');
+          return;
         }
-      });
-
-      // Import overflow dropdown
-      $('btnImportOverflow').addEventListener('click', function (e) {
-        e.stopPropagation();
-        $('exportDropdownOverflow').classList.add('hidden');
-        $('addNodeDropdownOverflow').classList.add('hidden');
-        $('importDropdownOverflow').classList.toggle('hidden');
-      });
-      $('importDropdownOverflow').addEventListener('click', function (e) {
-        var item = e.target.closest('.tb-dropdown-item');
-        if (!item) return;
-        e.stopPropagation();
-        var format = item.dataset.format;
-        $('importDropdownOverflow').classList.add('hidden');
-        om.classList.remove('open');
-        $('fileInput').setAttribute('data-format', format);
-        if (format === 'json') {
-          $('fileInput').accept = '.json';
-          $('importModalTitle').textContent = '导入JSON股票池';
-          $('dropZoneText').textContent = '点击选择或拖拽 .json 文件到此处';
-        } else if (format === 'tdx') {
-          $('fileInput').accept = '.xml';
-          $('importModalTitle').textContent = '导入通达信XML股票池';
-          $('dropZoneText').textContent = '点击选择或拖拽 .xml 文件到此处';
-        } else {
-          $('fileInput').accept = '.xml';
-          $('importModalTitle').textContent = '导入大智慧XML股票池';
-          $('dropZoneText').textContent = '点击选择或拖拽 .xml 文件到此处';
+        var btn = e.target.closest('.tb-btn');
+        if (btn && btn.id && btn.id.indexOf('Overflow') !== -1) {
+          e.stopPropagation();
+          var mainBtnId = btn.id.replace(/Overflow$/, '');
+          var mainBtn = $(mainBtnId);
+          if (mainBtn) mainBtn.click();
+          om.classList.remove('open');
         }
-        $('importModal').classList.remove('hidden');
-      });
-
-      // Export overflow dropdown
-      $('btnExportOverflow').addEventListener('click', function (e) {
-        e.stopPropagation();
-        $('importDropdownOverflow').classList.add('hidden');
-        $('addNodeDropdownOverflow').classList.add('hidden');
-        $('exportDropdownOverflow').classList.toggle('hidden');
-      });
-      $('exportDropdownOverflow').addEventListener('click', function (e) {
-        var item = e.target.closest('.tb-dropdown-item');
-        if (!item) return;
-        e.stopPropagation();
-        var format = item.dataset.format;
-        $('exportDropdownOverflow').classList.add('hidden');
-        om.classList.remove('open');
-        if (format === 'tdx') exportTDXXML();
-        else if (format === 'json') exportJSON();
-        else exportXML();
       });
     }
 
@@ -11459,173 +11374,23 @@ var TableDrivenPanel = window.TableDrivenPanel;
   function bindContextMenu() {
     var cm = $('contextMenu');
     var _ctxCanvasX = 0, _ctxCanvasY = 0;
-    var _ctxTargetType = null;   // 'candidate'|'condition'|'state_pool'|'cond_edge'|'uncond_edge'|null
+    var _ctxTargetType = null;   // 目标类型由 context_menu_config.node_type_map 决定
     var _ctxTargetId = null;
     var _ctxIsRuntime = false;
 
-    // ── 菜单项定义表 ──
-    // 每个 item: { action, label, icon?, danger?, checkable?, checked? }
-    function _buildMenu(items) {
-      var html = '';
-      items.forEach(function(it) {
-        if (it === '---') { html += '<div class="ctx-sep"></div>'; return; }
-        var cls = 'ctx-item';
-        if (it.danger) cls += ' ctx-danger';
-        if (it.checked) cls += ' ctx-checked';
-        html += '<div class="' + cls + '" data-action="' + it.action + '">' +
-          (it.icon || '') + ' ' + it.label + '</div>';
-      });
-      return html;
-    }
-
-    // ── 判断右键目标类型 ──
-    function _resolveCtxTarget() {
-      var nid = canvas.getSelectedNodeId();
-      var eid = canvas.getSelectedEdgeId();
-      if (nid) {
-        var node = canvas._findNode(nid);
-        if (!node) return { type: null, id: null };
-        if (poolData._isTDX) {
-          if (node.type === 'tdx_candidate') return { type: 'candidate', id: nid, node: node };
-          if (node.type === 'tdx_condition') return { type: 'condition', id: nid, node: node };
-          if (node.type === 'tdx_state_pool') return { type: 'state_pool', id: nid, node: node };
-        }
-        // DZH types fallback
-        if (node.type === 'market_source') return { type: 'candidate', id: nid, node: node };
-        if (node.type === 'transfer_condition') return { type: 'condition', id: nid, node: node };
-        if (node.type === 'stock_state_pool') return { type: 'state_pool', id: nid, node: node };
-        // 标签节点（DZH text_label / TDX tdx_text_label / tdx_deco_text）
-        if (node.type === 'text_label' || node.type === 'tdx_text_label' || node.type === 'tdx_deco_text') {
-          return { type: 'label', id: nid, node: node };
-        }
-        return { type: 'generic_node', id: nid, node: node };
-      }
-      if (eid) {
-        var edge = poolData.getEdgeById(eid);
-        if (!edge) return { type: null, id: null };
-        var params = edge.params || {};
-        // 有条件边：有条件公式参数(nset等)或有明确条件标记
-        var hasCondition = params.nset !== undefined || params.condition_formula || params.tdx_func;
-        return { type: hasCondition ? 'cond_edge' : 'uncond_edge', id: eid, edge: edge, params: params };
-      }
-      return { type: null, id: null }; // 空白区域
-    }
-
-    // ── 构建三维菜单 ──
-    function _buildContextMenu(targetInfo) {
-      var t = targetInfo.type;
-      var isDesign = AppState.mode === 'design';
-      var items = [];
-
-      if (!t) {
-        // 空白区域：添加节点子菜单
-        items = [
-          { action: 'addNode', label: '➕ 添加节点 ▸', isSub: true },
-        ];
-      } else if (t === 'candidate') {
-        // 候选池: 属性 + 说明文字
-        var _descLabel_C = poolData._isTDX ? '✏ 修改说明文字和样式' : '✏ 修改说明文字';
-        items = [
-          { action: 'properties', label: '🔧 属性' },
-          { action: 'comprehensiveSettings', label: '⚙ 综合设置' },
-          '---',
-          { action: 'editDescText', label: _descLabel_C },
-        ];
-      } else if (t === 'condition') {
-        // 条件节点: 属性 + 说明文字 + 停止运算
-        var node = targetInfo.node || {};
-        var params = node.params || {};
-        var isDisabled = !!params.disabled;
-        var _descLabel_N = poolData._isTDX ? '✏ 修改说明文字和样式' : '✏ 修改说明文字';
-        if (!isDesign && !poolData._isTDX) {
-          // DZH runtime condition: show stock list hint (original shows dropdown)
-          var _stockCount = (params.stks || []).length;
-          items = [
-            { action: 'viewConditionStocks', label: '▼ 查看通过条件的股票 (' + _stockCount + '只)' },
-          ];
-        } else {
-          items = [
-            { action: 'properties', label: '🔧 属性' },
-            { action: 'comprehensiveSettings', label: '⚙ 综合设置' },
-            '---',
-            { action: 'editDescText', label: _descLabel_N },
-            '---',
-            { action: 'toggleDisabled', label: (isDisabled ? '▶ 恢复运算' : '⏸ 停止运算'), checked: isDisabled },
-          ];
-        }
-      } else if (t === 'state_pool') {
-        var node = targetInfo.node || {};
-        var params = node.params || {};
-        var showRowNum = !!params.show_row_num;
-        var hasStockSelection = false; // 后续可实现
-
-        if (isDesign) {
-          // 设计模式
-          var _descLabel_S = poolData._isTDX ? '✏ 修改说明文字和样式' : '✏ 修改说明文字';
-          items = [
-            { action: 'properties', label: '🔧 属性' },
-            { action: 'comprehensiveSettings', label: '⚙ 综合设置' },
-            '---',
-            { action: 'editDescText', label: _descLabel_S },
-            '---',
-            { action: 'addStockToPool', label: '➕ 手工添加股票到状态池' },
-            { action: 'clearAllStocks', label: '🗑 清除状态池中所有股票', danger: true },
-            { action: 'allStockToBlock', label: '📋 所有股票加入到板块股' },
-            '---',
-            { action: 'toggleRowNum', label: (showRowNum ? '☑ 隐藏行号' : '☐ 显示行号'), checked: showRowNum },
-          ];
-          if (hasStockSelection) {
-            items.push('---');
-            items.push({ action: 'addToFavorites', label: '★ 将当前银行加入到自选股' });
-            items.push({ action: 'viewChart', label: '📊 查看|删除发行走势' });
-            items.push({ action: 'deleteStockRow', label: '✕ 从本次池中删除该笔(行)', danger: true });
-          }
-        } else {
-          // 运行时模式
-          items = [
-            { action: 'addToFavorites', label: '★ 将当前银行加入到自选股' },
-            { action: 'viewChart', label: '📊 查看|删除发行走势' },
-            '---',
-            { action: 'allStockToBlock', label: '📋 所有股票加入到板块股' },
-            '---',
-            { action: 'toggleRowNum', label: (showRowNum ? '☑ 隐藏行号' : '☐ 显示行号'), checked: showRowNum },
-          ];
-        }
-      } else if (t === 'cond_edge') {
-        // 有条件边: 属性 + 线条宽度
-        items = [
-          { action: 'properties', label: '🔧 属性' },
-          { action: 'comprehensiveSettings', label: '⚙ 综合设置' },
-          '---',
-          { action: 'editLineWidth', label: '📏 线条宽度 (' + (targetInfo.params.size || 1) + ')' },
-        ];
-      } else if (t === 'uncond_edge') {
-        // 无条件边: 仅线条宽度
-        items = [
-          { action: 'editLineWidth', label: '📏 线条宽度 (' + (targetInfo.params.size || 1) + ')' },
-        ];
-      } else if (t === 'generic_node') {
-        // 通用节点（DZH或其他）：保持原有行为
-        items = [
-          { action: 'properties', label: '🔧 属性' },
-          { action: 'comprehensiveSettings', label: '⚙ 综合设置' },
-          '---',
-          { action: 'copy', label: '📋 复制' },
-          { action: 'cut', label: '✂ 剪切' },
-          { action: 'paste', label: '📄 粘贴' },
-          '---',
-          { action: 'bringToFront', label: '⬆ 置于顶层' },
-          { action: 'sendToBack', label: '⬇ 置于底层' },
-          '---',
-          { action: 'delete', label: '🗑 删除', danger: true },
-        ];
-      }
-
-      return items;
-    }
-
     // ── 表驱动：从 context_menu_config 构建菜单 HTML ──
-    function _buildCtxMenuFromConfig(targetType, cellType, isDesignMode, ctxParams) {
+    function _getCtxCheckedState(target, path) {
+      if (!target || !path) return false;
+      var parts = path.split('.');
+      var cur = target;
+      for (var i = 0; i < parts.length; i++) {
+        if (cur == null) return false;
+        cur = cur[parts[i]];
+      }
+      return !!cur;
+    }
+
+    function _buildCtxMenuFromConfig(targetType, cellType, isDesignMode, ctxParams, targetData) {
       var cfg = getConfig('context_menu_config');
       var menus = cfg.menus || {};
       var items = menus[targetType] || [];
@@ -11639,6 +11404,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
         }
         // visible_when 过滤
         if (item.visible_when === 'design_mode' && !isDesignMode) return false;
+        if (item.visible_when === 'runtime' && isDesignMode) return false;
         // has_clipboard: 仅在剪贴板有内容时显示
         if (item.visible_when === 'has_clipboard') {
           return poolData._clipboard && poolData._clipboard.length > 0;
@@ -11653,6 +11419,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
         var cls = 'ctx-item';
         if (item.danger) cls += ' ctx-danger';
         if (item.submenu) cls += ' ctx-has-sub';
+        if (item.checkable && _getCtxCheckedState(targetData, item.checked_when)) cls += ' ctx-checked';
         var label = item.label || '';
         // 动态标签替换：线宽显示当前值
         if (item.action === 'editLineWidth' && ctxParams && ctxParams.size !== undefined) {
@@ -11679,39 +11446,45 @@ var TableDrivenPanel = window.TableDrivenPanel;
       _ctxCanvasX = (e.clientX - vpRect.left - canvas.transform.x) / canvas.transform.zoom;
       _ctxCanvasY = (e.clientY - vpRect.top - canvas.transform.y) / canvas.transform.zoom;
 
-      // Resolve what was right-clicked
-      var targetInfo = _resolveCtxTarget();
-      _ctxTargetType = targetInfo.type;
-      _ctxTargetId = targetInfo.id;
-      _ctxIsRuntime = AppState.mode !== 'design';
-
+      // 表驱动：从 context_menu_config.node_type_map 解析右键目标类型
       var isDesign = AppState.mode === 'design';
-      var menuHtml = null;
+      var nid = canvas.getSelectedNodeId();
+      var eid = canvas.getSelectedEdgeId();
+      var targetType = null;
+      var targetId = null;
+      var targetData = null;
+      var ctxParams = null;
+      var cellType = null;
 
-      // 表驱动：尝试从 context_menu_config 构建菜单
-      if (!targetInfo.type) {
-        // 空白画布
-        menuHtml = _buildCtxMenuFromConfig('canvas', null, isDesign);
-      } else if (targetInfo.type === 'cond_edge' || targetInfo.type === 'uncond_edge') {
-        // 边：从配置构建，传入当前线宽
-        menuHtml = _buildCtxMenuFromConfig('edge', null, isDesign, targetInfo.params);
-      } else if (targetInfo.type === 'label') {
-        // 标签节点：传入 cell_type 以匹配 cell_types 过滤
-        var labelCellType = targetInfo.node ? (targetInfo.node.dzh_cell_type || targetInfo.node.tdx_cell_type) : null;
-        menuHtml = _buildCtxMenuFromConfig('label', labelCellType, isDesign);
-      } else if (targetInfo.type === 'generic_node') {
-        // 通用节点
-        menuHtml = _buildCtxMenuFromConfig('node', null, isDesign);
+      if (nid) {
+        var node = canvas._findNode(nid);
+        if (node) {
+          var ctxCfg = getConfig('context_menu_config');
+          var typeMap = ctxCfg.node_type_map || {};
+          targetType = typeMap[node.type] || 'node';
+          targetId = nid;
+          targetData = node;
+          cellType = node.dzh_cell_type || node.tdx_cell_type || null;
+        }
+      } else if (eid) {
+        var edge = poolData.getEdgeById(eid);
+        if (edge) {
+          targetType = 'edge';
+          targetId = eid;
+          targetData = edge;
+          ctxParams = edge.params || {};
+        }
       }
 
-      if (menuHtml) {
-        cm.innerHTML = menuHtml;
-      } else {
-        // 特殊节点（candidate/condition/state_pool）：保留原有逻辑
-        var items = _buildContextMenu(targetInfo);
-        cm.innerHTML = _buildMenu(items);
-      }
+      _ctxTargetType = targetType;
+      _ctxTargetId = targetId;
+      _ctxIsRuntime = !isDesign;
 
+      var menuHtml = targetType
+        ? _buildCtxMenuFromConfig(targetType, cellType, isDesign, ctxParams, targetData)
+        : _buildCtxMenuFromConfig('canvas', null, isDesign, null, null);
+
+      cm.innerHTML = menuHtml || '';
       cm.classList.add('visible');
       cm.style.left = e.clientX + 'px';
       cm.style.top = e.clientY + 'px';
@@ -12570,23 +12343,16 @@ var TableDrivenPanel = window.TableDrivenPanel;
       $('mobileTabCanvas').classList.remove('active');
     });
 
-    // Mobile float buttons
-    var mobileAddSource = $('mobileAddSource');
-    var mobileAddCondition = $('mobileAddCondition');
-    var mobileAddPool = $('mobileAddPool');
-    if (mobileAddSource) {
-      mobileAddSource.addEventListener('click', function () {
-        addNodeAtCenter(poolData._isTDX ? 7 : 202);
-      });
-    }
-    if (mobileAddCondition) {
-      mobileAddCondition.addEventListener('click', function () {
-        addNodeAtCenter(poolData._isTDX ? 3 : 201);
-      });
-    }
-    if (mobileAddPool) {
-      mobileAddPool.addEventListener('click', function () {
-        addNodeAtCenter(poolData._isTDX ? 8 : 200);
+    // 移动端悬浮按钮：表驱动渲染在 #mobileFloatBtns 中，通过 data-action 统一绑定
+    var mobileFloatBtns = $('mobileFloatBtns');
+    if (mobileFloatBtns) {
+      mobileFloatBtns.addEventListener('click', function (e) {
+        var btn = e.target.closest('.mobile-float-btn');
+        if (!btn) return;
+        var action = btn.getAttribute('data-action');
+        if (!action) return;
+        var cellType = _getAddNodeCellTypeByAction(action);
+        if (cellType !== null) addNodeAtCenter(cellType);
       });
     }
   }
@@ -12659,23 +12425,6 @@ var TableDrivenPanel = window.TableDrivenPanel;
     // 表驱动：委托给 ToolbarRenderer 按表更新按钮状态
     if (typeof ToolbarRenderer !== 'undefined' && ToolbarRenderer.getConfigs().toolbar) {
       ToolbarRenderer.updateButtonStates(getUIState());
-      return;
-    }
-    // fallback：ToolbarRenderer 未加载时使用原逻辑
-    var cfg = getConfig('toolbar_config');
-    var buttons = cfg.buttons || [];
-    if (buttons.length) {
-      buttons.forEach(function (btn) {
-        var el = $(btn.id);
-        if (!el || !btn.enabled_when) return;
-        el.disabled = !_evalEnabledWhen(btn.enabled_when);
-      });
-    } else {
-      $('btnUndo').disabled = !poolData.canUndo();
-      $('btnRedo').disabled = !poolData.canRedo();
-      $('btnSave').disabled = !poolData.hasData;
-      $('btnExport').disabled = !poolData.hasData;
-      if ($('btnComprehensiveSettings')) $('btnComprehensiveSettings').disabled = !poolData.hasData;
     }
   }
 

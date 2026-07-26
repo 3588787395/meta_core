@@ -54,6 +54,19 @@
   "buttons": [
     {
       "group": "file_ops",
+      "id": "btnHamburger",
+      "icon": "☰",
+      "label": "菜单",
+      "action": "toggleOverflowMenu",
+      "enabled_when": "always",
+      "order": 0,
+      "dropdown": false,
+      "overflow": false,
+      "position": "left",
+      "button_class": "hamburger-btn"
+    },
+    {
+      "group": "file_ops",
       "id": "btnNew",
       "icon": "🆕",
       "label": "新建",
@@ -129,21 +142,24 @@
           "icon": "📦",
           "label": "备选池",
           "action": "addSource",
-          "data_node_type": "source"
+          "data_node_type": "source",
+          "mobile_float": true
         },
         {
           "id": "condition",
           "icon": "🔀",
           "label": "转移条件",
           "action": "addCondition",
-          "data_node_type": "condition"
+          "data_node_type": "condition",
+          "mobile_float": true
         },
         {
           "id": "statepool",
           "icon": "🏷",
           "label": "状态池",
           "action": "addStatePool",
-          "data_node_type": "statepool"
+          "data_node_type": "statepool",
+          "mobile_float": true
         },
         {
           "id": "discard",
@@ -470,6 +486,39 @@
       "overflow": false,
       "is_link": true,
       "href": "config.html"
+    },
+    {
+      "group": "node_ops",
+      "id": "mobileAddSource",
+      "icon": "🗄",
+      "label": "添加备选池",
+      "action": "addSource",
+      "enabled_when": "mode == 'edit'",
+      "order": 100,
+      "mobile": true,
+      "data_node_type": "source"
+    },
+    {
+      "group": "node_ops",
+      "id": "mobileAddCondition",
+      "icon": "⚙",
+      "label": "添加条件",
+      "action": "addCondition",
+      "enabled_when": "mode == 'edit'",
+      "order": 101,
+      "mobile": true,
+      "data_node_type": "condition"
+    },
+    {
+      "group": "node_ops",
+      "id": "mobileAddPool",
+      "icon": "📦",
+      "label": "添加状态池",
+      "action": "addStatePool",
+      "enabled_when": "mode == 'edit'",
+      "order": 102,
+      "mobile": true,
+      "data_node_type": "statepool"
     }
   ]
 }

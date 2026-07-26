@@ -359,22 +359,55 @@
     return html;
   });
 
-  // 条件公式摘要（边编辑器中直接显示当前条件公式）
+  // 条件公式摘要（配置驱动：summary_type 决定渲染内容）
   ComponentRegistry.register('condition_summary', function (field, data) {
-    var ctype = DataBinder.get(data, 'condition_type') || '';
-    var fref = DataBinder.get(data, 'formula_ref') || '';
-    var isrc = DataBinder.get(data, 'intersection_source') || '';
-    var summary = '-';
-    if (ctype === 'INTERSECTION' && isrc) summary = 'INTERSECTION (' + _escHtml(isrc) + ')';
-    else if (ctype === 'INTERSECTION') summary = 'INTERSECTION';
-    else if (fref) summary = _escHtml(fref);
-    else if (ctype) summary = _escHtml(ctype);
-    var html = '<div class="td-field td-field-condition-summary" data-key="' + field.key + '">';
+    var summaryType = field.summary_type || 'flow';
+    var html = '<div class="td-field td-field-condition-summary" data-key="' + field.key + '" data-summary-type="' + summaryType + '">';
     html += '<label>' + (field.label || '当前条件公式') + '</label>';
-    html += '<div class="td-condition-summary-box" title="当前条件公式">' + summary + '</div>';
+    html += '<div class="td-condition-summary-box">' + _renderConditionSummaryInner(field, data) + '</div>';
     html += '</div>';
     return html;
   });
+
+  function _renderConditionSummaryInner(field, data) {
+    var summaryType = field.summary_type || 'flow';
+    var parts = [];
+    if (summaryType === 'flow') {
+      var ctype = DataBinder.get(data, 'condition_type') || '';
+      var fref = DataBinder.get(data, 'formula_ref') || '';
+      var isrc = DataBinder.get(data, 'intersection_source') || '';
+      if (ctype === 'INTERSECTION' && isrc) parts.push('INTERSECTION (' + _escHtml(isrc) + ')');
+      else if (ctype === 'INTERSECTION') parts.push('INTERSECTION');
+      else if (fref) parts.push(_escHtml(fref));
+      else if (ctype) parts.push(_escHtml(ctype));
+      var interval = DataBinder.get(data, 'time_gate_interval');
+      if (interval === undefined || interval === null) interval = DataBinder.get(data, 'interval_sec');
+      if (interval !== undefined && interval !== '') parts.push('触发间隔: ' + _escHtml(interval) + 's');
+      var ttl = DataBinder.get(data, 'ttl_hold_seconds');
+      var ttlMode = DataBinder.get(data, 'ttl_mode') || '';
+      if (ttl !== undefined && ttl !== null && ttl !== '') parts.push('TTL: ' + _escHtml(ttl) + 's/' + _escHtml(ttlMode || 'interval'));
+    } else if (summaryType === 'dzh_condition') {
+      var itype = DataBinder.get(data, 'inditype') || '';
+      var itypeMap = { 'indi': '技术指标', '': '条件选股', 'trade_sys': '交易系统', 'basic': '基本面', 'dynamic': '动态行情', 'ref': '引用公式' };
+      parts.push('公式类型: ' + _escHtml(itypeMap[itype] || itype));
+      var iparam = DataBinder.get(data, 'indiparam') || '';
+      if (iparam) parts.push('参数: ' + _escHtml(iparam));
+      var decoded = (DataBinder.get(data, 'formula_decoded') || '').substring(0, 60);
+      if (decoded) parts.push(_escHtml(decoded) + (decoded.length >= 60 ? '…' : ''));
+    } else if (summaryType === 'tdx_condition') {
+      var nset = DataBinder.get(data, 'params.tdx_func.nset');
+      var nperiod = DataBinder.get(data, 'params.tdx_func.nperiod');
+      var noperate = DataBinder.get(data, 'params.tdx_func.noperate');
+      var nsetMap = { 0: '技术指标', 1: '条件选股', 2: '专家系统', 3: '最新财务', 4: '实时行情', 5: '逻辑运算' };
+      var periodMap = { 0: '分笔', 1: '1分钟', 2: '5分钟', 3: '15分钟', 4: '日线', 5: '周线', 6: '月线' };
+      var operateMap = { 0: '等于', 1: '大于', 2: '小于', 3: '上穿(金叉)', 4: '下破(死叉)', 5: '持股', 6: '排名前N', 7: '排名后N', 8: '上拐', 9: '下拐' };
+      parts.push(_escHtml(nsetMap[nset] || ('nset=' + nset)));
+      parts.push('周期: ' + _escHtml(periodMap[nperiod] || nperiod));
+      parts.push('操作: ' + _escHtml(operateMap[noperate] || noperate));
+    }
+    if (!parts.length) return '-';
+    return parts.map(function (p) { return '<span class="td-summary-badge">' + p + '</span>'; }).join('');
+  }
 
   // 下拉选择框
   ComponentRegistry.register('select', function (field, data) {
@@ -682,8 +715,36 @@
     return html;
   });
 
-  // 公式参数容器（DZH condition_filter 专用：由 _injectDzhFormulaPicker 动态填充）
-  // 渲染一个空的 .td-formula-args-box 占位，_renderFormulaArgsForm 向 .td-formula-args-list 写入参数行
+  // 公式选择器（配置驱动：picker_type/args_path/script_path/name_path 等由 ui_layouts.json 声明）
+  ComponentRegistry.register('formula_picker', function (field, data) {
+    var pickerType = field.picker_type || 'dzh';
+    var selectedName = DataBinder.get(data, field.name_path || '') || '';
+    var selectedScript = DataBinder.get(data, field.script_path || '') || '';
+    var hasSelection = !!(selectedName && selectedScript);
+    var html = '<div class="td-field td-formula-picker" data-key="' + _escAttr(field.key || 'formula_picker') + '" data-picker-type="' + _escAttr(pickerType) + '">';
+    html += '<label>' + _escHtml(field.label || '公式选择') + '</label>';
+    html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">';
+    html += '<button type="button" class="td-btn td-btn-primary td-btn-sm td-formula-pick-btn" style="padding:3px 10px;font-size:11px;">从公式库选择</button>';
+    html += '<button type="button" class="td-btn td-btn-sm td-formula-validate-btn" style="padding:3px 10px;font-size:11px;' + (hasSelection ? '' : 'display:none;') + '">验证公式</button>';
+    html += '<span class="td-formula-pick-name" style="font-size:11px;color:var(--text-secondary);">' + (selectedName ? '已选: ' + _escHtml(selectedName) : '') + '</span>';
+    html += '</div>';
+    html += '<div class="td-formula-result" style="margin-top:4px;font-size:11px;display:none;"></div>';
+    // 存储配置到元素上，供事件绑定读取
+    html += '<script type="text/td-formula-picker-config">' + JSON.stringify({
+      picker_type: pickerType,
+      args_path: field.args_path,
+      script_path: field.script_path,
+      name_path: field.name_path,
+      accode_path: field.accode_path,
+      nset_path: field.nset_path,
+      indi_path: field.indi_path,
+      inditype_path: field.inditype_path
+    }) + '</script>';
+    html += '</div>';
+    return html;
+  });
+
+  // 公式参数容器（配置驱动：由 ui_layouts.json 声明，_renderFormulaArgsForm 向 .td-formula-args-list 写入参数行）
   ComponentRegistry.register('formula_args_container', function (field, data) {
     var html = '<div class="td-field td-formula-args-box" data-key="' + _escAttr(field.key || 'formula_args') + '" style="display:none;margin-top:6px;">';
     html += '<label style="font-size:11px;font-weight:600;">' + _escHtml(field.label || '公式参数') + '</label>';
@@ -1113,15 +1174,6 @@
           );
         }
 
-        // DZH 转移条件节点(type=201)：formula_decoded 缺失时调用后端解码 API（支持 GBK + ency 加密）
-        if (String(this._nodeType) === '201') {
-          var indiBase64 = DataBinder.get(this._data, 'indi');
-          var existingDecoded = DataBinder.get(this._data, 'formula_decoded');
-          if (indiBase64 && !existingDecoded) {
-            this._decodeFormulaViaBackend(indiBase64, this._getPoolEncy());
-          }
-        }
-
         // 设置面板标题
         if (this.titleEl) {
           this.titleEl.textContent = node.label || node.type || '节点属性';
@@ -1172,15 +1224,6 @@
             );
           }
 
-          // DZH 转移条件节点(type=201)：formula_decoded 缺失时调用后端解码 API（支持 GBK + ency 加密）
-          if (String(this._nodeType) === '201') {
-            var indiBase642 = DataBinder.get(this._data, 'indi');
-            var existingDecoded2 = DataBinder.get(this._data, 'formula_decoded');
-            if (indiBase642 && !existingDecoded2) {
-              this._decodeFormulaViaBackend(indiBase642, this._getPoolEncy());
-            }
-          }
-
           if (this.titleEl) {
             this.titleEl.textContent = nodeId.label || nodeId.type || '节点属性';
           }
@@ -1226,14 +1269,8 @@
         this._currentEdgeId = edgeId;
         this._currentItem = edge;
 
-        // 判定 poolType：边参数含 tran/jgtime → tdx
-        var ep = edge.params || {};
-        if (ep.tran !== undefined || ep.jgtime !== undefined) {
-          this._poolType = 'tdx';
-        } else {
-          var poolMeta2 = this.poolData.data && this.poolData.data.pool_meta;
-          this._poolType = (poolMeta2 && poolMeta2.type === 'tdx') ? 'tdx' : 'dzh';
-        }
+        var poolMeta2 = this.poolData.data && this.poolData.data.pool_meta;
+        this._poolType = (poolMeta2 && poolMeta2.type === 'tdx') ? 'tdx' : 'dzh';
 
         this._nodeType = 'flow';
         this._data = edge.params ? _deepClone(edge.params) : {};
@@ -1281,97 +1318,12 @@
         this.titleEl.textContent = '股票池属性';
       }
 
-      // Try loading from ui_layouts pool_meta
       var self = this;
       this._fetchPanelConfig('pool_meta', 'any', this._data, function(config) {
-        if (config && config.sections) {
-          self._renderPanel(config);
-          self._bindEvents();
-          if (self._readOnly) self.setReadOnly(true);
-        } else {
-          // Fallback to hardcoded fields
-          self._renderPoolMetaFallback(poolMeta);
-        }
+        self._renderPanel(config);
+        self._bindEvents();
+        if (self._readOnly) self.setReadOnly(true);
       });
-    }
-
-    // 池元数据面板硬编码兜底渲染
-    _renderPoolMetaFallback(poolMeta) {
-      // 渲染池元数据面板
-      var html = '<div class="td-panel">';
-      html += '<div class="td-panel-header">股票池属性</div>';
-      html += '<div class="td-section"><div class="td-section-body">';
-
-      var fields = [
-        { key: 'type', label: '类型', value: poolMeta ? poolMeta.type : '', readonly: true },
-        { key: 'ver', label: '版本', value: poolMeta ? poolMeta.ver : '', readonly: true },
-        { key: 'mode', label: '模式', value: poolMeta ? poolMeta.mode : '', readonly: false },
-        { key: 'nextid', label: '下一个ID', value: poolMeta ? poolMeta.nextid : '', readonly: false },
-        { key: 'backcolor', label: '背景色', value: poolMeta ? poolMeta.backcolor : 16777216, readonly: false, comp: 'color_picker' },
-        { key: 'name', label: '名称', value: poolMeta ? poolMeta.name : '', readonly: false }
-      ];
-
-      for (var i = 0; i < fields.length; i++) {
-        var f = fields[i];
-        if (f.comp === 'color_picker') {
-          var colorHex = (f.value >= 0) ? _intToHex(f.value) : '#ffffff';
-          html += '<div class="td-field td-field-color" data-key="' + f.key + '">';
-          html += '<label>' + f.label + '</label>';
-          html += '<div class="td-color-wrap">';
-          html += '<input type="color" class="td-color-input" data-path="' + f.key + '" value="' + colorHex + '">';
-          html += '<span class="td-color-value">' + f.value + '</span>';
-          html += '</div></div>';
-        } else {
-          html += '<div class="td-field td-field-text" data-key="' + f.key + '">';
-          html += '<label>' + f.label + '</label>';
-          html += '<input type="text" class="td-input" data-path="' + f.key + '" value="' + _escHtml(f.value) + '"';
-          if (f.readonly) html += ' readonly';
-          html += '></div>';
-        }
-      }
-
-      html += '</div></div></div>';
-      this.container.innerHTML = html;
-
-      // 绑定事件
-      var self = this;
-      var panel = this.container.querySelector('.td-panel');
-      if (panel) {
-        panel.addEventListener('change', function (e) {
-          self._handlePoolChange(e.target);
-        });
-        panel.addEventListener('input', function (e) {
-          if (e.target.tagName === 'INPUT' && e.target.type === 'text') {
-            self._handlePoolChange(e.target);
-          }
-        });
-      }
-    }
-
-    // 池元数据变更处理
-    _handlePoolChange(target) {
-      var path = target.getAttribute('data-path');
-      if (!path) return;
-
-      var value;
-      if (target.classList.contains('td-color-input')) {
-        value = _hexToInt(target.value);
-        var valSpan = target.parentElement.querySelector('.td-color-value');
-        if (valSpan) valSpan.textContent = value;
-      } else {
-        value = target.value;
-      }
-
-      // 写回 poolData
-      if (this.poolData && this.poolData.data && this.poolData.data.pool_meta) {
-        this.poolData.data.pool_meta[path] = value;
-        this.poolData._notify();
-      }
-
-      // 触发 onPropertyChange
-      if (this.onPropertyChange) {
-        this.onPropertyChange(this.poolData.data.pool_meta, path, value);
-      }
     }
 
     // 显示占位提示（兼容 PropertyPanel 接口）
@@ -1523,7 +1475,9 @@
       // 复制配置属性
       var copyKeys = ['options', 'min', 'max', 'step', 'readonly', 'disabled', 'nullable',
         'depends_on', 'active_when', 'markets', 'unit_options', 'flags',
-        'flag_source', 'hhmmss_modes', 'action_types', 'default', 'hint', 'encode_to', 'rows'];
+        'flag_source', 'hhmmss_modes', 'action_types', 'default', 'hint', 'encode_to', 'rows',
+        'summary_type', 'picker_type', 'args_path', 'script_path', 'name_path',
+        'accode_path', 'nset_path', 'indi_path', 'inditype_path'];
       for (var i = 0; i < copyKeys.length; i++) {
         if (fieldConfig[copyKeys[i]] !== undefined) {
           result[copyKeys[i]] = fieldConfig[copyKeys[i]];
@@ -1626,353 +1580,6 @@
 
       html += '</div>';
       this.container.innerHTML = html;
-
-      // 注入"从公式库选择"按钮（TDX/DZH 转移条件面板）
-      this._injectFormulaPicker();
-      // 注入当前条件/周期/间隔摘要，方便用户即时查看
-      this._injectConditionSummary();
-    }
-
-    /**
-     * 注入"从公式库选择"按钮：
-     * - TDX (tdx_condition)：在 accode 字段后注入按钮 + 参数表单容器，nset=0/1/2 时可见
-     * - DZH (condition_filter)：在 formula_editor 的操作区注入按钮
-     */
-    _injectFormulaPicker() {
-      var panelEl = this.container.querySelector('.td-panel');
-      var layoutId = panelEl ? panelEl.getAttribute('data-layout') : '';
-      if (layoutId === 'tdx_condition') {
-        this._injectTdxFormulaPicker();
-      } else if (layoutId === 'condition_filter') {
-        this._injectDzhFormulaPicker();
-      }
-    }
-
-    /**
-     * TDX 转移条件面板：注入"从公式库选择"按钮 + 参数表单容器。
-     * 按钮插入到 accode 字段之后；参数表单容器插入到按钮之后。
-     * 可见性由 _refreshTdxFuncFieldsVisibility 根据 nset 控制。
-     */
-    _injectTdxFormulaPicker() {
-      var accodeField = this.container.querySelector('.td-field[data-key="accode"]');
-      if (!accodeField) return;
-
-      // 避免重复注入
-      if (this.container.querySelector('.td-formula-picker-tdx')) return;
-
-      var wrap = document.createElement('div');
-      wrap.className = 'td-field td-formula-picker-tdx';
-      wrap.setAttribute('data-key', 'formula_picker');
-      wrap.style.marginTop = '4px';
-      wrap.innerHTML =
-        '<button type="button" class="td-btn td-btn-primary td-btn-sm td-formula-pick-btn" ' +
-        'style="padding:3px 10px;font-size:11px;">从公式库选择</button>' +
-        '<button type="button" class="td-btn td-btn-sm td-formula-validate-btn" ' +
-        'style="padding:3px 10px;font-size:11px;margin-left:6px;display:none;">验证公式</button>' +
-        '<span class="td-formula-pick-name" style="margin-left:8px;font-size:11px;color:var(--text-secondary);"></span>' +
-        '<div class="td-formula-result" style="margin-top:4px;font-size:11px;display:none;"></div>';
-
-      // 参数表单容器
-      var argsBox = document.createElement('div');
-      argsBox.className = 'td-field td-formula-args-box';
-      argsBox.setAttribute('data-key', 'formula_args');
-      argsBox.style.display = 'none';
-      argsBox.style.marginTop = '6px';
-      argsBox.innerHTML = '<label style="font-size:11px;font-weight:600;">公式参数</label>' +
-        '<div class="td-formula-args-list" style="margin-top:4px;"></div>';
-
-      accodeField.parentNode.insertBefore(argsBox, accodeField.nextSibling);
-      accodeField.parentNode.insertBefore(wrap, argsBox);
-
-      // 绑定按钮点击
-      var self = this;
-      var btn = wrap.querySelector('.td-formula-pick-btn');
-      btn.addEventListener('click', function () {
-        self._openTdxFormulaSelector();
-      });
-
-      // 绑定验证公式按钮点击
-      var validateBtn = wrap.querySelector('.td-formula-validate-btn');
-      validateBtn.addEventListener('click', function () {
-        var script = DataBinder.get(self._data, 'params.tdx_func.formula_script') || '';
-        if (!script) {
-          self._showToast && self._showToast('请先选择公式', 'error');
-          return;
-        }
-        self._validateFormula(wrap, script);
-      });
-
-      // 初始可见性：根据当前 nset 值
-      var nsetVal = DataBinder.get(this._data, 'params.tdx_func.nset');
-      this._updateTdxFormulaPickerVisibility(nsetVal);
-
-      // 若已有 formula_args 数据且按钮可见（nset=0/1/2），恢复参数表单
-      var nsetNum = parseInt(nsetVal);
-      if (isNaN(nsetNum)) nsetNum = 0;
-      var pickerVisible = (nsetNum === 0 || nsetNum === 1 || nsetNum === 2);
-      if (pickerVisible) {
-        var existingArgs = DataBinder.get(this._data, 'params.tdx_func.formula_args');
-        var existingScript = DataBinder.get(this._data, 'params.tdx_func.formula_script');
-        if (existingArgs && typeof existingArgs === 'object' && existingScript) {
-          var nameEl = wrap.querySelector('.td-formula-pick-name');
-          var existingName = DataBinder.get(this._data, 'params.tdx_func.formula_name') || '';
-          if (nameEl && existingName) nameEl.textContent = '已选: ' + existingName;
-          // 恢复"验证公式"按钮可见
-          var restoreValidateBtn = wrap.querySelector('.td-formula-validate-btn');
-          if (restoreValidateBtn) restoreValidateBtn.style.display = 'inline-block';
-          this._renderFormulaArgsForm(existingArgs, existingScript, existingName);
-        }
-      }
-    }
-
-    /**
-     * 打开 TDX 公式选择器，选中后回填 accode/formula_script 并生成参数表单。
-     */
-    _openTdxFormulaSelector() {
-      var self = this;
-      var nsetVal = DataBinder.get(this._data, 'params.tdx_func.nset');
-      var nsetNum = parseInt(nsetVal);
-      if (isNaN(nsetNum)) nsetNum = null;
-
-      if (!window.ComprehensiveSettings || !window.ComprehensiveSettings.utils ||
-          typeof window.ComprehensiveSettings.utils.openFormulaSelector !== 'function') {
-        this._showToast && this._showToast('公式选择器不可用', 'error');
-        return;
-      }
-
-      window.ComprehensiveSettings.utils.openFormulaSelector(nsetNum, function (formula) {
-        self._onTdxFormulaSelected(formula);
-      });
-    }
-
-    /**
-     * TDX 公式选中回调：回填字段并生成参数表单。
-     */
-    _onTdxFormulaSelected(formula) {
-      // 回填 formula_script（完整脚本）和 accode（标识/脚本）
-      DataBinder.set(this._data, 'params.tdx_func.formula_script', formula.script || '');
-      this._notifyChange('params.tdx_func.formula_script', formula.script || '');
-
-      // accode 字段回填公式名称作为标识（保留原 accode 语义，同时存 name）
-      DataBinder.set(this._data, 'params.tdx_func.formula_name', formula.name || '');
-      this._notifyChange('params.tdx_func.formula_name', formula.name || '');
-
-      // 同步 accode 的 data_path（params.tdx_func.accode），保证保存后重新打开面板能正确显示
-      DataBinder.set(this._data, 'params.tdx_func.accode', formula.name || '');
-      this._notifyChange('params.tdx_func.accode', formula.name || '');
-
-      // 同步显示到 accode 输入框（若可见）
-      var accodeInput = this.container.querySelector('.td-field[data-key="accode"] input, .td-field[data-key="accode"] textarea');
-      if (accodeInput) {
-        accodeInput.value = formula.name || '';
-      }
-
-      // 公式已选，若分析周期未填写则立即标红提示
-      var nperiodVal = DataBinder.get(this._data, 'params.tdx_func.nperiod');
-      this._validateField('params.tdx_func.nperiod', nperiodVal);
-
-      // 更新按钮旁的已选提示
-      var nameEl = this.container.querySelector('.td-formula-pick-name');
-      if (nameEl && formula.name) nameEl.textContent = '已选: ' + formula.name;
-
-      // 显示"验证公式"按钮
-      var validateBtn = this.container.querySelector('.td-formula-validate-btn');
-      if (validateBtn) validateBtn.style.display = 'inline-block';
-
-      // 构造 formula_args 对象并生成参数表单
-      var argsObj = {};
-      var argsArr = formula.args || [];
-      for (var i = 0; i < argsArr.length; i++) {
-        var a = argsArr[i];
-        var aName = a.name || ('param' + i);
-        argsObj[aName] = (a.value !== undefined ? a.value : '');
-      }
-      DataBinder.set(this._data, 'params.tdx_func.formula_args', argsObj);
-      this._notifyChange('params.tdx_func.formula_args', argsObj);
-
-      this._renderFormulaArgsForm(argsObj, formula.script || '', formula.name || '');
-    }
-
-    /**
-     * DZH 转移条件面板：在 formula_editor 操作区注入"从公式库选择"按钮。
-     */
-    _injectDzhFormulaPicker() {
-      var formulaField = this.container.querySelector('.td-field-formula');
-      if (!formulaField) return;
-      // 避免重复注入
-      if (formulaField.querySelector('.td-formula-pick-btn')) return;
-
-      var actions = formulaField.querySelector('.td-formula-actions');
-      if (!actions) return;
-
-      var self = this;
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'td-btn td-btn-primary td-btn-sm td-formula-pick-btn';
-      btn.textContent = '从公式库选择';
-      btn.style.padding = '3px 10px';
-      btn.style.fontSize = '11px';
-      btn.addEventListener('click', function () {
-        self._openDzhFormulaSelector();
-      });
-      actions.insertBefore(btn, actions.firstChild);
-
-      // 注入参数表单容器（与 TDX 的 .td-formula-args-box 结构一致，供 _renderFormulaArgsForm 渲染）
-      if (!this.container.querySelector('.td-formula-args-box')) {
-        var argsBox = document.createElement('div');
-        argsBox.className = 'td-field td-formula-args-box';
-        argsBox.setAttribute('data-key', 'formula_args');
-        argsBox.style.display = 'none';
-        argsBox.style.marginTop = '6px';
-        argsBox.innerHTML = '<label style="font-size:11px;font-weight:600;">公式参数</label>' +
-          '<div class="td-formula-args-list" style="margin-top:4px;"></div>';
-        formulaField.parentNode.insertBefore(argsBox, formulaField.nextSibling);
-      }
-
-      // 若已有 formula_args 数据，恢复参数表单（DZH 参数存储在 _data 顶层 formula_args）
-      var existingArgs = DataBinder.get(this._data, 'formula_args');
-      if (existingArgs && typeof existingArgs === 'object') {
-        var existingScript = DataBinder.get(this._data, 'formula_decoded') || '';
-        this._renderFormulaArgsForm(existingArgs, existingScript, '', 'formula_args');
-      } else {
-        // indiparam 兜底：导入的 DZH 节点无 formula_args，从 indiparam 解析位置参数
-        // indiparam 格式如 (1,25,100,30,15,30)，按位置映射为 P1/P2/...
-        var indiparamStr = DataBinder.get(this._data, 'indiparam');
-        var parsedArgs = this._parseIndiparam(indiparamStr);
-        if (parsedArgs) {
-          var fallbackScript = DataBinder.get(this._data, 'formula_decoded') || '';
-          // 同步生成 formula_args dict，供后端 formula_eval 优先使用
-          DataBinder.set(this._data, 'formula_args', parsedArgs);
-          this._notifyChange('formula_args', parsedArgs);
-          this._renderFormulaArgsForm(parsedArgs, fallbackScript, '', 'formula_args');
-        }
-      }
-    }
-
-    /**
-     * 在面板顶部注入当前条件/周期/触发间隔摘要，减少用户记忆成本。
-     * 支持 flow_edge / condition_filter / tdx_condition 三种布局。
-     */
-    _injectConditionSummary() {
-      var panelEl = this.container.querySelector('.td-panel');
-      if (!panelEl) return;
-      var layoutId = panelEl.getAttribute('data-layout');
-      if (['flow_edge', 'condition_filter', 'tdx_condition'].indexOf(layoutId) < 0) return;
-      if (panelEl.querySelector('.td-condition-summary')) return;
-
-      var summary = { html: '', fields: [] };
-      if (layoutId === 'flow_edge') {
-        var ct = DataBinder.get(this._data, 'condition_type') || '';
-        var formula = DataBinder.get(this._data, 'formula_ref') || '';
-        var interval = DataBinder.get(this._data, 'time_gate_interval');
-        if (interval === undefined || interval === null) interval = DataBinder.get(this._data, 'interval_sec');
-        var ttl = DataBinder.get(this._data, 'ttl_hold_seconds');
-        var ttlMode = DataBinder.get(this._data, 'ttl_mode') || '';
-        var src = this._data._source_label || '';
-        var tgt = this._data._target_label || '';
-        var ctLabel = { 'INDICATOR': '指标条件', 'INTERSECTION': '交集运算', 'RANKING': '排名条件', '': '直接转移' }[String(ct).toUpperCase()] || ct;
-        summary.html = '<div class="td-summary-line"><span class="td-summary-route">' + _escHtml(src) + ' → ' + _escHtml(tgt) + '</span></div>';
-        summary.html += '<div class="td-summary-badges">';
-        summary.html += '<span class="td-summary-badge">条件: ' + _escHtml(ctLabel) + '</span>';
-        if (formula) summary.html += '<span class="td-summary-badge">公式: ' + _escHtml(formula) + '</span>';
-        summary.html += '<span class="td-summary-badge">触发间隔: ' + (interval !== undefined && interval !== '' ? _escHtml(interval) + 's' : '未设置') + '</span>';
-        if (ttl !== undefined && ttl !== null && ttl !== '') summary.html += '<span class="td-summary-badge">TTL: ' + _escHtml(ttl) + 's/' + _escHtml(ttlMode || 'interval') + '</span>';
-        summary.html += '</div>';
-        summary.fields = ['condition_type', 'formula_ref', 'time_gate_interval', 'interval_sec', 'ttl_hold_seconds', 'ttl_mode'];
-      } else if (layoutId === 'condition_filter') {
-        var itype = DataBinder.get(this._data, 'inditype') || '';
-        var itypeMap = { 'indi': '技术指标', '': '条件选股', 'trade_sys': '交易系统', 'basic': '基本面', 'dynamic': '动态行情', 'ref': '引用公式' };
-        var decoded = (DataBinder.get(this._data, 'formula_decoded') || '').substring(0, 60);
-        var iparam = DataBinder.get(this._data, 'indiparam') || '';
-        summary.html = '<div class="td-summary-badges">';
-        summary.html += '<span class="td-summary-badge">公式类型: ' + _escHtml(itypeMap[itype] || itype) + '</span>';
-        if (iparam) summary.html += '<span class="td-summary-badge">参数: ' + _escHtml(iparam) + '</span>';
-        summary.html += '</div>';
-        if (decoded) summary.html += '<div class="td-summary-script">' + _escHtml(decoded) + (decoded.length >= 60 ? '…' : '') + '</div>';
-        summary.fields = ['inditype', 'formula_decoded', 'indiparam'];
-      } else if (layoutId === 'tdx_condition') {
-        var nset = DataBinder.get(this._data, 'params.tdx_func.nset');
-        var nperiod = DataBinder.get(this._data, 'params.tdx_func.nperiod');
-        var noperate = DataBinder.get(this._data, 'params.tdx_func.noperate');
-        var nsetMap = { 0: '技术指标', 1: '条件选股', 2: '专家系统', 3: '最新财务', 4: '实时行情', 5: '逻辑运算' };
-        var periodMap = { 0: '分笔', 1: '1分钟', 2: '5分钟', 3: '15分钟', 4: '日线', 5: '周线', 6: '月线' };
-        var operateMap = { 0: '等于', 1: '大于', 2: '小于', 3: '上穿(金叉)', 4: '下破(死叉)', 5: '持股', 6: '排名前N', 7: '排名后N', 8: '上拐', 9: '下拐' };
-        summary.html = '<div class="td-summary-badges">';
-        summary.html += '<span class="td-summary-badge">' + _escHtml(nsetMap[nset] || ('nset=' + nset)) + '</span>';
-        summary.html += '<span class="td-summary-badge">周期: ' + _escHtml(periodMap[nperiod] || nperiod) + '</span>';
-        summary.html += '<span class="td-summary-badge">操作: ' + _escHtml(operateMap[noperate] || noperate) + '</span>';
-        summary.html += '</div>';
-        summary.fields = ['params.tdx_func.nset', 'params.tdx_func.nperiod', 'params.tdx_func.noperate'];
-      }
-
-      if (!summary.html) return;
-      var box = document.createElement('div');
-      box.className = 'td-condition-summary';
-      box.innerHTML = summary.html;
-      var header = panelEl.querySelector('.td-panel-header');
-      if (header && header.nextSibling) {
-        panelEl.insertBefore(box, header.nextSibling);
-      } else {
-        panelEl.appendChild(box);
-      }
-
-      // 字段变化时即时更新摘要文本
-      var self = this;
-      function updateSummary() {
-        var newHtml = summary.html;
-        if (layoutId === 'flow_edge') {
-          var ct2 = DataBinder.get(self._data, 'condition_type') || '';
-          var formula2 = DataBinder.get(self._data, 'formula_ref') || '';
-          var interval2 = DataBinder.get(self._data, 'time_gate_interval');
-          if (interval2 === undefined || interval2 === null) interval2 = DataBinder.get(self._data, 'interval_sec');
-          var ttl2 = DataBinder.get(self._data, 'ttl_hold_seconds');
-          var ttlMode2 = DataBinder.get(self._data, 'ttl_mode') || '';
-          var ctLabel2 = { 'INDICATOR': '指标条件', 'INTERSECTION': '交集运算', 'RANKING': '排名条件', '': '直接转移' }[String(ct2).toUpperCase()] || ct2;
-          var html2 = '<div class="td-summary-line"><span class="td-summary-route">' + _escHtml(self._data._source_label || '') + ' → ' + _escHtml(self._data._target_label || '') + '</span></div>';
-          html2 += '<div class="td-summary-badges">';
-          html2 += '<span class="td-summary-badge">条件: ' + _escHtml(ctLabel2) + '</span>';
-          if (formula2) html2 += '<span class="td-summary-badge">公式: ' + _escHtml(formula2) + '</span>';
-          html2 += '<span class="td-summary-badge">触发间隔: ' + (interval2 !== undefined && interval2 !== '' ? _escHtml(interval2) + 's' : '未设置') + '</span>';
-          if (ttl2 !== undefined && ttl2 !== null && ttl2 !== '') html2 += '<span class="td-summary-badge">TTL: ' + _escHtml(ttl2) + 's/' + _escHtml(ttlMode2 || 'interval') + '</span>';
-          html2 += '</div>';
-          box.innerHTML = html2;
-        } else if (layoutId === 'condition_filter') {
-          var itype2 = DataBinder.get(self._data, 'inditype') || '';
-          var itypeMap2 = { 'indi': '技术指标', '': '条件选股', 'trade_sys': '交易系统', 'basic': '基本面', 'dynamic': '动态行情', 'ref': '引用公式' };
-          var decoded2 = (DataBinder.get(self._data, 'formula_decoded') || '').substring(0, 60);
-          var iparam2 = DataBinder.get(self._data, 'indiparam') || '';
-          var html2 = '<div class="td-summary-badges">';
-          html2 += '<span class="td-summary-badge">公式类型: ' + _escHtml(itypeMap2[itype2] || itype2) + '</span>';
-          if (iparam2) html2 += '<span class="td-summary-badge">参数: ' + _escHtml(iparam2) + '</span>';
-          html2 += '</div>';
-          if (decoded2) html2 += '<div class="td-summary-script">' + _escHtml(decoded2) + (decoded2.length >= 60 ? '…' : '') + '</div>';
-          box.innerHTML = html2;
-        } else if (layoutId === 'tdx_condition') {
-          var nset2 = DataBinder.get(self._data, 'params.tdx_func.nset');
-          var nperiod2 = DataBinder.get(self._data, 'params.tdx_func.nperiod');
-          var noperate2 = DataBinder.get(self._data, 'params.tdx_func.noperate');
-          var nsetMap2 = { 0: '技术指标', 1: '条件选股', 2: '专家系统', 3: '最新财务', 4: '实时行情', 5: '逻辑运算' };
-          var periodMap2 = { 0: '分笔', 1: '1分钟', 2: '5分钟', 3: '15分钟', 4: '日线', 5: '周线', 6: '月线' };
-          var operateMap2 = { 0: '等于', 1: '大于', 2: '小于', 3: '上穿(金叉)', 4: '下破(死叉)', 5: '持股', 6: '排名前N', 7: '排名后N', 8: '上拐', 9: '下拐' };
-          var html2 = '<div class="td-summary-badges">';
-          html2 += '<span class="td-summary-badge">' + _escHtml(nsetMap2[nset2] || ('nset=' + nset2)) + '</span>';
-          html2 += '<span class="td-summary-badge">周期: ' + _escHtml(periodMap2[nperiod2] || nperiod2) + '</span>';
-          html2 += '<span class="td-summary-badge">操作: ' + _escHtml(operateMap2[noperate2] || noperate2) + '</span>';
-          html2 += '</div>';
-          box.innerHTML = html2;
-        }
-      }
-
-      var container = this.container;
-      summary.fields.forEach(function (path) {
-        var key = self._pathToKey(path);
-        var selector = key ? '.td-field[data-key="' + key + '"] input, .td-field[data-key="' + key + '"] select, .td-field[data-key="' + key + '"] textarea' : '';
-        if (!selector) selector = '.td-field[data-path="' + path + '"] input, .td-field[data-path="' + path + '"] select, .td-field[data-path="' + path + '"] textarea';
-        container.querySelectorAll(selector).forEach(function (el) {
-          el.addEventListener('change', updateSummary);
-          el.addEventListener('input', updateSummary);
-        });
-      });
     }
 
     /**
@@ -4504,16 +4111,24 @@
           if (typeof this.poolData.updateEdge === 'function') {
             this.poolData.updateEdge(this._currentEdgeId, edgeUpdate);
           }
+        } else if (this._nodeType === 'pool_meta' && this.poolData.data && this.poolData.data.pool_meta) {
+          // 池元数据面板：直接更新 pool_meta 并通知
+          this.poolData.data.pool_meta[path] = value;
+          this.poolData._notify();
         }
       }
 
       // 2. 触发 onPropertyChange 回调（兼容 PropertyPanel 接口）
-      if (this.onPropertyChange && this._currentItem) {
-        // 将变更同步到 currentItem.params（使用剥离前缀的 syncPath）
-        if (this._currentItem.params) {
-          DataBinder.set(this._currentItem.params, syncPath, value);
+      if (this.onPropertyChange) {
+        if (this._currentItem) {
+          // 将变更同步到 currentItem.params（使用剥离前缀的 syncPath）
+          if (this._currentItem.params) {
+            DataBinder.set(this._currentItem.params, syncPath, value);
+          }
+          this.onPropertyChange(this._currentItem, path, value);
+        } else if (this._nodeType === 'pool_meta' && this.poolData.data && this.poolData.data.pool_meta) {
+          this.onPropertyChange(this.poolData.data.pool_meta, path, value);
         }
-        this.onPropertyChange(this._currentItem, path, value);
       }
 
       // 3. 触发 onChange 注册监听器
@@ -5526,7 +5141,9 @@ if (typeof module !== 'undefined' && module.exports) {
     var firstGroup = true;
 
     groups.forEach(function (group) {
-      var groupButtons = buttons.filter(function (btn) { return btn.group === group.group_id; });
+      var groupButtons = buttons.filter(function (btn) {
+        return btn.group === group.group_id && btn.position !== 'left' && !btn.mobile;
+      });
       if (!groupButtons.length) return;
 
       // 组间分隔符
@@ -5569,8 +5186,9 @@ if (typeof module !== 'undefined' && module.exports) {
     if (btn.is_link && btn.href) {
       var link = document.createElement('a');
       link.href = btn.href;
-      link.className = 'tb-btn';
+      link.className = 'tb-btn' + (btn.button_class ? ' ' + btn.button_class : '');
       link.id = id;
+      if (btn.action) link.setAttribute('data-action', btn.action);
       link.title = btn.label + (btn.shortcut ? ' (' + btn.shortcut + ')' : '');
       link.style.textDecoration = 'none';
       link.textContent = (btn.icon || '') + ' ' + (btn.label || '');
@@ -5597,9 +5215,12 @@ if (typeof module !== 'undefined' && module.exports) {
       btn.dropdown_items.forEach(function (item) {
         var itemEl = document.createElement('div');
         itemEl.className = 'tb-dropdown-item';
-        // data-* 属性
-        if (item.data_node_type) itemEl.setAttribute('data-node-type', item.data_node_type);
-        if (item.data_format) itemEl.setAttribute('data-format', item.data_format);
+        // 将配置项中所有 data_ 前缀属性复制为 data-* 属性（配置驱动，无需硬编码）
+        Object.keys(item).forEach(function (k) {
+          if (k.indexOf('data_') === 0) {
+            itemEl.setAttribute('data-' + k.substring(5), item[k]);
+          }
+        });
         if (item.action) itemEl.setAttribute('data-action', item.action);
         itemEl.textContent = (item.icon || '') + ' ' + (item.label || '');
         menu.appendChild(itemEl);
@@ -5610,10 +5231,11 @@ if (typeof module !== 'undefined' && module.exports) {
 
     // 普通按钮
     var button = document.createElement('button');
-    button.className = 'tb-btn';
+    button.className = 'tb-btn' + (btn.button_class ? ' ' + btn.button_class : '');
     button.id = id;
     button.title = btn.label + (btn.shortcut ? ' (' + btn.shortcut + ')' : '');
     button.textContent = (btn.icon || '') + ' ' + (btn.label || '');
+    if (btn.action) button.setAttribute('data-action', btn.action);
 
     // 表驱动 enabled_when 求值
     if (btn.enabled_when) {
@@ -5647,10 +5269,63 @@ if (typeof module !== 'undefined' && module.exports) {
       return (a.order || 0) - (b.order || 0);
     });
 
-    buttons.filter(function (btn) { return btn.overflow; })
+    buttons.filter(function (btn) { return btn.overflow && btn.position !== 'left' && !btn.mobile; })
       .forEach(function (btn) {
         var el = _renderButton(btn, {}, true);
         if (el) container.appendChild(el);
+      });
+  }
+
+  /**
+   * 渲染左侧固定按钮（如汉堡菜单），由配置表的 position: 'left' 驱动
+   * @param {HTMLElement} container - 左侧容器
+   * @param {Object} config - toolbar_config.json
+   * @param {Object} state - 当前状态
+   */
+  function renderLeftButtons(container, config, state) {
+    if (!container || !config || !config.buttons) return;
+    container.innerHTML = '';
+
+    var buttons = config.buttons.slice().sort(function (a, b) {
+      return (a.order || 0) - (b.order || 0);
+    });
+
+    buttons.filter(function (btn) { return btn.position === 'left'; })
+      .forEach(function (btn) {
+        var el = _renderButton(btn, state, false);
+        if (el) container.appendChild(el);
+      });
+  }
+
+  /**
+   * 渲染移动端悬浮按钮，由配置表的 mobile: true 驱动
+   * @param {HTMLElement} container - 移动端悬浮按钮容器
+   * @param {Object} config - toolbar_config.json
+   * @param {Object} state - 当前状态
+   */
+  function renderMobileFloat(container, config, state) {
+    if (!container || !config || !config.buttons) return;
+    container.innerHTML = '';
+
+    var buttons = config.buttons.slice().sort(function (a, b) {
+      return (a.order || 0) - (b.order || 0);
+    });
+
+    buttons.filter(function (btn) { return btn.mobile; })
+      .forEach(function (btn) {
+        var el = document.createElement('button');
+        el.className = 'mobile-float-btn' + (btn.button_class ? ' ' + btn.button_class : '');
+        el.id = btn.id;
+        el.title = btn.label || '';
+        el.textContent = btn.icon || '';
+        if (btn.data_node_type) el.setAttribute('data-node-type', btn.data_node_type);
+        if (btn.action) el.setAttribute('data-action', btn.action);
+        if (btn.enabled_when) {
+          var uiStateBtn = _uiStateConfig && _uiStateConfig.buttons && _uiStateConfig.buttons[btn.id];
+          var condExpr = (uiStateBtn && uiStateBtn.enabled) || btn.enabled_when;
+          el.disabled = !evaluateCondition(condExpr, state);
+        }
+        container.appendChild(el);
       });
   }
 
@@ -5721,12 +5396,14 @@ if (typeof module !== 'undefined' && module.exports) {
 
   /**
    * 初始化：加载配置并渲染工具栏
-   * @param {Object} opts - {toolbarContainer, overflowContainer, state}
+   * @param {Object} opts - {toolbarContainer, overflowContainer, leftContainer, mobileContainer, state}
    */
   function init(opts) {
     opts = opts || {};
     var toolbarContainer = opts.toolbarContainer || document.getElementById('toolbarButtons');
     var overflowContainer = opts.overflowContainer || document.getElementById('overflowMenu');
+    var leftContainer = opts.leftContainer || document.getElementById('toolbarLeft');
+    var mobileContainer = opts.mobileContainer || document.getElementById('mobileFloatBtns');
     var state = opts.state || {};
 
     return loadConfigs().then(function () {
@@ -5735,6 +5412,12 @@ if (typeof module !== 'undefined' && module.exports) {
       }
       if (overflowContainer) {
         renderOverflowMenu(overflowContainer, _toolbarConfig);
+      }
+      if (leftContainer) {
+        renderLeftButtons(leftContainer, _toolbarConfig, state);
+      }
+      if (mobileContainer) {
+        renderMobileFloat(mobileContainer, _toolbarConfig, state);
       }
       updateButtonStates(state);
       return { toolbar: _toolbarConfig, uiState: _uiStateConfig };
@@ -5747,6 +5430,8 @@ if (typeof module !== 'undefined' && module.exports) {
     init: init,
     renderToolbar: renderToolbar,
     renderOverflowMenu: renderOverflowMenu,
+    renderLeftButtons: renderLeftButtons,
+    renderMobileFloat: renderMobileFloat,
     evaluateCondition: evaluateCondition,
     updateButtonStates: updateButtonStates,
     updatePanelVisibility: updatePanelVisibility,
