@@ -200,10 +200,6 @@
       pending: isPaused
     };
 
-    if (eventObj.category === 'ttl' && (eventObj.fire_at_ms != null || (eventObj.details && eventObj.details.fire_at != null))) {
-      addTimerQueueItem(eventObj);
-    }
-
     if (isPaused) {
       pendingEvents.push(eventObj);
       updateEventCount();
@@ -216,14 +212,6 @@
     while (events.length > MAX_EVENTS) events.shift();
     updateEventCount();
     scheduleRender();
-  }
-
-  function addTimerQueueItem(ev) {
-    const fireAtMs = ev.fire_at_ms != null ? Number(ev.fire_at_ms) : (ev.display_ts || 0);
-    const key = fireAtMs + '-' + ev.event_type + '-' + (ev.code || '');
-    const idx = timerQueue.findIndex(t => t.key === key);
-    if (idx >= 0) timerQueue[idx] = { key, ev, updated: ev.ts || Date.now(), source: 'event' };
-    else timerQueue.push({ key, ev, updated: ev.ts || Date.now(), source: 'event' });
   }
 
   function flushPendingEvents() {
@@ -1867,43 +1855,34 @@
       if (!res.ok) return;
       const data = await res.json();
       if (!data.success || !Array.isArray(data.timers)) return;
-      const pollKeys = new Set();
-      data.timers.forEach(spec => {
-        const fireMs = Number(spec.fire_at_ms != null ? spec.fire_at_ms : spec.display_fire_ms);
-        if (isNaN(fireMs)) return;
+      timerQueue = data.timers.map(spec => {
+        const fireMs = Number(spec.fire_at_ms);
+        if (isNaN(fireMs)) return null;
         const code = spec.code || '';
-        const key = 'poll-' + fireMs + '-' + (spec.edge_id || '') + '-' + code;
-        pollKeys.add(key);
-        const existingIdx = timerQueue.findIndex(t => t.key === key);
-        const pseudoEvent = {
-          id: 'timer-' + key,
-          ts: fireMs,
-          display_ts: fireMs,
-          category: spec.category || 'ttl',
-          event_type: spec.event_type || (spec.kind === 'edge' ? 'EdgeTimer' : 'TimerQueued'),
-          code: code,
-          pool_id: spec.pool_id || '',
-          edge_id: spec.edge_id || '',
-          display_fire_time: spec.display_fire_time || '',
-          display_fire_time_ms: spec.display_fire_time_ms || '',
-          state: spec.state || 'waiting',
-          trigger_type: spec.trigger_type || '定时器',
-          remaining_text: spec.remaining_text || '',
-          details: spec.details || { fire_at: fireMs < 1e12 ? fireMs / 1000 : fireMs, queue_position: 0, kind: spec.kind || 'ttl' },
-          raw: spec,
-          pending: false
+        const key = fireMs + '-' + (spec.edge_id || '') + '-' + code;
+        return {
+          key: key,
+          ev: {
+            id: 'timer-' + key,
+            ts: fireMs,
+            display_ts: fireMs,
+            category: spec.category || 'ttl',
+            event_type: spec.event_type || 'TimerQueued',
+            code: code,
+            pool_id: spec.pool_id || '',
+            edge_id: spec.edge_id || '',
+            display_fire_time: spec.display_fire_time || '',
+            display_fire_time_ms: spec.display_fire_time_ms || '',
+            state: spec.state || 'waiting',
+            trigger_type: spec.trigger_type || '定时器',
+            remaining_text: spec.remaining_text || '',
+            details: spec.details || { fire_at: fireMs < 1e12 ? fireMs / 1000 : fireMs, kind: spec.kind || 'ttl' },
+            raw: spec,
+            pending: false
+          },
+          updated: Date.now()
         };
-        if (existingIdx >= 0) {
-          timerQueue[existingIdx].ev = pseudoEvent;
-          timerQueue[existingIdx].updated = Date.now();
-        } else {
-          timerQueue.push({ key, ev: pseudoEvent, updated: Date.now(), source: 'poll' });
-        }
-      });
-      timerQueue = timerQueue.filter(t => {
-        if (t.source === 'poll') return pollKeys.has(t.key);
-        return true;
-      });
+      }).filter(function (t) { return t != null; });
       scheduleRender();
     } catch (e) { /* ignore */ }
   }
@@ -1919,7 +1898,7 @@
       clearInterval(timerPollTimer);
       timerPollTimer = null;
     }
-    timerQueue = timerQueue.filter(t => t.source !== 'poll');
+    timerQueue = [];
   }
 
   function setSession(sid) {
@@ -1991,6 +1970,7 @@
 
     loadRecentEvents();
     initSSE();
+    startTimerPolling();
   }
 
   if (document.readyState === 'loading') {
