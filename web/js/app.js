@@ -120,7 +120,9 @@
     window.EventPanelBus.subscribe(function (ev) {
       if (!ev || !ev.event_type) return;
       if (ev.event_type === 'SimulationStateChanged' && ev.details && ev.details.state) {
-        AppState.setSimulationState(ev.details.state);
+        var newState = ev.details.state;
+        AppState.setSimulationState(newState);
+        updateSimBtnState(newState === 'running');
       }
     });
   }
