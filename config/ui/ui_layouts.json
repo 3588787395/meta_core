@@ -1081,6 +1081,101 @@
         }
       ]
     },
+    "condition_node": {
+      "layout_id": "condition_node",
+      "name": "条件节点属性",
+      "target_type": "condition",
+      "target_scope": "node",
+      "pool_type": "any",
+      "sections": [
+        {
+          "title": "基本信息",
+          "collapsible": false,
+          "fields": [
+            {"key": "id", "comp": "readonly", "label": "ID", "data_path": "id"},
+            {"key": "type", "comp": "readonly", "label": "类型", "data_path": "type"},
+            {"key": "name", "comp": "text_input", "label": "节点名称", "data_path": "name", "default": "条件节点", "hint": "如 KDJ金叉条件 / MACD金叉条件 / 交集条件"},
+            {"key": "clr", "comp": "color_picker", "label": "节点颜色", "data_path": "clr", "default": "#8e44ad", "hint": "紫色为条件节点默认色"}
+          ]
+        },
+        {
+          "title": "func 公式配置（K线/计算参数）",
+          "collapsible": false,
+          "fields": [
+            {"key": "func_accode", "comp": "text_input", "label": "公式编码(accode)", "data_path": "func.accode", "default": "", "hint": "如 KDJ / MACD / MA；集合运算节点可留空"},
+            {"key": "func_nset", "comp": "select", "label": "公式类型(nset)", "data_path": "func.nset", "options": [
+              {"value": 0, "label": "技术指标公式"},
+              {"value": 1, "label": "条件选股公式"},
+              {"value": 2, "label": "专家系统公式"},
+              {"value": 4, "label": "实时行情选股"},
+              {"value": 5, "label": "逻辑运算(集合)"}
+            ], "default": 0},
+            {"key": "func_nperiod", "comp": "select", "label": "K线周期(nperiod)", "data_path": "func.nperiod", "options": [
+              {"value": 0, "label": "分笔"},
+              {"value": 1, "label": "1分钟"},
+              {"value": 2, "label": "5分钟"},
+              {"value": 3, "label": "15分钟"},
+              {"value": 4, "label": "30分钟"},
+              {"value": 5, "label": "60分钟"},
+              {"value": 6, "label": "日线"},
+              {"value": 7, "label": "周线"},
+              {"value": 8, "label": "月线"}
+            ], "default": 2, "hint": "KDJ默认5分钟(2)，MACD默认1分钟(1)"},
+            {"key": "func_noperate", "comp": "select", "label": "操作符(noperate)", "data_path": "func.noperate", "options": [
+              {"value": 0, "label": "等于"},
+              {"value": 1, "label": "大于"},
+              {"value": 2, "label": "小于"},
+              {"value": 3, "label": "上穿(金叉)"},
+              {"value": 4, "label": "下破(死叉)"},
+              {"value": 5, "label": "排名为"},
+              {"value": 6, "label": "排名前N"},
+              {"value": 7, "label": "排名后N"},
+              {"value": 8, "label": "上拐"},
+              {"value": 9, "label": "下拐"}
+            ], "default": 3},
+            {"key": "func_nfirst", "comp": "number_input", "label": "第一参数(nfirst)", "data_path": "func.nfirst", "default": 0, "hint": "KDJ=9, MACD=12"},
+            {"key": "func_nsecond", "comp": "number_input", "label": "第二参数(nsecond)", "data_path": "func.nsecond", "default": 0, "hint": "KDJ=3, MACD=26"},
+            {"key": "func_cfirst", "comp": "text_input", "label": "第三参数(cfirst)", "data_path": "func.cfirst", "default": "", "hint": "指标线条名，如 KDJ:K / MACD:DIF"},
+            {"key": "func_csecond", "comp": "text_input", "label": "第四参数(csecond)", "data_path": "func.csecond", "default": "", "hint": "指标线条名，如 KDJ:D / MACD:DEA"},
+            {"key": "func_formula_args", "comp": "formula_args_container", "label": "公式参数(formula_args)", "data_path": "func.formula_args", "default": {}, "hint": "KDJ:{N:9,M1:3,M2:3} / MACD:{SHORT:12,LONG:26,MID:9}"}
+          ]
+        },
+        {
+          "title": "indi 指标配置",
+          "collapsible": false,
+          "fields": [
+            {"key": "indi", "comp": "text_input", "label": "指标名称(indi)", "data_path": "indi", "default": "", "hint": "如 KDJ / MACD；交集节点留空"},
+            {"key": "indiparam", "comp": "text_input", "label": "指标参数(indiparam)", "data_path": "indiparam", "default": [], "hint": "位置参数列表"}
+          ]
+        },
+        {
+          "title": "filter_spec 筛选规格",
+          "collapsible": false,
+          "fields": [
+            {"key": "filter_evaluator_type", "comp": "select", "label": "评估器类型(evaluator_type)", "data_path": "filter_spec.evaluator_type", "options": [
+              {"value": "indicator", "label": "指标筛选(indicator)"},
+              {"value": "intersection", "label": "交集(intersection)"},
+              {"value": "union", "label": "并集(union)"},
+              {"value": "difference", "label": "差集(difference)"},
+              {"value": "rank", "label": "排序(rank)"},
+              {"value": "threshold", "label": "阈值(threshold)"}
+            ], "default": "indicator", "hint": "cond1/cond2=indicator，cond3=intersection"},
+            {"key": "filter_nset", "comp": "number_input", "label": "筛选nset", "data_path": "filter_spec.nset", "default": 0},
+            {"key": "filter_noperate", "comp": "number_input", "label": "筛选noperate", "data_path": "filter_spec.noperate", "default": 0, "hint": "3=金叉(上穿)"},
+            {"key": "filter_formula_ref", "comp": "text_input", "label": "公式引用(formula_ref)", "data_path": "filter_spec.formula_ref", "default": "", "hint": "如 KDJ / MACD；交集节点留空"},
+            {"key": "filter_fsecond", "comp": "number_input", "label": "浮点参数(fsecond)", "data_path": "filter_spec.fsecond", "default": 0, "step": 0.01},
+            {"key": "filter_rank_rule", "comp": "text_input", "label": "排序规则(rank_rule)", "data_path": "filter_spec.rank_rule", "default": "", "hint": "如 top10 / bottom5"}
+          ]
+        },
+        {
+          "title": "节点说明",
+          "collapsible": true,
+          "fields": [
+            {"key": "_condition_help", "comp": "readonly", "label": "使用说明", "data_path": "_condition_help", "default": "条件节点承载 func/indi/indiparam/filter_spec；边只承载触发频率与顺序号。点击保存后配置生效。"}
+          ]
+        }
+      ]
+    },
     "pool_meta": {
       "layout_id": "pool_meta",
       "title": "股票池属性",

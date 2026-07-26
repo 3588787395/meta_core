@@ -35,9 +35,9 @@ import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
-    from .execution_module import FilterSpec
+    from .domain import FilterSpec
     from .runtime_mode_module import PoolState
-from .screening_module import _lookup_builtin_script, _lookup_builtin_formula_info
+from .domain import _lookup_builtin_script, _lookup_builtin_formula_info
 from .event_bus import (
     BarComposed,
     CrossOverDetected,
@@ -152,13 +152,19 @@ def window_op(series: Any, n: int, agg_method: str,
     agg_kwargs 透传给聚合方法（如 std 的 ddof）。
     agg_override 为语义标记（如 bool_sum），pandas rolling.sum() 已正确处理
     布尔序列求和，无需额外代码分支。
+
+    n=0 时使用 expanding 窗口（从首个数据点到当前点的累计计算），
+    与通达信 SUM(X,0)/HHV(X,0)/LLV(X,0)/COUNT(X,0)/STD(X,0) 语义一致。
     """
     s = _to_series(series)
     n = int(n)
-    if n <= 0:
-        return s
     kwargs = agg_kwargs or {}
-    roller = s.rolling(window=n, min_periods=1)
+    if n == 0:
+        roller = s.expanding(min_periods=1)
+    elif n < 0:
+        return s
+    else:
+        roller = s.rolling(window=n, min_periods=1)
     method = getattr(roller, agg_method, None)
     if method is None:
         return s
@@ -173,14 +179,16 @@ def shift_op(series: Any, n: int) -> pd.Series:
 def cross_op(line1: Any, line2: Any, direction: str = "above") -> pd.Series:
     """通用穿越检测算子，替代 CROSS。
 
-    direction='above'：line1 上穿 line2（前一根 line1<line2 且当前 line1>=line2）。
-    direction='below'：line1 下穿 line2（前一根 line1>line2 且当前 line1<=line2）。
+    direction='above'（金叉）：line1 从下方上穿 line2，
+        即前一根 line1<=line2 且当前 line1>line2（通达信标准 CROSS 语义）。
+    direction='below'（死叉）：line1 从上方下穿 line2，
+        即前一根 line1>=line2 且当前 line1<line2。
     """
     sa, sb = _to_series(line1), _to_series(line2)
     if direction == "above":
-        return (sa.shift(1) < sb.shift(1)) & (sa >= sb)
+        return (sa.shift(1) <= sb.shift(1)) & (sa > sb)
     else:
-        return (sa.shift(1) > sb.shift(1)) & (sa <= sb)
+        return (sa.shift(1) >= sb.shift(1)) & (sa < sb)
 
 
 # ---------------------------------------------------------------------------
@@ -555,12 +563,42 @@ def _parse_statement(stmt: List[str]) -> Tuple[str, Optional[str], Any]:
         rhs_tokens = stmt[assign_idx + 1 :]
         if not rhs_tokens:
             raise ValueError(f"赋值语句右侧为空: {' '.join(stmt)}")
+        # 剥离 TDX 绘图修饰符：顶层逗号后跟随 COLORSTICK/VOLSTICK/NODRAW/LINETHICK*/COLOR* 等，
+        # 这些是显示指令而非表达式的一部分。在第一个顶层逗号（depth==0）处截断。
+        expr_tokens = []
+        depth = 0
+        for tok in rhs_tokens:
+            if tok == "(":
+                depth += 1
+                expr_tokens.append(tok)
+            elif tok == ")":
+                depth -= 1
+                expr_tokens.append(tok)
+            elif tok == "," and depth == 0:
+                break
+            else:
+                expr_tokens.append(tok)
+        if not expr_tokens:
+            raise ValueError(f"赋值语句表达式为空（剥离绘图修饰符后）: {' '.join(stmt)}")
         kind = "assign" if assign_tok == ":=" else "output"
-        expr = _ExprParser(rhs_tokens).parse()
+        expr = _ExprParser(expr_tokens).parse()
         return kind, name, compile(expr, "<formula>", "eval")
 
-    # 无赋值符，整体作为表达式
-    expr = _ExprParser(stmt).parse()
+    # 无赋值符，整体作为表达式（同样剥离顶层绘图修饰符）
+    expr_tokens_clean = []
+    depth = 0
+    for tok in stmt:
+        if tok == "(":
+            depth += 1
+            expr_tokens_clean.append(tok)
+        elif tok == ")":
+            depth -= 1
+            expr_tokens_clean.append(tok)
+        elif tok == "," and depth == 0:
+            break
+        else:
+            expr_tokens_clean.append(tok)
+    expr = _ExprParser(expr_tokens_clean).parse()
     return "output", None, compile(expr, "<formula>", "eval")
 
 
@@ -677,6 +715,53 @@ class CompiledFormula:
         for name, val in outputs.items():
             key = "XG" if name is None else name
             result[key] = self._last_value(val)
+        return result
+
+    def eval_series(self, bars: pd.DataFrame, args: Optional[dict] = None, lookback: int = 5) -> Optional[Dict[str, Any]]:
+        """对单只股票的 K 线数据进行求值，返回全部输出变量的最近 lookback 个值序列。
+
+        用于 cross/inflection 等需要历史数据的操作符检测。
+
+        Args:
+            bars: K线数据DataFrame
+            args: 公式参数
+            lookback: 返回最近N个值，默认5（足够cross需要2个、inflection需要3个）
+
+        Returns:
+            ``{outvar_name: [v0, v1, ..., vN-1]}`` 字典（vN-1为最新值）；
+            求值失败或无输出时返回 None。
+        """
+        outputs = self._eval_core(bars, args)
+        if outputs is None:
+            return None
+        result: OrderedDict = OrderedDict()
+        for name, val in outputs.items():
+            key = "XG" if name is None else name
+            if isinstance(val, pd.Series):
+                series = val.values
+                n = min(lookback, len(series))
+                if n > 0:
+                    last_n = [float(x) if not (isinstance(x, float) and np.isnan(x)) else None for x in series[-n:]]
+                    result[key] = last_n
+                else:
+                    result[key] = []
+            elif isinstance(val, np.ndarray):
+                n = min(lookback, len(val))
+                if n > 0:
+                    last_n = [float(x) if not (isinstance(x, float) and np.isnan(x)) else None for x in val[-n:]]
+                    result[key] = last_n
+                else:
+                    result[key] = []
+            elif isinstance(val, (list, tuple)):
+                n = min(lookback, len(val))
+                if n > 0:
+                    last_n = [float(x) if x is not None and not (isinstance(x, float) and np.isnan(x)) else None for x in val[-n:]]
+                    result[key] = last_n
+                else:
+                    result[key] = []
+            else:
+                v = self._last_value(val)
+                result[key] = [v] if v is not None else []
         return result
 
 
@@ -833,6 +918,63 @@ class PythonFormulaEngine:
             except Exception as e:
                 logger.debug("批量求值异常 %s: %s", symbol, e)
                 results[symbol] = False
+
+        return results
+
+    def eval_series_batch(
+        self,
+        formula: str,
+        symbols: List[str],
+        period: str = "1d",
+        data_fetcher: Optional[Callable[[str, str], pd.DataFrame]] = None,
+        args: Optional[dict] = None,
+        lookback: int = 5,
+    ) -> Dict[str, Any]:
+        """批量序列求值：为每只标的取数据并返回输出变量的最近lookback个值序列。
+
+        Args:
+            formula: 公式字符串。
+            symbols: 标的代码列表。
+            period: 周期，默认 ``'1d'``。
+            data_fetcher: 可选数据获取函数 ``(symbol, period) -> pd.DataFrame``。
+            args: 公式参数（如 SHORT/LONG/MID），注入到求值命名空间。
+            lookback: 返回最近N个值，默认5。
+
+        Returns:
+            ``{symbol: {outvar_name: [v0,...,vN-1]}}``，任一标的数据不足或求值失败时该标的结果为 ``None``。
+        """
+        results: Dict[str, Any] = {}
+        try:
+            compiled = self._compile(formula)
+        except Exception as e:
+            logger.warning("批量公式编译失败 %s: %s", formula, e)
+            return {symbol: None for symbol in symbols}
+
+        for symbol in symbols:
+            df: Optional[pd.DataFrame] = None
+            if data_fetcher is not None:
+                try:
+                    df = data_fetcher(symbol, period)
+                except Exception as e:
+                    logger.debug("data_fetcher 异常 %s: %s", symbol, e)
+            elif self.data_query is not None:
+                try:
+                    df = self.data_query.fetch(symbol, period)
+                except Exception:
+                    try:
+                        df = self.data_query.get_bars(symbol, period)
+                    except Exception as e2:
+                        logger.debug("data_query 取数异常 %s: %s", symbol, e2)
+
+            if df is None or not isinstance(df, pd.DataFrame) or len(df) == 0:
+                results[symbol] = None
+                continue
+
+            try:
+                results[symbol] = compiled.eval_series(df, args, lookback=lookback)
+            except Exception as e:
+                logger.debug("批量序列求值异常 %s: %s", symbol, e)
+                results[symbol] = None
 
         return results
 
@@ -1029,7 +1171,7 @@ class FormulaEngine:
         """
         return self._cached_eval(
             spec, codes, ctx,
-            lambda c, x: self._eval_formula(spec.formula_ref, c, x),
+            lambda c, x: self._eval_formula(spec, c, x),
             writeback=True,
         )
 
@@ -1056,10 +1198,11 @@ class FormulaEngine:
         evaluator_fn: Callable[[List[str], EvalContext], Dict[str, Any]],
         writeback: bool,
     ) -> Dict[str, Any]:
-        """统一缓存求值：per-code粒度缓存。
+        """统一缓存求值：per-code 粒度缓存。
 
-        缓存key为 (formula_ref, code, period) -> (code_bar_hash, value)
-        某只股票K线变化仅失效该股票对应周期的公式缓存，其他股票缓存保持有效。
+        缓存键为 (formula_ref, code, period, code_bar_hash)，值为公式结果。
+        某只股票 K 线变化仅因 hash 改变而失效该股票对应周期的公式缓存，
+        其他股票缓存保持有效。
         """
         formula_ref = spec.formula_ref
         period = getattr(ctx, 'period', '1d') or '1d'
@@ -1070,18 +1213,20 @@ class FormulaEngine:
         result: Dict[str, Any] = {}
         codes_to_eval: List[str] = []
 
+        def _code_bar_hash(code: str) -> str:
+            code_bars = ctx.bars.get(code) if hasattr(ctx, 'bars') and isinstance(ctx.bars, dict) else None
+            if code_bars is None:
+                tick = ctx.latest_tick.get(code) if hasattr(ctx, 'latest_tick') and isinstance(ctx.latest_tick, dict) else None
+                code_bars = tick
+            return _hash_code_bars(code_bars)
+
         for code in codes:
-            cache_key = ("formula_per_code", ctx.mode, formula_ref, code, period)
-            cached_entry = self.state.formula_results.get(cache_key)
-            code_bars = None
-            if hasattr(ctx, 'bars') and isinstance(ctx.bars, dict):
-                code_bars = ctx.bars.get(code)
-            code_bar_hash = _hash_code_bars(code_bars)
-            if cached_entry is not None:
-                cached_hash, cached_value = cached_entry
-                if cached_hash == code_bar_hash:
-                    result[code] = cached_value
-                    continue
+            code_bar_hash = _code_bar_hash(code)
+            cache_key = (formula_ref, code, period, code_bar_hash)
+            cached_value = self.state.formula_results.get(cache_key)
+            if cached_value is not None:
+                result[code] = cached_value
+                continue
             codes_to_eval.append(code)
 
         if codes_to_eval:
@@ -1089,12 +1234,9 @@ class FormulaEngine:
             for code in codes_to_eval:
                 value = new_results.get(code)
                 result[code] = value
-                code_bars = None
-                if hasattr(ctx, 'bars') and isinstance(ctx.bars, dict):
-                    code_bars = ctx.bars.get(code)
-                code_bar_hash = _hash_code_bars(code_bars)
-                cache_key = ("formula_per_code", ctx.mode, formula_ref, code, period)
-                self.state.formula_results[cache_key] = (code_bar_hash, value)
+                code_bar_hash = _code_bar_hash(code)
+                cache_key = (formula_ref, code, period, code_bar_hash)
+                self.state.formula_results[cache_key] = value
 
                 if writeback:
                     tick = self.state.latest_tick.get(code)
@@ -1104,9 +1246,10 @@ class FormulaEngine:
         return result
 
     def _eval_formula(
-        self, formula_ref: str, codes: List[str], ctx: EvalContext
+        self, spec: FilterSpec, codes: List[str], ctx: EvalContext
     ) -> Dict[str, Any]:
         """调用底层 Python 公式引擎逐只求值。"""
+        formula_ref = spec.formula_ref if spec else ""
         formula = formula_ref or ""
         if not formula:
             return {code: None for code in codes}
@@ -1120,6 +1263,16 @@ class FormulaEngine:
         period = getattr(ctx, 'period', '1d') or '1d'
         if builtin_info and builtin_info.get("period"):
             period = builtin_info["period"]
+
+        # 合并公式参数：spec.formula_args 覆盖 builtin 默认值
+        formula_args: Dict[str, Any] = {}
+        if builtin_info and builtin_info.get("args"):
+            for arg in builtin_info["args"]:
+                name = arg.get("name")
+                if name:
+                    formula_args[name] = arg.get("value")
+        if spec and getattr(spec, "formula_args", None):
+            formula_args.update(spec.formula_args)
 
         if self._data_query is not None:
             def fetcher(symbol: str, p: str) -> pd.DataFrame | None:
@@ -1150,7 +1303,7 @@ class FormulaEngine:
 
         try:
             batch = self._python_engine.eval_batch(
-                formula, codes, period=period, data_fetcher=fetcher, args=None
+                formula, codes, period=period, data_fetcher=fetcher, args=formula_args or None
             )
         except Exception as exc:
             self._logger.debug("公式求值异常: %s", exc)
@@ -1163,6 +1316,75 @@ class FormulaEngine:
                 val = val.get(eval_field)
             result[code] = val
         return result
+
+    def eval_series(self, spec: FilterSpec, codes: List[str], ctx: EvalContext, lookback: int = 5) -> Dict[str, Any]:
+        """公式序列求值路径：返回输出变量的最近lookback个值序列，用于cross/inflection检测。
+
+        Returns:
+            {code: {outvar_name: [v0,...,vN-1]}}
+        """
+        return self._cached_eval(
+            spec, codes, ctx,
+            lambda c, x: self._eval_formula_series(spec.formula_ref, c, x, spec, lookback=lookback),
+            writeback=False,
+        )
+
+    def _eval_formula_series(
+        self, formula_ref: str, codes: List[str], ctx: EvalContext, spec: Optional[FilterSpec] = None, lookback: int = 5
+    ) -> Dict[str, Any]:
+        """调用底层 Python 公式引擎逐只求值，返回序列数据。"""
+        formula = formula_ref or ""
+        if not formula:
+            return {code: None for code in codes}
+
+        builtin_info = _lookup_builtin_formula_info(formula)
+        builtin_script = builtin_info.get("script", "") if builtin_info else ""
+        if builtin_script:
+            formula = builtin_script
+
+        period = getattr(ctx, 'period', '1d') or '1d'
+        if spec is not None and spec.formula_period:
+            period = spec.formula_period
+        elif builtin_info and builtin_info.get("period"):
+            period = builtin_info["period"]
+
+        # 合并公式参数：spec.formula_args 覆盖 builtin 默认值
+        formula_args: Dict[str, Any] = {}
+        if builtin_info and builtin_info.get("args"):
+            for arg in builtin_info["args"]:
+                name = arg.get("name")
+                if name:
+                    formula_args[name] = arg.get("value")
+        if spec is not None and getattr(spec, "formula_args", None):
+            formula_args.update(spec.formula_args)
+
+        if self._data_query is not None:
+            def fetcher(symbol: str, p: str) -> pd.DataFrame | None:
+                return self._data_query.get_kline_series(symbol, p or period)
+        else:
+            def fetcher(symbol: str, p: str) -> pd.DataFrame | None:
+                bar = ctx.bars.get(symbol) if hasattr(ctx, 'bars') and isinstance(ctx.bars, dict) else None
+                if bar is None:
+                    tick = ctx.latest_tick.get(symbol) if hasattr(ctx, 'latest_tick') and isinstance(ctx.latest_tick, dict) else None
+                    if isinstance(tick, dict):
+                        bar = tick
+                if isinstance(bar, pd.DataFrame):
+                    return bar
+                if isinstance(bar, dict):
+                    return pd.DataFrame([bar])
+                if isinstance(bar, list):
+                    return pd.DataFrame(bar)
+                return None
+
+        try:
+            batch = self._python_engine.eval_series_batch(
+                formula, codes, period=period, data_fetcher=fetcher, args=formula_args, lookback=lookback
+            )
+        except Exception as exc:
+            self._logger.debug("公式序列求值异常: %s", exc)
+            return {code: None for code in codes}
+
+        return batch
 
 
 # ===========================================================================
@@ -1950,9 +2172,14 @@ class FormulaRouter:
             return None
 
         prev_main, prev_trig = prev
-        if prev_main <= prev_trig and cur_main_f > cur_trig_f:
+        # 使用 cross_op 统一穿越检测（标量对转为2元素Series，取第2个位置的检测结果）
+        main_s = pd.Series([prev_main, cur_main_f], dtype=float)
+        trig_s = pd.Series([prev_trig, cur_trig_f], dtype=float)
+        golden_cross = cross_op(main_s, trig_s, direction="above")
+        death_cross = cross_op(main_s, trig_s, direction="below")
+        if bool(golden_cross.iloc[-1]):
             return "golden"
-        if prev_main >= prev_trig and cur_main_f < cur_trig_f:
+        if bool(death_cross.iloc[-1]):
             return "death"
         return None
 

@@ -204,6 +204,37 @@ if (typeof module !== 'undefined' && module.exports) {
 // ===== 来源: canvas.js（原 FlowCanvas 画布引擎） =====
 // ============================================================================
 
+// ─── 高亮闪烁动画样式 ────────────────────────────────────────────────────────
+(function() {
+  var style = document.createElement('style');
+  style.textContent = `
+    @keyframes highlight-flash {
+      0%, 100% {
+        box-shadow: 0 0 0 0 rgba(74, 144, 217, 0.7);
+        transform: scale(1);
+      }
+      50% {
+        box-shadow: 0 0 20px 8px rgba(74, 144, 217, 0.5);
+        transform: scale(1.02);
+      }
+    }
+    .highlight-flash {
+      animation: highlight-flash 0.6s ease-in-out infinite;
+      border-color: #4a90d9 !important;
+    }
+    .highlight-flash .shape-svg polygon,
+    .highlight-flash .shape-svg rect,
+    .highlight-flash .shape-svg ellipse {
+      filter: drop-shadow(0 0 8px rgba(74, 144, 217, 0.7));
+    }
+    .flow-active {
+      stroke-width: 3 !important;
+      filter: drop-shadow(0 0 6px rgba(255, 215, 0, 0.8));
+    }
+  `;
+  document.head.appendChild(style);
+})();
+
 /**
  * FlowCanvas - xyflow-style flow canvas engine
  * Replaces the old DZHCanvas with a declarative state, DOM-based nodes,
@@ -245,13 +276,14 @@ class VirtualScroller {
     this.container.appendChild(this._wrapper);
 
     var self = this;
-    this.container.addEventListener('scroll', function () {
+    this._scrollHandler = function () {
       if (self._rafId) return;
       self._rafId = requestAnimationFrame(function () {
         self._rafId = null;
         self._renderVisibleRows();
       });
-    });
+    };
+    this.container.addEventListener('scroll', this._scrollHandler);
   }
 
   setData(data) {
@@ -282,6 +314,10 @@ class VirtualScroller {
     if (this._rafId) {
       cancelAnimationFrame(this._rafId);
       this._rafId = null;
+    }
+    if (this._scrollHandler) {
+      this.container.removeEventListener('scroll', this._scrollHandler);
+      this._scrollHandler = null;
     }
   }
 }
@@ -318,11 +354,13 @@ var DEFAULT_DZH_COL_MAP = {
 var DEFAULT_NODE_TYPE_DEFAULTS = {
   market_source:       { color: '#DAA520', shape: 'cylinder',     label: '备选池' },   // DZH原生默认金黄色(截图验证)
   stock_state_pool:    { color: '#FF1493', shape: 'rounded-rect', label: '状态池' },   // DZH原生默认深粉红DeepPink(超赢7号→超赢追踪/整理 clr=-1时截图验证:非纯品红,而是偏红的粉紫色#FF1493系)
-  transfer_condition:  { color: '#f39c12', shape: 'diamond',      label: '转移条件' }, // UI fallback(橙黄色,接近DZH原生菱形色)
+  transfer_condition:  { color: '#e67e22', shape: 'diamond',      label: '转移条件' }, // UI fallback(橙黄色,接近DZH原生菱形色)
   discard_pool:        { color: '#c0392b', shape: 'small-rect',   label: '丢弃池' },   // UI fallback(红色系)
   tdx_candidate:       { color: '#9b59b6', shape: 'cylinder',     label: 'TDX候选' },  // TDX系统默认色
   tdx_state_pool:      { color: '#27ae60', shape: 'rounded-rect', label: 'TDX状态池' },// TDX系统默认色
-  tdx_condition:       { color: '#e67e22', shape: 'diamond',      label: 'TDX条件' }   // TDX系统默认色
+  tdx_condition:       { color: '#e67e22', shape: 'diamond',      label: 'TDX条件' },  // TDX系统默认色
+  // Task 9: 显式条件节点（可视化条件节点流 spec）—— 紫色矩形，区别于旧 transfer_condition 菱形
+  condition:           { color: '#8e44ad', shape: 'rounded-rect', label: '条件节点' }
 };
 
 // ─── DZH Native Rendering Constants ──────────────────────────────────────
@@ -404,6 +442,79 @@ var DEFAULT_EDGE_STRATEGY_COLORS = {
 function escHtml(s) {
   if (!s) return '';
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ─── Edge label builders (config-table driven, no hardcoded instance content) ───
+
+var EDGE_PERIOD_LABELS = {
+  0: '分笔', 1: '1m', 2: '5m', 3: '15m', 4: '30m',
+  5: '60m', 6: '日线', 7: '周线', 8: '月线'
+};
+var EDGE_BAR_TYPE_LABELS = {
+  0: '分笔', 1: '1分钟', 5: '5分钟', 15: '15分钟', 30: '30分钟', 60: '60分钟',
+  'daily': '日线', 'weekly': '周线', 'monthly': '月线',
+  '1m': '1m', '5m': '5m', '15m': '15m', '30m': '30m', '60m': '60m'
+};
+var EDGE_OPERATOR_LABELS = {
+  0: '等于', 1: '大于', 2: '小于', 3: '金叉', 4: '死叉',
+  5: '排名为', 6: '排名前N', 7: '排名后N', 8: '上拐', 9: '下拐',
+  'eq': '等于', 'gt': '大于', 'lt': '小于', 'cross_up': '金叉', 'cross_down': '死叉'
+};
+var EDGE_NSET_LABELS = {
+  0: '技术指标', 1: '条件选股', 2: '专家系统', 3: '最新财务', 4: '实时行情', 5: '逻辑运算'
+};
+
+function _formatEdgeInterval(seconds) {
+  var s = parseInt(seconds) || 0;
+  if (s <= 0) return '即时';
+  if (s <= 60) return s + 's';
+  if (s < 3600) return Math.round(s / 60) + 'm';
+  if (s < 86400) return Math.round(s / 3600) + 'h';
+  return Math.round(s / 86400) + 'd';
+}
+
+function _buildEdgeConditionSummary(params) {
+  params = params || {};
+  var func = params.func || {};
+  var filterSpec = params.filter_spec || {};
+  var evaluatorType = String(filterSpec.evaluator_type || '').toLowerCase();
+  var ct = String(params.condition_type || '').toUpperCase();
+  if (ct === 'INTERSECTION' || evaluatorType === 'intersection') return '交集';
+  if (evaluatorType === 'union') return '并集';
+  if (evaluatorType === 'difference') return '差集';
+
+  var parts = [];
+  var period = params.period !== undefined ? params.period :
+               (params.nperiod !== undefined ? params.nperiod :
+               (func.nperiod !== undefined ? func.nperiod :
+               (filterSpec.nperiod !== undefined ? filterSpec.nperiod :
+               (params.bar_type !== undefined ? params.bar_type : ''))));
+  var periodLabel = EDGE_PERIOD_LABELS[period] || EDGE_BAR_TYPE_LABELS[period] || '';
+  if (periodLabel) parts.push(periodLabel);
+
+  var formula = params.formula_ref || '';
+  if (!formula && filterSpec.formula_ref) formula = filterSpec.formula_ref;
+  if (!formula && params.tdx_func) formula = params.tdx_func.accode || '';
+  if (!formula && func) formula = func.accode || '';
+  if (formula) parts.push(String(formula));
+
+  var op = params.operator !== undefined ? params.operator :
+           (params.noperate !== undefined ? params.noperate :
+           (func.noperate !== undefined ? func.noperate :
+           (filterSpec.noperate !== undefined ? filterSpec.noperate : '')));
+  var opLabel = EDGE_OPERATOR_LABELS[op] || '';
+  if (opLabel) parts.push(opLabel);
+
+  if (params.threshold !== undefined && params.threshold !== '') parts.push(String(params.threshold));
+
+  var nset = params.nset !== undefined ? params.nset :
+             (func.nset !== undefined ? func.nset :
+             (filterSpec.nset !== undefined ? filterSpec.nset : undefined));
+  var nsetLabel = EDGE_NSET_LABELS[nset] || '';
+  if (nsetLabel && !formula) parts.unshift(nsetLabel);
+
+  if (!parts.length && ct) parts.push(ct);
+  return parts.join(' ');
 }
 
 // ─── DZH Palette Names (与Python端 dzh_constants.DZH_PALETTE 完全一致) ─────────
@@ -683,6 +794,18 @@ class FlowCanvas {
     // ── Node renderer override ──
     this._nodeRenderer = null;  // custom nodeRenderer(type) => html
 
+    // ── Performance optimization ──
+    this._renderQueue = { nodes: new Set(), edges: new Set() };
+    this._rafRenderId = null;
+    this._rafUpdateId = null;
+    this._renderStartTime = 0;
+
+    // ── Virtual rendering ──
+    this._virtualRendering = false;
+    this._virtualThreshold = 100;
+    this._virtualBuffer = 100;
+    this._visibleNodeIds = new Set();
+
     // ── Build DOM ──
     this._buildDOM();
     this._initEvents();
@@ -697,10 +820,96 @@ class FlowCanvas {
     this._changeListeners.forEach(function (cb) { cb(self._nodes, self._edges); });
   }
 
-  setNodes(nodes) { this._nodes = nodes || []; this._renderNodes(); this._emitChange(); }
-  setEdges(edges) { this._edges = edges || []; this._renderEdges(); this._emitChange(); }
+  setNodes(nodes) { this._nodes = nodes || []; this._scheduleRender(); this._emitChange(); }
+  setEdges(edges) { this._edges = edges || []; this._scheduleRender(); this._emitChange(); }
   getNodes() { return this._nodes; }
   getEdges() { return this._edges; }
+
+  _scheduleRender() {
+    if (this._rafRenderId) return;
+    var self = this;
+    this._renderStartTime = performance.now();
+    this._rafRenderId = requestAnimationFrame(function() {
+      self._rafRenderId = null;
+      self._renderNodes();
+      self._renderEdges();
+      if (self._onRenderComplete) {
+        var duration = performance.now() - self._renderStartTime;
+        self._onRenderComplete(duration);
+      }
+    });
+  }
+
+  _scheduleEdgeUpdate(nodeId) {
+    if (this._rafUpdateId) return;
+    var self = this;
+    this._rafUpdateId = requestAnimationFrame(function() {
+      self._rafUpdateId = null;
+      self._reRenderEdgeForNode(nodeId);
+      self._updateMinimap();
+    });
+  }
+
+  setVirtualThreshold(threshold) {
+    this._virtualThreshold = threshold || 100;
+    this._virtualRendering = this._nodes.length >= this._virtualThreshold;
+    if (this._virtualRendering) {
+      this._updateVisibleNodes();
+    }
+  }
+
+  _updateVisibleNodes() {
+    var self = this;
+    var vpRect = this.viewportEl.getBoundingClientRect();
+    var zoom = this.transform.zoom;
+    var buffer = this._virtualBuffer;
+
+    var visibleLeft = (this.transform.x - buffer) / zoom;
+    var visibleTop = (this.transform.y - buffer) / zoom;
+    var visibleRight = (this.transform.x + vpRect.width + buffer) / zoom;
+    var visibleBottom = (this.transform.y + vpRect.height + buffer) / zoom;
+
+    var newVisibleIds = new Set();
+    this._nodes.forEach(function(node) {
+      var pos = node.position || { x: 0, y: 0, width: 100, height: 50 };
+      var nx = pos.x, ny = pos.y;
+      var nw = pos.width || 100, nh = pos.height || 50;
+      if (nx < visibleRight && nx + nw > visibleLeft && ny < visibleBottom && ny + nh > visibleTop) {
+        newVisibleIds.add(node.id);
+      }
+    });
+
+    var toRemove = [];
+    this._visibleNodeIds.forEach(function(id) {
+      if (!newVisibleIds.has(id)) {
+        toRemove.push(id);
+      }
+    });
+
+    toRemove.forEach(function(id) {
+      var el = self.nodeElements.get(id);
+      if (el && el.parentNode) {
+        el.parentNode.removeChild(el);
+      }
+      self.nodeElements.delete(id);
+    });
+
+    var toAdd = [];
+    newVisibleIds.forEach(function(id) {
+      if (!self._visibleNodeIds.has(id)) {
+        toAdd.push(id);
+      }
+    });
+
+    toAdd.forEach(function(id) {
+      var node = self._findNode(id);
+      if (node) {
+        self._renderNode(node);
+      }
+    });
+
+    this._visibleNodeIds = newVisibleIds;
+  }
 
   // ── DOM structure ─────────────────────────────────────────────────────────
 
@@ -836,7 +1045,7 @@ class FlowCanvas {
       { id: 'arrowOverwrite', color: EDGE_STRATEGY_COLORS.overwrite },
       { id: 'arrowMove',      color: EDGE_STRATEGY_COLORS.move },
       { id: 'arrowForce',     color: EDGE_STRATEGY_COLORS.force },
-      { id: 'arrowDefault',   color: '#f39c12' } // UI默认箭头色(未知策略时)
+      { id: 'arrowDefault',   color: '#e67e22' } // UI默认箭头色(未知策略时)
     ];
     markers.forEach(function (m) {
       var marker = document.createElementNS(ns, 'marker');
@@ -939,6 +1148,11 @@ class FlowCanvas {
             if (self.onExecOrderComplete) self.onExecOrderComplete();
             return;
           }
+          // 运行模式下禁用框选，仅触发 onCanvasClick 回调（拖拽/handle/框选/右键菜单均无效）
+          if (self._runMode) {
+            if (self.onCanvasClick) self.onCanvasClick(e);
+            return;
+          }
           // Left button on blank: Box select
           self._isBoxSelecting = true;
           var rect = self.viewportEl.getBoundingClientRect();
@@ -953,8 +1167,8 @@ class FlowCanvas {
       }
     });
 
-    // Global mouse move
-    document.addEventListener('mousemove', function (e) {
+    // Global mouse move (stored as instance property for cleanup in destroy())
+    this._docMouseMoveHandler = function (e) {
       if (self._isPanning) {
         self.transform.x = self._lastPanX + (e.clientX - self._panStartX);
         self.transform.y = self._lastPanY + (e.clientY - self._panStartY);
@@ -984,10 +1198,11 @@ class FlowCanvas {
           self._tempEdge.setAttribute('d', self._buildEdgePath(srcPos, { x: mx, y: my }, 0));
         }
       }
-    });
+    };
+    document.addEventListener('mousemove', this._docMouseMoveHandler);
 
-    // Global mouse up
-    document.addEventListener('mouseup', function (e) {
+    // Global mouse up (stored as instance property for cleanup in destroy())
+    this._docMouseUpHandler = function (e) {
       if (self._isPanning) {
         self._isPanning = false;
         self.viewportEl.style.cursor = '';
@@ -1018,11 +1233,17 @@ class FlowCanvas {
         self._connectingFrom = null;
         self._tempEdge = null;
       }
-    });
+    };
+    document.addEventListener('mouseup', this._docMouseUpHandler);
 
     // Right-click context menu
     this.viewportEl.addEventListener('contextmenu', function (e) {
       e.preventDefault();
+      // 运行模式下禁用右键菜单（阻止事件冒泡，避免 main.js 派发）
+      if (self._runMode) {
+        e.stopPropagation();
+        return;
+      }
       // Let the main.js handle context menu via the existing mechanism
     });
 
@@ -1033,6 +1254,60 @@ class FlowCanvas {
       var mmY = e.clientY - mmRect.top;
       self._navigateMinimap(mmX, mmY);
     });
+  }
+
+  // ── Lifecycle cleanup ──────────────────────────────────────────────────────
+  // 销毁画布：取消 RAF、移除 document 级事件监听器、清理引用，防止内存泄漏。
+  // 调用后实例不再可用；幂等（多次调用安全）。
+  destroy() {
+    // 取消待执行的渲染 RAF
+    if (this._rafRenderId) {
+      cancelAnimationFrame(this._rafRenderId);
+      this._rafRenderId = null;
+    }
+    if (this._rafUpdateId) {
+      cancelAnimationFrame(this._rafUpdateId);
+      this._rafUpdateId = null;
+    }
+
+    // 移除 document 级事件监听器（这些是 _initEvents 中绑定到全局 document 的处理器，
+    // 不会随 container.innerHTML='' 自动清理，必须显式 removeEventListener）
+    if (this._docMouseMoveHandler) {
+      document.removeEventListener('mousemove', this._docMouseMoveHandler);
+      this._docMouseMoveHandler = null;
+    }
+    if (this._docMouseUpHandler) {
+      document.removeEventListener('mouseup', this._docMouseUpHandler);
+      this._docMouseUpHandler = null;
+    }
+
+    // 清空回调与数据引用，辅助 GC
+    this._changeListeners = [];
+    this.onConnect = null;
+    this.onNodeClick = null;
+    this.onEdgeClick = null;
+    this.onCanvasClick = null;
+    this.onNodeDoubleClick = null;
+    this.onNodeDragEnd = null;
+    this.onZoomChangeCb = null;
+    this._toolClickHandler = null;
+
+    // 清空派生缓存与高亮集合
+    if (this.nodeElements) this.nodeElements.clear();
+    if (this._edgeElements) this._edgeElements.clear();
+    if (this._handleElements) this._handleElements.clear();
+    if (this.highlightedNodes) this.highlightedNodes.clear();
+    if (this.highlightedEdges) this.highlightedEdges.clear();
+    if (this._visibleNodeIds) this._visibleNodeIds.clear();
+    this._nodes = [];
+    this._edges = [];
+
+    // 重置交互态
+    this._isPanning = false;
+    this._isBoxSelecting = false;
+    this._connectingFrom = null;
+    this._tempEdge = null;
+    this._currentResizeNodeId = null;
   }
 
   _finishBoxSelect(e) {
@@ -1126,8 +1401,8 @@ class FlowCanvas {
         var nRect = nodeEl.getBoundingClientRect();
         var zoom = this.transform.zoom;
         return {
-          x: nodeEl.offsetLeft + (hRect.left - nRect.left + hRect.width / 2) / zoom * zoom / zoom,
-          y: nodeEl.offsetTop + (hRect.top - nRect.top + hRect.height / 2) / zoom * zoom / zoom
+          x: nodeEl.offsetLeft + (hRect.left - nRect.left + hRect.width / 2) / zoom,
+          y: nodeEl.offsetTop + (hRect.top - nRect.top + hRect.height / 2) / zoom
         };
       }
     }
@@ -1146,6 +1421,18 @@ class FlowCanvas {
   _applyTransform() {
     var t = 'translate(' + this.transform.x + 'px,' + this.transform.y + 'px) scale(' + this.transform.zoom + ')';
     this.transformEl.style.transform = t;
+    if (this._virtualRendering) {
+      this._scheduleVisibleUpdate();
+    }
+  }
+
+  _scheduleVisibleUpdate() {
+    if (this._rafUpdateId) return;
+    var self = this;
+    this._rafUpdateId = requestAnimationFrame(function() {
+      self._rafUpdateId = null;
+      self._updateVisibleNodes();
+    });
   }
 
   _onZoomChange() {
@@ -1196,9 +1483,6 @@ class FlowCanvas {
     this._updateMinimap();
   }
 
-  // Alias
-  fitView(padding) { this.fitToContent(padding); }
-
   // ── Render ────────────────────────────────────────────────────────────────
 
   render(data) {
@@ -1206,12 +1490,10 @@ class FlowCanvas {
     this._edges = (data && data.edges) || [];
     this._poolMeta = (data && data.pool_meta) || null;
     this.clearSelection();
-    this._renderEdges();
-    this._renderNodes();
     this._updateBackground(this._poolMeta);
     // 自动适应视口，确保内容以合适比例显示
     if (this._nodes.length > 0) { this.fitToContent(40); }
-    this._updateMinimap();
+    this._scheduleRender();
   }
 
   refresh(data) {
@@ -1275,20 +1557,27 @@ class FlowCanvas {
   }
 
   _renderNodes() {
-    this.nodesEl.innerHTML = '';
-    this.nodeElements.clear();
     this._handleElements.clear();
 
-    // Sort by z-order
-    var sorted = [].concat(this._nodes).sort(function (a, b) {
-      var order = { container: 0, state_column: 1, flow_arrow: 2, text_label: 4, tdx_container: 0, tdx_deco_line: 2, tdx_text_label: 4, tdx_deco_text: 4 };
-      return (order[a.type] || 3) - (order[b.type] || 3);
-    });
+    this._virtualRendering = this._nodes.length >= this._virtualThreshold;
 
-    var self = this;
-    sorted.forEach(function (node) {
-      self._renderNode(node);
-    });
+    if (this._virtualRendering) {
+      this._updateVisibleNodes();
+    } else {
+      this.nodesEl.innerHTML = '';
+      this.nodeElements.clear();
+
+      // Sort by z-order
+      var sorted = [].concat(this._nodes).sort(function (a, b) {
+        var order = { container: 0, state_column: 1, flow_arrow: 2, text_label: 4, tdx_container: 0, tdx_deco_line: 2, tdx_text_label: 4, tdx_deco_text: 4 };
+        return (order[a.type] || 3) - (order[b.type] || 3);
+      });
+
+      var self = this;
+      sorted.forEach(function (node) {
+        self._renderNode(node);
+      });
+    }
   }
 
   _renderNode(node) {
@@ -1312,6 +1601,8 @@ class FlowCanvas {
       case 'tdx_text_label':      this._renderLabel(node, pos); break;
       case 'tdx_container':       this._renderContainer(node, pos); break;
       case 'tdx_deco_line':       this._renderArrowDeco(node, pos); break;
+      // Task 9: 显式条件节点（spec: 可视化条件节点）—— 矩形显示，承载 func/indi/indiparam/filter_spec
+      case 'condition':           this._renderConditionNode(node, pos); break;
       default:                    this._renderGenericNode(node, pos); break;
     }
   }
@@ -1321,6 +1612,9 @@ class FlowCanvas {
     var el = document.createElement('div');
     el.className = 'flow-node ' + className;
     el.setAttribute('data-node-id', node.id);
+    el.setAttribute('role', 'button');
+    el.setAttribute('tabindex', '0');
+    el.setAttribute('aria-label', node.label || node.id);
     el.style.cssText = styleStr;
 
     el.addEventListener('click', function (e) {
@@ -1349,6 +1643,7 @@ class FlowCanvas {
   }
 
   _addHandles(el, node) {
+    if (this._runMode) return;
     if (node.type === 'text_label' || node.type === 'container' || node.type === 'state_column' ||
         node.type === 'flow_arrow' || node.type === 'execution_order' || node.type === 'tdx_deco_text' ||
         node.type === 'tdx_text_label' || node.type === 'tdx_container' || node.type === 'tdx_deco_line') {
@@ -1430,9 +1725,8 @@ class FlowCanvas {
             nEl.style.left = newX + 'px';
             nEl.style.top = newY + 'px';
           }
-          self._reRenderEdgeForNode(nid);
+          self._scheduleEdgeUpdate(nid);
         });
-        self._updateMinimap();
       };
       var onUp = function () {
         document.removeEventListener('mousemove', onMove);
@@ -1509,7 +1803,7 @@ class FlowCanvas {
 
   _renderCondition(node, pos) {
     var params = node.params || {};
-    var clr = dzhColorToCss(params.clr, '#f39c12'); // fallback: UI默认色(NODE_TYPE_DEFAULTS.transfer_condition)
+    var clr = dzhColorToCss(params.clr, '#e67e22'); // fallback: UI默认色(NODE_TYPE_DEFAULTS.transfer_condition)
     var selected = (this.selectedNodeId === node.id || this.selectedNodeIds.indexOf(node.id) !== -1) ? ' selected' : '';
     var MIN_COND_W = 22, MIN_COND_H = 20;  // DZH原生条件三角形最小尺寸(接近XML原始25×24)
     var w = Math.max(pos.width || DZH_NODE_SIZES.transfer_condition.width, MIN_COND_W);
@@ -1580,7 +1874,7 @@ class FlowCanvas {
     var stocks = params.stocks || [];
     var stockCountBadge = '';
     if (stocks.length > 0) {
-      stockCountBadge = '<div style="position:absolute;top:2px;right:2px;background:#e74c3c;color:#fff;font-size:10px;font-weight:bold;line-height:1;padding:2px 5px;border-radius:8px;min-width:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.4);z-index:5;">' + stocks.length + '</div>';
+      stockCountBadge = '<div class="candidate-count-badge" style="position:absolute;top:2px;right:2px;background:#e74c3c;color:#fff;font-size:10px;font-weight:bold;line-height:1;padding:2px 5px;border-radius:8px;min-width:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.4);z-index:5;">' + stocks.length + '</div>';
     }
 
     cel.innerHTML =
@@ -1773,7 +2067,7 @@ class FlowCanvas {
 
   _renderTdxCandidate(node, pos) {
     var params = node.params || {};
-    var clr = dzhColorToCss(params.clr, '#3498db'); // fallback: UI默认色(TDX候选节点)
+    var clr = dzhColorToCss(params.clr, (NODE_TYPE_DEFAULTS.tdx_candidate || {}).color || '#9b59b6'); // fallback: 从 cell_type_registry 配置读取(NODE_TYPE_DEFAULTS.tdx_candidate.color)
     var clrtext = dzhColorToCss(params.clrtext, '#ffffff'); // fallback: DZH原生文字默认白色
     var solid = params.solid !== undefined ? params.solid : 1;
     var selected = (this.selectedNodeId === node.id || this.selectedNodeIds.indexOf(node.id) !== -1) ? ' selected' : '';
@@ -1902,7 +2196,7 @@ class FlowCanvas {
 
   _renderTdxCondition(node, pos) {
     var params = node.params || {};
-    var clr = dzhColorToCss(params.clr, '#f39c12'); // fallback: UI默认色(NODE_TYPE_DEFAULTS.tdx_condition)
+    var clr = dzhColorToCss(params.clr, '#e67e22'); // fallback: UI默认色(NODE_TYPE_DEFAULTS.tdx_condition)
     var clrtext = dzhColorToCss(params.clrtext, '#ffffff'); // fallback: DZH原生文字默认白色
     var solid = params.solid !== undefined ? params.solid : 1;
     var selected = (this.selectedNodeId === node.id || this.selectedNodeIds.indexOf(node.id) !== -1) ? ' selected' : '';
@@ -1942,6 +2236,89 @@ class FlowCanvas {
         '<div class="tdx-cond-name">' + escHtml(condName) + '</div>' +
         (isDisabled ? '<div class="disabled-overlay"></div>' : '') +
       '</div>';
+  }
+
+  // ── Task 9: 显式条件节点矩形渲染 ──────────────────────────────────────────
+  // 节点本身包含接口表代码（无单独布局分区）：
+  //   - 矩形 + 标题栏 + Indi 名称 + 图标（ƒΣ 表示公式/筛选）
+  //   - 颜色：紫色 #8e44ad（区别于 statepool 粉色、transfer_condition 橙色菱形）
+  //   - 位置/尺寸：从 JSON 的 position 字段读取（cond1/cond2/cond3 实例配置）
+  //   - func/indi/indiparam/filter_spec 在点击时打开右侧配置面板（见 ui_layouts.json: condition_node）
+  _renderConditionNode(node, pos) {
+    var params = node.params || {};
+    var defaults = NODE_TYPE_DEFAULTS.condition || { color: '#8e44ad' };
+    var clr = dzhColorToCss(params.clr, defaults.color);
+    var selected = (this.selectedNodeId === node.id || this.selectedNodeIds.indexOf(node.id) !== -1) ? ' selected' : '';
+    var w = pos.width || 100;
+    var h = pos.height || 70;
+    if (node.position) { node.position.width = w; node.position.height = h; }
+
+    // 标题：节点 name（如 "KDJ金叉条件"），缺失时回退到 label/id
+    var title = node.name || node.label || node.id || '条件节点';
+
+    // Indi 名称（KDJ / MACD / 交集）
+    var filterSpec = params.filter_spec || {};
+    var evaluatorType = filterSpec.evaluator_type || '';
+    var indiName = params.indi || '';
+    var indiLabel = '';
+    if (evaluatorType === 'intersection' || evaluatorType === 'union' || evaluatorType === 'difference') {
+      indiLabel = evaluatorType === 'intersection' ? '交集' :
+                  (evaluatorType === 'union' ? '并集' : '差集');
+    } else if (indiName) {
+      indiLabel = String(indiName);
+    } else if (filterSpec.formula_ref) {
+      indiLabel = String(filterSpec.formula_ref);
+    }
+
+    // 图标：ƒΣ 表示公式+筛选；集合运算用 ∩∪∖
+    var iconText = 'ƒΣ';
+    if (evaluatorType === 'intersection') iconText = '∩';
+    else if (evaluatorType === 'union') iconText = '∪';
+    else if (evaluatorType === 'difference') iconText = '∖';
+    else if (indiName) iconText = 'ƒ';
+
+    // 公式简述：nperiod/noperate（如 "5m/金叉"）
+    var func = params.func || {};
+    var funcSummary = '';
+    if (func.nperiod !== undefined && func.nperiod !== null && func.nperiod !== '' && evaluatorType !== 'intersection') {
+      var periodMap = { 0: '分笔', 1: '1m', 2: '5m', 3: '15m', 4: '30m', 5: '60m', 6: '日', 7: '周', 8: '月' };
+      var pStr = periodMap[func.nperiod] || (func.nperiod + 'p');
+      funcSummary = pStr;
+    }
+    if (func.noperate !== undefined && func.noperate !== null && String(func.noperate) !== '0') {
+      var opMap = { 1: '金叉', 2: '死叉', 3: '金叉', 4: '上穿', 5: '下穿', 6: '大于', 7: '小于' };
+      var opStr = opMap[func.noperate] || ('op' + func.noperate);
+      funcSummary = funcSummary ? (funcSummary + '/' + opStr) : opStr;
+    }
+
+    var bodyBg = '#1a0d24';  // 紫色系深底
+    var borderStyle = 'border:2px solid ' + clr + ';border-radius:6px;';
+    var style = 'left:' + pos.x + 'px;top:' + pos.y + 'px;width:' + w + 'px;' +
+      'height:' + h + 'px;background:' + bodyBg + ';' + borderStyle +
+      'position:absolute;box-sizing:border-box;overflow:hidden;';
+
+    var el = this._createNodeEl(node, 'node-condition-explicit' + selected, style);
+    var titleBarHtml = '<div class="nce-title-bar" style="background:' + clr + ';color:#ffffff;padding:2px 6px;font-size:11px;font-weight:bold;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;">' +
+      '<span class="nce-icon" style="margin-right:4px;font-weight:bold;">' + iconText + '</span>' +
+      escHtml(title) + '</div>';
+    var bodyHtml = '<div class="nce-body" style="padding:4px 6px;color:#ffffff;font-size:10px;line-height:1.4;">';
+    if (indiLabel) {
+      bodyHtml += '<div class="nce-indi" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">指标: <b>' + escHtml(indiLabel) + '</b></div>';
+    }
+    if (funcSummary) {
+      bodyHtml += '<div class="nce-func" style="opacity:0.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escHtml(funcSummary) + '</div>';
+    }
+    bodyHtml += '</div>';
+    el.innerHTML = titleBarHtml + bodyHtml;
+
+    // 运行模式：附加股票覆盖层（条件节点激活时显示通过/拒绝股票数）
+    if (this._runMode) {
+      var stockOverlay = document.createElement('div');
+      stockOverlay.className = 'node-stock-overlay';
+      stockOverlay.setAttribute('data-stock-overlay', node.id);
+      stockOverlay.style.cssText = 'position:absolute;bottom:2px;right:4px;font-size:9px;color:#b39ddb;background:rgba(0,0,0,0.5);padding:1px 4px;border-radius:3px;';
+      el.appendChild(stockOverlay);
+    }
   }
 
   // ── Edge rendering ────────────────────────────────────────────────────────
@@ -2069,6 +2446,7 @@ class FlowCanvas {
     //   条件边(conditional)：源为备选池/状态池/数据源 → 有时间间隔属性(interval_sec)
     //   无条件边(unconditional)：源为条件节点(公式/筛选) → 直通，只有线宽属性(width)
     var srcNode = this._findNode(srcId);
+    var tgtNode = this._findNode(tgtId);
     var CONDITIONAL_SOURCE_TYPES = [
       'market_source', 'candidate_dzh', 'tdx_candidate',     // 数据源/备选池
       'stock_state_pool', 'state_pool', 'statepool', 'tdx_state_pool'      // 状态池（作为源出发时）
@@ -2078,25 +2456,16 @@ class FlowCanvas {
     // 表驱动：从 params 中读取实际属性值
     var labelText = '';
     if (isConditionalEdge) {
-      // 条件边：显示时间间隔（兼容 interval_sec / time_gate_interval / jgtime）
+      // 条件边：触发频率 + 条件摘要（如 "60s / 5m KDJ 金叉"）
       var interval = params.time_gate_interval !== undefined ? parseInt(params.time_gate_interval) :
                      (params.interval_sec !== undefined ? parseInt(params.interval_sec) :
                      (params.jgtime !== undefined ? parseInt(params.jgtime) : 60));
-      if (interval <= 0) labelText = '即时';
-      else if (interval < 60) labelText = interval + 's';
-      else if (interval < 3600) labelText = Math.round(interval / 60) + 'm';
-      else if (interval < 86400) labelText = Math.round(interval / 3600) + 'h';
-      else labelText = Math.round(interval / 86400) + 'd';
-
-      // 在标签第二行显示转移条件（公式/交集）
-      var condText = '';
-      if (params.condition_type === 'INTERSECTION' || params.condition_type === ' intersection') {
-        condText = '交集';
-      } else if (params.formula_ref) {
-        condText = String(params.formula_ref);
-      } else if (params.tdx_func && params.tdx_func.accode) {
-        condText = String(params.tdx_func.accode);
-      }
+      var intervalLabel = _formatEdgeInterval(interval);
+      // 条件摘要优先从目标条件节点参数 + 边参数融合生成（配置表驱动，无硬编码）
+      var condBaseParams = (tgtNode && tgtNode.params) || {};
+      var condParams = Object.assign({}, condBaseParams, params);
+      var condSummary = _buildEdgeConditionSummary(condParams);
+      labelText = intervalLabel + (condSummary ? ' / ' + condSummary : '');
     } else {
       // 无条件边：只显示线宽（来自 params.size 或 modeInfo.width）
       var edgeWidth = params.size ? parseInt(params.size) : modeInfo.width;
@@ -2105,7 +2474,7 @@ class FlowCanvas {
 
     var label = document.createElementNS(ns, 'text');
     label.setAttribute('x', mx);
-    label.setAttribute('y', my - 6);
+    label.setAttribute('y', my + 3);
     label.setAttribute('text-anchor', 'middle');
     label.setAttribute('fill', modeInfo.color);
     label.setAttribute('font-size', '10');
@@ -2117,23 +2486,6 @@ class FlowCanvas {
     label.setAttribute('paint-order', 'stroke');
     label.textContent = labelText;
     this._edgeLabelGroup.appendChild(label);
-
-    // 条件边额外渲染条件标签（第二行，便于一眼识别 KDJ/MACD/交集）
-    if (isConditionalEdge && condText) {
-      var condLabel = document.createElementNS(ns, 'text');
-      condLabel.setAttribute('x', mx);
-      condLabel.setAttribute('y', my + 8);
-      condLabel.setAttribute('text-anchor', 'middle');
-      condLabel.setAttribute('fill', '#ffd166');
-      condLabel.setAttribute('font-size', '9');
-      condLabel.setAttribute('font-family', 'Microsoft YaHei, sans-serif');
-      condLabel.setAttribute('pointer-events', 'none');
-      condLabel.setAttribute('stroke', 'rgba(0,0,0,0.75)');
-      condLabel.setAttribute('stroke-width', '2');
-      condLabel.setAttribute('paint-order', 'stroke');
-      condLabel.textContent = condText;
-      this._edgeLabelGroup.appendChild(condLabel);
-    }
 
     // 执行顺序编号模式：徽标仅渲染在条件边上（源节点是池类型）（DZH§6.2）
     if (this._showExecOrder && this._isConditionEdge(edge)) {
@@ -2222,6 +2574,55 @@ class FlowCanvas {
       widthLabel.setAttribute('paint-order', 'stroke');
       widthLabel.textContent = 'w=' + modeInfo.width;
       this._edgeLabelGroup.appendChild(widthLabel);
+    }
+
+    // Task 9 SubTask 9.3: 多入边显示顺序号（_order）—— 当目标节点为 condition 类型且有多条入边时，
+    // 在目标端显示顺序号徽标（始终显示，不依赖 _showExecOrder 模式）
+    var tgtNodeForOrder = this._findNode(tgtId);
+    if (tgtNodeForOrder && tgtNodeForOrder.type === 'condition' &&
+        params._order !== undefined && params._order !== null) {
+      // 统计目标节点的入边数
+      var tgtInEdges = (this._edges || []).filter(function (e) {
+        var t = e.target ? e.target.node_id : (e.to || null);
+        return t === tgtId;
+      });
+      if (tgtInEdges.length > 1) {
+        // 多入边：在目标端绘制顺序号徽标
+        var mOrderVal = params._order;
+        var mBadgeR = 10;
+        var mbdx = tp.x - sp.x;
+        var mbdy = tp.y - sp.y;
+        var mblen = Math.sqrt(mbdx * mbdx + mbdy * mbdy);
+        var mOffset = 18;
+        var mTgtBx, mTgtBy;
+        if (mblen > 0) {
+          mTgtBx = tp.x - (mbdx / mblen) * mOffset;
+          mTgtBy = tp.y - (mbdy / mblen) * mOffset;
+        } else {
+          mTgtBx = tp.x; mTgtBy = tp.y;
+        }
+        var mOrderCircle = document.createElementNS(ns, 'circle');
+        mOrderCircle.setAttribute('cx', mTgtBx);
+        mOrderCircle.setAttribute('cy', mTgtBy);
+        mOrderCircle.setAttribute('r', mBadgeR);
+        mOrderCircle.setAttribute('fill', '#8e44ad'); // 紫色：与 condition 节点色系一致
+        mOrderCircle.setAttribute('stroke', '#fff');
+        mOrderCircle.setAttribute('stroke-width', '1.5');
+        mOrderCircle.setAttribute('pointer-events', 'none');
+        this._edgeLabelGroup.appendChild(mOrderCircle);
+
+        var mOrderText = document.createElementNS(ns, 'text');
+        mOrderText.setAttribute('x', mTgtBx);
+        mOrderText.setAttribute('y', mTgtBy + 4);
+        mOrderText.setAttribute('text-anchor', 'middle');
+        mOrderText.setAttribute('fill', '#fff');
+        mOrderText.setAttribute('font-size', '10');
+        mOrderText.setAttribute('font-weight', 'bold');
+        mOrderText.setAttribute('font-family', 'Microsoft YaHei, sans-serif');
+        mOrderText.setAttribute('pointer-events', 'none');
+        mOrderText.textContent = '#' + mOrderVal;
+        this._edgeLabelGroup.appendChild(mOrderText);
+      }
     }
 
     this._edgeElements.set(edge.id, { path: path, hitPath: hitPath, label: label, edge: edge });
@@ -2383,7 +2784,7 @@ class FlowCanvas {
     this.selectedNodeIds = nodeId ? [nodeId] : [];
     this.selectedEdgeId = null;
     this._syncSelectionStyles();
-    if (nodeId) {
+    if (nodeId && !this._runMode) {
       var node = this._findNode(nodeId);
       if (node) this._showResizeHandles(nodeId);
       else this._hideResizeHandles();
@@ -2481,8 +2882,7 @@ class FlowCanvas {
           targetEl.style.width = newW + 'px';
           targetEl.style.height = newH + 'px';
           self._updateHandlePositions();
-          self._reRenderEdgeForNode(targetNode.id);
-          self._updateMinimap();
+          self._scheduleEdgeUpdate(targetNode.id);
         };
         var onUp = function () {
           document.removeEventListener('mousemove', onMove);
@@ -2637,6 +3037,15 @@ class FlowCanvas {
     if (!srcId) return false;
     var srcNode = this._findNode(srcId);
     if (!srcNode) return false;
+    // 字符串类型识别：与 _renderEdge 中 CONDITIONAL_SOURCE_TYPES 保持一致
+    // 修复 sim_test_pool_100 等使用字符串节点类型（market_source/statepool）的池
+    var COND_SRC_STR_TYPES = [
+      'market_source', 'candidate_dzh', 'tdx_candidate',
+      'stock_state_pool', 'state_pool', 'statepool', 'tdx_state_pool'
+    ];
+    if (srcNode.type && COND_SRC_STR_TYPES.indexOf(srcNode.type) !== -1) {
+      return true;
+    }
     var ct = null;
     if (srcNode.dzh_cell_type !== undefined && srcNode.dzh_cell_type !== null) {
       ct = Number(srcNode.dzh_cell_type);
@@ -2672,9 +3081,11 @@ class FlowCanvas {
   setRunMode(enabled) {
     this._runMode = enabled;
     if (enabled) {
+      document.body.classList.add('run-mode');
       this.disableEditing();
       this.refreshStockTables();
     } else {
+      document.body.classList.remove('run-mode');
       this.enableEditing();
       var overlays = this.nodesEl.querySelectorAll('.node-stock-overlay');
       overlays.forEach(function (o) { o.remove(); });
@@ -2688,6 +3099,7 @@ class FlowCanvas {
     this.connectable = false;
     this.selectable = true;
     this.nodeElements.forEach(function (el) { el.style.cursor = 'default'; });
+    this._hideResizeHandles();
   }
 
   enableEditing() {
@@ -2741,7 +3153,8 @@ class FlowCanvas {
   refreshStockTables() {
     var self = this;
     this._nodes.forEach(function (node) {
-      if (node.type === 'stock_state_pool' || node.type === 'statepool' || node.type === 'tdx_state_pool') {
+      var ntype = node.type;
+      if (ntype === 'stock_state_pool' || ntype === 'statepool' || ntype === 'tdx_state_pool') {
         var overlay = self.nodesEl.querySelector('[data-stock-overlay="' + node.id + '"]');
         if (!overlay) {
           var el = self.nodeElements.get(node.id);
@@ -2753,13 +3166,42 @@ class FlowCanvas {
           }
         }
         if (overlay) { self._renderStockTable(node, overlay); }
-        if (node.type === 'tdx_state_pool') {
-          var el = self.nodeElements.get(node.id);
-          if (el) {
-            var countEl = el.querySelector('.tdx-stock-count');
+        if (ntype === 'tdx_state_pool') {
+          var el2 = self.nodeElements.get(node.id);
+          if (el2) {
+            var countEl = el2.querySelector('.tdx-stock-count');
             if (countEl) {
               var stocks = (node.params && node.params.stocks) || [];
               countEl.textContent = stocks.length + ' 只';
+            }
+          }
+        }
+      } else if (ntype === 'market_source' || ntype === 'tdx_candidate' || ntype === 'candidate_dzh') {
+        var el3 = self.nodeElements.get(node.id);
+        if (el3) {
+          var stocks = (node.params && node.params.stocks) || [];
+          var cnt = stocks.length;
+          var badge = el3.querySelector('.candidate-count-badge');
+          if (!badge && cnt > 0) {
+            badge = document.createElement('div');
+            badge.className = 'candidate-count-badge';
+            badge.style.cssText = 'position:absolute;top:2px;right:2px;background:#e74c3c;color:#fff;font-size:10px;font-weight:bold;line-height:1;padding:2px 5px;border-radius:8px;min-width:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.4);z-index:5;';
+            el3.appendChild(badge);
+          }
+          if (badge) {
+            badge.textContent = cnt;
+            badge.style.display = cnt > 0 ? '' : 'none';
+          }
+          if (self._runMode) {
+            var overlay2 = el3.querySelector('[data-stock-overlay="' + node.id + '"]');
+            if (!overlay2) {
+              overlay2 = document.createElement('div');
+              overlay2.className = 'node-stock-overlay';
+              overlay2.setAttribute('data-stock-overlay', node.id);
+              el3.appendChild(overlay2);
+            }
+            if (overlay2 && cnt > 0) {
+              self._renderStockTable(node, overlay2);
             }
           }
         }
@@ -3149,9 +3591,6 @@ class FlowCanvas {
     this.highlightedNodes.forEach(function (nodeId) { self.unhighlightNode(nodeId); });
     this.highlightedEdges.forEach(function (edgeId) { self.unhighlightEdge(edgeId); });
   }
-
-  getHighlightedNodes() { return new Set(this.highlightedNodes); }
-  getHighlightedEdges() { return new Set(this.highlightedEdges); }
 
   // ── SVG compatibility (for zoomchange event dispatch) ─────────────────────
 

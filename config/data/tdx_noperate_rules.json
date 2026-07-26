@@ -1,5 +1,5 @@
 {
-  "version": "1.2",
+  "version": "1.3",
   "description": "TDX noperate 操作符规则定义表，驱动通用比较器 _eval_op 与 _resolve_rank。计算逻辑由 expr/prev_expr/curr_expr/combine 字段（表达式字符串）承载，_eval_op 调 _eval_derived_expr 求值，无 if/elif 分支。mode 字段驱动 _eval_nset0_result 顶层分派（compare/rank/inflection），消除 noperate id 硬编码元组判断。",
   "records": [
     {
@@ -31,24 +31,24 @@
       "id": "3",
       "name": "上穿",
       "mode": "compare",
-      "description": "line1 前一周期低于 line2，当前周期大于等于 line2（金叉）",
+      "description": "line1 前一周期小于等于 line2，当前周期大于 line2（金叉）- 与cross_op一致",
       "compare": "cross",
       "direction": "above",
       "params": {"window": 2},
-      "prev_expr": "line1[-2] < line2[-2]",
-      "curr_expr": "line1[-1] >= line2[-1]",
+      "prev_expr": "line1[-2] <= line2[-2]",
+      "curr_expr": "line1[-1] > line2[-1]",
       "combine": "and"
     },
     {
       "id": "4",
       "name": "下破",
       "mode": "compare",
-      "description": "line1 前一周期高于 line2，当前周期小于等于 line2（死叉）",
+      "description": "line1 前一周期大于等于 line2，当前周期小于 line2（死叉）- 与cross_op一致",
       "compare": "cross",
       "direction": "below",
       "params": {"window": 2},
-      "prev_expr": "line1[-2] > line2[-2]",
-      "curr_expr": "line1[-1] <= line2[-1]",
+      "prev_expr": "line1[-2] >= line2[-2]",
+      "curr_expr": "line1[-1] < line2[-1]",
       "combine": "and"
     },
     {
@@ -84,24 +84,24 @@
       "id": "8",
       "name": "上拐",
       "mode": "inflection",
-      "description": "曲线由降转升：前一期的前期值 < 前一期值 <= 当前值",
+      "description": "曲线由降转升：前一期斜率<0，当前斜率>=0",
       "compare": "inflection",
       "direction": "up",
       "params": {"window": 3},
-      "prev_expr": "line1[-2] - line1[-3] < 0",
-      "curr_expr": "line1[-1] - line1[-2] >= 0",
+      "prev_expr": "(line1[-2] - line1[-3]) < 0",
+      "curr_expr": "(line1[-1] - line1[-2]) >= 0",
       "combine": "and"
     },
     {
       "id": "9",
       "name": "下拐",
       "mode": "inflection",
-      "description": "曲线由升转降：前一期的前期值 > 前一期值 >= 当前值",
+      "description": "曲线由升转降：前一期斜率>0，当前斜率<=0",
       "compare": "inflection",
       "direction": "down",
       "params": {"window": 3},
-      "prev_expr": "line1[-2] - line1[-3] > 0",
-      "curr_expr": "line1[-1] - line1[-2] <= 0",
+      "prev_expr": "(line1[-2] - line1[-3]) > 0",
+      "curr_expr": "(line1[-1] - line1[-2]) <= 0",
       "combine": "and"
     }
   ],

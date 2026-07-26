@@ -1124,19 +1124,20 @@ class MockProvider(DataSourceProvider):
         return "mock"
 
     def create_tick_source(self, codes, clock_start: float = 0.0, **kwargs) -> Any:
-        """创建仿真 TickSource（SimTickSource）。
+        """创建仿真 TickSource（MockDataSource）。
 
-        Task 1：将 MockProvider 生成的行情统一收敛到 ``SimTickSource``，
+        Task 1：将 MockProvider 生成的行情统一收敛到 ``MockDataSource``，
         由 ``TickSource.next_ticks`` 驱动核心循环，所有输出代码统一为 ``fz`` 前缀。
+        G5：tick 定时器注册到 EventDriver 统一优先队列。
         """
         try:
-            from ..core.domain import SimTickSource
+            from ..core.domain import MockDataSource
         except ImportError:
             try:
-                from core.domain import SimTickSource
+                from core.domain import MockDataSource
             except ImportError:
-                from services.core.domain import SimTickSource
-        return SimTickSource(codes=codes, clock_start=clock_start, **kwargs)
+                from services.core.domain import MockDataSource
+        return MockDataSource(codes=codes, clock_start=clock_start, **kwargs)
 
     def _probe(self) -> Dict[str, Any]:
         """契约探测（Task 6）：mock provider 始终就绪（_probe 不受授权门控）。

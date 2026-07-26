@@ -16,7 +16,7 @@ SubTask 27.4：将原 4 个 Execution 模块相关源文件高内聚合并到本
     节点边解析辅助 / ``build_timed_event_specs``
   - ``core/edge_executor.py`` → EdgeExecutor / TickTable / gate/filter/propagate
     表驱动分派辅助
-  - ``core/time_util.py``     → time_at / EventDriver / TtlTracker / TimedEventSpec
+  - ``core/time_util.py``     → time_at / EventDriver / TimedEventSpec
     等时序驱动基础设施
   - ``core/edge_state.py``    → EdgeState / EdgeStateMixin 边级运行时表
 上述 4 个源文件已删除，``core/execution_module.py`` 成为 Execution 模块的唯一入口。
@@ -31,7 +31,7 @@ import operator
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Protocol, Set, Tuple, Type, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
@@ -42,25 +42,19 @@ from .event_bus import (
     EdgeFired,
     EventBus,
     Executed,
+    FormulaEvaluated,
     ModeChanged,
     PoolLoaded,
     Signal,
     StockFiltered,
+    TickDue,
     TimeAdvanced,
     TransferExecuted,
+    TTLDue,
     TTLExpired,
 )
-from .screening_module import (
-    _NOPERATE_RULES,
-    _RANK_MODES,
-    _lookup_builtin_formula_info,
-    _nperiod_to_period,
-    _resolve_rank,
-    _scalar_compare,
-    eval_scalar_nset,
-    evaluate_intersection,
-)
-from .formula_module import EvalContext, FormulaEngine, live_context
+# 依赖注入（Protocol）：标量评估器 / 评估上下文工厂 / 实时上下文工厂 / 公式引擎协议
+# 由 engine.py 组装层经 EdgeExecutor 构造函数注入，满足模块零引用约束。
 from .domain import (
     _stock_code,
     _hms_to_seconds,
@@ -68,13 +62,71 @@ from .domain import (
     _safe_timestamp,
     is_offset_of_day,
     anchor_to_today,
+    _lookup_builtin_formula_info,
     time_now_unix,
+    # noperate 评估工具（已迁移至 domain 白名单）
+    _NOPERATE_RULES,
+    _RANK_MODES,
+    _resolve_rank,
+    _build_op_ctx,
+    _eval_op,
+    # TDX nperiod → period 映射（已迁移至 domain 白名单）
+    _nperiod_to_period,
+    # 交集条件评估器（已迁移至 domain 白名单）
+    evaluate_intersection,
+    # EdgeState 边级运行时表（已迁移至 domain 白名单）
+    EdgeState,
+    EdgeStateMixin,
+    # TimedEventSpec 已下沉至 domain（纯数据结构），经此模块级 import 引入并 re-export
+    # （见 __all__），避免 core/domain 反向函数级懒加载本模块（模块零引用约束）。
+    TimedEventSpec,
 )
 
 if TYPE_CHECKING:
     from .runtime_mode_module import PoolState
 
 logger = logging.getLogger(__name__)
+
+
+# ===========================================================================
+# 依赖注入协议（避免 execution_module 跨模块引用公式/选股模块）
+# ===========================================================================
+# 组装层（core/engine.py）持有具体实现并经 EdgeExecutor 构造函数注入；
+# 本模块仅依赖以下 Protocol/容器结构类型，满足模块零引用约束。
+
+
+class FormulaEngineProtocol(Protocol):
+    """公式引擎协议：本模块仅依赖此结构类型，不直接 import 公式模块。"""
+
+    def eval_series(self, spec: Any, codes: List[str], ctx: Any, lookback: int) -> Dict[str, Any]:
+        ...
+
+    def eval_scalar(
+        self,
+        spec: Any,
+        codes: List[str],
+        ctx: Any,
+        evaluator_fn: Callable[[List[str], Any], Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        ...
+
+
+@dataclass
+class _FilterEvalDeps:
+    """筛选评估依赖注入容器。
+
+    由 engine.py 组装层注入具体实现：
+      - scalar_nset_fn: 标量 nset 评估器（nset=3/4 财务/行情选股）
+      - eval_ctx_factory: 评估上下文工厂（标量路径构造求值上下文）
+      - live_ctx_fn: 实时上下文工厂（公式路径构造实盘上下文）
+      - bus: EventBus 实例（spec.md L128：公式求值异常时发布携带 error
+        字段的 FormulaEvaluated 事件供下游诊断）
+    """
+
+    scalar_nset_fn: Optional[Callable] = None
+    eval_ctx_factory: Optional[Callable] = None
+    live_ctx_fn: Optional[Callable] = None
+    bus: Any = None
 
 
 # ---------------------------------------------------------------------------
@@ -117,214 +169,106 @@ def _load_config(name: str) -> Dict[str, Any]:
 #   - sequence：回放模式，由 ReplayRunner 写入 K 线时间戳
 #   - virtual：仿真模式，由 Simulator 写入虚拟时钟
 #
-# 统一时间驱动：所有到时事件统一为 TimedEventSpec：
-#   - at_fn() 返回到期时间（Unix 秒），<= now 表示到期
-#   - action(params) 到期时调用，发布事件参数不同，引发的下个事件不同
-#   - 边触发：action 发布 Executed → 订阅者执行 filter→propagate→callback
+# 统一时间驱动（G1 heapq 优先队列）：所有到时事件统一为 TimedEventSpec：
+#   - 注册到 EventDriver 单一 heapq，元素 [fire_time, seq, spec]
+#   - fire_due(now) 弹出堆顶 fire_time <= now 的事件，调 action(params) 发布事件
+#   - 立即注册下次：next = fire_time + interval（不是 now + interval）
+#   - interval=None 表示一次性（TTL），interval>0 表示周期触发（边触发）
+#   - 边触发：action 发布 EdgeFired → 订阅者执行 filter→propagate→callback
 #   - TTL到期：action 发布 DomainEvent(TIMEOUT) → 订阅者执行批量删除
-#
-# TtlTracker 是单条边的 TTL 追踪器（面向对象），仅管理到期时间堆，
-# 不发布事件——发布是 action 的职责，不是 tracker 的职责。
-#
-# EventDriver.fire_due(now) 统一扫描所有 TimedEventSpec，
-# at_fn() <= now 就调 action——边触发和 TTL 完全同一套机制。
 
 
 # ---------------------------------------------------------------------------
-# TtlEntry + TtlTracker（面向对象：仅管理到期时间堆，不发布事件）
+# TimedEventSpec（统一到时事件规格）— 已下沉至 core/domain.py（纯数据结构）
+# 经下方 ``from .domain import TimedEventSpec`` 引入并 re-export（见 __all__），
+# 避免 core/domain 反向函数级懒加载本模块（模块零引用约束）。
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class TtlEntry:
-    """TTL 到期条目（值对象）：一只股票在特定目标池中的到期记录。
-
-    入池时创建，入堆排序；出池时惰性删除（从 _entries 移除，堆弹出时跳过）。
-    pop_expired 返回到期条目列表，由 action 消费并发布 DomainEvent(TIMEOUT)。
-    """
-    code: str
-    tgt: str
-    eid: str
-    ttl_sec: float
-    entry_ts: float
-    expire_at: float
-
-    def __lt__(self, other: "TtlEntry") -> bool:
-        return self.expire_at < other.expire_at
-
-
-class TtlTracker:
-    """单条边的 TTL 追踪器（面向对象，仅管理到期时间堆）。
-
-    职责单一：register / unregister / next_expire_at / pop_expired / clear。
-    不发布事件——发布是 TimedEventSpec.action 的职责。
-
-    next_expire_at() 使 TTL 的 at_fn 与边触发共用 ``at_fn() <= now`` 语义。
-    """
-
-    def __init__(self, tgt: str, eid: str) -> None:
-        self._tgt = tgt
-        self._eid = eid
-        self._heap: List[TtlEntry] = []
-        self._entries: Dict[str, TtlEntry] = {}
-
-    @property
-    def tgt(self) -> str:
-        return self._tgt
-
-    @property
-    def eid(self) -> str:
-        return self._eid
-
-    def register(self, code: str, ttl_sec: float, entry_ts: float, now_unix: float) -> None:
-        """股票入池时注册到期条目。expire_at = entry_ts + ttl_sec。
-
-        已过期（expire_at <= now_unix）仍入堆，fire_due 时立即弹出。
-        """
-        if ttl_sec <= 0:
-            return
-        expire_at = entry_ts + ttl_sec
-        entry = TtlEntry(
-            code=code, tgt=self._tgt, eid=self._eid,
-            ttl_sec=ttl_sec, entry_ts=entry_ts, expire_at=expire_at,
-        )
-        self._entries[code] = entry
-        heapq.heappush(self._heap, entry)
-
-    def unregister(self, code: str) -> None:
-        """股票出池时取消注册（惰性删除）。"""
-        self._entries.pop(code, None)
-
-    def next_expire_at(self) -> float:
-        """返回堆顶到期时间。空堆返回 inf（永不到期）。"""
-        while self._heap:
-            top = self._heap[0]
-            if top.code in self._entries:
-                return top.expire_at
-            heapq.heappop(self._heap)
-        return float("inf")
-
-    def pop_expired(self, now_unix: float) -> List[TtlEntry]:
-        """弹出所有到期条目（expire_at <= now_unix），跳过已取消的。"""
-        expired: List[TtlEntry] = []
-        while self._heap and self._heap[0].expire_at <= now_unix:
-            entry = heapq.heappop(self._heap)
-            if entry.code in self._entries:
-                del self._entries[entry.code]
-                expired.append(entry)
-        return expired
-
-    def clear(self) -> None:
-        """清空所有追踪。"""
-        self._heap.clear()
-        self._entries.clear()
-
-
 # ---------------------------------------------------------------------------
-# TimedEventSpec（统一到时事件规格）
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class TimedEventSpec:
-    """到时事件规格表行——边触发与 TTL 共用。
-
-    到时触发是到时触发，执行事件是执行事件。
-    所有到时事件统一为 TimedEventSpec，区别仅在 params 不同、引发的下个事件不同：
-      - 边触发：action 发布 Executed → 订阅者执行 filter→propagate→callback
-      - TTL到期：action 发布 DomainEvent(TIMEOUT) → 订阅者执行批量删除
-
-    Attributes:
-        at_fn:   计算下次触发时间（Unix 秒）。<= now 表示到期。
-        interval: 触发间隔（秒）。None=一次性事件。
-        end_fn:  计算结束时间（Unix 秒）。None=永久。
-        action:  事件回调，签名为 ``action(params)``。
-        params:  事件参数字典。
-    """
-
-    at_fn: Callable[[], float]
-    interval: Optional[float]
-    end_fn: Optional[Callable[[], float]]
-    action: Callable[[Any], None]
-    params: dict = field(default_factory=dict)
-
-
-# ---------------------------------------------------------------------------
-# EventDriver — 统一时间驱动器
+# EventDriver — 统一时间驱动器（G1 单一 heapq 优先队列）
 # ---------------------------------------------------------------------------
 
 
 class EventDriver:
-    """统一时间驱动器：所有 TimedEventSpec 共用 at_fn() <= now 到期判定。
+    """统一时间驱动器：所有 TimedEventSpec 注册到单一 heapq 优先队列。
 
-    fire_due(now) 统一扫描所有 spec，at_fn() <= now 就调 action。
-    边触发和 TTL 完全同一套机制——区别仅在 action 发布的事件不同。
+    fire_due(now) 弹出堆顶到时事件，发布事件 + 立即注册下次（fire_time + interval）。
+    与模块计算无关——触发即注册下次，结束。
 
-    TtlTracker 仅供 TTL 类型的 at_fn 委托 next_expire_at()，
-    以及运行期 register/unregister 到期条目。
+    heapq 元素格式：``(fire_time, seq, spec)``，seq 用于同时间稳定排序。
+    同 fire_time 时，kind="tick" 的 spec 使用更小的 seq，确保 tick 数据事件
+    （TickReceived → DataChanged → BarComposed）先于边触发事件（EdgeFired）执行。
     """
+
+    # tick 定时器 seq 起始值：足够小的负数，保证同 fire_time 时始终排在边触发/TTL 之前
+    _TICK_SEQ_BASE = -10**9
 
     def __init__(self, state: Any = None, bus: Any = None) -> None:
         self._state = state
         self._bus = bus
-        self._specs: List[TimedEventSpec] = []
-        self._ttl_trackers: Dict[str, TtlTracker] = {}
+        self._heap: List[tuple[float, int, TimedEventSpec]] = []
+        self._seq = 0
+        self._tick_seq = self._TICK_SEQ_BASE
 
-    def add_spec(self, spec: TimedEventSpec) -> None:
-        """注册到时事件规格（边触发和 TTL 统一入口）。"""
-        self._specs.append(spec)
+    def _next_seq(self, spec: TimedEventSpec) -> int:
+        """按 spec 类型分配 seq：tick 优先，其余按全局顺序。"""
+        kind = spec.params.get("kind") if isinstance(spec.params, dict) else None
+        if kind == "tick":
+            seq = self._tick_seq
+            self._tick_seq += 1
+            return seq
+        seq = self._seq
+        self._seq += 1
+        return seq
 
-    def add_ttl_tracker(self, eid: str, tracker: TtlTracker) -> None:
-        """注册 TTL 追踪器（interval 类型，运行期 register/unregister）。"""
-        self._ttl_trackers[eid] = tracker
+    def add_spec(self, spec: TimedEventSpec, first_fire_time: float) -> None:
+        """注册到时事件规格到 heapq（边触发和 TTL 统一入口）。"""
+        heapq.heappush(self._heap, (first_fire_time, self._next_seq(spec), spec))
 
-    def register_ttl(self, eid: str, code: str, ttl_sec: float, entry_ts: float, now_unix: float) -> None:
-        """运行期：股票入池时注册 TTL 到期。"""
-        tracker = self._ttl_trackers.get(eid)
-        if tracker is not None:
-            tracker.register(code, ttl_sec, entry_ts, now_unix)
-
-    def unregister_ttl(self, eid: str, code: str) -> None:
-        """运行期：股票出池时取消 TTL 到期。"""
-        tracker = self._ttl_trackers.get(eid)
-        if tracker is not None:
-            tracker.unregister(code)
-
-    def is_edge_due(self, eid: str, now: float) -> bool:
-        """边触发到期判定（兼容旧接口，tick body 中使用）。"""
-        for spec in self._specs:
-            if spec.params.get("eid") == eid:
-                return spec.at_fn() <= now
-        return True
+    def _register_next(self, fire_time: float, spec: TimedEventSpec) -> None:
+        """按规则为周期规格注册下次触发时间。"""
+        if spec.interval is not None and spec.interval > 0:
+            next_time = fire_time + spec.interval
+            if spec.end_fn is None or next_time <= spec.end_fn():
+                heapq.heappush(self._heap, (next_time, self._next_seq(spec), spec))
 
     def fire_due(self, now: float) -> None:
-        """统一到期触发：遍历所有 spec，at_fn() <= now 就调 action。
+        """弹出堆顶到时事件，发布事件 + 立即注册下次。
 
-        边触发和 TTL 完全同一套机制——at_fn 判定到期，action 发布事件，
-        订阅者执行具体逻辑。区别仅在 params 不同、引发的下个事件不同。
+        next = fire_time + interval（不是 now + interval），保证固定间隔。
+        interval=None 或 <=0 表示一次性，不注册下次。
+        end_fn 判定是否继续注册（None=永久）。
+
+        为保证每个 tick 循环内"数据先于计算"，本次 fire_due 调用内到期的
+        kind="tick" 规格（生成 TickReceived / DataChanged / BarComposed）先于
+        kind="edge" / "ttl" 规格（EdgeFired / TTLDue）执行。同时保留"追回"
+        行为：周期规格执行后若 next <= now 会继续入队并在本次 fire_due 内处理。
         """
-        for spec in self._specs:
-            try:
-                if spec.at_fn() <= now:
-                    spec.action(spec.params)
-            except Exception:
-                logger.warning("TimedEventSpec action 异常", exc_info=True)
-
-    def fire_ttl_due(self, now: float) -> None:
-        """TTL 到期触发（兼容旧接口，仅处理 TTL 类型 spec）。"""
-        for spec in self._specs:
-            if spec.params.get("kind") != "ttl":
-                continue
-            try:
-                if spec.at_fn() <= now:
-                    spec.action(spec.params)
-            except Exception:
-                logger.warning("TTL spec action 异常", exc_info=True)
-
-    def clear_ttl(self) -> None:
-        """清空所有 TTL 追踪器。"""
-        for tracker in self._ttl_trackers.values():
-            tracker.clear()
+        while True:
+            # 第一阶段：弹出所有到期项；tick 立即执行，非 tick 先缓冲
+            buffered: List[tuple[float, int, TimedEventSpec]] = []
+            while self._heap and self._heap[0][0] <= now:
+                fire_time, seq, spec = heapq.heappop(self._heap)
+                kind = spec.params.get("kind") if isinstance(spec.params, dict) else None
+                if kind == "tick":
+                    try:
+                        spec.action(spec.params, fire_time)
+                    except Exception:
+                        logger.warning("TimedEventSpec action 异常", exc_info=True)
+                    self._register_next(fire_time, spec)
+                else:
+                    buffered.append((fire_time, seq, spec))
+            if not buffered:
+                break
+            # 第二阶段：执行缓冲的非 tick 规格，可能产生新的到期项
+            for fire_time, _seq, spec in buffered:
+                try:
+                    spec.action(spec.params, fire_time)
+                except Exception:
+                    logger.warning("TimedEventSpec action 异常", exc_info=True)
+                self._register_next(fire_time, spec)
+            # 循环：新入队的周期项若仍 <= now 需要继续处理（追回）
 
 
 # ===========================================================================
@@ -338,92 +282,16 @@ class EventDriver:
 # - ``filter_inputs``: 每条边最近一次过滤的输入股票指纹
 #
 # I94：删除 ``edge_fired`` 字典与 ``exec_ctx[eid]["fired"]`` 字段——两者均
-# 零生产读取。``edge_fired`` 被 engine.py 写入（is_edge_due 结果）但 L322
+# 零生产读取。``edge_fired`` 被 engine.py 写入但 L322
 # 读局部变量；``exec_ctx.fired`` 被 set_exec_ctx_fired 写入但无消费方。
 # edge_fired 非非 exec_ctx.fired 的视图（语义不同：前者为当前 tick 时间
 # 门控结果，后者为边是否曾执行过），原 L7 注释错误。
+#
+# EdgeState / EdgeStateMixin 已迁移至 core/domain（白名单模块），
+# 此处通过顶部 from .domain import 导入，并在 __all__ 中 re-export 保持向后兼容。
 
 
-class EdgeStateMixin:
-    """EdgeState 表级访问方法集合。
 
-    将公式结果缓存与过滤输入指纹的读写从 ``EdgeState`` 核心类中剥离，
-    使其属性/方法数满足架构约束。
-    """
-
-    # ------------------------------------------------------------------
-    # formula_results（公式级结果缓存，亦称 filter_cache）
-    # ------------------------------------------------------------------
-    def get_formula_result(self, formula_ref: Any, bar_hash: str) -> Any:
-        return self.formula_results.get((formula_ref, bar_hash))
-
-    def set_formula_result(self, formula_ref: Any, bar_hash: str, result: Any) -> None:
-        self.formula_results[(formula_ref, bar_hash)] = result
-
-    # ------------------------------------------------------------------
-    # filter_inputs
-    # ------------------------------------------------------------------
-    def set_filter_input(self, eid: str, codes: Iterable[str]) -> None:
-        self.filter_inputs[eid] = frozenset(codes)
-
-    def get_filter_input(self, eid: str) -> Optional[frozenset]:
-        return self.filter_inputs.get(eid)
-
-
-@dataclass
-class EdgeState(EdgeStateMixin):
-    """边级运行时表真相源。
-
-    属性（按架构 ≤5 个）：
-      - exec_ctx
-      - formula_results
-      - filter_inputs
-    """
-
-    exec_ctx: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    formula_results: Dict[Tuple[Any, str], Any] = field(default_factory=dict)
-    filter_inputs: Dict[str, frozenset] = field(default_factory=dict)
-
-    # ------------------------------------------------------------------
-    # exec_ctx（边执行上下文：count / first_fire / last_fire）
-    # ------------------------------------------------------------------
-    def get_exec_ctx(self, eid: str) -> Dict[str, Any]:
-        if eid not in self.exec_ctx:
-            self.exec_ctx[eid] = {
-                "count": 0,
-                "first_fire": None,
-                "last_fire": None,
-            }
-        return self.exec_ctx[eid]
-
-    def set_exec_ctx_fired(self, eid: str, now: Optional[float] = None) -> None:
-        ctx = self.get_exec_ctx(eid)
-        if now is None:
-            now = time.time()
-        ctx["count"] = ctx.get("count", 0) + 1
-        if ctx["first_fire"] is None:
-            ctx["first_fire"] = now
-        ctx["last_fire"] = now
-
-    # ------------------------------------------------------------------
-    # 快照 / 恢复
-    # ------------------------------------------------------------------
-    def snapshot(self) -> Dict[str, Any]:
-        return {
-            "exec_ctx": copy.deepcopy(self.exec_ctx),
-            "formula_results": copy.deepcopy(self.formula_results),
-            "filter_inputs": copy.deepcopy(self.filter_inputs),
-        }
-
-    def restore(self, data: Dict[str, Any]) -> None:
-        self.exec_ctx = copy.deepcopy(data.get("exec_ctx", {}))
-        self.formula_results = copy.deepcopy(data.get("formula_results", {}))
-        self.filter_inputs = copy.deepcopy(data.get("filter_inputs", {}))
-
-    def fresh(self) -> None:
-        self.exec_ctx.clear()
-        self.formula_results.clear()
-        self.filter_inputs.clear()
 
 
 # ===========================================================================
@@ -482,12 +350,30 @@ class TimingSpec(BaseModel):
 
 
 class FilterSpec(BaseModel):
-    """筛选分派规则（读 dispatch.json）。
+    """筛选分派规则（读 dispatch.json + tdx_func 16参数）。
 
     I18：编译期解析 dispatch_key → evaluator_type，运行期按 evaluator_type dict 分派。
     消除 dispatch_key + evaluator 双路径；evaluator_params 承载 scalar 路径 nset_cfg。
     I53：evaluator_type 为唯一运行期分派键；filter_type 降级为元数据（审计追溯），
-    不再参与控制流，FormulaEngine.eval 不再按 filter_type 分派。
+    不再参与控制流，公式引擎.eval 不再按 filter_type 分派。
+
+    TDX func 节点16个参数完整支持：
+    - nset: 条件类型路由(0技术指标,1条件选股,2专家系统,3最新财务,4实时行情,5逻辑运算)
+    - accode: 指标代码/公式名
+    - ntjindexno: 系统指标编号/财务/行情字段索引/集合操作类型(0并/1差/2交)
+    - nperiod: 分析周期(0日线,1周线,2月线,3多分钟,45分钟线等)
+    - nfirst: 第一条指标线索引
+    - cfirst: 第一条指标线名称
+    - noperate: 操作符(0-9)
+    - nsecond: 第二条指标线索引
+    - csecond: 第二条指标线名称
+    - fsecond: 数值阈值(threshold)
+    - nbeginday: 时间窗口起始日
+    - nendday: 时间窗口结束日
+    - bnost: 不包含ST股票
+    - bnotp: 不包含新股/次新股
+    - bnotq: 不包含停牌股票
+    - nperiodnum: 回溯K线数量(排名窗口)
     """
 
     filter_type: str = ""
@@ -499,6 +385,27 @@ class FilterSpec(BaseModel):
     compare_mode: str = ""
     evaluator_type: Literal["pass_through", "formula", "scalar", "set_operation", "intersection"] = "pass_through"
     evaluator_params: Dict[str, Any] = Field(default_factory=dict)
+
+    nset: int = 0
+    accode: str = ""
+    ntjindexno: int = 0
+    nperiod: int = 0
+    nfirst: int = 0
+    cfirst: str = ""
+    nsecond: int = -1
+    csecond: str = ""
+    nbeginday: int = 0
+    nendday: int = 0
+    bnost: bool = False
+    bnotp: bool = False
+    bnotq: bool = False
+    nperiodnum: int = 0
+    formula_args: Dict[str, Any] = Field(default_factory=dict)
+
+    # TDX 转移节点指标面板参数（func/indi/indiparam）
+    func: Dict[str, Any] = Field(default_factory=dict)
+    indi: str = ""
+    indiparam: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class PropagateSpec(BaseModel):
@@ -540,7 +447,6 @@ class TTLSpec(BaseModel):
 class CompiledSchedule(BaseModel):
     """编译期静态调度表。"""
 
-    execution_order: List[str]
     edge_ctx: Dict[str, EdgeContext]
     edge_timing_spec: Dict[str, TimingSpec]
     edge_filter_spec: Dict[str, FilterSpec]
@@ -551,9 +457,8 @@ class CompiledSchedule(BaseModel):
     source_node_ids: Set[str] = Field(default_factory=set)
     # I16：无入边节点的 TTL spec（如预填股票的状态池无入边时仍需 TTL 驱动）
     node_ttl_spec: Dict[str, TTLSpec] = Field(default_factory=dict)
-    # 以下字段为 Task 14 兼容性 facade 保留，供旧测试 / PoolEngine 旧 API 读取
-    topo_order: List[str] = Field(default_factory=list)
-    depths: Dict[str, int] = Field(default_factory=dict)
+    # G6：运行时事件无序，不保留 execution_order/topo_order/depths 等运行时拓扑排序属性。
+    # 边顺序号保留在 edge_index[eid].params._order，供条件节点集合运算排序入边使用。
     nodes: Dict[str, Any] = Field(default_factory=dict)
     edge_index: Dict[str, Any] = Field(default_factory=dict)
 
@@ -866,29 +771,119 @@ def _normalize_nodes(pool_config: Dict[str, Any]) -> Dict[str, Any]:
     return nodes
 
 
+# TDX 转移节点指标面板参数解析辅助（indi / indiparam / func）
+# 加载 ntjindexno → formula_name/args 映射表，用于把前端指标选择解析为 builtin formula
+_TDX_INDICATOR_FORMULA_MAP: Dict[int, Dict[str, Any]] = {}
+try:
+    _tdx_indi_map_cfg = _load_config("tdx_indicator_formula_map.json")
+    for rec in _tdx_indi_map_cfg.get("records", []):
+        ntj = rec.get("ntjindexno")
+        if ntj is not None:
+            _TDX_INDICATOR_FORMULA_MAP[int(ntj)] = rec
+except Exception:
+    _TDX_INDICATOR_FORMULA_MAP = {}
+
+
+def _parse_indiparam(indiparam: Any) -> Dict[str, Any]:
+    """把 indiparam 列表/字典解析为 {参数名: 值}。"""
+    args: Dict[str, Any] = {}
+    if isinstance(indiparam, dict):
+        for k, v in indiparam.items():
+            args[str(k)] = v
+    elif isinstance(indiparam, list):
+        for item in indiparam:
+            if isinstance(item, dict):
+                name = item.get("name") or item.get("n")
+                value = item.get("value") if "value" in item else item.get("v")
+                if name is not None:
+                    args[str(name)] = value
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                args[str(item[0])] = item[1]
+    return args
+
+
+def _resolve_indicator_formula(
+    indi: str,
+    indiparam: Any,
+    func: Optional[Dict[str, Any]] = None,
+    ntjindexno: Optional[int] = None,
+) -> Tuple[str, str, Dict[str, Any]]:
+    """根据指标面板参数解析出 formula_ref / formula_period / formula_args。
+
+    优先级：
+      1. func.accode / indi 直接对应 builtin formula 名称（如 KDJ/MACD）
+      2. ntjindexno 查 tdx_indicator_formula_map 映射
+      3. 兜底返回 indi 作为 formula_ref
+    """
+    func = func or {}
+    accode = str(func.get("accode", "")).strip() or indi.strip()
+    period = _nperiod_to_period(func.get("nperiod")) if func.get("nperiod") is not None else ""
+    args = _parse_indiparam(indiparam)
+
+    # 若 func 内带了 args，也合并进来（indi 面板参数优先）
+    func_args = func.get("args") or func.get("formula_args") or {}
+    if isinstance(func_args, dict):
+        merged_args = dict(func_args)
+        merged_args.update(args)
+        args = merged_args
+
+    # 尝试用 ntjindexno 查映射表
+    if ntjindexno is not None and int(ntjindexno) in _TDX_INDICATOR_FORMULA_MAP:
+        rec = _TDX_INDICATOR_FORMULA_MAP[int(ntjindexno)]
+        formula_name = str(rec.get("formula_name", accode or indi))
+        # 映射表里的 arg 优先级高于面板参数
+        map_arg = rec.get("formula_arg", "")
+        if map_arg:
+            for idx, v in enumerate(str(map_arg).split(",")):
+                v = v.strip()
+                if v:
+                    args.setdefault(f"P{idx + 1}", v)
+        return formula_name, period or "1d", args
+
+    if accode:
+        return accode, period or "1d", args
+
+    return indi, period or "1d", args
+
+
+def _build_tdx_func_from_panel(params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """从通达信转移节点指标面板参数（func / indi / indiparam）合成 tdx_func。
+
+    面板参数常见形态：
+      - params["func"] = {"accode": "KDJ", "nperiod": 4, "noperate": 3, ...}
+      - params["indi"] = "KDJ"
+      - params["indiparam"] = [{"name": "N", "value": 9}, ...]
+
+    合成规则：
+      - func 字典作为基础，缺失字段由 indi / indiparam 推导
+      - indi 作为 accode 回退
+      - indiparam 解析为 formula_args
+      - 若三者皆空返回 None
+    """
+    func = params.get("func") if isinstance(params.get("func"), dict) else {}
+    indi = str(params.get("indi", "")).strip()
+    indiparam = params.get("indiparam")
+    if not func and not indi and not indiparam:
+        return None
+
+    tdx_func: Dict[str, Any] = dict(func)
+    if indi and not tdx_func.get("accode"):
+        tdx_func["accode"] = indi
+    if indiparam is not None and "formula_args" not in tdx_func:
+        tdx_func["formula_args"] = _parse_indiparam(indiparam)
+    # 确保 nset 默认技术指标
+    if "nset" not in tdx_func:
+        tdx_func["nset"] = 0
+    return tdx_func
+
+
 class Compiler:
     """股票池配置编译器：输出 ``CompiledSchedule`` 供运行期只读使用。"""
 
-    # 类方法数 = 6：compile / _build_execution_order / _build_edge_ctx /
+    # 类方法数 = 5：compile / _build_edge_ctx /
     # _build_timing_spec / _build_filter_spec / _build_propagate_spec
     # action/ttl spec 构造已抽到模块级纯函数，在 compile 中调用。
-
-    @staticmethod
-    def _build_execution_order(edges: List[Dict[str, Any]]) -> List[str]:
-        """按 edges 的 ``_order`` 字段生成执行顺序；缺失时按出现顺序。"""
-        keyed: List[Tuple[Any, int, str]] = []
-        for idx, edge in enumerate(edges):
-            if not isinstance(edge, dict):
-                continue
-            eid = edge.get("id") or edge.get("flow_id")
-            if not eid:
-                continue
-            order = edge.get("_order")
-            if order is None and isinstance(edge.get("params"), dict):
-                order = edge["params"].get("_order")
-            keyed.append((order if order is not None else idx, idx, str(eid)))
-        keyed.sort(key=lambda x: (x[0], x[1]))
-        return [eid for _, _, eid in keyed]
+    # G6：已删除 _build_execution_order（运行时事件无序，边顺序号 _order 保留于 edge_ctx 供交集/差集运算）。
 
     @staticmethod
     def _build_edge_ctx(
@@ -904,6 +899,13 @@ class Compiler:
             eid = str(edge.get("id") or edge.get("flow_id") or "")
             if not eid:
                 continue
+            # spec.md L130-133: 自环边（source == target）禁止，抛明确异常而非触发
+            # depths 计算的 while changed 无限循环（L1213-1220）。
+            if sid == tid:
+                raise ValueError(
+                    f"自环边检测到: eid={eid}, sid=tid={sid}；"
+                    f"CompiledSchedule 不允许自环边（spec.md L130-133）"
+                )
             src_type = _resolve_node_type(nodes.get(sid, {}))
             tgt_type = _resolve_node_type(nodes.get(tid, {}))
             edge_type = _resolve_edge_type(src_type)
@@ -991,6 +993,10 @@ class Compiler:
 
         tdx_func = params.get("tdx_func")
 
+        # 若边 params 未携带 tdx_func，尝试从通达信指标面板参数合成
+        if not isinstance(tdx_func, dict) or not tdx_func:
+            tdx_func = _build_tdx_func_from_panel(params)
+
         # 若边 params 未携带 tdx_func，但目标节点是条件节点，则从条件节点继承公式配置
         if not isinstance(tdx_func, dict) or not tdx_func:
             tid = _extract_edge_endpoint(edge, ("to", "target", "endid"))
@@ -998,6 +1004,9 @@ class Compiler:
             tgt_type = str(tgt_node.get("type", tgt_node.get("dzh_cell_type", "")))
             if tgt_type in ("3", "201", "transfer_condition", "condition_filter"):
                 tdx_func = tgt_node.get("params", {}).get("tdx_func")
+                # 条件节点也可能使用面板参数
+                if not isinstance(tdx_func, dict) or not tdx_func:
+                    tdx_func = _build_tdx_func_from_panel(tgt_node.get("params", {}))
 
         if isinstance(tdx_func, dict) and tdx_func:
             nset = int(tdx_func.get("nset", 0) or 0)
@@ -1011,8 +1020,8 @@ class Compiler:
             accode_raw = tdx_func.get("accode")
             accode = str(accode_raw) if accode_raw is not None else ""
             ntjindexno_raw = tdx_func.get("ntjindexno")
-            ntjindexno = str(ntjindexno_raw) if ntjindexno_raw is not None else ""
-            if not accode and not ntjindexno:
+            ntjindexno = int(ntjindexno_raw) if ntjindexno_raw is not None else 0
+            if not accode and ntjindexno_raw is None:
                 evaluator_type = "pass_through"
             else:
                 evaluator_type = Compiler._DISPATCH_KEY_TO_EVALUATOR_TYPE.get(
@@ -1025,9 +1034,9 @@ class Compiler:
             # - set_operation: ntjindexno（操作码，如 "0"）
             # 旧代码统一用 accode or ntjindexno，对 scalar 路径误取 accode 标签（如"现价"）
             if evaluator_type == "formula":
-                formula_ref = accode or ntjindexno
+                formula_ref = accode or str(ntjindexno)
             else:
-                formula_ref = ntjindexno or accode
+                formula_ref = str(ntjindexno) if ntjindexno_raw is not None else accode
 
             # I18：scalar 路径 nset_cfg 转存至 evaluator_params（运行期不再查 _SCALAR_NSET_CFG）
             evaluator_params: Dict[str, Any] = {}
@@ -1038,6 +1047,30 @@ class Compiler:
                 }
 
             formula_period = _nperiod_to_period(tdx_func.get("nperiod"))
+
+            # 提取所有16个TDX func参数
+            def _as_bool(v) -> bool:
+                if isinstance(v, bool):
+                    return v
+                if isinstance(v, (int, float)):
+                    return v != 0
+                if isinstance(v, str):
+                    return v.strip().lower() in ("1", "true", "yes", "on")
+                return False
+
+            nperiod_val = int(tdx_func.get("nperiod", 0) or 0)
+            nfirst_val = int(tdx_func.get("nfirst", 0) or 0)
+            cfirst_val = str(tdx_func.get("cfirst", "") or "").strip()
+            nsecond_val = int(tdx_func.get("nsecond", -1)) if tdx_func.get("nsecond") is not None else -1
+            csecond_val = str(tdx_func.get("csecond", "") or "").strip()
+            nbeginday_val = int(tdx_func.get("nbeginday", 0) or 0)
+            nendday_val = int(tdx_func.get("nendday", 0) or 0)
+            bnost_val = _as_bool(tdx_func.get("bnost", False))
+            bnotp_val = _as_bool(tdx_func.get("bnotp", False))
+            bnotq_val = _as_bool(tdx_func.get("bnotq", False))
+            nperiodnum_val = int(tdx_func.get("nperiodnum", 0) or 0)
+            formula_args_val = tdx_func.get("formula_args") or {}
+
             return FilterSpec(
                 filter_type=dispatch_key or "formula",
                 formula_ref=formula_ref,
@@ -1048,6 +1081,24 @@ class Compiler:
                 compare_mode=str(tdx_func.get("compare_mode") or ""),
                 evaluator_type=evaluator_type,
                 evaluator_params=evaluator_params,
+                nset=nset,
+                accode=accode,
+                ntjindexno=ntjindexno,
+                nperiod=nperiod_val,
+                nfirst=nfirst_val,
+                cfirst=cfirst_val,
+                nsecond=nsecond_val,
+                csecond=csecond_val,
+                nbeginday=nbeginday_val,
+                nendday=nendday_val,
+                bnost=bnost_val,
+                bnotp=bnotp_val,
+                bnotq=bnotq_val,
+                nperiodnum=nperiodnum_val,
+                formula_args=formula_args_val,
+                func=params.get("func") if isinstance(params.get("func"), dict) else {},
+                indi=str(params.get("indi", "")).strip(),
+                indiparam=params.get("indiparam") if isinstance(params.get("indiparam"), list) else [],
             )
 
         # 无 tdx_func 时：先检查边 params 是否直接携带 formula_ref
@@ -1068,6 +1119,9 @@ class Compiler:
                 compare_mode=str(params.get("compare_mode") or ""),
                 evaluator_type="formula",
                 evaluator_params={},
+                func=params.get("func") if isinstance(params.get("func"), dict) else {},
+                indi=str(params.get("indi", "")).strip(),
+                indiparam=params.get("indiparam") if isinstance(params.get("indiparam"), list) else [],
             )
 
         # 无 formula_ref 也无 tdx_func 时，检查 condition_type（如 INTERSECTION）
@@ -1154,7 +1208,6 @@ class Compiler:
             edges = []
 
         edge_ctx = cls._build_edge_ctx(nodes, edges)
-        execution_order = cls._build_execution_order(edges)
         node_types = {nid: _resolve_node_type(node) for nid, node in nodes.items()}
         source_node_ids = {nid for nid, node in nodes.items() if _is_source_node(node)}
 
@@ -1188,20 +1241,13 @@ class Compiler:
             if spec.bdel == 1 and spec.check_type != "none":
                 node_ttl_spec[nid] = spec
 
-        # Task 14: 兼容性 facade 需要的深度 / 拓扑序 / 边索引
-        depths = {nid: 0 for nid in nodes}
-        changed = True
-        while changed:
-            changed = False
-            for ec in edge_ctx.values():
-                if ec.sid in depths and ec.tid in depths and depths[ec.tid] < depths[ec.sid] + 1:
-                    depths[ec.tid] = depths[ec.sid] + 1
-                    changed = True
-        topo_order = sorted(nodes.keys(), key=lambda n: depths.get(n, 0))
-        edge_index = {eid: edge for edge in edges if isinstance(edge, dict) and (edge.get("id") or edge.get("flow_id"))}
+        # G6：运行时事件无序，不再计算 execution_order/topo_order/depths。
+        # 仅保留 edge_index 用于读取边顺序号 _order（条件节点集合运算排序入边）。
+        edge_index = {str(edge.get("id") or edge.get("flow_id")): edge
+                      for edge in edges
+                      if isinstance(edge, dict) and (edge.get("id") or edge.get("flow_id"))}
 
         return CompiledSchedule(
-            execution_order=execution_order,
             edge_ctx=edge_ctx,
             edge_timing_spec=timing_spec,
             edge_filter_spec=filter_spec,
@@ -1211,8 +1257,6 @@ class Compiler:
             node_types=node_types,
             source_node_ids=source_node_ids,
             node_ttl_spec=node_ttl_spec,
-            topo_order=topo_order,
-            depths=depths,
             nodes=nodes,
             edge_index=edge_index,
         )
@@ -1230,7 +1274,7 @@ def _now_ts(state: PoolState) -> float:
     """从 ``state.time_source`` 或本地时间获取当前时间戳。
 
     返回 ``time_at(state)`` 原值——与 ``EventDriver.fire_due(now)`` 中 ``now`` 单位一致。
-    不再转换为 Unix 时间戳，因为 TTL 的 ``at_fn`` / ``pop_expired`` / ``fire_due``
+    不再转换为 Unix 时间戳，因为 TTL 的 ``fire_due`` / ``add_spec``
     全链路共享 ``time_at`` 返回的统一时间单位（wall_clock=Unix秒，virtual=当日秒数偏移）。
     """
     return time_at(state=state)
@@ -1342,16 +1386,17 @@ def _init_entry_trackers(
     tick_table: "TickTable",
     ttl_spec: Optional[Any] = None,
     event_driver: Optional[Any] = None,
+    bus: Any = None,
 ) -> Dict[str, float]:
     """为新进入目标池的股票创建/初始化 tracker，并注册 interval 类型 TTL。
 
-    TTL 类型分派（表驱动）：
-      - check_type="interval"：注册到 TtlTracker（堆，O(log N)），到期由 fire_ttl_due 批量弹出
+    G1 heapq 驱动：
+      - check_type="interval"：per-code 注册到 heapq（一次性，fire_time=ts+ttl_sec）
       - check_type="endtime"：编译期已注册 TimedEventSpec（时钟触发），无需运行期注册
       - check_type="none"：无 TTL，跳过
     """
     prices: Dict[str, float] = {}
-    tgt_stocks = state.get_node_stocks(tgt)
+    tgt_stocks = state.get_pool(tgt).get_stocks()
     tgt_index = {_stock_code(s): s for s in tgt_stocks if isinstance(s, dict)}
 
     for code in entered:
@@ -1375,7 +1420,7 @@ def _init_entry_trackers(
             stock["_tracker"] = tracker
 
             if ttl_spec is not None and event_driver is not None and ttl_spec.bdel == 1 and ttl_spec.check_type == "interval" and ttl_spec.ttl_sec > 0:
-                event_driver.register_ttl(eid, code, ttl_spec.ttl_sec, ts, ts)
+                register_ttl_spec(event_driver, state, tgt, eid, code, ttl_spec.ttl_sec, ts, bus)
 
     return prices
 
@@ -1646,6 +1691,145 @@ _CXTYPE_POST_GATES: Dict[int, Callable[["TimingSpec", Dict[str, Any], float], bo
 }
 
 
+# ---------------------------------------------------------------------------
+# 股票过滤：bnst(排除ST) / bnotp(排除新股) / bnotq(排除停牌)
+# ---------------------------------------------------------------------------
+
+_STOCK_NAMES_CACHE: Optional[Dict[str, str]] = None
+
+
+def _load_stock_names() -> Dict[str, str]:
+    """加载股票名称数据（用于ST判断）。"""
+    global _STOCK_NAMES_CACHE
+    if _STOCK_NAMES_CACHE is not None:
+        return _STOCK_NAMES_CACHE
+    try:
+        path = _CONFIG_DIR / "data" / "mock_data.json"
+        if path.exists():
+            data = json.loads(path.read_text("utf-8"))
+            _STOCK_NAMES_CACHE = data.get("stock_names", {})
+        else:
+            _STOCK_NAMES_CACHE = {}
+    except Exception:
+        _STOCK_NAMES_CACHE = {}
+    return _STOCK_NAMES_CACHE
+
+
+def _is_st_stock(code: str, stock_names: Dict[str, str]) -> bool:
+    """判断是否为ST股票（名称包含ST或*ST）。"""
+    if not code:
+        return False
+    pure_code = code.split(".")[0] if "." in code else code
+    name = stock_names.get(pure_code, "") or stock_names.get(code, "")
+    if not name:
+        return False
+    name_upper = name.upper()
+    return "ST" in name_upper
+
+
+def _is_suspended(code: str, state: "PoolState") -> bool:
+    """判断是否为停牌股票（latest_tick无数据或成交量为0且价格未变化）。"""
+    if state is None:
+        return False
+    latest_tick = getattr(state, "latest_tick", {}) or {}
+    tick = latest_tick.get(code)
+    if tick is None:
+        return True
+    if not isinstance(tick, dict):
+        return False
+    vol = tick.get("volume", tick.get("vol", 0))
+    try:
+        vol_val = float(vol or 0)
+    except (TypeError, ValueError):
+        vol_val = 0
+    if vol_val <= 0:
+        return True
+    return False
+
+
+def _is_new_stock(code: str, state: "PoolState") -> bool:
+    """判断是否为新股/次新股（上市不足60交易日）。
+
+    Mock环境无上市日期数据，保守返回False（不过滤）。
+    """
+    return False
+
+
+def _apply_stock_filters(
+    codes: List[str],
+    spec: FilterSpec,
+    state: "PoolState",
+) -> List[str]:
+    """应用bnst/bnotp/bnotq股票排除开关。
+
+    Args:
+        codes: 待筛选代码列表
+        spec: FilterSpec（含bnst/bnotp/bnotq开关）
+        state: PoolState（用于判断停牌）
+
+    Returns:
+        过滤后的代码列表
+    """
+    if not codes:
+        return []
+    need_st = spec.bnost
+    need_new = spec.bnotp
+    need_suspend = spec.bnotq
+    if not (need_st or need_new or need_suspend):
+        return list(codes)
+    stock_names = _load_stock_names() if need_st else {}
+    result = []
+    for code in codes:
+        if need_st and _is_st_stock(code, stock_names):
+            continue
+        if need_new and _is_new_stock(code, state):
+            continue
+        if need_suspend and _is_suspended(code, state):
+            continue
+        result.append(code)
+    return result
+
+
+def _extract_line_from_series(series_result: Dict[str, Any], line_name: str, line_idx: int) -> Optional[List[float]]:
+    """从公式序列结果中提取指定名称的指标线序列。
+
+    Args:
+        series_result: 单只股票的eval_series返回值，如 {"K": [1.1, 1.2, 1.3], "D": [...]}
+        line_name: 指标线名称（如"K"、"DIF"）
+        line_idx: 指标线索引（备用，当line_name为空时按索引取）
+
+    Returns:
+        数值序列列表（最近N个值，最后一个为最新值）
+    """
+    if not series_result or not isinstance(series_result, dict):
+        return None
+    if line_name and line_name in series_result:
+        val = series_result[line_name]
+        if isinstance(val, list):
+            return [float(x) for x in val if x is not None]
+        return None
+    if line_name:
+        upper_name = line_name.upper()
+        for k, v in series_result.items():
+            if k.upper() == upper_name:
+                if isinstance(v, list):
+                    return [float(x) for x in v if x is not None]
+                return None
+    if line_idx >= 0:
+        keys = list(series_result.keys())
+        if line_idx < len(keys):
+            val = series_result[keys[line_idx]]
+            if isinstance(val, list):
+                return [float(x) for x in val if x is not None]
+            return None
+    keys = list(series_result.keys())
+    if keys:
+        val = series_result[keys[0]]
+        if isinstance(val, list):
+            return [float(x) for x in val if x is not None]
+    return None
+
+
 # nset5 集合运算：0=并集 1=差集 2=交集
 _NSET5_OPS: Dict[int, Callable[[set, set], set]] = {
     0: lambda a, b: a | b,
@@ -1686,7 +1870,7 @@ def _eval_set_operation(
     for other in in_edges:
         if other.sid == sid:
             continue
-        other_stocks |= {_stock_code(s) for s in state.get_node_stocks(other.sid)}
+        other_stocks |= {_stock_code(s) for s in state.get_pool(other.sid).get_stocks()}
 
     op = _NSET5_OPS.get(op_code)
     if op is None:
@@ -1707,11 +1891,12 @@ def _eval_set_operation(
 def _eval_pass_through(
     state: PoolState,
     schedule: CompiledSchedule,
-    formula_engine: FormulaEngine,
+    formula_engine: FormulaEngineProtocol,
     tick_table: "TickTable",
     spec: FilterSpec,
     codes: List[str],
     eid: str,
+    eval_deps: Optional["_FilterEvalDeps"] = None,
 ) -> List[str]:
     """透传：全部通过（无条件边 / 无公式条件边）。"""
     return list(codes)
@@ -1720,101 +1905,250 @@ def _eval_pass_through(
 def _eval_formula_path(
     state: PoolState,
     schedule: CompiledSchedule,
-    formula_engine: FormulaEngine,
+    formula_engine: FormulaEngineProtocol,
     tick_table: "TickTable",
     spec: FilterSpec,
     codes: List[str],
     eid: str,
+    eval_deps: Optional["_FilterEvalDeps"] = None,
 ) -> List[str]:
-    """公式求值路径：nset=0/1/2 + 通用公式，委托 FormulaEngine.eval。"""
+    """公式求值路径：nset=0/1/2，支持全部10种noperate操作符。
+
+    完整支持TDX func节点16参数：
+    - nset/accode/ntjindexno/nperiod/nfirst/cfirst/noperate/nsecond/csecond/fsecond
+    - 通过eval_series获取序列数据，支持cross/inflection/rank/compare
+    - nset=1/2条件选股/专家系统：公式返回XG信号，直接判断XG>0
+    - bnost/bnotp/bnotq股票过滤在结果后应用
+
+    spec.md L128：公式求值异常或无效配置（formula_ref 缺失）时，
+    通过 ``eval_deps.bus`` 发布携带 ``error`` 字段的 FormulaEvaluated 事件，
+    供下游订阅者诊断；求值成功路径 ``error`` 保持默认空串。
+    """
     if not codes:
         return []
+
+    # spec.md L128：formula_ref 缺失视为无效配置，发布携带 error 的事件并降级返回。
+    formula_ref = getattr(spec, "formula_ref", "") or ""
+    bus = getattr(eval_deps, "bus", None) if eval_deps is not None else None
+    if not formula_ref:
+        logger.warning("公式求值跳过：formula_ref 为空 eid=%s", eid)
+        if bus is not None:
+            _publish(bus, FormulaEvaluated(
+                formula_ref=formula_ref,
+                result=None,
+                code="",
+                bar_hash="",
+                error="formula_ref 为空，无法执行公式求值",
+            ))
+        return []
+
     try:
         period = spec.formula_period or "1d"
-        ctx = live_context(state, period=period)
+        ctx = eval_deps.live_ctx_fn(state, period=period)
         ctx.period = period
-        results = formula_engine.eval(spec, codes, ctx)
+        noperate = spec.noperate
+        rule = _NOPERATE_RULES.get(str(noperate), {})
+        mode = rule.get("mode", "compare")
+        lookback = 5
+        if mode == "inflection":
+            lookback = 5
+        elif rule.get("compare") == "cross":
+            lookback = 3
+        else:
+            lookback = 3
+        series_results = formula_engine.eval_series(spec, codes, ctx, lookback=lookback)
     except Exception as ex:
-        logger.warning("公式求值失败 %s: %s", spec.formula_ref, ex)
+        logger.warning("公式序列求值失败 %s: %s", spec.formula_ref, ex)
+        # spec.md L128：异常路径发布携带 error 的 FormulaEvaluated 事件
+        if bus is not None:
+            _publish(bus, FormulaEvaluated(
+                formula_ref=formula_ref,
+                result=None,
+                code="",
+                bar_hash="",
+                error=str(ex),
+            ))
         return []
-    op = spec.compare_mode or _parse_noperate(spec.noperate)
-    return [c for c in codes if _value_passes(results.get(c), spec.threshold, op)]
+
+    nset = spec.nset
+    noperate = spec.noperate
+    rule = _NOPERATE_RULES.get(str(noperate), {})
+    mode = rule.get("mode", "compare")
+    fsecond = spec.threshold
+    cfirst = spec.cfirst
+    csecond = spec.csecond
+    nfirst = spec.nfirst
+    nsecond = spec.nsecond
+
+    if nset in (1, 2):
+        passed = []
+        for code in codes:
+            sres = series_results.get(code)
+            if sres is None:
+                continue
+            xg_line = None
+            if "XG" in sres:
+                xg_line = sres["XG"]
+            else:
+                for k, v in sres.items():
+                    if k.upper() == "XG":
+                        xg_line = v
+                        break
+            if xg_line is None:
+                line1 = _extract_line_from_series(sres, cfirst, nfirst)
+                if line1 and len(line1) > 0:
+                    try:
+                        if float(line1[-1]) > 0:
+                            passed.append(code)
+                    except (TypeError, ValueError):
+                        pass
+                continue
+            if isinstance(xg_line, list) and len(xg_line) > 0:
+                try:
+                    last_val = xg_line[-1]
+                    if last_val is not None and float(last_val) > 0:
+                        passed.append(code)
+                except (TypeError, ValueError):
+                    pass
+        passed = _apply_stock_filters(passed, spec, state)
+        return passed
+
+    if mode == "rank":
+        ranked_pairs: List[Tuple[str, float]] = []
+        for code in codes:
+            sres = series_results.get(code)
+            line1 = _extract_line_from_series(sres, cfirst, nfirst)
+            if line1 and len(line1) > 0 and line1[-1] is not None:
+                try:
+                    val = float(line1[-1])
+                    ranked_pairs.append((code, val))
+                except (TypeError, ValueError):
+                    continue
+        rank_rule = _RANK_MODES.get(str(noperate), {})
+        passed = _resolve_rank(ranked_pairs, fsecond, rank_rule)
+    else:
+        passed = []
+        for code in codes:
+            sres = series_results.get(code)
+            if sres is None:
+                continue
+            line1 = _extract_line_from_series(sres, cfirst, nfirst)
+            if line1 is None or len(line1) == 0:
+                continue
+            if nsecond >= 0 and csecond:
+                line2 = _extract_line_from_series(sres, csecond, nsecond)
+                if line2 is None:
+                    line2 = [fsecond] * len(line1)
+            else:
+                line2 = [fsecond] * len(line1)
+            min_len = min(len(line1), len(line2))
+            if min_len == 0:
+                continue
+            line1 = line1[-min_len:]
+            line2 = line2[-min_len:]
+            op_ctx = _build_op_ctx(line1, line2, rule.get("params", {}))
+            try:
+                result = _eval_op(rule, op_ctx)
+                if result is not None and not isinstance(result, list):
+                    try:
+                        if bool(result):
+                            passed.append(code)
+                    except (TypeError, ValueError):
+                        pass
+            except (IndexError, TypeError, KeyError) as ex:
+                logger.debug("noperate求值异常 code=%s noperate=%d: %s", code, noperate, ex)
+                continue
+    passed = _apply_stock_filters(passed, spec, state)
+    return passed
 
 
 def _eval_scalar_path(
     state: PoolState,
     schedule: CompiledSchedule,
-    formula_engine: FormulaEngine,
+    formula_engine: FormulaEngineProtocol,
     tick_table: "TickTable",
     spec: FilterSpec,
     codes: List[str],
     eid: str,
+    eval_deps: Optional["_FilterEvalDeps"] = None,
 ) -> List[str]:
-    """标量评估路径：nset=3/4，委托 evaluators.eval_scalar_nset。
+    """标量评估路径：nset=3/4（财务/行情选股），委托注入的标量 nset 评估器。
 
-    I18 修复：nset=3/4 现在正确路由至 eval_scalar_nset（旧路径 evaluator 字段
-    承载 "tdx_eval_nset3/4" 而非 "eval_scalar_nset"，导致标量分支永不触发）。
-    I54：缓存收敛到 FormulaEngine.eval_scalar（消除本函数重复的 cache_key
-    构造与 formula_results 读写）。mode 从 time_source 派生，保留原缓存隔离语义。
+    使用spec.ntjindexno作为字段索引（而非旧的formula_ref），
+    传递完整的tdx_func参数，结果后应用股票过滤。
     """
     if not codes:
         return []
 
-    # I54：构造 EvalContext，mode 从 time_source 派生（保留原缓存隔离语义）
-    # I25：tick_table.bar_hash() 与 state.bar_hash() 双层一致。
     kind = state.time_source.get("kind", "live")
     formula_mode = kind if kind in ("live", "replay", "simulation") else "live"
-    ctx = EvalContext(
+    ctx = eval_deps.eval_ctx_factory(
         mode=formula_mode,
         bar_hash=tick_table.bar_hash(),
         bars={},
         latest_tick=state.latest_tick,
     )
 
-    def _evaluator(codes: List[str], ctx: EvalContext) -> Dict[str, Any]:
+    def _evaluator(codes: List[str], ctx: Any) -> Dict[str, Any]:
         prev_lookup = lambda c: tick_table.prev_column(c, "line1")
         action_inputs = {
             "src_params": {"tdx_func": {
-                "ntjindexno": spec.formula_ref,
+                "ntjindexno": spec.ntjindexno,
                 "noperate": spec.noperate,
                 "fsecond": spec.threshold,
+                "accode": spec.accode,
+                "cfirst": spec.cfirst,
+                "csecond": spec.csecond,
+                "nfirst": spec.nfirst,
+                "nsecond": spec.nsecond,
             }},
             "stock_list": codes,
             "market_data_port": getattr(state, "market_data_port", None),
             "current_bar_data": getattr(state, "current_bar_data", {}),
         }
         nset_cfg = spec.evaluator_params or {"nset": 0}
-        passed = eval_scalar_nset(action_inputs, nset_cfg, prev_lookup=prev_lookup)
+        if "nset" not in nset_cfg:
+            nset_cfg["nset"] = spec.nset if spec.nset in (3, 4) else 3
+        passed = eval_deps.scalar_nset_fn(action_inputs, nset_cfg, prev_lookup=prev_lookup)
         passed_set = set(passed)
         return {c: (c in passed_set) for c in codes}
 
     results = formula_engine.eval_scalar(spec, codes, ctx, _evaluator)
-    return [c for c in codes if results.get(c)]
+    passed = [c for c in codes if results.get(c)]
+    passed = _apply_stock_filters(passed, spec, state)
+    return passed
 
 
 def _eval_set_op_path(
     state: PoolState,
     schedule: CompiledSchedule,
-    formula_engine: FormulaEngine,
+    formula_engine: FormulaEngineProtocol,
     tick_table: "TickTable",
     spec: FilterSpec,
     codes: List[str],
     eid: str,
+    eval_deps: Optional["_FilterEvalDeps"] = None,
 ) -> List[str]:
-    """集合运算路径：nset=5，委托 _eval_set_operation。"""
-    op_code = int(spec.formula_ref or 0)
+    """集合运算路径：nset=5（交集/并集/差集）。
+
+    使用spec.ntjindexno作为操作码（0=并集/1=差集/2=交集），
+    而非旧的formula_ref，结果后应用股票过滤。
+    """
+    op_code = int(spec.ntjindexno) if spec.ntjindexno is not None else 0
     passed, _rejected = _eval_set_operation(state, schedule, eid, codes, op_code)
+    passed = _apply_stock_filters(passed, spec, state)
     return passed
 
 
 def _eval_intersection_path(
     state: PoolState,
     schedule: CompiledSchedule,
-    formula_engine: FormulaEngine,
+    formula_engine: FormulaEngineProtocol,
     tick_table: "TickTable",
     spec: FilterSpec,
     codes: List[str],
     eid: str,
+    eval_deps: Optional["_FilterEvalDeps"] = None,
 ) -> List[str]:
     """交集条件路径：委托 evaluate_intersection 筛选与源状态池的交集。"""
     edge_params = spec.evaluator_params or {}
@@ -1828,6 +2162,33 @@ _FILTER_EVALUATORS: Dict[str, Callable[..., List[str]]] = {
     "scalar": _eval_scalar_path,
     "set_operation": _eval_set_op_path,
     "intersection": _eval_intersection_path,
+}
+
+
+# ---------------------------------------------------------------------------
+# Task 8：条件节点激活模型常量
+# ---------------------------------------------------------------------------
+# 条件节点类型集合：识别 EdgeFired 目标节点是否为条件节点。
+# 含 DZH/TDX 标准类型 + 实例 JSON 使用的 "condition" 简写。
+_CONDITION_NODE_TYPES: frozenset = frozenset({
+    "condition", "transfer_condition", "tdx_condition",
+    "dzh_condition_pool", "condition_filter",
+})
+
+# JSON filter_spec.evaluator_type="indicator" → 运行期 "formula"（HQChartPy2 公式路径）
+_COND_EVALUATOR_TYPE_MAP: Dict[str, str] = {
+    "indicator": "formula",
+    "intersection": "intersection",
+    "union": "set_operation",
+    "difference": "set_operation",
+}
+
+# 多入边集合运算：evaluator_type → 集合操作函数（表驱动，无 if/elif 分派）
+_SET_OP_FUNCS: Dict[str, Callable[[Set[str], Set[str]], Set[str]]] = {
+    "intersection": lambda a, b: a & b,
+    "union": lambda a, b: a | b,
+    "difference": lambda a, b: a - b,
+    "set_operation": lambda a, b: a & b,  # 默认交集
 }
 
 
@@ -1847,7 +2208,7 @@ def _tgt_merge(state: PoolState, tid: str, transferred: List[Any], tgt_stocks: L
     """
     existing = {_stock_code(s) for s in tgt_stocks}
     new_stocks = [s for s in transferred if _stock_code(s) not in existing]
-    state.set_node_stocks(tid, tgt_stocks + new_stocks)
+    state.get_pool(tid).add_stocks(new_stocks)
     return [_stock_code(s) for s in new_stocks], []
 
 
@@ -1855,10 +2216,10 @@ def _tgt_overwrite(state: PoolState, tid: str, transferred: List[Any], tgt_stock
     """清空目标写入 transferred，返回 (新入池代码, 被覆盖出目标池代码)。
 
     I66：entered 语义统一 + tracker 保全。旧实现返回 ALL transferred codes，
-    且 set_node_stocks 用 transferred 的 fresh _tracker（仅 entry_time）覆盖
+    且全量替换（pool.remove+add_stocks）用 transferred 的 fresh _tracker（仅 entry_time）覆盖
     已持仓 stock 的完整 _tracker，导致 overwrite + multi-tick 三重 bug：
       1. BUY spam：_run_callback 对 ALL entered 发 BUY（已持仓重复）
-      2. tracker 重置：_init_entry_trackers 对 ALL entered 重置 + set_node_stocks
+      2. tracker 重置：_init_entry_trackers 对 ALL entered 重置 + 全量替换
          用 fresh _tracker 覆盖 → entry_price/entry_time 丢失 → profit_pct/hold_days
          恒 0、TTL 永不触发
       3. ENTER spam：_emit_transfer_events 对 ALL transferred_codes 发 ENTER
@@ -1874,7 +2235,9 @@ def _tgt_overwrite(state: PoolState, tid: str, transferred: List[Any], tgt_stock
         old = existing_map.get(_stock_code(s))
         if old is not None and isinstance(old, dict) and isinstance(s, dict) and old.get("_tracker"):
             s["_tracker"] = old["_tracker"]
-    state.set_node_stocks(tid, transferred)
+    pool = state.get_pool(tid)
+    pool.remove_stocks(list(pool.get_stock_codes()))
+    pool.add_stocks(transferred)
     entered = [_stock_code(s) for s in transferred if _stock_code(s) not in existing_map]
     target_cleared = [c for c in existing_map if c not in transferred_codes]
     return entered, target_cleared
@@ -1883,7 +2246,7 @@ def _tgt_overwrite(state: PoolState, tid: str, transferred: List[Any], tgt_stock
 def _src_delete(state: PoolState, sid: str, src_stocks: List[Any], passed_set: set) -> List[str]:
     """从源池删除已转移股票并标记脏。返回实际离开源池的代码列表。"""
     deleted = [_stock_code(s) for s in src_stocks if _stock_code(s) in passed_set]
-    state.set_node_stocks(sid, [s for s in src_stocks if _stock_code(s) not in passed_set])
+    state.get_pool(sid).remove_stocks(list(passed_set))
     state.mark_node_dirty(sid)
     return deleted
 
@@ -1895,7 +2258,7 @@ def _src_keep(state: PoolState, sid: str, src_stocks: List[Any], passed_set: set
 
 # mode → (target_strategy, source_strategy)（表驱动，无 if/elif 分派）。
 # target_strategy 返回 (entered, target_cleared) 二元组；source_strategy 返回 exited 代码。
-# I21：source_strategy 返回值取代 run() 中 source_before/after 双 get_node_stocks diff。
+# I21：source_strategy 返回值取代 run() 中 source_before/after 双 get_stocks diff。
 # I69：target_strategy 返回值扩展为 (entered, target_cleared)，使 Executed 事件携带
 # 被覆盖出目标池的代码，修复 SnapshotBuilder view drift。
 _PROPAGATE_STRATEGIES: Dict[str, Tuple[Callable[..., List[str]], Callable[..., List[str]]]] = {
@@ -1937,7 +2300,7 @@ class EdgeExecutor:
     属性（实例级，≤ 5）:
       - state: PoolState
       - schedule: CompiledSchedule
-      - formula_engine: FormulaEngine
+      - formula_engine: FormulaEngineProtocol
       - bus: Optional[EventBus]
 
     方法（≤ 6）:
@@ -1952,15 +2315,26 @@ class EdgeExecutor:
         self,
         state: PoolState,
         schedule: CompiledSchedule,
-        formula_engine: FormulaEngine,
+        formula_engine: FormulaEngineProtocol,
         event_bus: Optional[EventBus] = None,
         event_driver: Optional[Any] = None,
+        *,
+        scalar_nset_fn: Optional[Callable] = None,
+        eval_ctx_factory: Optional[Callable] = None,
+        live_ctx_fn: Optional[Callable] = None,
     ) -> None:
         self.state = state
         self.schedule = schedule
         self.formula_engine = formula_engine
         self.bus = event_bus
         self.event_driver = event_driver  # I4：用于注册 TTL 到时事件
+        # 依赖注入容器：避免 execution_module 跨模块 import 公式/选股模块。
+        self._eval_deps = _FilterEvalDeps(
+            scalar_nset_fn=scalar_nset_fn,
+            eval_ctx_factory=eval_ctx_factory,
+            live_ctx_fn=live_ctx_fn,
+            bus=self.bus,
+        )
         # I13：TickTable 实时绑定 state.latest_tick / state.prev_tick（不再空 dict）。
         # DataUpdater._apply_code_tick 推进前快照 prev_tick，使 cross 模式 prev_column 真实可用。
         self._tick_table = TickTable(state.latest_tick, state.prev_tick)
@@ -1971,9 +2345,26 @@ class EdgeExecutor:
             self.bus.subscribe(EdgeFired, self._on_edge_fired)
 
     def _on_edge_fired(self, event: EdgeFired) -> None:
-        """EdgeFired 事件 handler — 经事件触发边执行，携带 changed_codes 增量参数。"""
-        changed = getattr(event, "changed_codes", None)
-        self.run(event.eid, changed_codes=changed)
+        """EdgeFired 事件 handler — 条件节点激活模型（Task 8）+ 非 condition 回退（G3）。
+
+        EdgeFired 只携带 eid+ts（G3）。定位 eid 目标节点：
+        - 条件节点：调用 _activate_condition（SubTask 8.1-8.6 完整流程）
+        - 非条件节点：回退到 run()（gate→filter→propagate，保留原逻辑）
+        """
+        ec = self.schedule.edge_ctx.get(event.eid)
+        if ec is None:
+            return
+        # Task 8 SubTask 8.1：条件节点激活分支
+        if self._is_condition_node(ec.tid):
+            self._activate_condition(event.eid)
+            return
+        # 非条件节点：保留原 run() 路径（G3 从源池 StatePoolView 取脏股票）
+        source_pool = self.state.get_pool(ec.sid)
+        dirty_codes = source_pool.get_dirty_codes()
+        # first_run 兜底：脏股票为空且首次运行时，用源池全量股票
+        if not dirty_codes and getattr(self.state, "first_run", False):
+            dirty_codes = set(_stock_code(s) for s in source_pool.get_stocks() if isinstance(s, dict))
+        self.run(event.eid, changed_codes=list(dirty_codes) if dirty_codes else None)
 
     def run(self, eid: str, changed_codes: Optional[List[str]] = None) -> bool:
         """执行单条边：gate → filter → propagate → callback。
@@ -2000,8 +2391,29 @@ class EdgeExecutor:
         self.state.set_exec_ctx_fired(eid, now=_now_ts(self.state))
 
         # 2. filter（changed_codes 驱动增量筛选）
-        source_codes = [_stock_code(s) for s in self.state.get_node_stocks(ec.sid)]
-        passed, _rejected = self._filter(filter_spec, source_codes, ec.eid, changed_codes=changed_codes)
+        source_codes = [_stock_code(s) for s in self.state.get_pool(ec.sid).get_stocks()]
+        passed, rejected = self._filter(filter_spec, source_codes, ec.eid, changed_codes=changed_codes)
+
+        # 2b. 发布 FormulaEvaluated → StockFiltered（Spec 顺序：公式计算先于筛选）
+        if self.bus is not None and filter_spec is not None:
+            formula_ref = getattr(filter_spec, 'formula_ref', '')
+            if formula_ref:
+                all_evaluated = list(passed) + list(rejected)
+                for code in all_evaluated:
+                    result = code in passed
+                    _publish(self.bus, FormulaEvaluated(
+                        formula_ref=formula_ref,
+                        result=result,
+                        code=code,
+                        bar_hash="",
+                    ))
+            _publish(self.bus, StockFiltered(
+                eid=ec.eid,
+                passed=list(passed),
+                rejected=list(rejected),
+                filter_ref=getattr(filter_spec, 'formula_ref', ''),
+                ts=_now_ts(self.state),
+            ))
 
         # 3. propagate
         entered, exited, target_cleared = self._propagate(propagate_spec, ec.sid, ec.tid, passed)
@@ -2011,7 +2423,7 @@ class EdgeExecutor:
         ts = _now_ts(self.state)
         prices = _init_entry_trackers(
             self.state, ec.tid, entered, ts, ec.eid, self._tick_table,
-            ttl_spec=ttl_spec, event_driver=self.event_driver,
+            ttl_spec=ttl_spec, event_driver=self.event_driver, bus=self.bus,
         ) if entered else {}
         # 4b. 节点级 TTL 注册（状态池/目标池的 hold 时间，例如 pool_C 20 分钟）
         if entered and self.event_driver is not None:
@@ -2019,7 +2431,7 @@ class EdgeExecutor:
             if node_ttl is not None and node_ttl.bdel == 1 and node_ttl.check_type == "interval" and node_ttl.ttl_sec > 0:
                 node_ttl_eid = f"node_ttl:{ec.tid}"
                 for code in entered:
-                    self.event_driver.register_ttl(node_ttl_eid, code, node_ttl.ttl_sec, ts, ts)
+                    register_ttl_spec(self.event_driver, self.state, ec.tid, node_ttl_eid, code, node_ttl.ttl_sec, ts, self.bus)
         actions = action_spec.target_pool_actions if action_spec else []
 
         # 5. 发布 Executed 事件
@@ -2039,6 +2451,16 @@ class EdgeExecutor:
                 mode=propagate_mode,
                 details=details,
             ))
+            if entered or exited:
+                _publish(self.bus, TransferExecuted(
+                    src=ec.sid,
+                    tgt=ec.tid,
+                    codes=list(entered) if entered else [],
+                    mode=propagate_mode,
+                    ts=ts,
+                    entered_codes=list(entered) if entered else [],
+                    exited_codes=list(exited) if exited else [],
+                ))
 
         # 6. callback
         _run_callback(self.state, ec, action_spec, ec.tid, entered, ts, prices, self.bus)
@@ -2134,6 +2556,7 @@ class EdgeExecutor:
         newly_passed = handler(
             self.state, self.schedule, self.formula_engine,
             self._tick_table, spec, eval_codes, eid,
+            eval_deps=self._eval_deps,
         )
         passed_set = (prev_passed | set(newly_passed)) & codes_set
 
@@ -2163,7 +2586,7 @@ class EdgeExecutor:
         （消除 ``if spec.mode == "overwrite" or spec.clear_dest_first`` 双路径）。
         4 模式分解为 (target_strategy, source_strategy) 二元组，运行期只查表。
         I21：source_strategy 返回 exited 列表，取代 run() 中 source_before/after
-        双 ``get_node_stocks`` diff——消除 2 次冗余读取，propagate 契约完备
+        双 ``get_stocks`` diff——消除 2 次冗余读取，propagate 契约完备
         （同时知道 entered 与 exited 两个方向的状态变更）。
         I69：target_strategy 返回 (entered, target_cleared) 二元组，使 Executed
         事件携带三个方向的完整状态变更——entered/exited/target_cleared。
@@ -2172,8 +2595,8 @@ class EdgeExecutor:
             spec = PropagateSpec()
 
         passed_set = set(passed)
-        src_stocks = self.state.get_node_stocks(sid)
-        tgt_stocks = self.state.get_node_stocks(tid)
+        src_stocks = self.state.get_pool(sid).get_stocks()
+        tgt_stocks = self.state.get_pool(tid).get_stocks()
 
         now_ts = _now_ts(self.state)
         transferred = []
@@ -2191,272 +2614,481 @@ class EdgeExecutor:
         entered, target_cleared = tgt_strategy(self.state, tid, transferred, tgt_stocks)
         exited = src_strategy(self.state, sid, src_stocks, passed_set)
 
-        if self.event_driver is not None and target_cleared:
-            for eid_key, ec in self.schedule.edge_ctx.items():
-                if ec.tid == tid:
-                    for code in target_cleared:
-                        self.event_driver.unregister_ttl(eid_key, code)
-                    break
+        # G1 heapq：TTL 惰性删除——股票出池后 TTL 到时 action 检测 pool 后自动跳过，
+        # 无需主动 unregister（heapq 不支持高效随机删除）。
 
         self.state.mark_node_dirty(tid)
         return entered, exited, target_cleared
 
+    # ------------------------------------------------------------------
+    # Task 8：条件节点激活模型（SubTask 8.1-8.6）
+    # ------------------------------------------------------------------
 
-# ===========================================================================
-# 统一时间驱动：所有到时事件统一为 TimedEventSpec（原 core/compiler.py 尾部）
-# ===========================================================================
+    def _is_condition_node(self, nid: str) -> bool:
+        """SubTask 8.1：判断节点是否为条件节点。
 
+        表驱动查 _CONDITION_NODE_TYPES，覆盖 DZH/TDX 标准类型 + 实例 JSON "condition" 简写。
+        """
+        node_type = self.schedule.node_types.get(nid, "")
+        return node_type in _CONDITION_NODE_TYPES
 
-def _make_edge_at_fn(state: Any, eid: str, timing: "TimingSpec",
-                     edge_executor: Any) -> Callable[[], float]:
-    """构造边触发的 at_fn：委托 ``edge_executor._gate`` 判定，返回 <= now 表示到期。
+    def _build_cond_filter_spec(self, cond_params: Dict[str, Any]) -> FilterSpec:
+        """SubTask 8.2/8.6：从条件节点 params 合成运行期 FilterSpec。
 
-    at_fn 语义：
-        - ``_gate`` 通过 → 返回 0.0（已到期，应触发 action）
-        - ``_gate`` 拒绝 → 返回 now + 1.0（未到期，下一 tick 再评估）
-    """
+        条件节点承载计算参数（func/indi/indiparam/filter_spec），本方法在激活时
+        合成 FilterSpec，不修改编译期 schedule.edge_filter_spec。
 
-    def at_fn() -> float:
-        try:
-            if edge_executor._gate(timing, eid):
-                return 0.0
-        except Exception:
-            pass
-        return _state_now(state) + 1.0
+        公式/筛选分离（SubTask 8.6）：
+        - FilterSpec 携带 formula_ref/formula_period/formula_args 供公式引擎.eval_series
+          计算（公式 = 添加列）
+        - noperate/nset 供 _eval_op 按 _NOPERATE_RULES prev_expr/curr_expr 比较
+          （筛选 = 列操作），无 cross 函数，金叉通过 noperate=3 实现
 
-    return at_fn
+        JSON evaluator_type 映射（_COND_EVALUATOR_TYPE_MAP）：
+        - "indicator" → "formula"（HQChartPy2 公式路径）
+        - "intersection" → "intersection"（多入边集合运算）
+        - "union"/"difference" → "set_operation"
+        """
+        fs_dict = cond_params.get("filter_spec") or {}
+        if not isinstance(fs_dict, dict):
+            fs_dict = {}
+        json_eval_type = str(fs_dict.get("evaluator_type", "")).strip()
+        runtime_eval_type = _COND_EVALUATOR_TYPE_MAP.get(
+            json_eval_type, json_eval_type or "pass_through"
+        )
 
+        func = cond_params.get("func") if isinstance(cond_params.get("func"), dict) else {}
+        indi = str(cond_params.get("indi", "")).strip()
+        indiparam = (
+            cond_params.get("indiparam")
+            if isinstance(cond_params.get("indiparam"), list)
+            else []
+        )
 
-def _make_edge_action(bus: Any, eid: str, sid: str, tid: str, edge_executor: Any, state: Any, schedule: Any, source_ids: set) -> Callable[[Any], None]:
-    """构造边触发的 action：发布 EdgeFired 事件（携带 changed_codes）。
+        # 复用 _build_tdx_func_from_panel 合成 tdx_func（func + indi + indiparam）
+        tdx_func = _build_tdx_func_from_panel(cond_params) or dict(func)
 
-    时间触发与执行分离——at_fn 判定时间，action 发布事件，EdgeExecutor 订阅
-    EdgeFired 后执行 gate→filter→propagate→callback。
-    changed_codes 取自 DirtyState.changed_codes（本 tick 有 Tick/Bar 更新的股票集合），
-    使筛选器可增量评估，仅对变化股票重新计算公式，未变化股票沿用上一次缓存结果。
+        formula_ref = (
+            str(tdx_func.get("accode", "")).strip()
+            or indi
+            or str(fs_dict.get("formula_ref", "")).strip()
+        )
+        formula_period = _nperiod_to_period(tdx_func.get("nperiod"))
+        formula_args = tdx_func.get("formula_args") or {}
+        noperate = int(tdx_func.get("noperate", fs_dict.get("noperate", 0)) or 0)
+        nset = int(tdx_func.get("nset", fs_dict.get("nset", 0)) or 0)
+        fsecond = float(fs_dict.get("fsecond", 0) or 0)
 
-    新逻辑（视图模型）：
-    - is_source_dirty：dirty.data 为 True 且源节点在 source_ids 中
-    - is_node_dirty：dirty.nodes.get(src, False)（边到期触发时）
-    - changed = dirty.changed_codes ∩ 源池股票代码集合（当 is_source_dirty 时）
-    - 首次运行或 changed_codes 为空时，changed = 源池所有股票（全量评估）
-    """
+        # nfirst/cfirst/nsecond/csecond 从 func 读取（指标线索引/名称）
+        nfirst = int(tdx_func.get("nfirst", 0) or 0)
+        cfirst = str(tdx_func.get("cfirst", "") or "").strip()
+        nsecond_raw = tdx_func.get("nsecond")
+        nsecond = int(nsecond_raw) if nsecond_raw is not None else -1
+        csecond = str(tdx_func.get("csecond", "") or "").strip()
 
-    def action(params: Any) -> None:
-        ec = schedule.edge_ctx.get(eid)
+        return FilterSpec(
+            filter_type="formula" if runtime_eval_type == "formula" else runtime_eval_type,
+            formula_ref=formula_ref,
+            formula_period=formula_period,
+            threshold=fsecond,
+            noperate=noperate,
+            evaluator_type=runtime_eval_type,
+            nset=nset,
+            accode=formula_ref,
+            nperiod=int(tdx_func.get("nperiod", 0) or 0),
+            nfirst=nfirst,
+            cfirst=cfirst,
+            nsecond=nsecond,
+            csecond=csecond,
+            formula_args=formula_args,
+            func=func,
+            indi=indi,
+            indiparam=indiparam,
+        )
+
+    def _collect_in_edges_ordered(self, cond_nid: str) -> List[EdgeContext]:
+        """SubTask 8.2：收集条件节点的所有入边，按 _order 排序。
+
+        入边 = edge_ctx 中 tid == cond_nid 的边。
+        顺序号从 edge_index[eid].params._order 读取（G6 保留边顺序号用于交集/差集运算次序）。
+        """
+        in_edges = [ec for ec in self.schedule.edge_ctx.values() if ec.tid == cond_nid]
+
+        def _order_key(ec: EdgeContext) -> int:
+            edge_dict = self.schedule.edge_index.get(ec.eid, {})
+            params = edge_dict.get("params", {}) if isinstance(edge_dict, dict) else {}
+            return int(params.get("_order", 0) or 0)
+
+        return sorted(in_edges, key=_order_key)
+
+    def _apply_set_operation(
+        self, port_results: Dict[int, List[str]], eval_type: str
+    ) -> List[str]:
+        """SubTask 8.3：多入边集合运算。
+
+        表驱动查 _SET_OP_FUNCS，无 if/elif 分派：
+        - 单入边：直接输出
+        - 多入边：按 eval_type 做交集/差集/并集（默认交集）
+        """
+        if not port_results:
+            return []
+        if len(port_results) == 1:
+            return list(next(iter(port_results.values())))
+        op_fn = _SET_OP_FUNCS.get(eval_type, _SET_OP_FUNCS["intersection"])
+        result: Optional[Set[str]] = None
+        for order in sorted(port_results.keys()):
+            codes = set(port_results[order])
+            result = codes if result is None else op_fn(result, codes)
+        return list(result) if result else []
+
+    def _transfer_to_target(
+        self,
+        out_edge: EdgeContext,
+        cond_nid: str,
+        passed: List[str],
+    ) -> Tuple[List[str], List[str]]:
+        """SubTask 8.4/8.5：通过出边输出到目标池 + TTL 注册 + 事件链。
+
+        - add_stocks + 标脏（StatePoolView.add_stocks 内部调 add_changed_codes）
+        - 注册 per-code TTL 一次性定时器到 heapq（G1 统一队列）
+        - 发布 Executed + TransferExecuted（TradeModule 订阅后触发买入链：
+          TransferExecuted → Signal(buy,100) → OrderPlaced → OrderFilled → PositionUpdated）
+
+        条件节点不持有股票，transferred 从 passed codes 构造 minimal stock dict。
+        """
+        if not passed:
+            return [], []
+        tgt = out_edge.tid
+        tgt_pool = self.state.get_pool(tgt)
+        now_ts = _now_ts(self.state)
+
+        # 构造 transferred stocks（条件节点无股票池，用 passed codes 构造 minimal dict）
+        transferred = []
+        for code in passed:
+            ns = {"code": code}
+            ns["_tracker"] = {"entry_time": now_ts}
+            transferred.append(ns)
+
+        # 复用 _tgt_merge（copy 模式）：追加去重写入目标池 + 标脏
+        tgt_stocks = tgt_pool.get_stocks()
+        entered, _target_cleared = _tgt_merge(self.state, tgt, transferred, tgt_stocks)
+        exited: List[str] = []  # 条件节点不持有股票，无 exited
+
+        # 注册 per-code TTL 一次性定时器（SubTask 8.4）
+        ttl_spec = self.schedule.node_ttl_spec.get(tgt)
+        if (
+            entered
+            and self.event_driver is not None
+            and ttl_spec is not None
+            and ttl_spec.bdel == 1
+            and ttl_spec.check_type == "interval"
+            and ttl_spec.ttl_sec > 0
+        ):
+            node_ttl_eid = f"node_ttl:{tgt}"
+            for code in entered:
+                register_ttl_spec(
+                    self.event_driver, self.state, tgt,
+                    node_ttl_eid, code, ttl_spec.ttl_sec, now_ts, self.bus,
+                )
+
+        # tracker 初始化（记录 entry_price 等，供卖出时计算 profit_pct/hold_days）
+        if entered:
+            _init_entry_trackers(
+                self.state, tgt, entered, now_ts, out_edge.eid, self._tick_table,
+                ttl_spec=ttl_spec, event_driver=self.event_driver, bus=self.bus,
+            )
+
+        # 发布 Executed + TransferExecuted（SubTask 8.5：C 池入池触发买入链）
+        if self.bus is not None and (entered or exited):
+            propagate_mode = "copy"
+            _publish(self.bus, Executed(
+                eid=out_edge.eid,
+                sid=cond_nid,
+                tid=tgt,
+                entered=list(entered),
+                exited=exited,
+                target_cleared=[],
+                mode=propagate_mode,
+                details={"timestamp": now_ts},
+            ))
+            _publish(self.bus, TransferExecuted(
+                src=cond_nid,
+                tgt=tgt,
+                codes=list(entered) if entered else [],
+                mode=propagate_mode,
+                ts=now_ts,
+                entered_codes=list(entered) if entered else [],
+                exited_codes=exited,
+            ))
+        return entered, exited
+
+    def _activate_condition(self, eid: str) -> bool:
+        """SubTask 8.1-8.6：条件节点激活主流程。
+
+        EdgeFired(eid) → 定位条件节点 → 收集所有入边（按 _order 排序）
+        → 每条入边取源池脏股票 + 公式计算 + 筛选 → port_results[order]
+        → 集合运算（单入边直接输出，多入边交集/差集/并集）
+        → 出边输出到目标池 + TTL + 事件链
+
+        公式/筛选分离（SubTask 8.6）：
+        - 公式 = 添加列（公式引擎.eval_series 写入 series_results）
+        - 筛选 = 列操作（_eval_op 按 noperate 规则做 prev_expr/curr_expr 比较，无 cross）
+        - 增量评估：仅对 dirty_codes 重新评估，合并规则 passed = (cached - dirty) | newly_passed
+        """
+        ec = self.schedule.edge_ctx.get(eid)
         if ec is None:
-            return
-        src = ec.sid
-        dirty = state.dirty
-        is_node_dirty = dirty.nodes.get(src, False)
-        is_source_dirty = dirty.data and src in source_ids
-        if not (is_node_dirty or is_source_dirty):
-            return
-        source_stocks = state.get_node_stocks(src)
-        source_codes = set(_stock_code(s) for s in source_stocks if isinstance(s, dict))
-        if not dirty.changed_codes:
-            changed = set(source_codes)
-        else:
-            changed = dirty.changed_codes & source_codes
+            return False
+        cond_nid = ec.tid
+        if not self._is_condition_node(cond_nid):
+            return False
+
+        cond_node = self.schedule.nodes.get(cond_nid, {})
+        cond_params = cond_node.get("params", {}) if isinstance(cond_node, dict) else {}
+        filter_spec = self._build_cond_filter_spec(cond_params)
+
+        # SubTask 8.2：收集所有入边按 _order 排序
+        in_edges = self._collect_in_edges_ordered(cond_nid)
+        if not in_edges:
+            return False
+
+        port_results: Dict[int, List[str]] = {}
+        for in_edge in in_edges:
+            source_pool = self.state.get_pool(in_edge.sid)
+            dirty_codes = source_pool.get_dirty_codes()
+            source_codes = [
+                _stock_code(s) for s in source_pool.get_stocks() if isinstance(s, dict)
+            ]
+            # first_run 兜底：脏股票为空且首次运行时，用源池全量股票
+            if not dirty_codes and getattr(self.state, "first_run", False):
+                dirty_codes = set(source_codes)
+            # 提前计算 order，供空源池分支记录占位空列表
+            edge_dict = self.schedule.edge_index.get(in_edge.eid, {})
+            params = edge_dict.get("params", {}) if isinstance(edge_dict, dict) else {}
+            order = int(params.get("_order", 0) or 0)
+            if not source_codes:
+                # 交集运算中，空源池应记录为空列表而非跳过，否则
+                # _apply_set_operation 会因 len(port_results)==1 退化为
+                # 单入边直接返回（数学定义 A∩∅=∅，原代码退化为 A∩∅=B）
+                if filter_spec.evaluator_type == "intersection":
+                    port_results[order] = []
+                continue
+
+            if filter_spec.evaluator_type == "intersection":
+                # SubTask 8.3 交集条件：port_results 记录源池当前股票全集，集合运算在后面做
+                # 用 source_codes（当前股票全集）而非 dirty_codes，否则不同池的脏股票
+                # 通常无交集，恒为空，无法发现"当前同时在两个池中"的股票。
+                passed_list = list(source_codes)
+            else:
+                # SubTask 8.2/8.6 公式条件：_filter 内部调公式引擎.eval_series
+                # （公式 = 添加列）+ _eval_op（筛选 = 列操作），增量评估 dirty_codes
+                changed = list(dirty_codes) if dirty_codes else None
+                passed_list, _rejected = self._filter(
+                    filter_spec, source_codes, eid=in_edge.eid,
+                    changed_codes=changed,
+                )
+                # 发布 FormulaEvaluated → StockFiltered（与 run() 方法保持一致，
+                # 使条件节点激活路径也产生公式评估与筛选事件）
+                if self.bus is not None:
+                    formula_ref = getattr(filter_spec, 'formula_ref', '')
+                    if formula_ref:
+                        all_evaluated = list(passed_list) + list(_rejected)
+                        for code in all_evaluated:
+                            result = code in passed_list
+                            _publish(self.bus, FormulaEvaluated(
+                                formula_ref=formula_ref,
+                                result=result,
+                                code=code,
+                                bar_hash="",
+                            ))
+                    _publish(self.bus, StockFiltered(
+                        eid=in_edge.eid,
+                        passed=list(passed_list),
+                        rejected=list(_rejected),
+                        filter_ref=getattr(filter_spec, 'formula_ref', ''),
+                        ts=_now_ts(self.state),
+                    ))
+
+            # order 已在循环开头提前计算
+            port_results[order] = passed_list
+
+        # SubTask 8.3：集合运算
+        final_passed = self._apply_set_operation(port_results, filter_spec.evaluator_type)
+        if not final_passed:
+            return True  # 触发成功但无股票通过
+
+        # SubTask 8.4：通过出边输出到目标池
+        out_edges = [e for e in self.schedule.edge_ctx.values() if e.sid == cond_nid]
+        for out_edge in out_edges:
+            self._transfer_to_target(out_edge, cond_nid, final_passed)
+        return True
+
+
+# ===========================================================================
+# 统一时间驱动（G1 heapq）：所有到时事件注册到 EventDriver 单一 heapq
+# ===========================================================================
+
+
+def _make_edge_action(bus: Any, eid: str, state: Any) -> Callable[..., None]:
+    """构造边触发的 action：只发布 EdgeFired 事件（G2/G3 只携带 eid+ts）。
+
+    G1 heapq 驱动：定时器到时→action 发布 EdgeFired + fire_due 立即注册下次。
+    EdgeExecutor 订阅 EdgeFired 后执行 gate→filter→propagate→callback。
+    脏股票由 EdgeExecutor._on_edge_fired 从源池 StatePoolView.get_dirty_codes() 取，
+    action 不再计算/携带 changed_codes，也不调用 edge_executor.run()。
+
+    fire_time 由 EventDriver.fire_due 注入（spec 在 heapq 中实际到期的时刻），
+    使 EdgeFired.ts 反映真实触发顺序，避免同一仿真步内所有边触发共享
+    self.clock 导致前端时间轴堆叠为一条线。
+    """
+
+    def action(params: Any, fire_time: Optional[float] = None) -> None:
+        # G2：action 只发布 EdgeFired 事件，不执行计算
+        # fire_time 优先（来自 heapq 弹出的精确时刻），None 时退回 time_at(state)
+        ts = fire_time if fire_time is not None else time_at(state=state)
         if bus is not None:
-            from .event_bus import EdgeFired as _EdgeFired
-            bus.publish(_EdgeFired(
+            bus.publish(EdgeFired(
                 eid=eid,
-                ts=time_at(state=state),
-                changed_codes=list(changed),
+                ts=ts,
             ))
-        else:
-            edge_executor.run(eid, changed_codes=list(changed))
 
     return action
 
 
-def _make_ttl_interval_at_fn(tracker: Any) -> Callable[[], float]:
-    """构造 TTL interval 类型的 at_fn：委托 TtlTracker.next_expire_at()。
+def _make_ttl_interval_action(state: Any, tgt: str, eid: str, ttl_sec: float, bus: Any) -> Callable[..., None]:
+    """构造 TTL interval 类型的 action（G1 per-code 一次性触发，G2 只发事件）。
 
-    堆空返回 inf（永不到期），与边触发 at_fn 共用 at_fn() <= now 语义。
+    每只股票入池时注册独立的 TimedEventSpec（interval=None 一次性），
+    到时 action 从 params 读取 code，发布 TTLDue(node_id=tgt, code=code, ts)。
+    不执行删除/卖出逻辑（由 TradeModule 订阅 TTLDue 后自行完成）。
+    若股票已出池（惰性删除），action 检测后跳过。
+
+    Args:
+        state:   PoolState 实例
+        tgt:     目标池 ID
+        eid:     边/流程 ID
+        ttl_sec: TTL 间隔秒数（用于事件 details）
+        bus:     EventBus 实例
+
+    fire_time 由 EventDriver.fire_due 注入，使 TTLDue.ts 反映真实触发时刻，
+    避免 self.clock 在仿真步内为常量导致前端时间轴堆叠。
     """
 
-    def at_fn() -> float:
-        return tracker.next_expire_at()
-
-    return at_fn
-
-
-def _make_ttl_interval_action(state: Any, tracker: Any, bus: Any) -> Callable[[Any], None]:
-    """构造 TTL interval 类型的 action：pop_expired → 发布 SELL Signal + DomainEvent(TIMEOUT)。
-
-    到时触发与执行分离——TtlTracker 管理到期时间，action 发布事件，
-    订阅者（engine）执行批量删除。Tracker 不发布事件。
-
-    SubTask 27.4：``time_at`` / ``_stock_code`` / ``DomainEvent`` / ``Signal``
-    已随 ``time_util.py`` / ``edge_executor.py`` / ``event_bus`` 一并迁移至本模块，
-    原动态 import 链移除，直接使用本地名称。
-    
-    修复：价格优先从 state.latest_tick 获取，tracker 价格作为后备。
-    """
-
-    def action(params: Any) -> None:
-        now_val = time_at(state=state)
-        expired = tracker.pop_expired(now_val)
-        if not expired:
+    def action(params: Any, fire_time: Optional[float] = None) -> None:
+        code = params.get("code")
+        if not code:
             return
-        tgt = tracker.tgt
-        eid = tracker.eid
-        codes = [e.code for e in expired]
-
-        expired_prices: Dict[str, float] = {}
-        latest_tick = getattr(state, "latest_tick", {}) or {}
-        for s in state.get_node_stocks(tgt):
-            if isinstance(s, dict) and _stock_code(s) in set(codes):
-                code = _stock_code(s)
-                tick_price = 0.0
-                tick_data = latest_tick.get(code, {})
-                if isinstance(tick_data, dict):
-                    tick_price = float(tick_data.get("close", tick_data.get("price", 0.0)) or 0.0)
-                if tick_price > 0:
-                    expired_prices[code] = tick_price
-                else:
-                    tr = s.get("_tracker")
-                    if isinstance(tr, dict):
-                        expired_prices[code] = float(
-                            tr.get("current_price", tr.get("entry_price", 0))
-                        )
-
-        kept = [s for s in state.get_node_stocks(tgt) if _stock_code(s) not in set(codes)]
-        if len(kept) < len(state.get_node_stocks(tgt)):
-            state.set_node_stocks(tgt, kept)
-            state.mark_node_dirty(tgt)
-            logging.getLogger(__name__).info("TTL expire: removed %s from %s", codes, tgt)
-
-        for entry in expired:
-            price = expired_prices.get(entry.code, 0)
-            bus.publish(Signal(
-                signal_type="SELL",
-                code=entry.code,
-                pool_id=tgt,
-                price=price,
-                ts=now_val,
-                quantity=0,
-            ))
-            bus.publish(DomainEvent(
-                event_type="TIMEOUT",
-                code=entry.code,
-                pool_id=tgt,
-                details={
-                    "reason": "TTL_EXPIRED",
-                    "flow_id": eid,
-                    "ttl_sec": entry.ttl_sec,
-                    "timestamp": entry.expire_at,
-                },
-            ))
+        pool = state.get_pool(tgt)
+        stocks = pool.get_stocks()
+        # 惰性删除：若股票已出池则跳过（由 move 边传播移除）
+        code_in_pool = False
+        for s in stocks:
+            if isinstance(s, dict) and _stock_code(s) == code:
+                code_in_pool = True
+                break
+        if not code_in_pool:
+            return
+        # G2：action 只发布 TTLDue 事件，不执行删除/卖出逻辑
+        # fire_time 优先（来自 heapq 弹出的精确时刻），None 时退回 time_at(state)
+        now_val = fire_time if fire_time is not None else time_at(state=state)
+        bus.publish(TTLDue(
+            node_id=tgt,
+            code=code,
+            ts=now_val,
+        ))
 
     return action
 
 
-def _make_ttl_endtime_at_fn(state: Any, endtime_sec: int) -> Callable[[], float]:
-    """构造 TTL endtime 类型的 at_fn：当前时刻 >= endtime_sec 时返回 0.0（到期）。
-
-    SubTask 27.4：``time_at`` / ``is_offset_of_day`` / ``_current_seconds_of_day``
-    已随 ``time_util.py`` / ``edge_executor.py`` 一并迁移至本模块，原动态 import
-    链移除，直接使用本地名称。
-    """
-
-    def at_fn() -> float:
-        now = time_at(state=state)
-        now_sec = _current_seconds_of_day(now)
-        if now_sec >= endtime_sec:
-            return 0.0
-        return now + 1.0
-
-    return at_fn
-
-
-def _make_ttl_endtime_action(state: Any, ttl_spec: "TTLSpec", tgt: str, bus: Any, eid: str) -> Callable[[Any], None]:
-    """构造 TTL endtime 类型的 action：扫描 hold 超时股票 → 发布 SELL Signal + DomainEvent(TIMEOUT)。
+def _make_ttl_endtime_action(state: Any, ttl_spec: "TTLSpec", tgt: str, bus: Any, eid: str) -> Callable[..., None]:
+    """构造 TTL endtime 类型的 action：扫描 hold 超时股票 → 发布 TTLDue（G2 只发事件）。
 
     endtime 模式在时钟到达 endtime_sec 时触发，检查 hold_for_ttl 过滤超时股票。
     这不是轮询——是时钟驱动的单次/周期触发。
-    
-    修复：添加 SELL Signal 发布（与 interval 类型一致），价格从 latest_tick 获取。
+    不执行删除/卖出逻辑（由 TradeModule 订阅 TTLDue 后自行完成）。
 
     SubTask 27.4：``_stock_code`` / ``_stock_entry_time`` / ``_now_ts`` /
-    ``_current_seconds_of_day`` / ``DomainEvent`` / ``time_at`` 已随相关源文件
+    ``_current_seconds_of_day`` / ``TTLDue`` / ``time_at`` 已随相关源文件
     一并迁移至本模块，原动态 import 链移除，直接使用本地名称。
+
+    fire_time 由 EventDriver.fire_due 注入，使 TTLDue.ts 反映真实触发时刻。
+    endtime 模式下 fire_time 应为 endtime_sec 当日秒数；hold_for_ttl 比较仍用
+    now_unix（实盘 Unix 秒），因为 entry_ts 也是 Unix 秒——两套坐标系独立。
     """
 
-    def action(params: Any) -> None:
+    def action(params: Any, fire_time: Optional[float] = None) -> None:
         now_unix = _now_ts(state)
         now_sec_of_day = _current_seconds_of_day(time_at(state=state))
         if now_sec_of_day < ttl_spec.endtime_sec:
             return
-        removed_codes: List[str] = []
-        removed_prices: Dict[str, float] = {}
-        stocks = state.get_node_stocks(tgt)
-        kept: List[Any] = []
-        latest_tick = getattr(state, "latest_tick", {}) or {}
+        # fire_time 优先（来自 heapq 弹出的精确时刻），None 时退回 now_unix
+        event_ts = fire_time if fire_time is not None else now_unix
+        expired_codes: List[str] = []
+        stocks = state.get_pool(tgt).get_stocks()
         for stock in stocks:
-            should_remove = False
+            should_expire = False
             if ttl_spec.hold_for_ttl > 0:
                 entry_ts = _stock_entry_time(stock)
                 if entry_ts is not None and (now_unix - entry_ts) >= ttl_spec.hold_for_ttl:
-                    should_remove = True
+                    should_expire = True
             else:
-                should_remove = True
-            
-            if should_remove:
+                should_expire = True
+            if should_expire:
                 code = _stock_code(stock)
-                removed_codes.append(code)
-                tick_data = latest_tick.get(code, {})
-                tick_price = 0.0
-                if isinstance(tick_data, dict):
-                    tick_price = float(tick_data.get("close", tick_data.get("price", 0.0)) or 0.0)
-                if tick_price > 0:
-                    removed_prices[code] = tick_price
-                else:
-                    tr = stock.get("_tracker") if isinstance(stock, dict) else None
-                    if isinstance(tr, dict):
-                        removed_prices[code] = float(
-                            tr.get("current_price", tr.get("entry_price", 0))
-                        )
-            else:
-                kept.append(stock)
-        if removed_codes:
-            state.set_node_stocks(tgt, kept)
-            state.mark_node_dirty(tgt)
-            logging.getLogger(__name__).info("TTL endtime expire: removed %s from %s", removed_codes, tgt)
-            for code in removed_codes:
-                price = removed_prices.get(code, 0)
-                bus.publish(Signal(
-                    signal_type="SELL",
-                    code=code,
-                    pool_id=tgt,
-                    price=price,
-                    ts=now_unix,
-                    quantity=0,
-                ))
-                bus.publish(DomainEvent(
-                    event_type="TIMEOUT",
-                    code=code,
-                    pool_id=tgt,
-                    details={
-                        "reason": "TTL_ENDTIME",
-                        "flow_id": eid,
-                        "ttl_sec": ttl_spec.hold_for_ttl,
-                        "timestamp": now_unix,
-                    },
-                ))
+                expired_codes.append(code)
+        # G2：action 只发布 TTLDue 事件，不执行删除/卖出逻辑
+        for code in expired_codes:
+            bus.publish(TTLDue(
+                node_id=tgt,
+                code=code,
+                ts=event_ts,
+            ))
 
     return action
 
 
 def _state_now(state: Any) -> float:
-    """从 state 读取当前时间戳（三模式统一入口）。
-
-    SubTask 27.4：``time_at`` 已随 ``time_util.py`` 一并迁移至本模块，
-    原动态 import 链移除，直接使用本地 ``time_at``。
-    """
+    """从 state 读取当前时间戳（三模式统一入口）。"""
     return time_at(state=state)
+
+
+def _compute_endtime_fire_time(state: Any, endtime_sec: int) -> float:
+    """计算 endtime TTL 的首次触发时间。
+
+    virtual 模式下 ``time_at`` 返回当日秒数偏移，直接与 endtime_sec 比较；
+    wall_clock 模式下为 Unix 时间戳，需转换。
+    """
+    now = time_at(state=state)
+    now_sec = _current_seconds_of_day(now)
+    if now_sec >= endtime_sec:
+        return now  # 已过 endtime，立即触发
+    if is_offset_of_day(now):
+        return float(endtime_sec)  # virtual 模式：endtime_sec 即当日秒数
+    return now + (endtime_sec - now_sec)  # wall_clock：加上剩余秒数
+
+
+def register_ttl_spec(
+    event_driver: Any,
+    state: Any,
+    tgt: str,
+    eid: str,
+    code: str,
+    ttl_sec: float,
+    entry_ts: float,
+    bus: Any = None,
+) -> None:
+    """注册 per-code TTL 一次性定时器到 heapq（G1 统一队列）。
+
+    股票入池时调用：创建 TimedEventSpec（interval=None 一次性），
+    first_fire_time = entry_ts + ttl_sec，到时 action 发布 TTLDue(node_id=tgt, code=code, ts)。
+    删除/卖出逻辑由 TradeModule 订阅 TTLDue 后自行完成。
+    """
+    action = _make_ttl_interval_action(state, tgt, eid, ttl_sec, bus)
+    spec = TimedEventSpec(
+        action=action,
+        params={"kind": "ttl", "eid": eid, "tgt": tgt, "code": code, "check_type": "interval"},
+        interval=None,  # 一次性
+    )
+    event_driver.add_spec(spec, first_fire_time=entry_ts + ttl_sec)
 
 
 def build_timed_event_specs(
@@ -2466,102 +3098,66 @@ def build_timed_event_specs(
     edge_executor: Any,
     event_driver: Any = None,
     bus: Any = None,
-) -> List["TimedEventSpec"]:
-    """编译期统一构造所有 TimedEventSpec——边触发和 TTL 共用。
+) -> None:
+    """编译期注册所有周期性 TimedEventSpec 到 heapq（G1 统一队列）。
 
-    所有到时事件统一为 TimedEventSpec，区别仅在 params 不同、引发的下个事件不同：
-      - 边触发：action 发布 Executed → 订阅者执行 filter→propagate→callback
-      - TTL interval：at_fn 委托 TtlTracker.next_expire_at，action 发布 DomainEvent(TIMEOUT)
-      - TTL endtime：at_fn 判定时钟时间，action 发布 DomainEvent(TIMEOUT)
+    G1 heapq 驱动：
+      - 边触发：interval=timing.interval_sec，first_fire_time=now+interval，
+        到时发布 EdgeFired + 立即注册下次（fire_time + interval）
+      - TTL interval：不在编译期注册（per-code，运行期入池时通过 register_ttl_spec 注册）
+      - TTL endtime：interval=None（一次性），first_fire_time=计算得到的 endtime 时刻，
+        到时发布 TTLDue
 
-    Returns:
-        List[TimedEventSpec]：按 execution_order 排列的到时事件规格列表
-
-    SubTask 27.4：``TimedEventSpec`` / ``TtlTracker`` 已随 ``time_util.py``
-    一并迁移至本模块，原动态 import 链移除，直接使用本地名称。
+    SubTask 27.4：``TimedEventSpec`` 已随 ``time_util.py`` 一并迁移至本模块。
     """
-    specs: list[TimedEventSpec] = []
     source_ids = schedule.source_node_ids
     if bus is None:
         bus = getattr(edge_executor, "bus", None)
+    if event_driver is None:
+        return
+    now = time_at(state=state)
 
-    for eid in schedule.execution_order:
-        ec = schedule.edge_ctx.get(eid)
+    # G6：运行时事件无序，不存在 execution_order 拓扑排序。
+    # 每条边的触发定时器独立注册到 heapq 优先队列，由 fire_time 决定触发先后。
+    for eid, ec in schedule.edge_ctx.items():
         if ec is None:
             continue
 
-        # 边触发 TimedEventSpec
+        # 边触发 TimedEventSpec（interval > 0 才注册周期定时器）
         timing = schedule.edge_timing_spec.get(eid)
-        if timing is not None:
-            edge_at_fn = _make_edge_at_fn(state, eid, timing, edge_executor)
-            edge_action = _make_edge_action(bus, eid, ec.sid, ec.tid, edge_executor, state, schedule, source_ids)
-            specs.append(TimedEventSpec(
-                at_fn=edge_at_fn,
-                interval=None,
-                end_fn=None,
+        if timing is not None and timing.interval_sec > 0:
+            edge_action = _make_edge_action(bus, eid, state)
+            spec = TimedEventSpec(
                 action=edge_action,
                 params={"kind": "edge", "eid": eid, "sid": ec.sid, "tid": ec.tid},
-            ))
+                interval=float(timing.interval_sec),
+                end_fn=None,
+            )
+            event_driver.add_spec(spec, first_fire_time=now + timing.interval_sec)
 
-        # TTL TimedEventSpec（按 check_type 分派）
+        # TTL endtime TimedEventSpec（一次性，编译期注册）
         ttl = schedule.edge_ttl_spec.get(eid)
-        if ttl is not None and ttl.bdel == 1 and ttl.check_type != "none" and (
-            ttl.ttl_sec > 0 or ttl.endtime_sec > 0
-        ):
-            if ttl.check_type == "interval" and ttl.ttl_sec > 0:
-                tracker = TtlTracker(tgt=ec.tid, eid=eid)
-                if event_driver is not None:
-                    event_driver.add_ttl_tracker(eid, tracker)
-                ttl_at_fn = _make_ttl_interval_at_fn(tracker)
-                ttl_action = _make_ttl_interval_action(state, tracker, bus)
-                specs.append(TimedEventSpec(
-                    at_fn=ttl_at_fn,
-                    interval=None,
-                    end_fn=None,
-                    action=ttl_action,
-                    params={"kind": "ttl", "eid": eid, "tgt": ec.tid, "check_type": "interval"},
-                ))
-            elif ttl.check_type == "endtime" and ttl.endtime_sec > 0:
-                ttl_at_fn = _make_ttl_endtime_at_fn(state, ttl.endtime_sec)
-                ttl_action = _make_ttl_endtime_action(state, ttl, ec.tid, bus, eid)
-                specs.append(TimedEventSpec(
-                    at_fn=ttl_at_fn,
-                    interval=None,
-                    end_fn=None,
-                    action=ttl_action,
-                    params={"kind": "ttl", "eid": eid, "tgt": ec.tid, "check_type": "endtime"},
-                ))
+        if ttl is not None and ttl.bdel == 1 and ttl.check_type == "endtime" and ttl.endtime_sec > 0:
+            ttl_action = _make_ttl_endtime_action(state, ttl, ec.tid, bus, eid)
+            spec = TimedEventSpec(
+                action=ttl_action,
+                params={"kind": "ttl", "eid": eid, "tgt": ec.tid, "check_type": "endtime"},
+                interval=None,
+                end_fn=None,
+            )
+            event_driver.add_spec(spec, first_fire_time=_compute_endtime_fire_time(state, ttl.endtime_sec))
 
-    # 无入边节点的 TTL spec（如预填股票的状态池）
+    # 无入边节点的 TTL endtime spec（如预填股票的状态池）
     for nid, ttl in schedule.node_ttl_spec.items():
-        if ttl.bdel == 1 and ttl.check_type != "none" and (
-            ttl.ttl_sec > 0 or ttl.endtime_sec > 0
-        ):
-            if ttl.check_type == "interval" and ttl.ttl_sec > 0:
-                tracker = TtlTracker(tgt=nid, eid=f"node_ttl:{nid}")
-                if event_driver is not None:
-                    event_driver.add_ttl_tracker(f"node_ttl:{nid}", tracker)
-                ttl_at_fn = _make_ttl_interval_at_fn(tracker)
-                ttl_action = _make_ttl_interval_action(state, tracker, bus)
-                specs.append(TimedEventSpec(
-                    at_fn=ttl_at_fn,
-                    interval=None,
-                    end_fn=None,
-                    action=ttl_action,
-                    params={"kind": "ttl", "eid": f"node_ttl:{nid}", "tgt": nid, "check_type": "interval"},
-                ))
-            elif ttl.check_type == "endtime" and ttl.endtime_sec > 0:
-                ttl_at_fn = _make_ttl_endtime_at_fn(state, ttl.endtime_sec)
-                ttl_action = _make_ttl_endtime_action(state, ttl, nid, bus, f"node_ttl:{nid}")
-                specs.append(TimedEventSpec(
-                    at_fn=ttl_at_fn,
-                    interval=None,
-                    end_fn=None,
-                    action=ttl_action,
-                    params={"kind": "ttl", "eid": f"node_ttl:{nid}", "tgt": nid, "check_type": "endtime"},
-                ))
-
-    return specs
+        if ttl.bdel == 1 and ttl.check_type == "endtime" and ttl.endtime_sec > 0:
+            ttl_action = _make_ttl_endtime_action(state, ttl, nid, bus, f"node_ttl:{nid}")
+            spec = TimedEventSpec(
+                action=ttl_action,
+                params={"kind": "ttl", "eid": f"node_ttl:{nid}", "tgt": nid, "check_type": "endtime"},
+                interval=None,
+                end_fn=None,
+            )
+            event_driver.add_spec(spec, first_fire_time=_compute_endtime_fire_time(state, ttl.endtime_sec))
 
 
 # ===========================================================================
@@ -2591,7 +3187,7 @@ def _do_ttl_check(state: PoolState, ttl_spec: Any, tgt: str, bus: Any = None, ei
     latest_tick = getattr(state, "latest_tick", {}) or {}
 
     if ttl_spec.check_type == "interval" and ttl_spec.ttl_sec > 0:
-        for stock in state.get_node_stocks(tgt):
+        for stock in state.get_pool(tgt).get_stocks():
             entry_ts = _stock_entry_time(stock)
             if entry_ts is not None and (now_unix - entry_ts) >= ttl_spec.ttl_sec:
                 code = _stock_code(stock)
@@ -2613,7 +3209,7 @@ def _do_ttl_check(state: PoolState, ttl_spec: Any, tgt: str, bus: Any = None, ei
     elif ttl_spec.check_type == "endtime":
         if now_sec_of_day < ttl_spec.endtime_sec:
             return []
-        for stock in state.get_node_stocks(tgt):
+        for stock in state.get_pool(tgt).get_stocks():
             should_remove = False
             if ttl_spec.hold_for_ttl > 0:
                 entry_ts = _stock_entry_time(stock)
@@ -2642,21 +3238,12 @@ def _do_ttl_check(state: PoolState, ttl_spec: Any, tgt: str, bus: Any = None, ei
         return []
 
     if removed:
-        state.set_node_stocks(tgt, kept)
+        state.get_pool(tgt).remove_stocks(removed)
         state.mark_node_dirty(tgt)
         logger.info("TTL expire: removed %s from %s (check=%s)",
                     removed, tgt, ttl_spec.check_type)
         if bus is not None:
             for code in removed:
-                price = removed_prices.get(code, 0)
-                bus.publish(Signal(
-                    signal_type="SELL",
-                    code=code,
-                    pool_id=tgt,
-                    price=price,
-                    ts=now_unix,
-                    quantity=0,
-                ))
                 bus.publish(DomainEvent(
                     event_type="TIMEOUT",
                     code=code,
@@ -2673,10 +3260,14 @@ class TTLHelper:
     """
 
     def __init__(self, psatt_cfg: Dict[str, Any] = None, defaults: Dict[str, Any] = None,
-                 now_fn: Callable[[], Any] = None):
+                 now_fn: Callable[[], Any] = None,
+                 pool_state_cls: Optional[Type[Any]] = None):
         self._psatt_cfg = psatt_cfg or {}
         self._defaults = defaults or {}
         self._now = now_fn
+        # 依赖注入：PoolState 类由 engine.py 组装层注入，避免本模块跨模块 import
+        # runtime_mode_module（满足模块零引用约束，与 FormulaEngineProtocol 同一模式）。
+        self._pool_state_cls = pool_state_cls
 
     def apply_ttl(self, node_id: str, node: Any, node_stocks: Dict[str, list],
                   bus: Any = None, eid: str = "") -> None:
@@ -2685,8 +3276,12 @@ class TTLHelper:
         if ttl_spec.bdel != 1 or ttl_spec.check_type == "none":
             return
 
-        from .runtime_mode_module import PoolState
-        state = PoolState({"nodes": [], "edges": []})
+        if self._pool_state_cls is None:
+            raise RuntimeError(
+                "TTLHelper.apply_ttl 需要 pool_state_cls 依赖注入"
+                "（由 core/engine.py 组装层经构造函数注入 PoolState）"
+            )
+        state = self._pool_state_cls({"nodes": [], "edges": []})
         if self._now is not None:
             try:
                 ts = _safe_timestamp(self._now())
@@ -2697,11 +3292,13 @@ class TTLHelper:
                 }
             except Exception:
                 state.time_source = {"driver_type": "wall_clock", "current_ts": 0.0}
-        state.set_node_stocks(node_id, list(node_stocks.get(node_id, [])))
+        pool = state.get_pool(node_id)
+        pool.remove_stocks(list(pool.get_stock_codes()))
+        pool.add_stocks(list(node_stocks.get(node_id, [])))
 
         _do_ttl_check(state, ttl_spec, node_id, bus=bus, eid=eid)
 
-        node_stocks[node_id] = list(state.get_node_stocks(node_id))
+        node_stocks[node_id] = list(state.get_pool(node_id).get_stocks())
 
 
 # ===========================================================================
@@ -2811,7 +3408,7 @@ class ExecutionModule:
 
         通过 ``PoolEngine._ensure_pool_engine`` 复用现有创建逻辑，避免重复
         PoolEngine.__init__ 中的组件装配（EventBus / DataUpdater / BarComposer /
-        TradeExecutor / EventPanel / FormulaEngine / EdgeExecutor / EventDriver）。
+        TradeExecutor / EventPanel / 公式引擎 / EdgeExecutor / EventDriver）。
         """
         if self._engine is not None:
             return self._engine
@@ -2866,34 +3463,57 @@ class ExecutionModule:
         筛选结果缓存后立即发布 EdgeFired 事件，使边触发由筛选结果驱动
         （而非仅由 DataChanged 驱动）。使用 ``_fired_edges`` 集合去重，
         避免与 ``_run_tick`` 的 fallback 发布重复。
+
+        注意：新 EventDriver 架构下（event_driver 已创建），边级联由
+        driver.fire_due() 统一驱动，此处理器仅缓存筛选结果，不再重新发布
+        EdgeFired，避免重复触发和 eid 不一致。
         """
         try:
-            pe = self._ensure_engine()
+            new_arch = self._is_new_arch_active()
+            pe = None
+            if not new_arch:
+                pe = self._ensure_engine()
+            else:
+                for eng in (self._engine, self._meta_engine):
+                    if eng is not None:
+                        pe = eng
+                        break
             if pe is not None:
                 pe.state.filter_inputs[event.eid] = frozenset(event.passed)
-                logger.info(
-                    "ExecutionModule._on_stock_filtered eid=%s passed=%d state_id=%d filter_inputs_size=%d",
-                    event.eid, len(event.passed), id(pe.state), len(pe.state.filter_inputs),
-                )
-            else:
-                logger.warning(
-                    "ExecutionModule._on_stock_filtered pe=None eid=%s passed=%d",
+                logger.debug(
+                    "ExecutionModule._on_stock_filtered eid=%s passed=%d",
                     event.eid, len(event.passed),
                 )
             self._filter_results[event.eid] = (list(event.passed), list(event.rejected))
-            if event.eid not in self._fired_edges:
+            if not new_arch and event.eid not in self._fired_edges:
                 self._fired_edges.add(event.eid)
                 self._bus.publish(EdgeFired(
                     eid=event.eid,
                     ts=event.ts or time.time(),
-                    changed_codes=list(event.passed) if event.passed else [],
                 ))
         except Exception as ex:
             logger.warning("ExecutionModule 缓存筛选结果失败: %s", ex)
 
+    def _is_new_arch_active(self) -> bool:
+        """检测新 EventDriver 架构是否已激活（通过 meta_engine 或 self._engine 判断）。"""
+        for eng in (self._engine, self._meta_engine):
+            if eng is not None:
+                components = getattr(eng, '_components', None)
+                if components is not None and components.get("event_driver") is not None:
+                    return True
+        return False
+
     def _on_data_changed(self, event: DataChanged) -> None:
-        """数据变更触发核心 tick 执行（SubTask 8.2）。"""
+        """数据变更触发核心 tick 执行（SubTask 8.2）。
+
+        当引擎已启用新 EventDriver 架构（_components 含 event_driver）时，
+        边触发由 ``_run_tick_body → driver.fire_due()`` 统一驱动，此处直接返回
+        以避免双重执行和 eid 不一致问题。仅在旧版 run_pool 路径（无 event_driver）
+        下才执行本模块的 _run_tick。
+        """
         if self._compiled is None:
+            return
+        if self._is_new_arch_active():
             return
         try:
             self._run_tick(event)
@@ -2929,7 +3549,7 @@ class ExecutionModule:
     def _on_domain_event(self, event: DomainEvent) -> None:
         """DomainEvent(TIMEOUT) → TTLExpired（SubTask 8.3）。
 
-        TTL 到期由 ``EventDriver.fire_ttl_due`` 触发，内部 action 发布
+        TTL 到期由 ``EventDriver.fire_due`` 触发（G1 heapq 弹出），内部 action 发布
         DomainEvent(TIMEOUT) + Signal(SELL)。此处转发为 TTLExpired 事件，
         供 Database/Monitoring 模块订阅。其他 DomainEvent 类型（ENTER/EXIT/
         RANK_CHANGED）不经此转发，保留由原 _on_domain_event 订阅者处理。
@@ -2949,69 +3569,29 @@ class ExecutionModule:
     # 核心循环
     # ------------------------------------------------------------------
     def _run_tick(self, event: DataChanged) -> None:
-        """执行核心 tick：gate→filter→propagate→callback→ttl（SubTask 8.2/8.3）。
+        """执行核心 tick：fire_due 统一驱动到时事件（G2 引擎只发事件）。
 
-        遍历 ``CompiledSchedule.execution_order``，对每条满足触发条件的边：
-          1. 发布 ``EdgeFired`` 事件
-          2. 调用 ``EdgeExecutor.run(eid)`` 执行边
-             （EdgeExecutor 内部发布 ``Executed`` + ``Signal`` 事件）
-          3. 由 ``_on_executed`` 订阅者转发为 ``TransferExecuted`` 事件
+        G2 重构：引擎只发事件不执行计算。边触发由 ``EventDriver.fire_due`` → action
+        发布 ``EdgeFired`` → ``EdgeExecutor._on_edge_fired`` 订阅触发 ``run(eid)``
+        自行完成 gate→filter→propagate→callback。本方法不遍历边列表，
+        由 heapq 优先队列按 fire_time 独立触发各边（G6 运行时事件无序）。
 
-        ``Signal`` 事件由 ``EdgeExecutor._run_callback`` 直接发布到 EventBus
-        （baimpool 动作产生 BUY Signal），无需此处重复发布——EdgeExecutor 为
-        ExecutionModule 持有的内部组件，其发布即代表 ExecutionModule 发布。
-
-        tick 末尾触发 ``EventDriver.fire_ttl_due`` 统一驱动 TTL 到期检查，
         TTL action 发布 DomainEvent(TIMEOUT)，由 ``_on_domain_event`` 转发为
-        ``TTLExpired`` 事件。
+        ``TTLExpired`` 事件，由 ``TradeModule`` 订阅后自行完成卖出。
         """
         pe = self._ensure_engine()
         if pe is None:
             return
-        edge_executor = self._get_edge_executor()
-        if edge_executor is None or self._compiled is None:
+        if self._compiled is None:
             return
-        schedule = self._compiled
-        state = pe.state
-        dirty = state.dirty
-        for eid in schedule.execution_order:
-            try:
-                if not self._should_fire(eid, pe):
-                    continue
-                ec = schedule.edge_ctx.get(eid)
-                if ec is None:
-                    continue
-                src = ec.sid
-                source_stocks = state.get_node_stocks(src)
-                source_codes = set(_stock_code(s) for s in source_stocks if isinstance(s, dict))
-                if not dirty.changed_codes:
-                    changed = set(source_codes)
-                else:
-                    changed = dirty.changed_codes & source_codes
-                # SubTask 19.5: 去重——若 StockFiltered 已发布 EdgeFired 则跳过
-                # （_run_tick 作为 fallback，仅对未经筛选驱动的边发布 EdgeFired）
-                if eid not in self._fired_edges:
-                    self._bus.publish(EdgeFired(
-                        eid=eid,
-                        ts=event.ts,
-                        changed_codes=list(changed),
-                    ))
-                # TODO(SubTask 21.3): 待 EdgeExecutor 完全事件化后移除直接调用
-                # EdgeExecutor 已订阅 EdgeFired，上方 publish（或 _on_stock_filtered 的
-                # publish）已经事件触发 run(eid)。此处 fallback 仅在 EdgeExecutor 未订阅
-                # （bus=None 场景）时直接调用，避免双重触发。
-                if edge_executor.bus is None:
-                    edge_executor.run(eid, changed_codes=list(changed))
-            except Exception as ex:
-                logger.warning("ExecutionModule 边执行失败 eid=%s: %s", eid, ex)
-        # tick 末尾触发 TTL 到期检查（EventDriver 统一驱动）
+        # tick 末尾触发到时事件检查（EventDriver G1 heapq 统一驱动）
         event_driver = self._get_event_driver()
         if event_driver is not None:
             try:
-                event_driver.fire_ttl_due(event.ts)
+                event_driver.fire_due(event.ts)
             except Exception as ex:
-                logger.warning("ExecutionModule fire_ttl_due 失败: %s", ex)
-        # SubTask 19.5: 清理本 tick 的去重集合，为下一 tick 准备
+                logger.warning("ExecutionModule fire_due 失败: %s", ex)
+        # 清理本 tick 的去重集合，为下一 tick 准备
         self._fired_edges.clear()
 
     def _should_fire(self, eid: str, pe: Any) -> bool:
@@ -3019,6 +3599,7 @@ class ExecutionModule:
 
         判定逻辑与 ``compiler._make_edge_action`` 中的 trigger 检查一致：
         源节点被标脏（dirty.nodes）或源节点为 source 节点且数据已更新（dirty.data）。
+        对于交集边（intersection），intersection_source 节点被标脏也会触发。
         """
         if self._compiled is None:
             return False
@@ -3029,6 +3610,12 @@ class ExecutionModule:
         dirty = state.dirty
         source_ids = self._compiled.source_node_ids
         trigger = dirty.nodes.get(ec.sid) or (dirty.data and ec.sid in source_ids)
+        if not trigger:
+            fspec = self._compiled.edge_filter_spec.get(eid)
+            if fspec is not None and fspec.evaluator_type == "intersection":
+                inter_src = (fspec.evaluator_params or {}).get("intersection_source", "")
+                if inter_src and dirty.nodes.get(inter_src):
+                    trigger = True
         if not trigger:
             return False
         edge_executor = self._get_edge_executor()
@@ -3043,7 +3630,7 @@ class ExecutionModule:
             return False
 
     def _check_ttl_expired(self, ts: float) -> None:
-        """TTL 过期检查：委托 EventDriver.fire_ttl_due 统一驱动（SubTask 8.3）。
+        """TTL 过期检查：委托 EventDriver.fire_due 统一驱动（G1 heapq）。
 
         ``EventDriver`` 内部 action 会发布 DomainEvent(TIMEOUT) + Signal(SELL)，
         由 ``_on_domain_event`` 订阅者转发为 ``TTLExpired`` 事件。
@@ -3052,7 +3639,7 @@ class ExecutionModule:
         if event_driver is None:
             return
         try:
-            event_driver.fire_ttl_due(ts)
+            event_driver.fire_due(ts)
         except Exception as ex:
             logger.warning("ExecutionModule TTL fire_due 失败: %s", ex)
 
@@ -3060,13 +3647,13 @@ class ExecutionModule:
 __all__ = [
     # 时序工具（time_util）
     "time_at", "time_now_unix", "is_offset_of_day", "anchor_to_today",
-    "TtlEntry", "TtlTracker", "TimedEventSpec", "EventDriver",
+    "TimedEventSpec", "EventDriver",
     # 边状态（edge_state）
     "EdgeState", "EdgeStateMixin",
     # 编译产物（compiler）
     "CompiledSchedule", "Compiler", "EdgeContext", "TimingSpec",
     "FilterSpec", "PropagateSpec", "ActionSpec", "TTLSpec",
-    "build_timed_event_specs",
+    "build_timed_event_specs", "register_ttl_spec",
     # 边执行器（edge_executor）
     "EdgeExecutor", "TickTable",
     # TTL 兼容入口

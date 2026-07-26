@@ -1,6 +1,7 @@
 import logging, re, json, os
 import asyncio
 import uuid
+import dataclasses
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -78,9 +79,9 @@ except ImportError:
     from api import table_router, set_table_engine, table_config_router
 
 try:
-    from .api import config_api_router, config_api_init
+    from .api import config_api_router, config_api_init, config_ws_router
 except ImportError:
-    from api import config_api_router, config_api_init
+    from api import config_api_router, config_api_init, config_ws_router
 
 try:
     from .api import create_formula_router
@@ -274,7 +275,7 @@ async def lifespan(app):
     # ── 3.3 DataSource 模块（候选池解析器 + 数据源契约） ──
     candidate_resolver = CandidatePoolResolver(storage=storage, providers={}, bus=bus)
     app.state.candidate_resolver = candidate_resolver
-    data_contract = DataSourceContract(config=config, bus=bus)
+    data_contract = DataSourceContract(bus=bus)
     app.state.data_contract = data_contract
 
     # ── 3.4 TickBar 模块 ──
@@ -542,6 +543,8 @@ app.include_router(create_replay_router(), dependencies=[Depends(verify_api_key)
 app.include_router(table_router, dependencies=[Depends(verify_api_key)])
 app.include_router(table_config_router, dependencies=[Depends(verify_api_key)])
 app.include_router(config_api_router, dependencies=[Depends(verify_api_key)])
+# WebSocket 路由独立挂载，不带 API key dependencies（WebSocket 上下文不支持 APIKeyHeader）
+app.include_router(config_ws_router)
 app.include_router(create_formula_router(), prefix="/api/formula", tags=["公式"], dependencies=[Depends(verify_api_key)])
 
 @app.get("/api/tdx/pools", tags=["tdx"])
@@ -783,6 +786,52 @@ async def get_events_pending(clear: int = 1, request: Request = None):
         return {"success": False, "error": str(ex)}
 
 
+@app.get("/api/events/timer-queue", tags=["events"])
+async def get_events_timer_queue(request: Request, session_id: str = ""):
+    """返回当前定时器队列（EventDriver heap 中的待触发定时器）。"""
+    try:
+        now_ts = None
+        event_driver = None
+        sim_session_map = getattr(request.app.state, "_sim_session_map", {})
+        if session_id and session_id in sim_session_map:
+            session = sim_session_map[session_id]
+            simulator = session.get("simulator")
+            if simulator is not None:
+                now_ts = getattr(simulator, "clock", None)
+                pe = getattr(simulator, "_pool_engine", None)
+                if pe is None:
+                    inner = getattr(simulator, "_engine", None)
+                    pe = getattr(inner, "_pool_engine", None) if inner else None
+                if pe is not None:
+                    event_driver = pe._components.get("event_driver") if hasattr(pe, "_components") else None
+        if event_driver is None:
+            ep = _get_engine_event_panel(request)
+            if ep is not None:
+                event_driver = getattr(ep, "_event_driver", None)
+                pe = getattr(ep, "bus", None)
+        specs = []
+        if event_driver is not None:
+            for entry in getattr(event_driver, '_heap', []):
+                fire_time = entry[0] if isinstance(entry, (list, tuple)) and len(entry) >= 2 else 0
+                spec = entry[2] if isinstance(entry, (list, tuple)) and len(entry) >= 3 else None
+                params = getattr(spec, 'params', {}) if spec else {}
+                specs.append({
+                    "edge_id": params.get("eid", ''),
+                    "pool_id": params.get("tgt", ''),
+                    "code": params.get("code", ''),
+                    "kind": params.get("kind", ''),
+                    "fire_at": fire_time,
+                    "interval": getattr(spec, 'interval', None) if spec else None,
+                })
+            if now_ts is None:
+                state = getattr(event_driver, "_state", None)
+                if state is not None:
+                    now_ts = state.time_source.get("current_ts")
+        return {"success": True, "count": len(specs), "now": now_ts, "timers": specs}
+    except Exception as ex:
+        return {"success": False, "error": str(ex), "count": 0, "now": None, "timers": []}
+
+
 @app.get("/api/events/stream", tags=["events"])
 async def events_stream(request: Request):
     """SSE事件流端点：订阅EventBus所有事件，实时推送到前端。"""
@@ -958,8 +1007,8 @@ async def api_get_node_stocks(pool_id: str, node_id: str, request: _Request):
             if pe is None:
                 inner = getattr(sim, "_engine", None)
                 pe = getattr(inner, "_pool_engine", None) if inner else None
-            if pe and hasattr(pe, 'state') and hasattr(pe.state, 'node_stocks'):
-                ns = pe.state.node_stocks.get(node_id)
+            if pe and hasattr(pe, 'state') and hasattr(pe.state, 'get_pool'):
+                ns = pe.state.get_pool(node_id).get_stocks()
                 if ns and isinstance(ns, list):
                     node_stocks = ns
                     break
@@ -980,8 +1029,8 @@ async def api_get_node_stocks(pool_id: str, node_id: str, request: _Request):
                 if pe is None:
                     inner = getattr(simulator, "_engine", None)
                     pe = getattr(inner, "_pool_engine", None) if inner else None
-                if pe and hasattr(pe, 'state') and hasattr(pe.state, 'node_stocks'):
-                    ns = pe.state.node_stocks.get(node_id)
+                if pe and hasattr(pe, 'state') and hasattr(pe.state, 'get_pool'):
+                    ns = pe.state.get_pool(node_id).get_stocks()
                     if ns and isinstance(ns, list):
                         node_stocks = ns
                         break
@@ -1280,7 +1329,7 @@ def _get_or_create_simulator(name: str, engine) -> tuple:
             if tick_source is not None and tick_bar is not None:
                 tick_bar._tick_source = tick_source
                 tick_bar._mode_id = "simulation"
-                logger.info("synced SimTickSource to TickBarModule: codes=%d clock_start=%.1f",
+                logger.info("synced MockDataSource to TickBarModule: codes=%d clock_start=%.1f",
                             len(getattr(tick_source, '_codes', [])),
                             getattr(tick_source, '_clock_start', 0))
         app.state._simulators[name] = simulator
@@ -1307,7 +1356,8 @@ async def _run_simulation_step(name: str, delta: float = 60.0) -> dict:
 
     try:
         effective_delta = delta * float(getattr(simulator, "speed", 1.0) or 1.0)
-        events = simulator.step(d=effective_delta)
+        result = await simulator.astep(effective_delta)
+        events = result.get("events", [])
         if not events:
             events = []
         node_stocks = (
@@ -1466,7 +1516,7 @@ def _ensure_mock_data_source():
 
 
 def _create_runtime_simulator(pool_config: dict):
-    """创建并初始化 RuntimeSimulator（复用 _get_or_create_simulator 的核心逻辑）。
+    """创建 RuntimeSimulator 实例（初始化延迟到第一次 step/astep）。
 
     必须注入 ``bus=app.state.bus``，使 RuntimeSimulator.step() 末尾发布
     ``SimulationStep`` 事件，驱动 TickBarModule→ExecutionModule→TradeModule
@@ -1479,7 +1529,6 @@ def _create_runtime_simulator(pool_config: dict):
         engine=app.state.engine,
         bus=getattr(app.state, "bus", None),
     )
-    simulator.initialize()
     return simulator
 
 
@@ -1529,14 +1578,61 @@ def _normalize_sim_event(ev: dict) -> dict:
 
 
 def _get_session(sim_session_map: dict, session_id: str):
-    """获取会话，并校验 simulator 是否存在。"""
+    """获取会话，仅校验 session 是否存在。
+
+    仿真器可能仍在后台初始化中，因此不再要求 simulator 字段非空；
+    各 action 分支自行判断初始化状态。
+    """
     session = sim_session_map.get(session_id)
     if session is None:
         return None, "会话不存在"
-    simulator = session.get("simulator")
-    if simulator is None:
-        return None, "会话已损坏"
     return session, None
+
+
+async def _warm_simulator(session_id: str, pool_config: dict, speed: float):
+    """后台预热仿真器：创建、初始化并执行 astep(0.0) 完成 heavyweight 初始化。
+
+    在 /api/sim/start 返回后立即启动，使首次正式 step 直接走已初始化状态。
+    异常会被捕获并记录，不会导致未捕获任务错误。
+    """
+    sim_session_map = getattr(app.state, "_sim_session_map", {})
+    session = sim_session_map.get(session_id)
+    if session is None:
+        return
+    try:
+        # 切换数据源；该操作涉及全局 TqAdapter 状态，保留在事件循环中执行。
+        ok, err = _ensure_mock_data_source()
+        if not ok:
+            raise RuntimeError(err)
+
+        # 创建 RuntimeSimulator 可能涉及较重的 PoolEngine 配置读取，
+        # 放到线程池避免阻塞 Uvicorn 事件循环。
+        simulator = await asyncio.to_thread(_create_runtime_simulator, pool_config)
+        simulator.speed = speed
+
+        # initialize() 创建 asyncio.Queue/Event，必须绑定到 Uvicorn 事件循环。
+        simulator.initialize()
+
+        # astep(0.0) 仅完成 mode_state 初始化，不推进虚拟时间。
+        await simulator.astep(0.0)
+
+        session["simulator"] = simulator
+        session["speed"] = speed
+        try:
+            pe = getattr(simulator, "_engine", None)
+            if pe is not None:
+                pe = getattr(pe, "_pool_engine", None)
+            if pe is not None:
+                bus = pe._components.get("event_bus")
+                if bus is not None and hasattr(bus, "total_published"):
+                    session["event_offset"] = bus.total_published
+        except Exception:
+            session["event_offset"] = 0
+    except Exception as ex:
+        logger.exception("仿真器后台预热失败 (session_id=%s): %s", session_id, ex)
+        session["init_error"] = str(ex)
+    finally:
+        session["init_event"].set()
 
 
 @app.post("/api/sim/start", tags=["sim"])
@@ -1571,47 +1667,25 @@ async def sim_start_session(request: _Request):
     else:
         return {"code": 1, "msg": "缺少 pool_id 或 config 参数"}
 
-    ok, err = _ensure_mock_data_source()
-    if not ok:
-        return {"code": 1, "msg": err}
-
-    try:
-        simulator = _create_runtime_simulator(pool_config)
-    except Exception as ex:
-        return {"code": 1, "msg": f"创建仿真器失败: {ex}"}
-
-    simulator.speed = speed
-    try:
-        simulator.initialize()
-    except Exception as ex:
-        logger.warning("simulator.initialize() 失败: %s", ex)
-        return {"code": 1, "msg": f"仿真器初始化失败: {ex}"}
-
     session_id = uuid.uuid4().hex
     if not hasattr(request.app.state, "_sim_session_map"):
         request.app.state._sim_session_map = {}
     request.app.state._sim_session_map[session_id] = {
-        "simulator": simulator,
+        "simulator": None,
         "pool_id": pool_id,
         "config": pool_config,
         "events": [],
+        "event_offset": 0,
         "created_at": asyncio.get_event_loop().time(),
+        "init_event": asyncio.Event(),
+        "init_task": None,
+        "init_error": None,
     }
 
-    try:
-        bus = getattr(request.app.state, "bus", None)
-        if bus is not None:
-            from core.event_bus import PoolLoaded, ModeChanged
-            bus.publish(PoolLoaded(
-                pool_config=pool_config,
-                source_format="json",
-            ))
-            bus.publish(ModeChanged(
-                mode_id="simulation",
-                prev_mode="live",
-            ))
-    except Exception as ex:
-        logger.warning("发布 PoolLoaded/ModeChanged 事件失败: %s", ex)
+    # Task 14：后台执行创建/初始化/astep(0.0)，完成 run_mode 重量级初始化，
+    # 不阻塞 start 响应。
+    task = asyncio.create_task(_warm_simulator(session_id, pool_config, speed))
+    request.app.state._sim_session_map[session_id]["init_task"] = task
 
     return {"code": 0, "data": {"session_id": session_id, "pool_id": pool_id}}
 
@@ -1637,49 +1711,69 @@ async def sim_control_session(request: _Request):
     if session is None:
         return {"code": 1, "msg": err}
 
-    simulator = session["simulator"]
+    simulator = session.get("simulator")
+    init_event = session.get("init_event")
+    initializing = init_event is not None and not init_event.is_set()
+
     if action == "stop":
-        try:
-            simulator.stop()
-        except Exception:
-            pass
+        init_task = session.get("init_task")
+        if init_task is not None and not init_task.done():
+            init_task.cancel()
+        if simulator is not None:
+            try:
+                simulator.stop()
+            except Exception:
+                pass
+            try:
+                simulator.reset()
+            except Exception:
+                pass
         sim_session_map.pop(session_id, None)
-        try:
-            simulator.reset()
-        except Exception:
-            pass
         return {"code": 0, "data": {"session_id": session_id, "stopped": True}}
 
     if action == "pause":
+        if initializing or simulator is None:
+            return {"code": 102, "status": "initializing", "msg": "仿真器正在后台初始化，请稍后再试"}
         simulator.pause()
         return {"code": 0, "data": {"session_id": session_id, "paused": True}}
 
     if action == "resume":
+        if initializing or simulator is None:
+            return {"code": 102, "status": "initializing", "msg": "仿真器正在后台初始化，请稍后再试"}
         simulator.resume()
         return {"code": 0, "data": {"session_id": session_id, "paused": False}}
 
     if action == "step":
+        if initializing or simulator is None:
+            return {
+                "code": 102,
+                "status": "initializing",
+                "data": {"session_id": session_id},
+                "msg": "仿真器正在后台初始化，请稍后再试",
+            }
+        if session.get("init_error"):
+            return {"code": 1, "status": "error", "msg": f"仿真器初始化失败: {session['init_error']}"}
         delta = float(params.get("delta", 60.0))
         if delta <= 0:
             delta = 60.0
-        effective_delta = delta * float(getattr(simulator, "speed", 1.0) or 1.0)
+        effective_delta = delta * float(session.get("speed", 1.0) or 1.0)
         try:
-            events = simulator.step(d=effective_delta)
+            result = await simulator.astep(effective_delta)
+            # astep 返回 dict: {events, bar_data, changed_codes}
+            normalized = [_normalize_sim_event(ev) for ev in result.get("events", [])]
+            session["events"].extend(normalized)
+            return {
+                "code": 0,
+                "data": {
+                    "session_id": session_id,
+                    "clock": simulator.clock,
+                    "events": normalized,
+                    "event_count": len(normalized),
+                    "changed_codes": result.get("changed_codes", []),
+                },
+            }
         except Exception as ex:
             return {"code": 1, "msg": f"仿真 step 失败: {ex}"}
-        if not events:
-            events = []
-        normalized = [_normalize_sim_event(ev) for ev in events]
-        session["events"].extend(normalized)
-        return {
-            "code": 0,
-            "data": {
-                "session_id": session_id,
-                "clock": simulator.clock,
-                "events": normalized,
-                "event_count": len(normalized),
-            },
-        }
 
     return {"code": 1, "msg": f"未知 action: {action}"}
 
@@ -1695,75 +1789,151 @@ async def sim_get_events(session_id: str = "", since: str = "0", limit: int = 20
         since_idx = int(since)
     except Exception:
         since_idx = 0
-    
-    simulator = session.get("simulator")
-    events = []
-    if simulator is not None and hasattr(simulator, 'event_log'):
-        events = list(simulator.event_log)
-    if not events:
-        events = session.get("events", [])
-    
     if since_idx < 0:
         since_idx = 0
-    sliced = events[since_idx:since_idx + limit] if limit > 0 else events[since_idx:]
-    
+
+    simulator = session.get("simulator")
+    clock = getattr(simulator, "clock", None) if simulator else None
+    bus_offset = session.get("bus_offset", session.get("event_offset", 0))
+
+    ALLOWED_EVENTS = {
+        "TickReceived", "DataChanged", "BarComposed", "FormulaEvaluated",
+        "EdgeFired", "Executed", "TransferExecuted", "Signal", "TTLExpired",
+        "OrderPlaced", "OrderFilled", "PositionUpdated", "ConfigLoaded",
+        "SimulationStep", "TimeAdvanced", "StockFiltered", "AlertRaised",
+        "EventLogged", "TickDue"
+    }
+
+    def _normalize_event(ev, ev_type, fallback_ts):
+        if dataclasses.is_dataclass(ev) and not isinstance(ev, type):
+            try:
+                ev_dict = dataclasses.asdict(ev)
+            except Exception:
+                ev_dict = {}
+                for attr in dir(ev):
+                    if not attr.startswith("_"):
+                        try:
+                            val = getattr(ev, attr)
+                            if not callable(val):
+                                ev_dict[attr] = val
+                        except Exception:
+                            pass
+        elif isinstance(ev, dict):
+            ev_dict = dict(ev)
+        else:
+            return None
+        ev_dict["event_type"] = ev_type
+        ev_ts = ev_dict.get("ts") or ev_dict.get("time") or ev_dict.get("timestamp")
+        if ev_ts is None:
+            ev_ts = fallback_ts or 0
+        ev_dict["time"] = ev_ts
+        code = ""
+        for k in ("code", "stock_code", "symbol"):
+            if ev_dict.get(k):
+                code = str(ev_dict[k])
+                break
+        ev_dict["code"] = code
+        pool_id = str(ev_dict.get("pool_id", "") or ev_dict.get("target_id", "") or ev_dict.get("source_id", "") or ev_dict.get("sid", "") or ev_dict.get("tid", "") or ev_dict.get("node_id", "") or ev_dict.get("nid", ""))
+        node_id = str(ev_dict.get("node_id", "") or ev_dict.get("nid", ""))
+        edge_id = str(ev_dict.get("edge_id", "") or ev_dict.get("eid", ""))
+        skip_keys = {"event_type", "type", "code", "stock_code", "symbol", "pool_id",
+                     "target_id", "source_id", "node_id", "nid", "edge_id", "eid",
+                     "time", "ts", "timestamp", "sid", "tid"}
+        details = {}
+        for k, v in ev_dict.items():
+            if k in skip_keys:
+                continue
+            details[k] = v
+        # DataChanged/BarComposed 关键字段提顶层（前端 event-panel.js 直接读 ev.codes/source/period/bar）
+        result = {
+            "event_type": ev_type,
+            "type": ev_type,
+            "code": code,
+            "pool_id": pool_id,
+            "node_id": node_id,
+            "edge_id": edge_id,
+            "details": details,
+            "time": ev_ts,
+            "ts": ev_ts,
+        }
+        for top_key in ("codes", "source", "period", "bar", "formula_ref", "result",
+                        "entered", "exited", "order_id", "side", "qty", "price",
+                        "fill_ts", "eid", "tid", "sid"):
+            if top_key in ev_dict and top_key not in result:
+                result[top_key] = ev_dict[top_key]
+        return result
+
+    if "events" not in session:
+        session["events"] = []
+
+    if simulator is not None:
+        try:
+            pe = getattr(simulator._engine, "_pool_engine", None) if hasattr(simulator, "_engine") and simulator._engine else None
+            if pe is not None and hasattr(pe, "_components"):
+                pe_bus = pe._components.get("event_bus")
+                new_raw_events = []
+                if pe_bus is not None and hasattr(pe_bus, "get_events_since"):
+                    new_raw_events = pe_bus.get_events_since(bus_offset)
+                elif pe_bus is not None and hasattr(pe_bus, "get_events"):
+                    new_raw_events = pe_bus.get_events()[bus_offset:]
+                else:
+                    new_raw_events = []
+
+                for ev in new_raw_events:
+                    ev_type = type(ev).__name__
+                    if ev_type not in ALLOWED_EVENTS:
+                        continue
+                    normalized_ev = _normalize_event(ev, ev_type, clock)
+                    if normalized_ev is not None:
+                        session["events"].append(normalized_ev)
+
+                session["bus_offset"] = bus_offset + len(new_raw_events)
+        except Exception as ex:
+            logger.warning("sim_get_events EventBus 读取失败: %s", ex)
+
+    MAX_EVENTS_CAP = 50000
+    if len(session["events"]) > MAX_EVENTS_CAP:
+        session["events"] = session["events"][-MAX_EVENTS_CAP:]
+
+    all_events = session["events"]
+    total = len(all_events)
+    sliced = all_events[since_idx:since_idx + limit] if limit > 0 else all_events[since_idx:]
+
     normalized = []
     for ev in sliced:
         if not isinstance(ev, dict):
             continue
-        ev_type = ev.get("event_type", "UNKNOWN")
-        normalized.append({
-            "event_type": ev_type,
-            "code": str(ev.get("code", "") or ev.get("stock_code", "")),
-            "pool_id": str(ev.get("pool_id", "") or ev.get("target_id", "") or ev.get("source_id", "")),
-            "node_id": str(ev.get("node_id", "") or ev.get("nid", "")),
-            "edge_id": str(ev.get("edge_id", "") or ev.get("eid", "")),
-            "details": {k: v for k, v in ev.items() if k not in ("event_type", "code", "stock_code", "pool_id", "target_id", "source_id", "node_id", "nid", "edge_id", "eid", "time", "ts")},
-            "time": ev.get("time", 0),
-        })
+        if "details" in ev:
+            normalized.append(ev)
+        else:
+            ev_type = ev.get("event_type", "UNKNOWN")
+            code = str(ev.get("code", "") or ev.get("stock_code", ""))
+            pool_id = str(ev.get("pool_id", "") or ev.get("target_id", "") or ev.get("source_id", "") or ev.get("sid", "") or ev.get("tid", "") or ev.get("node_id", "") or ev.get("nid", ""))
+            node_id = str(ev.get("node_id", "") or ev.get("nid", ""))
+            edge_id = str(ev.get("edge_id", "") or ev.get("eid", ""))
+            skip_keys = {"event_type", "type", "code", "stock_code", "symbol", "pool_id",
+                         "target_id", "source_id", "node_id", "nid", "edge_id", "eid",
+                         "time", "ts", "timestamp", "sid", "tid"}
+            details = {}
+            for k, v in ev.items():
+                if k in skip_keys:
+                    continue
+                details[k] = v
+            ev_time = ev.get("time", ev.get("ts", 0))
+            normalized.append({
+                "event_type": ev_type,
+                "type": ev_type,
+                "code": code,
+                "pool_id": pool_id,
+                "node_id": node_id,
+                "edge_id": edge_id,
+                "details": details,
+                "time": ev_time,
+                "ts": ev_time,
+            })
 
-    diag = {}
-    try:
-        if simulator is not None:
-            sim_bus = getattr(simulator, "_bus", None)
-            diag["sim_bus_id"] = id(sim_bus) if sim_bus is not None else None
-            if sim_bus is not None and hasattr(sim_bus, "get_events"):
-                bus_events = sim_bus.get_events()
-                type_count = {}
-                for ev in bus_events:
-                    ev_type = type(ev).__name__
-                    type_count[ev_type] = type_count.get(ev_type, 0) + 1
-                diag["sim_bus_total"] = len(bus_events)
-                diag["sim_bus_type_distribution"] = type_count
-            pe = getattr(simulator._engine, "_pool_engine", None) if simulator._engine else None
-            if pe is not None and hasattr(pe, "_components"):
-                pe_bus = pe._components.get("event_bus")
-                diag["pe_event_bus_id"] = id(pe_bus) if pe_bus is not None else None
-                diag["pe_same_as_sim_bus"] = (pe_bus is sim_bus)
-                if pe_bus is not None and hasattr(pe_bus, "get_events"):
-                    pe_events = pe_bus.get_events()
-                    pe_type_count = {}
-                    for ev in pe_events:
-                        ev_type = type(ev).__name__
-                        pe_type_count[ev_type] = pe_type_count.get(ev_type, 0) + 1
-                    diag["pe_bus_total"] = len(pe_events)
-                    diag["pe_bus_type_distribution"] = pe_type_count
-            app_bus = getattr(app.state, "bus", None)
-            if app_bus is not None and hasattr(app_bus, "get_events"):
-                app_events = app_bus.get_events()
-                app_type_count = {}
-                for ev in app_events:
-                    ev_type = type(ev).__name__
-                    app_type_count[ev_type] = app_type_count.get(ev_type, 0) + 1
-                diag["app_bus_id"] = id(app_bus)
-                diag["app_bus_total"] = len(app_events)
-                diag["app_bus_type_distribution"] = app_type_count
-                diag["sim_bus_same_as_app_bus"] = (sim_bus is app_bus)
-            diag["event_log_count"] = len(simulator.event_log) if hasattr(simulator, 'event_log') else 0
-    except Exception as ex:
-        diag["error"] = str(ex)
+    return {"code": 0, "data": {"events": normalized, "total": total, "clock": clock}}
 
-    return {"code": 0, "data": {"events": normalized, "total": len(events), "diag": diag}}
 
 
 @app.get("/api/sim/state", tags=["sim"])
@@ -1861,7 +2031,8 @@ async def sim_batch_step(session_id: str = "", steps: int = 10, delta: float = 6
     last_err = None
     for _ in range(steps):
         try:
-            events = simulator.step(d=effective_delta)
+            result = await simulator.astep(effective_delta)
+            events = result.get("events", [])
             done += 1
             if events:
                 normalized = [_normalize_sim_event(ev) for ev in events]
@@ -2568,6 +2739,27 @@ async def highlight_websocket(websocket: WebSocket):
                     "status": "ok"
                 })
             elif msg_type == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+
+
+@app.websocket("/api/config/ws")
+async def config_ws(websocket: WebSocket):
+    """配置同步 WebSocket 端点。
+
+    对应前端 ``ConfigSync`` 客户端（``web/js/app.js``）。
+    连接建立后发送一次 ``status`` 消息，之后保持连接并响应 ``ping`` 心跳。
+    当前无主动配置变更推送源，静默保持连接以避免前端控制台报错。
+    """
+    await websocket.accept()
+    try:
+        await websocket.send_json({"type": "status", "status": "connected"})
+        while True:
+            data = await websocket.receive_text()
+            if data == "ping":
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
         pass

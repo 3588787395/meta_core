@@ -42,8 +42,9 @@ import concurrent.futures
 import json
 import logging
 import operator
+import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 
 try:
     from .schemas import ConfigLoadError
@@ -71,6 +72,13 @@ from .domain import (
     _tie_exact_rank, _tie_slice, _TIE_HANDLERS, _resolve_rank,
     _DERIVED_BIN_OPS, _DERIVED_CMP_OPS, _DERIVED_BOOL_OPS, _DERIVED_FUNCS,
     _eval_derived_ast, _eval_derived_expr,
+    # builtin formulas lookup（从 domain re-export，消除 formula_module → screening_module 耦合）
+    _BUILTIN_FORMULAS, _BUILTIN_FORMULA_INDEX, _BUILTIN_FORMULA_INFO,
+    _lookup_builtin_script, _lookup_builtin_formula_info,
+    # TDX nperiod → period mapping（已迁移至 domain，re-export 保持向后兼容）
+    _TDX_NPERIOD_TO_PERIOD, _nperiod_to_period,
+    # intersection evaluator（已迁移至 domain，re-export 保持向后兼容）
+    evaluate_intersection,
 )
 
 
@@ -194,72 +202,12 @@ def _get_float(data, *fields) -> float | None:
     return None
 
 
-# I96：builtin_formulas.json 模块级缓存 + fail-fast，消除 _lookup_builtin_script 每次调用的重复 I/O
-_builtin_formulas_cache = None
-
-def _load_builtin_formulas():
-    global _builtin_formulas_cache
-    if _builtin_formulas_cache is not None:
-        return _builtin_formulas_cache
-    path = Path(__file__).parent.parent / "config" / "data" / "builtin_formulas.json"
-    try:
-        _builtin_formulas_cache = json.loads(path.read_text("utf-8"))
-    except (OSError, json.JSONDecodeError) as ex:
-        raise ConfigLoadError(
-            f"无法加载配置表 {path}: {ex}（fail-fast：禁止静默回退空字符串）"
-        ) from ex
-    return _builtin_formulas_cache
-
-_BUILTIN_FORMULAS = _load_builtin_formulas()
-_BUILTIN_FORMULA_INDEX = {f.get("name"): f.get("script", "") for f in _BUILTIN_FORMULAS.get("formulas", [])}
-_BUILTIN_FORMULA_INFO = {f.get("name"): f for f in _BUILTIN_FORMULAS.get("formulas", []) if f.get("name")}
+# I96：builtin_formulas.json 模块级缓存 + fail-fast
+# 已迁移至 core/domain.py，通过 re-export 提供（_BUILTIN_FORMULAS / _lookup_builtin_script 等）
 
 
-def _lookup_builtin_script(name: str) -> str:
-    """从 config/builtin_formulas.json 按名称查找公式脚本。
-
-    Args:
-        name: 公式名称（如 "MA"、"MACD"）。
-
-    Returns:
-        公式脚本文本；未找到时返回空字符串。
-    """
-    if not name:
-        return ""
-    return _BUILTIN_FORMULA_INDEX.get(name, "")
-
-
-def _lookup_builtin_formula_info(name: str) -> dict:
-    """从 config/builtin_formulas.json 按名称查找完整公式信息。
-
-    Args:
-        name: 公式名称（如 "KDJ_5MIN_CROSS"）。
-
-    Returns:
-        完整公式信息字典（含 script/period/eval_field 等）；未找到时返回空字典。
-    """
-    if not name:
-        return {}
-    return _BUILTIN_FORMULA_INFO.get(name, {})
-
-
-# TDX nperiod 整数码 → 标准周期字符串映射（参考 docs/公式引擎使用指南.md 5.7 节）
-_TDX_NPERIOD_TO_PERIOD = {
-    0: '1d', 1: '1m', 2: '5m', 3: '15m', 4: '30m', 5: '60m',
-    6: '1d', 7: '1wk', 8: '1mon',
-}
-
-
-def _nperiod_to_period(nperiod) -> str:
-    """TDX nperiod 整数码映射为标准周期字符串。
-
-    0/6 → '1d'（日线），1 → '1m'，2 → '5m'，3 → '15m'，4 → '30m'，
-    5 → '60m'，7 → '1wk'，8 → '1mon'。缺失或无效返回 '1d'。
-    """
-    try:
-        return _TDX_NPERIOD_TO_PERIOD.get(int(nperiod), '1d')
-    except (TypeError, ValueError):
-        return '1d'
+# _TDX_NPERIOD_TO_PERIOD / _nperiod_to_period 已迁移至 core/domain（白名单），
+# 此处通过顶部 from .domain import re-export 保持向后兼容。
 
 
 def _extract_indicator_scalar(value) -> float | None:
@@ -606,22 +554,8 @@ def eval_tdx_condition(dispatch_key: str, action_inputs: dict) -> list[str]:
         return []
 
 
-def evaluate_intersection(codes: List[str], state: Any, edge_params: dict) -> List[str]:
-    """交集条件评估器：筛选同时存在于指定源状态池中的股票。
-
-    Args:
-        codes: 当前待筛选的股票代码列表。
-        state: 运行期状态对象，需提供 get_node_stocks(nid) 方法。
-        edge_params: 边参数字典，需包含 intersection_source 键指定源状态池 ID。
-
-    Returns:
-        交集结果：codes 中同时存在于 intersection_source 指定状态池的股票代码列表。
-    """
-    source_pool = edge_params.get('intersection_source', '')
-    other_stocks: set = set()
-    for s in (state.get_node_stocks(source_pool) if source_pool else []):
-        other_stocks.add(s.get('code', '') if isinstance(s, dict) else str(s))
-    return [c for c in codes if c in other_stocks]
+# evaluate_intersection 已迁移至 core/domain（白名单），
+# 此处通过顶部 from .domain import re-export 保持向后兼容。
 
 
 # ════════════════════════════════════════════════════════════
@@ -816,10 +750,12 @@ class ScreeningModule:
         self._config = config or {}
         # 加载 dispatch.json:nset_dispatch（nset×noperate 矩阵配置）
         self._dispatch_cfg = self._load_dispatch_config()
-        # 公式结果缓存：(formula_ref, bar_hash) → {code: result}
-        self._formula_results: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        # 公式结果缓存：(formula_ref, code) → result（per-code 粒度）
+        self._formula_results: Dict[Tuple[str, str], Any] = {}
         # 边的 filter_spec 配置：eid → FilterSpec
         self._edge_filter_specs: Dict[str, FilterSpec] = {}
+        # 边的 passed 缓存：eid → set(code)，用于增量筛选
+        self._edge_passed_cache: Dict[str, Set[str]] = {}
         # 注册事件订阅
         self._register_subscribers()
 
@@ -924,37 +860,40 @@ class ScreeningModule:
         return evaluator_cls()
 
     def _on_formula_evaluated(self, event: FormulaEvaluated) -> None:
-        """处理 FormulaEvaluated 事件：缓存结果并触发依赖边的筛选。
+        """处理 FormulaEvaluated 事件：per-code 缓存并触发依赖边的增量筛选。
 
-        缓存策略：(formula_ref, bar_hash) → {code: result}，支持单只与批量结果。
-        触发条件：边的 filter_spec.formula_ref 与事件 formula_ref 匹配。
+        缓存策略：(formula_ref, code) → result。
+        增量策略：仅对事件携带的 code（或 result 中的 codes）重新评估，
+        其余股票沿用 _edge_passed_cache 中缓存的 passed 集合。
 
         异常隔离：所有逻辑用 try/except 包裹 + logger.warning，
         保证事件总线与其他订阅者不受影响。
         """
         try:
-            cache_key = (event.formula_ref, event.bar_hash or "")
-            stock_results = self._formula_results.setdefault(cache_key, {})
-            # 缓存当前股票的公式结果
+            # 确定本次变化的 code 集合
+            changed_codes: List[str] = []
             if event.code:
-                stock_results[event.code] = event.result
-            # 若 result 为批量 dict（无 code），展开缓存
+                changed_codes = [event.code]
+                self._formula_results[(event.formula_ref, event.code)] = event.result
             elif isinstance(event.result, dict) and all(
                 isinstance(k, str) for k in event.result.keys()
             ):
-                stock_results.update(event.result)
+                changed_codes = list(event.result.keys())
+                for code, value in event.result.items():
+                    self._formula_results[(event.formula_ref, code)] = value
 
-            # 触发依赖此公式的边的筛选
+            # 触发依赖此公式的边的增量筛选
             for eid, filter_spec in list(self._edge_filter_specs.items()):
                 if filter_spec.formula_ref != event.formula_ref:
                     continue
                 passed, rejected = self._evaluate_filter(
-                    eid, filter_spec, stock_results, event.code,
+                    eid, filter_spec, changed_codes=changed_codes,
                 )
                 if passed is not None:
                     self._bus.publish(StockFiltered(
                         eid=eid, passed=passed, rejected=rejected,
                         filter_ref=filter_spec.formula_ref,
+                        ts=time.time(),
                     ))
         except Exception as ex:
             logger.warning(
@@ -966,33 +905,68 @@ class ScreeningModule:
         self,
         eid: str,
         filter_spec: FilterSpec,
-        stock_results: Dict[str, Any],
-        current_code: str,
+        changed_codes: Optional[List[str]] = None,
     ) -> Tuple[Optional[List[str]], List[str]]:
-        """执行筛选：按 nset 表驱动分派到筛选策略函数。
+        """执行筛选：按 nset 表驱动分派，支持增量筛选。
 
-        返回 (passed, rejected) 二元组；passed 为 None 表示无法评估（如缺数据）。
-        rejected 由全部候选代码减去 passed 计算。
+        changed_codes:
+          - None：全量评估（首次/无缓存）。
+          - []：缓存命中则直接返回，否则全量。
+          - 非空：仅对 changed_codes 中的股票重新评估，其余沿用缓存。
 
-        分派链（全表驱动，无 if/elif）：
-            1. nset → Evaluator 子类实例（_NSET_TO_EVALUATOR）
-            2. nset → 筛选策略函数（_NSET_FILTER_HANDLERS）
-        策略函数内部委托 core.evaluators 的 _apply_noperate_mode / _extract_indicator_scalar
-        执行实际比较（rank/compare/inflection 三模式 + noperate 规则表）。
+        增量合并公式：passed_set = (cached_passed - changed_set) | newly_passed
         """
         try:
-            evaluator = self._resolve_evaluator(filter_spec.nset)
-            # 表驱动：按 nset 分派到对应的筛选策略（无 if/elif）
-            handler = _NSET_FILTER_HANDLERS.get(filter_spec.nset, _filter_set_operation)
-            passed = handler(filter_spec, stock_results, current_code, evaluator)
-            if passed is None:
+            formula_ref = filter_spec.formula_ref
+            # 收集当前公式已缓存的所有 code（作为候选全集）
+            all_codes = [
+                code for (fr, code) in self._formula_results.keys()
+                if fr == formula_ref
+            ]
+            if not all_codes:
                 return None, []
-            passed_set = set(passed)
-            all_codes = list(stock_results.keys()) if stock_results else (
-                [current_code] if current_code else []
-            )
+            codes_set = set(all_codes)
+            cached_passed = self._edge_passed_cache.get(eid)
+
+            if changed_codes is None:
+                eval_codes = list(all_codes)
+                prev_passed: Set[str] = set()
+            elif not changed_codes:
+                if cached_passed is not None:
+                    passed_set = cached_passed & codes_set
+                    return list(passed_set), [c for c in all_codes if c not in passed_set]
+                eval_codes = list(all_codes)
+                prev_passed = set()
+            else:
+                changed_set = set(changed_codes) & codes_set
+                if cached_passed is not None:
+                    prev_passed = cached_passed - changed_set
+                    eval_codes = list(changed_set)
+                else:
+                    eval_codes = list(all_codes)
+                    prev_passed = set()
+
+            if not eval_codes:
+                passed_set = prev_passed & codes_set
+                self._edge_passed_cache[eid] = passed_set
+                return list(passed_set), [c for c in all_codes if c not in passed_set]
+
+            # 为待评估 code 构造 {code: result} 子集
+            stock_results = {
+                code: self._formula_results.get((formula_ref, code))
+                for code in eval_codes
+            }
+
+            evaluator = self._resolve_evaluator(filter_spec.nset)
+            handler = _NSET_FILTER_HANDLERS.get(filter_spec.nset, _filter_set_operation)
+            newly_passed = handler(filter_spec, stock_results, "", evaluator)
+            if newly_passed is None:
+                newly_passed = []
+            passed_set = (prev_passed | set(newly_passed)) & codes_set
+            self._edge_passed_cache[eid] = passed_set
+
             rejected = [c for c in all_codes if c not in passed_set]
-            return passed, rejected
+            return list(passed_set), rejected
         except Exception as ex:
             logger.warning(
                 "ScreeningModule._evaluate_filter 异常 (eid=%s nset=%d): %s",

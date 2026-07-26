@@ -22,7 +22,7 @@
   "providers": {
     "local_file": {
       "class": "LocalFileProvider",
-      "module": "meta_core.services.providers",
+      "module": "services.providers",
       "priority": 0,
       "always_ready": true,
       "label": "本地文件数据",
@@ -36,7 +36,7 @@
     },
     "tq_dll": {
       "class": "TqDllProvider",
-      "module": "meta_core.services.providers",
+      "module": "services.providers",
       "priority": 1,
       "always_ready": false,
       "label": "通达信TQ量化",
@@ -60,7 +60,7 @@
     },
     "tq_sdk": {
       "class": "TqSdkProvider",
-      "module": "meta_core.services.providers",
+      "module": "services.providers",
       "priority": 10,
       "always_ready": false,
       "label": "天勤TQ SDK",
@@ -78,7 +78,7 @@
     },
     "akshare": {
       "class": "AkShareProvider",
-      "module": "meta_core.services.providers",
+      "module": "services.providers",
       "priority": 20,
       "always_ready": false,
       "label": "AkShare",
@@ -93,7 +93,7 @@
     },
     "dfcf": {
       "class": "DfcfProvider",
-      "module": "meta_core.services.providers",
+      "module": "services.providers",
       "priority": 21,
       "always_ready": false,
       "label": "东方财富",
@@ -105,7 +105,7 @@
     },
     "mock": {
       "class": "MockProvider",
-      "module": "meta_core.services.providers",
+      "module": "services.providers",
       "priority": 99,
       "always_ready": true,
       "explicit_only": true,

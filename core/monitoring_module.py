@@ -97,7 +97,7 @@ class _EventPanel:
     属性（≤ 5）:
       - bus: EventBus
       - _events: 事件记录列表（maxlen=500）
-      - _pending_specs: 待触发 TimedEventSpec 引用
+      - _pending: 待排队事件缓存
       - _enabled: 是否已订阅
     """
 
@@ -210,10 +210,17 @@ class _EventPanel:
         if self._event_driver is None:
             return []
         specs = []
-        for spec in getattr(self._event_driver, '_specs', []):
+        for entry in getattr(self._event_driver, '_heap', []):
+            fire_time = entry[0] if isinstance(entry, (list, tuple)) and len(entry) >= 2 else 0
+            spec = entry[2] if isinstance(entry, (list, tuple)) and len(entry) >= 3 else None
+            params = getattr(spec, 'params', {}) if spec else {}
             specs.append({
-                "edge_id": getattr(spec, 'edge_id', ''),
-                "next_fire_time": getattr(spec, 'next_fire_time', 0),
+                "edge_id": params.get("eid", ''),
+                "pool_id": params.get("tgt", ''),
+                "code": params.get("code", ''),
+                "kind": params.get("kind", ''),
+                "next_fire_time": fire_time,
+                "interval": getattr(spec, 'interval', None) if spec else None,
             })
         return specs
 
@@ -1019,20 +1026,16 @@ class MonitoringModule:
     def _on_edge_fired(self, event: EdgeFired) -> None:
         """边触发事件加入浮窗 + 持久化。"""
         try:
-            changed_codes = list(event.changed_codes) if event.changed_codes else []
-            code_str = ",".join(changed_codes[:5]) + ("..." if len(changed_codes) > 5 else "")
             self._add_to_event_list({
                 "event_type": "EdgeFired",
                 "edge_id": event.eid,
                 "eid": event.eid,
-                "code": code_str,
+                "code": "",
                 "ts": event.ts,
-                "details": {
-                    "changed_count": len(changed_codes),
-                },
+                "details": {},
             })
             self._bus.publish(EventLogged(
-                event={"kind": "edge_fired", "eid": event.eid, "changed_codes": changed_codes},
+                event={"kind": "edge_fired", "eid": event.eid},
                 event_kind="edge_fired",
                 ts=event.ts,
             ))

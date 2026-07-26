@@ -1299,7 +1299,7 @@ I23：`DomainEvent(ENTER)` 已合并入 `Executed.details`，不再 per-code 发
 | `core/formula.py` | `core/formula_module.py` | 同上 |
 | `core/formula_engine.py` | `core/formula_module.py` | 同上 |
 | `core/formula_router.py` | `core/formula_module.py` | 同上 |
-| `core/tick_source.py` | `core/tick_bar_module.py` | SubTask 27.2：tick/bar 3 文件合并；TickSource/SimTickSource 由 core/domain.py 提供 |
+| `core/tick_source.py` | `core/tick_bar_module.py` | SubTask 27.2：tick/bar 3 文件合并；TickSource/MockDataSource 由 core/domain.py 提供 |
 | `core/data_updater.py` | `core/tick_bar_module.py` | 同上 |
 | `core/bar_composer.py` | `core/tick_bar_module.py` | 同上 |
 | `core/trade_executor.py` | `core/trade_module.py` | SubTask 27.5：交易相关 2 文件合并 |

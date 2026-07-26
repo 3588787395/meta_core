@@ -35,7 +35,7 @@ WHITELIST_GLOBAL_PREFIXES = {"native"}
 MODULE_INTERNAL_WHITELIST: Dict[str, Set[str]] = {
     "core/tick_bar_module.py": {
         # SubTask 27.2: data_updater / bar_composer / minute_aggregator 已合并入本文件
-        # tick_source 已在 SubTask 27.1 删除，TickSource/SimTickSource 由 core.domain 提供
+        # tick_source 已在 SubTask 27.1 删除，TickSource/MockDataSource 由 core.domain 提供
     },
     "core/formula_module.py": {
         # SubTask 27.3: formula / formula_engine / formula_router 已合并入本文件

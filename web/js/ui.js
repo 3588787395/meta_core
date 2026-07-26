@@ -1397,6 +1397,14 @@
         clearInterval(this._reloadTimer);
         this._reloadTimer = null;
       }
+      if (this._encodeTimer) {
+        clearTimeout(this._encodeTimer);
+        this._encodeTimer = null;
+      }
+      if (this._persistTimer) {
+        clearTimeout(this._persistTimer);
+        this._persistTimer = null;
+      }
       this.container.innerHTML = '';
       this._changeListeners = [];
     }
@@ -1459,6 +1467,63 @@
         data: data
       }, function (resp) {
         if (resp && !resp.error) {
+          // 边属性面板：补充计算参数与 K 线配置字段（Task 1）
+          if ((resp.layout_id === 'flow_edge' || resp.layout_id === 'tdx_flow_edge') && resp.sections) {
+            var existingKeys = {};
+            resp.sections.forEach(function(sec) {
+              (sec.fields || []).forEach(function(f) { existingKeys[f.key] = true; });
+            });
+            var extraSections = [
+              {
+                title: '计算参数',
+                collapsible: true,
+                fields: [
+                  { key: 'formula_ref', comp: 'text_input', label: '公式引用', data_path: 'formula_ref', default: '', hint: '如 KDJ / MACD' },
+                  { key: 'operator', comp: 'select', label: '操作符', data_path: 'operator', default: '', options: [
+                    { value: '', label: '未设置' }, { value: '0', label: '等于' }, { value: '1', label: '大于' },
+                    { value: '2', label: '小于' }, { value: '3', label: '金叉' }, { value: '4', label: '死叉' },
+                    { value: '5', label: '排名为' }, { value: '6', label: '排名前N' }, { value: '7', label: '排名后N' },
+                    { value: '8', label: '上拐' }, { value: '9', label: '下拐' }
+                  ]},
+                  { key: 'threshold', comp: 'number_input', label: '阈值', data_path: 'threshold', default: '', step: 0.01 },
+                  { key: 'nset', comp: 'select', label: '公式类型(nset)', data_path: 'nset', default: '', options: [
+                    { value: '', label: '未设置' }, { value: '0', label: '技术指标' }, { value: '1', label: '条件选股' },
+                    { value: '2', label: '专家系统' }, { value: '3', label: '最新财务' },
+                    { value: '4', label: '实时行情' }, { value: '5', label: '逻辑运算' }
+                  ]},
+                  { key: 'noperate', comp: 'select', label: '操作(noperate)', data_path: 'noperate', default: '', options: [
+                    { value: '', label: '未设置' }, { value: '0', label: '等于' }, { value: '1', label: '大于' },
+                    { value: '2', label: '小于' }, { value: '3', label: '金叉' }, { value: '4', label: '死叉' },
+                    { value: '5', label: '排名为' }, { value: '6', label: '排名前N' }, { value: '7', label: '排名后N' },
+                    { value: '8', label: '上拐' }, { value: '9', label: '下拐' }
+                  ]}
+                ]
+              },
+              {
+                title: 'K 线配置',
+                collapsible: true,
+                fields: [
+                  { key: 'period', comp: 'select', label: '周期(period)', data_path: 'period', default: '', options: [
+                    { value: '', label: '未设置' }, { value: '0', label: '分笔' }, { value: '1', label: '1分钟' },
+                    { value: '2', label: '5分钟' }, { value: '3', label: '15分钟' }, { value: '4', label: '30分钟' },
+                    { value: '5', label: '60分钟' }, { value: '6', label: '日线' },
+                    { value: '7', label: '周线' }, { value: '8', label: '月线' }
+                  ]},
+                  { key: 'length', comp: 'number_input', label: '长度(length)', data_path: 'length', default: '', min: 0 },
+                  { key: 'bar_type', comp: 'select', label: 'K线类型(bar_type)', data_path: 'bar_type', default: '', options: [
+                    { value: '', label: '未设置' }, { value: '0', label: '分笔' }, { value: '1', label: '1分钟' },
+                    { value: '5', label: '5分钟' }, { value: '15', label: '15分钟' }, { value: '30', label: '30分钟' },
+                    { value: '60', label: '60分钟' }, { value: 'daily', label: '日线' },
+                    { value: 'weekly', label: '周线' }, { value: 'monthly', label: '月线' }
+                  ]}
+                ]
+              }
+            ];
+            extraSections.forEach(function(sec) {
+              sec.fields = sec.fields.filter(function(f) { return !existingKeys[f.key]; });
+              if (sec.fields.length) resp.sections.push(sec);
+            });
+          }
           // 缓存布局配置（用于后续字段查找和联动处理）
           if (resp.layout_id) {
             self._layoutCache.set(cacheKey, resp);
@@ -4997,6 +5062,7 @@ class HighlightManager {
     this._animationFrameId = null;
     this._config = null;
     this._configLoading = null;
+    this._fallbackTimer = null;
   }
 
   init() {
@@ -5006,7 +5072,9 @@ class HighlightManager {
 
     this.connectWebSocket();
 
-    setTimeout(() => {
+    if (this._fallbackTimer) clearTimeout(this._fallbackTimer);
+    this._fallbackTimer = setTimeout(() => {
+      this._fallbackTimer = null;
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         console.warn('[HighlightManager] WebSocket连接失败,降级为轮询模式');
         this.startPolling();
@@ -5249,14 +5317,6 @@ class HighlightManager {
     this.isReplayMode = enabled;
   }
 
-  getActiveCount() {
-    return this.activeHighlights.size;
-  }
-
-  getActiveHighlights() {
-    return new Map(this.activeHighlights);
-  }
-
   destroy() {
     this.activeHighlights.forEach((_, id) => {
       var highlight = this.activeHighlights.get(id);
@@ -5265,12 +5325,21 @@ class HighlightManager {
       }
     });
 
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
+    this.stopPolling();
+
+    if (this._fallbackTimer) {
+      clearTimeout(this._fallbackTimer);
+      this._fallbackTimer = null;
     }
 
-    this.stopPolling();
+    if (this.ws) {
+      this.ws.onclose = null;
+      this.ws.onerror = null;
+      this.ws.onmessage = null;
+      this.ws.onopen = null;
+      try { this.ws.close(); } catch (e) {}
+      this.ws = null;
+    }
 
     if (this._animationFrameId) {
       cancelAnimationFrame(this._animationFrameId);
@@ -5691,23 +5760,6 @@ if (typeof module !== 'undefined' && module.exports) {
   // ─── 校验 ─────────────────────────────────────────────────────
 
   /**
-   * 校验配置表 buttons 数组与渲染后 DOM 按钮数量一致
-   * @returns {Object} {expected, rendered, ok}
-   */
-  function validateButtonCount() {
-    var expected = (_toolbarConfig && _toolbarConfig.buttons) ? _toolbarConfig.buttons.length : 0;
-    var rendered = _renderedButtons.length;
-    return { expected: expected, rendered: rendered, ok: expected === rendered };
-  }
-
-  /**
-   * 获取已渲染按钮清单
-   */
-  function getRenderedButtons() {
-    return _renderedButtons.slice();
-  }
-
-  /**
    * 获取已加载的配置（供外部使用）
    */
   function getConfigs() {
@@ -5747,491 +5799,51 @@ if (typeof module !== 'undefined' && module.exports) {
     evaluateCondition: evaluateCondition,
     updateButtonStates: updateButtonStates,
     updatePanelVisibility: updatePanelVisibility,
-    validateButtonCount: validateButtonCount,
-    getRenderedButtons: getRenderedButtons,
     getConfigs: getConfigs,
     loadConfigs: loadConfigs
   };
 
 })(typeof window !== 'undefined' ? window : this);
 
-  // === from event-panel.js ===
-
-/**
- * Event Panel — 事件浮窗 + K线面板
- * 使用 SSE (EventSource) 连接 /api/events/stream，实时推送事件
- */
+// === K线面板 (保留原有功能) ===
 (function () {
-  'use strict';
-
   const $ = id => document.getElementById(id);
-  const processedEventList = $('processedEventList');
-  const pendingEventList = $('pendingEventList');
-  const eventCountEl = $('eventCount');
-  const processedCountEl = $('processedCount');
-  const pendingCountEl = $('pendingCount');
-  const eventPanel = $('eventPanel');
   const chartPanel = $('chartPanel');
-  const stepCountEl = $('stepCount');
-  const btnPauseScroll = $('btnPauseScroll');
 
-  let sessionId = null;
-  let processedCount = 0;
-  let pendingCount = 0;
-  let totalEventCount = 0;
-  let eventSource = null;
-  let stepCount = 0;
-  let reconnectTimer = null;
-  let autoScrollPaused = false;
-  const MAX_EVENTS = 500;
-  const RECONNECT_DELAY = 3000;
-
-  const PENDING_EVENT_TYPES = new Set();
-
-  const EVENT_CATEGORIES = {
-    tick: new Set(['TickReceived', 'DataChanged']),
-    bar: new Set(['BarComposed', 'DataChanged']),
-    formula: new Set(['FormulaEvaluated', 'StockFiltered']),
-    edge: new Set(['EdgeFired', 'CrossOverDetected']),
-    transfer: new Set(['Executed', 'TransferExecuted', 'RankingChanged', 'ENTER', 'EXIT', 'RANK_CHANGED']),
-    signal: new Set(['Signal', 'BUY', 'SELL', 'AlertRaised']),
-    order: new Set(['OrderPlaced', 'OrderFilled', 'PositionUpdated']),
-    ttl: new Set(['TTLExpired', 'TIMEOUT']),
-    system: new Set(['ModeChanged', 'PoolLoaded', 'TimeAdvanced', 'StatisticsUpdated', 'SnapshotUpdated', 'EventLogged', 'ConfigLoaded', 'ConfigChanged'])
-  };
-
-  const activeFilters = new Set(Object.keys(EVENT_CATEGORIES));
-  activeFilters.add('all');
-
-  function formatCode(code) {
-    if (!code) return '';
-    code = String(code);
-    if (code.length === 6 && code.match(/^\d+$/)) return code;
-    if (code.length === 5 && code.match(/^\d+$/)) return code.padStart(6, '0');
-    if (code.startsWith('fz') && code.length === 7) return 'fz' + code.slice(2).padStart(6, '0');
-    return code;
-  }
-
-  function formatTime(ts) {
-    if (!ts) {
-      const now = new Date();
-      return now.toTimeString().slice(0, 8);
-    }
-    if (typeof ts === 'number') {
-      if (ts < 1e12) ts = ts * 1000;
-      return new Date(ts).toTimeString().slice(0, 8);
-    }
-    if (typeof ts === 'string') {
-      if (ts.length >= 8) return ts.slice(0, 8);
-      return ts;
-    }
-    return new Date().toTimeString().slice(0, 8);
-  }
-
-  function getEventCategory(type, details) {
-    if (type === 'DataChanged') {
-      const source = details?.source || '';
-      if (source === 'bar') return 'bar';
-      return 'tick';
-    }
-    for (const [cat, types] of Object.entries(EVENT_CATEGORIES)) {
-      if (types.has(type)) return cat;
-    }
-    return 'system';
-  }
-
-  function getEventIcon(type, details) {
-    if (type === 'DataChanged') {
-      const source = details?.source || '';
-      if (source === 'bar') return '📈';
-      return '📊';
-    }
-    const icons = {
-      TickReceived: '📊',
-      BarComposed: '📈',
-      FormulaEvaluated: '🧮', StockFiltered: '🧮',
-      EdgeFired: '⚡', CrossOverDetected: '⚡',
-      Executed: '🔄', TransferExecuted: '🔄', RankingChanged: '🔄',
-      ENTER: '✅', EXIT: '🚪', RANK_CHANGED: '🔄',
-      Signal: '💰', BUY: '💰', SELL: '💰', AlertRaised: '⚠️',
-      OrderPlaced: '📋', OrderFilled: '📋', PositionUpdated: '📋',
-      TTLExpired: '⏰', TIMEOUT: '⏰',
-      ModeChanged: '🔧', PoolLoaded: '🔧', TimeAdvanced: '🔧',
-      ConfigLoaded: '🔧', ConfigChanged: '🔧',
-      StatisticsUpdated: '📊', SnapshotUpdated: '📊', EventLogged: '📝'
-    };
-    return icons[type] || '📌';
-  }
-
-  function getEventColor(type, details) {
-    if (type === 'DataChanged') {
-      const source = details?.source || '';
-      if (source === 'bar') return '#2196f3';
-      return '#9e9e9e';
-    }
-    const colors = {
-      TickReceived: '#9e9e9e',
-      BarComposed: '#2196f3',
-      FormulaEvaluated: '#4caf50', StockFiltered: '#4caf50',
-      EdgeFired: '#ff9800', CrossOverDetected: '#ff9800',
-      Executed: '#9c27b0', TransferExecuted: '#9c27b0', RankingChanged: '#9c27b0',
-      ENTER: '#4caf50', EXIT: '#b71c1c', RANK_CHANGED: '#9c27b0',
-      TTLExpired: '#b71c1c', TIMEOUT: '#b71c1c',
-      Signal: '#f44336', BUY: '#f44336', SELL: '#f44336', AlertRaised: '#f44336',
-      OrderPlaced: '#ffc107', OrderFilled: '#ffc107', PositionUpdated: '#ffc107',
-      ModeChanged: '#00bcd4', PoolLoaded: '#00bcd4', TimeAdvanced: '#00bcd4',
-      ConfigLoaded: '#00bcd4', ConfigChanged: '#00bcd4',
-      StatisticsUpdated: '#9e9e9e', SnapshotUpdated: '#9e9e9e', EventLogged: '#9e9e9e'
-    };
-    return colors[type] || '#888';
-  }
-
-  function shouldShowEvent(type, details) {
-    if (activeFilters.has('all')) return true;
-    const cat = getEventCategory(type, details);
-    return activeFilters.has(cat);
-  }
-
-  function autoScroll(el) {
-    if (autoScrollPaused) return;
-    requestAnimationFrame(() => {
-      el.scrollTop = el.scrollHeight;
+  if ($('btnCloseChart')) {
+    $('btnCloseChart').addEventListener('click', function () {
+      if (chartPanel) chartPanel.style.display = 'none';
     });
   }
-
-  function createEventItem(ev) {
-    const type = ev.event_type || ev.type || 'UNKNOWN';
-    let code = formatCode(ev.code || '');
-    if (!code && ev.codes && Array.isArray(ev.codes) && ev.codes.length > 0) {
-      code = formatCode(ev.codes[0]);
-      if (ev.codes.length > 1) code += `+${ev.codes.length - 1}`;
-    }
-    const time = ev.time || formatTime(ev.timestamp || ev.ts);
-    const details = ev.details || {};
-    const color = getEventColor(type, details);
-    const icon = getEventIcon(type, details);
-
-    const div = document.createElement('div');
-    div.className = `event-item ${type}`;
-    div.dataset.type = type;
-    div.style.borderLeftColor = color;
-
-    const cat = getEventCategory(type, details);
-    div.dataset.category = cat;
-
-    let detailParts = [];
-    if (typeof details === 'object') {
-      for (const [k, v] of Object.entries(details)) {
-        if (v === null || v === undefined) continue;
-        if (typeof v === 'object') continue;
-        if (k === 'time' || k === 'ts' || k === 'code') continue;
-        const sv = String(v);
-        if (sv.length > 40) {
-          detailParts.push(`${k}=${sv.slice(0, 37)}...`);
-        } else {
-          detailParts.push(`${k}=${sv}`);
-        }
-        if (detailParts.length >= 3) break;
-      }
-    }
-    let detailStr = detailParts.join(' ');
-    if (ev.node_id) detailStr = `节点=${ev.node_id} ` + detailStr;
-    if (ev.edge_id) detailStr = `边=${ev.edge_id} ` + detailStr;
-    if (ev.pool_id) detailStr = `池=${ev.pool_id} ` + detailStr;
-    detailStr = detailStr.trim();
-
-    div.innerHTML = `
-      <span class="ev-time">${time}</span>
-      <span class="ev-icon">${icon}</span>
-      <span class="ev-type" style="color:${color}">${type}</span>
-      ${code ? `<span class="ev-code">${code}</span>` : ''}
-      ${detailStr ? `<span class="ev-details">${detailStr}</span>` : ''}
-    `.trim();
-
-    if (code) {
-      const baseCode = code.replace(/\+\d+$/, '');
-      div.dataset.code = baseCode;
-    }
-    return div;
-  }
-
-  function applyFilterToAll() {
-    const allItems = processedEventList.querySelectorAll('.event-item');
-    allItems.forEach(item => {
-      const cat = item.dataset.category;
-      const shouldShow = activeFilters.has('all') || activeFilters.has(cat);
-      item.classList.toggle('hidden', !shouldShow);
-    });
-    const pendingItems = pendingEventList.querySelectorAll('.event-item');
-    pendingItems.forEach(item => {
-      const cat = item.dataset.category;
-      const shouldShow = activeFilters.has('all') || activeFilters.has(cat);
-      item.classList.toggle('hidden', !shouldShow);
-    });
-  }
-
-  function addEvent(ev) {
-    const type = ev.event_type || ev.type || 'UNKNOWN';
-    totalEventCount++;
-    eventCountEl.textContent = totalEventCount > 99 ? '99+' : totalEventCount;
-
-    const isPending = PENDING_EVENT_TYPES.has(type);
-    const div = createEventItem(ev);
-    const targetList = isPending ? pendingEventList : processedEventList;
-
-    if (!shouldShowEvent(type, ev.details)) {
-      div.classList.add('hidden');
-    }
-
-    targetList.appendChild(div);
-    autoScroll(targetList);
-
-    if (isPending) {
-      pendingCount++;
-      pendingCountEl.textContent = pendingCount;
-    } else {
-      processedCount++;
-      processedCountEl.textContent = processedCount;
-    }
-
-    while (processedEventList.children.length > MAX_EVENTS) {
-      processedEventList.firstChild.remove();
-    }
-    while (pendingEventList.children.length > MAX_EVENTS / 2) {
-      pendingEventList.firstChild.remove();
-    }
-  }
-
-  function clearEvents() {
-    processedEventList.innerHTML = '';
-    pendingEventList.innerHTML = '';
-    processedCount = 0;
-    pendingCount = 0;
-    totalEventCount = 0;
-    eventCountEl.textContent = '0';
-    processedCountEl.textContent = '0';
-    pendingCountEl.textContent = '0';
-  }
-
-  function initSSE() {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
-    if (eventSource) {
-      eventSource.close();
-      eventSource = null;
-    }
-
-    try {
-      eventSource = new EventSource('/api/events/stream');
-
-      eventSource.onopen = function() {
-        console.log('SSE 连接已建立');
-      };
-
-      eventSource.onmessage = function(e) {
-        try {
-          const ev = JSON.parse(e.data);
-          addEvent(ev);
-          if (ev.event_type === 'SimulationStep' || ev.event_type === 'ReplayStep' || ev.event_type === 'TimeAdvanced') {
-            stepCount++;
-            if (stepCountEl) stepCountEl.textContent = stepCount;
-          }
-        } catch (err) {
-          console.error('解析SSE事件失败:', err);
-        }
-      };
-
-      eventSource.onerror = function(e) {
-        console.warn('SSE 连接错误，' + RECONNECT_DELAY/1000 + '秒后自动重连...', e);
-        if (eventSource) {
-          eventSource.close();
-          eventSource = null;
-        }
-        if (!reconnectTimer) {
-          reconnectTimer = setTimeout(function() {
-            reconnectTimer = null;
-            initSSE();
-          }, RECONNECT_DELAY);
-        }
-      };
-    } catch (e) {
-      console.error('SSE 初始化失败，' + RECONNECT_DELAY/1000 + '秒后重试:', e);
-      if (!reconnectTimer) {
-        reconnectTimer = setTimeout(function() {
-          reconnectTimer = null;
-          initSSE();
-        }, RECONNECT_DELAY);
-      }
-    }
-  }
-
-  function closeSSE() {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
-    if (eventSource) {
-      eventSource.close();
-      eventSource = null;
-    }
-  }
-
-  // === 暂停/继续滚动 ===
-  btnPauseScroll?.addEventListener('click', () => {
-    autoScrollPaused = !autoScrollPaused;
-    if (btnPauseScroll) {
-      if (autoScrollPaused) {
-        btnPauseScroll.textContent = '▶ 滚动';
-        btnPauseScroll.classList.add('paused');
-        btnPauseScroll.title = '继续滚动';
-      } else {
-        btnPauseScroll.textContent = '⏸ 滚动';
-        btnPauseScroll.classList.remove('paused');
-        btnPauseScroll.title = '暂停滚动';
-        autoScroll(processedEventList);
-    if (typeof timelineAddEvent === 'function') {
-        try { timelineAddEvent(ev); } catch(e) {}
-    }
-        autoScroll(pendingEventList);
-      }
-    }
-  });
-
-  // === 折叠/展开 ===
-  $('btnToggleEvents')?.addEventListener('click', () => {
-    eventPanel.classList.toggle('collapsed');
-    const btn = $('btnToggleEvents');
-    if (btn) btn.textContent = eventPanel.classList.contains('collapsed') ? '▼' : '▲';
-  });
-
-  // === 清空 ===
-  $('btnClearEvents')?.addEventListener('click', () => {
-    clearEvents();
-  });
-
-  // === 事件分类过滤 ===
-  document.querySelectorAll('.ep-filter-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const filter = btn.dataset.filter;
-      if (filter === 'all') {
-        if (btn.classList.contains('active')) {
-          activeFilters.clear();
-          document.querySelectorAll('.ep-filter-btn').forEach(b => b.classList.remove('active'));
-        } else {
-          activeFilters.clear();
-          Object.keys(EVENT_CATEGORIES).forEach(c => activeFilters.add(c));
-          activeFilters.add('all');
-          document.querySelectorAll('.ep-filter-btn').forEach(b => b.classList.add('active'));
-        }
-      } else {
-        if (btn.classList.contains('active')) {
-          activeFilters.delete(filter);
-          btn.classList.remove('active');
-          const allBtn = document.querySelector('.ep-filter-btn[data-filter="all"]');
-          if (allBtn) allBtn.classList.remove('active');
-          activeFilters.delete('all');
-        } else {
-          activeFilters.add(filter);
-          btn.classList.add('active');
-          let allActive = true;
-          for (const cat of Object.keys(EVENT_CATEGORIES)) {
-            if (!activeFilters.has(cat)) { allActive = false; break; }
-          }
-          if (allActive) {
-            activeFilters.add('all');
-            const allBtn = document.querySelector('.ep-filter-btn[data-filter="all"]');
-            if (allBtn) allBtn.classList.add('active');
-          }
-        }
-      }
-      applyFilterToAll();
-    });
-  });
-
-  function logSystem(msg) {
-    addEvent({
-      event_type: 'EventLogged',
-      time: new Date().toTimeString().slice(0, 8),
-      details: { message: msg }
-    });
-  }
-  window.logSystemEvent = logSystem;
-
-  function resetStepCount() {
-    stepCount = 0;
-    if (stepCountEl) stepCountEl.textContent = '0';
-  }
-  window.resetEventStepCount = resetStepCount;
-
-  function setSession(sid) {
-    sessionId = sid;
-    if (sid) {
-      logSystem('已连接会话: ' + sid.slice(0, 8));
-    }
-  }
-  window.eventPanelSetSession = setSession;
-
-  // === K线面板 ===
-  $('btnCloseChart')?.addEventListener('click', () => { chartPanel.style.display = 'none'; });
-
-  $('chartCodeSelect')?.addEventListener('change', () => {
-    const code = $('chartCodeSelect').value;
-    const period = $('chartPeriodSelect')?.value || '1min';
-    if (code) fetchBars(code, period);
-  });
-  $('chartPeriodSelect')?.addEventListener('change', () => {
-    const code = $('chartCodeSelect')?.value;
-    const period = $('chartPeriodSelect').value;
-    if (code) fetchBars(code, period);
-  });
 
   async function fetchBars(code, period) {
-    if (!sessionId) { logSystem('请先启动仿真再查看K线'); return; }
+    const sid = window.sessionId;
+    if (!sid) { if (typeof window.logSystemEvent === 'function') window.logSystemEvent('请先启动仿真'); return; }
+    if (!chartPanel) return;
     try {
-      const res = await fetch(`/api/sim/bars?session_id=${sessionId}&code=${encodeURIComponent(code)}&period=${period}`);
+      const res = await fetch('/api/sim/bars?session_id=' + sid + '&code=' + encodeURIComponent(code) + '&period=' + period);
       const data = await res.json();
       if (data.code === 0 && data.data) {
         const bars = data.data.bars || [];
         drawMiniChart(bars, code);
-        $('formulaResult').textContent = data.data.formula_result || '';
-        if (data.data.position) {
-          $('formulaResult').textContent += ' | 持仓: ' + JSON.stringify(data.data.position);
+        const fr = $('formulaResult');
+        if (fr) {
+          fr.textContent = data.data.formula_result || '';
+          if (data.data.position) fr.textContent += ' | Pos: ' + JSON.stringify(data.data.position);
         }
       }
     } catch (e) { /* ignore */ }
   }
 
-  function onEventListClick(e) {
-    const item = e.target.closest('.event-item');
-    if (!item) return;
-    const code = (item.dataset.code) || '';
-    if (!code) return;
-    chartPanel.style.display = '';
-    const sel = $('chartCodeSelect');
-    if (sel && !Array.from(sel.options).find(o => o.value === code)) {
-      const opt = document.createElement('option');
-      opt.value = code; opt.textContent = code;
-      sel.appendChild(opt);
-    }
-    sel.value = code;
-    fetchBars(code, $('chartPeriodSelect')?.value || '1min');
-  }
-
-  processedEventList?.addEventListener('click', onEventListClick);
-  setTimeout(() => { if (typeof initEventTimeline === 'function') initEventTimeline(); }, 100);
-  pendingEventList?.addEventListener('click', onEventListClick);
-
   function drawMiniChart(bars, code) {
-    const canvas = $('miniChart');
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    const W = canvas.width, H = canvas.height;
-    ctx.clearRect(0, 0, W, H);
+    const cvs = $('miniChart');
+    if (!cvs) return;
+    const ctx2 = cvs.getContext('2d');
+    const W = cvs.width, H = cvs.height;
+    ctx2.clearRect(0, 0, W, H);
     if (!bars || bars.length === 0) {
-      ctx.fillStyle = '#555'; ctx.font = '12px Consolas';
-      ctx.fillText(`无K线数据: ${code}`, 20, H / 2);
+      ctx2.fillStyle = '#555'; ctx2.font = '12px Consolas';
+      ctx2.fillText('No data: ' + code, 20, H / 2);
       return;
     }
     const padding = { top: 10, right: 10, bottom: 20, left: 50 };
@@ -6241,497 +5853,55 @@ if (typeof module !== 'undefined' && module.exports) {
     const highs = bars.map(b => b.high || b.h || 0);
     const lows = bars.map(b => b.low || b.l || 0);
     const opens = bars.map(b => b.open || b.o || 0);
-    const minP = Math.min(...lows) * 0.998;
-    const maxP = Math.max(...highs) * 1.002;
+    const minP = Math.min.apply(null, lows) * 0.998;
+    const maxP = Math.max.apply(null, highs) * 1.002;
     const range = maxP - minP || 1;
     const barW = chartW / bars.length;
     const y = p => padding.top + chartH * (1 - (p - minP) / range);
-
-    ctx.strokeStyle = '#1a1a2e'; ctx.lineWidth = 0.5;
+    ctx2.strokeStyle = '#1a1a2e'; ctx2.lineWidth = 0.5;
     for (let i = 0; i <= 4; i++) {
       const p = minP + (range * i / 4);
       const yy = y(p);
-      ctx.beginPath(); ctx.moveTo(padding.left, yy); ctx.lineTo(W - padding.right, yy); ctx.stroke();
-      ctx.fillStyle = '#555'; ctx.font = '9px Consolas';
-      ctx.fillText(p.toFixed(2), 2, yy + 3);
+      ctx2.beginPath(); ctx2.moveTo(padding.left, yy); ctx2.lineTo(W - padding.right, yy); ctx2.stroke();
+      ctx2.fillStyle = '#555'; ctx2.font = '9px Consolas';
+      ctx2.fillText(p.toFixed(2), 2, yy + 3);
     }
-    bars.forEach((bar, i) => {
-      const x = padding.left + i * barW + barW / 2;
-      const o = opens[i], c = closes[i], h = highs[i], l = lows[i];
+    for (let bi = 0; bi < bars.length; bi++) {
+      const x = padding.left + bi * barW + barW / 2;
+      const o = opens[bi], c = closes[bi], h = highs[bi], l = lows[bi];
       const isUp = c >= o;
       const color = isUp ? '#26a69a' : '#ef5350';
-      ctx.strokeStyle = color; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(x, y(h)); ctx.lineTo(x, y(l)); ctx.stroke();
+      ctx2.strokeStyle = color; ctx2.lineWidth = 1;
+      ctx2.beginPath(); ctx2.moveTo(x, y(h)); ctx2.lineTo(x, y(l)); ctx2.stroke();
       const bodyTop = y(Math.max(o, c));
       const bodyBot = y(Math.min(o, c));
       const bodyH = Math.max(bodyBot - bodyTop, 1);
-      ctx.fillStyle = color;
-      ctx.fillRect(x - barW * 0.35, bodyTop, barW * 0.7, bodyH);
-    });
-    ctx.fillStyle = '#aaa'; ctx.font = '11px Consolas';
-    ctx.fillText(`${code} | ${closes[closes.length - 1]?.toFixed(2)}`, padding.left + 5, H - 4);
+      ctx2.fillStyle = color;
+      ctx2.fillRect(x - barW * 0.35, bodyTop, barW * 0.7, bodyH);
+    }
+    ctx2.fillStyle = '#aaa'; ctx2.font = '11px Consolas';
+    ctx2.fillText(code + ' | ' + (closes[closes.length - 1] ? closes[closes.length - 1].toFixed(2) : '-'), padding.left + 5, H - 4);
   }
 
-  function init() {
-    initSSE();
-    logSystem('事件流已连接 (SSE)');
+  function openChartForCode(code) {
+    if (!code || !chartPanel) return;
+    chartPanel.style.display = '';
+    const sel = $('chartCodeSelect');
+    if (sel) {
+      let found = false;
+      for (let i = 0; i < sel.options.length; i++) {
+        if (sel.options[i].value === code) { found = true; break; }
+      }
+      if (!found) {
+        const opt = document.createElement('option');
+        opt.value = code;
+        opt.textContent = code;
+        sel.appendChild(opt);
+      }
+      sel.value = code;
+    }
+    fetchBars(code, ($('chartPeriodSelect') && $('chartPeriodSelect').value) || '1min');
   }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
-
-  window.addEventListener('beforeunload', closeSSE);
-
-  window.MetaSim = {
-    startSim: function() { logSystem('启动仿真...'); },
-    stopSim: function() { logSystem('停止仿真'); resetStepCount(); },
-    fetchBars: fetchBars,
-    clearEvents: clearEvents
-  };
-// ===== Event Timeline Implementation =====
-const EVENT_TYPE_COLORS = {
-    tick:     { color: '#2196f3', emoji: '📊', label: 'Tick' },
-    bar:      { color: '#4caf50', emoji: '📈', label: 'Bar' },
-    formula:  { color: '#00bcd4', emoji: '🧮', label: 'Formula' },
-    edge:     { color: '#ff9800', emoji: '⚡', label: 'Edge' },
-    transfer: { color: '#9c27b0', emoji: '🔄', label: 'Transfer' },
-    signal:   { color: '#f44336', emoji: '💰', label: 'Signal' },
-    order:    { color: '#ffc107', emoji: '📋', label: 'Order' },
-    ttl:      { color: '#e91e63', emoji: '⏰', label: 'TTL' },
-    system:   { color: '#9e9e9e', emoji: '🔧', label: 'System' }
-};
-
-class EventTimeline {
-    constructor() {
-        this.canvas = $('epTimelineCanvas');
-        this.container = $('epTimelineContainer');
-        this.tooltip = $('epTimelineTooltip');
-        this.ctx = this.canvas.getContext('2d');
-        this.events = [];
-        this.filteredTypes = new Set(Object.keys(EVENT_TYPE_COLORS));
-        this.autoScroll = true;
-        this.collapsed = false;
-        
-        this.viewStart = null;
-        this.viewEnd = null;
-        this.minTimeRange = 1000;
-        this.maxTimeRange = 24 * 60 * 60 * 1000;
-        
-        this.isDragging = false;
-        this.dragStartX = 0;
-        this.dragViewStart = 0;
-        this.dragViewEnd = 0;
-        
-        this.hoveredEvent = null;
-        this.dpr = window.devicePixelRatio || 1;
-        
-        this.resize();
-        this.bindEvents();
-        this.resetView();
-        this.render();
-    }
-    
-    resize() {
-        const rect = this.container.getBoundingClientRect();
-        this.width = rect.width;
-        this.height = rect.height;
-        this.canvas.width = this.width * this.dpr;
-        this.canvas.height = this.height * this.dpr;
-        this.canvas.style.width = this.width + 'px';
-        this.canvas.style.height = this.height + 'px';
-        this.ctx.scale(this.dpr, this.dpr);
-    }
-    
-    bindEvents() {
-        window.addEventListener('resize', () => {
-            this.resize();
-            this.render();
-        });
-        
-        this.canvas.addEventListener('wheel', (e) => {
-            e.preventDefault();
-            const zoomFactor = e.deltaY > 0 ? 1.2 : 0.8;
-            this.zoom(e.offsetX, zoomFactor);
-        });
-        
-        this.canvas.addEventListener('mousedown', (e) => {
-            this.isDragging = true;
-            this.dragStartX = e.offsetX;
-            this.dragViewStart = this.viewStart;
-            this.dragViewEnd = this.viewEnd;
-            this.canvas.style.cursor = 'grabbing';
-        });
-        
-        window.addEventListener('mousemove', (e) => {
-            if (this.isDragging) {
-                const rect = this.canvas.getBoundingClientRect();
-                const dx = e.clientX - rect.left - this.dragStartX;
-                const range = this.dragViewEnd - this.dragViewStart;
-                const shift = -(dx / this.width) * range;
-                this.viewStart = this.dragViewStart + shift;
-                this.viewEnd = this.dragViewEnd + shift;
-                this.autoScroll = false;
-                this.updateAutoScrollBtn();
-                this.render();
-            } else {
-                const rect = this.canvas.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const y = e.clientY - rect.top;
-                if (x >= 0 && x <= this.width && y >= 0 && y <= this.height) {
-                    this.checkHover(x, y, e.clientX, e.clientY);
-                } else {
-                    this.hideTooltip();
-                }
-            }
-        });
-        
-        window.addEventListener('mouseup', () => {
-            this.isDragging = false;
-            this.canvas.style.cursor = 'grab';
-        });
-        
-        $('btnTimelineAutoScroll')?.addEventListener('click', () => {
-            this.autoScroll = !this.autoScroll;
-            this.updateAutoScrollBtn();
-            if (this.autoScroll && this.events.length > 0) {
-                this.scrollToLatest();
-            }
-        });
-        
-        $('btnTimelineZoomIn')?.addEventListener('click', () => {
-            this.zoom(this.width * 0.8, 0.7);
-        });
-        
-        $('btnTimelineZoomOut')?.addEventListener('click', () => {
-            this.zoom(this.width * 0.8, 1.4);
-        });
-        
-        $('btnTimelineReset')?.addEventListener('click', () => {
-            this.resetView();
-            this.autoScroll = true;
-            this.updateAutoScrollBtn();
-            this.render();
-        });
-        
-        $('epTimelineToggle')?.addEventListener('click', (e) => {
-            if (e.target.closest('.ep-timeline-btn')) return;
-            this.collapsed = !this.collapsed;
-            $('epTimelineSection').classList.toggle('collapsed', this.collapsed);
-            if (!this.collapsed) {
-                setTimeout(() => {
-                    this.resize();
-                    this.render();
-                }, 50);
-            }
-        });
-    }
-    
-    updateAutoScrollBtn() {
-        const btn = $('btnTimelineAutoScroll');
-        if (btn) {
-            btn.classList.toggle('active', this.autoScroll);
-            btn.textContent = this.autoScroll ? '⏸ 跟随' : '▶ 手动';
-        }
-    }
-    
-    classifyEventType(evType) {
-        const t = (evType || '').toLowerCase();
-        if (t.includes('tick') || t.includes('datachanged')) return 'tick';
-        if (t.includes('bar')) return 'bar';
-        if (t.includes('formula') || t.includes('filtered') || t.includes('crossover')) return 'formula';
-        if (t.includes('edge')) return 'edge';
-        if (t.includes('transfer') || t.includes('executed')) return 'transfer';
-        if (t.includes('signal')) return 'signal';
-        if (t.includes('order') || t.includes('position') || t.includes('filled')) return 'order';
-        if (t.includes('ttl') || t.includes('timeout') || t.includes('expired')) return 'ttl';
-        return 'system';
-    }
-    
-    addEvent(ev) {
-        const ts = ev.ts || Date.now();
-        const type = this.classifyEventType(ev.type);
-        const eventData = ev.event || ev;
-        const code = eventData.code || eventData.codes || '';
-        let detail = '';
-        try {
-            if (typeof eventData === 'object') {
-                const simple = {};
-                for (const k in eventData) {
-                    if (typeof eventData[k] !== 'object' && typeof eventData[k] !== 'function') {
-                        simple[k] = eventData[k];
-                    }
-                }
-                detail = JSON.stringify(simple).slice(0, 150);
-            } else {
-                detail = String(eventData).slice(0, 150);
-            }
-        } catch(e) { detail = ''; }
-        
-        this.events.push({
-            ts: ts,
-            type: type,
-            typeName: ev.type || type,
-            code: code,
-            detail: detail,
-            raw: ev
-        });
-        
-        if (this.events.length > 2000) {
-            this.events = this.events.slice(-1500);
-        }
-        
-        if (this.autoScroll) {
-            this.scrollToLatest();
-        }
-        this.render();
-    }
-    
-    scrollToLatest() {
-        if (this.events.length === 0) return;
-        const latest = this.events[this.events.length - 1].ts;
-        const range = this.viewEnd - this.viewStart;
-        this.viewEnd = latest + range * 0.05;
-        this.viewStart = this.viewEnd - range;
-    }
-    
-    resetView() {
-        const now = Date.now();
-        this.viewStart = now - 60000;
-        this.viewEnd = now + 5000;
-    }
-    
-    zoom(centerX, factor) {
-        const range = this.viewEnd - this.viewStart;
-        const newRange = Math.max(this.minTimeRange, Math.min(this.maxTimeRange, range * factor));
-        const centerTime = this.viewStart + (centerX / this.width) * range;
-        const relPos = centerX / this.width;
-        this.viewStart = centerTime - relPos * newRange;
-        this.viewEnd = this.viewStart + newRange;
-        this.autoScroll = false;
-        this.updateAutoScrollBtn();
-        this.render();
-    }
-    
-    timeToX(t) {
-        const range = this.viewEnd - this.viewStart;
-        return ((t - this.viewStart) / range) * this.width;
-    }
-    
-    xToTime(x) {
-        const range = this.viewEnd - this.viewStart;
-        return this.viewStart + (x / this.width) * range;
-    }
-    
-    formatTime(ts) {
-        const d = new Date(ts);
-        const pad = (n) => String(n).padStart(2, '0');
-        return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
-    }
-    
-    formatTimeMs(ts) {
-        const d = new Date(ts);
-        const pad = (n) => String(n).padStart(2, '0');
-        const p3 = (n) => String(n).padStart(3, '0');
-        return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + '.' + p3(d.getMilliseconds());
-    }
-    
-    getNiceTickInterval(range) {
-        const targets = [100, 500, 1000, 2000, 5000, 10000, 15000, 30000, 60000, 120000, 300000, 600000, 900000, 1800000, 3600000];
-        const approx = range / 8;
-        let best = targets[0];
-        for (const t of targets) {
-            if (t <= approx) best = t;
-        }
-        return best;
-    }
-    
-    checkHover(x, y, clientX, clientY) {
-        let closest = null;
-        let closestDist = Infinity;
-        const visibleEvents = this.events.filter(e => this.filteredTypes.has(e.type));
-        const centerY = this.height / 2;
-        
-        for (const ev of visibleEvents) {
-            const ex = this.timeToX(ev.ts);
-            if (ex < -10 || ex > this.width + 10) continue;
-            const dist = Math.sqrt((x - ex) ** 2 + (y - centerY) ** 2);
-            if (dist < 12 && dist < closestDist) {
-                closest = ev;
-                closestDist = dist;
-            }
-        }
-        
-        if (closest) {
-            this.hoveredEvent = closest;
-            this.showTooltip(closest, clientX, clientY);
-        } else {
-            this.hoveredEvent = null;
-            this.hideTooltip();
-        }
-        this.render();
-    }
-    
-    showTooltip(ev, clientX, clientY) {
-        const info = EVENT_TYPE_COLORS[ev.type] || EVENT_TYPE_COLORS.system;
-        this.tooltip.innerHTML = `
-            <div class="tt-time">${this.formatTimeMs(ev.ts)}</div>
-            <div class="tt-type" style="background:${info.color}20;color:${info.color};border:1px solid ${info.color}50;">
-                ${info.emoji} ${ev.typeName}
-            </div>
-            ${ev.code ? '<div class="tt-code">' + escapeHtml(ev.code) + '</div>' : ''}
-            <div class="tt-detail">${escapeHtml(ev.detail)}</div>
-        `;
-        this.tooltip.style.display = 'block';
-        
-        const rect = this.container.getBoundingClientRect();
-        let left = clientX - rect.left + 15;
-        let top = clientY - rect.top - 10;
-        if (left + 280 > this.width) left = left - 300;
-        if (top + 100 > this.height) top = top - 80;
-        this.tooltip.style.left = Math.max(5, left) + 'px';
-        this.tooltip.style.top = Math.max(5, top) + 'px';
-    }
-    
-    hideTooltip() {
-        if (this.hoveredEvent) {
-            this.hoveredEvent = null;
-            this.render();
-        }
-        this.tooltip.style.display = 'none';
-    }
-    
-    applyFilter(activeFilters) {
-        this.filteredTypes = new Set(activeFilters);
-        this.render();
-    }
-    
-    render() {
-        if (!this.ctx || this.collapsed) return;
-        
-        const ctx = this.ctx;
-        ctx.clearRect(0, 0, this.width, this.height);
-        
-        ctx.fillStyle = '#1a1a2e';
-        ctx.fillRect(0, 0, this.width, this.height);
-        
-        const centerY = this.height / 2;
-        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(0, centerY);
-        ctx.lineTo(this.width, centerY);
-        ctx.stroke();
-        
-        const interval = this.getNiceTickInterval(this.viewEnd - this.viewStart);
-        const firstTick = Math.ceil(this.viewStart / interval) * interval;
-        
-        ctx.fillStyle = 'rgba(255,255,255,0.4)';
-        ctx.font = '10px monospace';
-        ctx.textAlign = 'center';
-        
-        for (let t = firstTick; t <= this.viewEnd; t += interval) {
-            const x = this.timeToX(t);
-            if (x < -20 || x > this.width + 20) continue;
-            
-            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, this.height);
-            ctx.stroke();
-            
-            ctx.fillStyle = 'rgba(180,180,200,0.6)';
-            ctx.fillText(this.formatTime(t), x, this.height - 5);
-        }
-        
-        const visibleEvents = this.events.filter(e => 
-            this.filteredTypes.has(e.type) && 
-            e.ts >= this.viewStart - 1000 && 
-            e.ts <= this.viewEnd + 1000
-        );
-        
-        for (const ev of visibleEvents) {
-            const x = this.timeToX(ev.ts);
-            if (x < -5 || x > this.width + 5) continue;
-            
-            const info = EVENT_TYPE_COLORS[ev.type] || EVENT_TYPE_COLORS.system;
-            const isHovered = this.hoveredEvent === ev;
-            const radius = isHovered ? 7 : 5;
-            
-            ctx.beginPath();
-            ctx.arc(x, centerY, radius + 2, 0, Math.PI * 2);
-            ctx.fillStyle = info.color + '40';
-            ctx.fill();
-            
-            ctx.beginPath();
-            ctx.arc(x, centerY, radius, 0, Math.PI * 2);
-            ctx.fillStyle = info.color;
-            ctx.fill();
-            
-            if (isHovered) {
-                ctx.strokeStyle = '#fff';
-                ctx.lineWidth = 2;
-                ctx.stroke();
-            }
-        }
-        
-        const now = Date.now();
-        if (now >= this.viewStart && now <= this.viewEnd) {
-            const nx = this.timeToX(now);
-            ctx.strokeStyle = 'rgba(255,100,100,0.5)';
-            ctx.lineWidth = 1;
-            ctx.setLineDash([4, 4]);
-            ctx.beginPath();
-            ctx.moveTo(nx, 0);
-            ctx.lineTo(nx, this.height);
-            ctx.stroke();
-            ctx.setLineDash([]);
-        }
-    }
-}
-
-let __eventTimeline = null;
-
-function initEventTimeline() {
-    if (__eventTimeline) return;
-    const section = $('epTimelineSection');
-    if (!section) return;
-    __eventTimeline = new EventTimeline();
-    
-    const filterBtns = document.querySelectorAll('.ep-filter-btn');
-    const updateFilters = () => {
-        if (!__eventTimeline) return;
-        const active = [];
-        filterBtns.forEach(btn => {
-            if (btn.classList.contains('active')) {
-                const f = btn.dataset.filter;
-                if (f && f !== 'all') active.push(f);
-            }
-        });
-        if (active.length === 0) {
-            filterBtns.forEach(b => b.classList.add('active'));
-            updateFilters();
-            return;
-        }
-        __eventTimeline.applyFilter(active);
-    };
-    
-    filterBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            setTimeout(updateFilters, 0);
-        });
-    });
-}
-
-function timelineAddEvent(ev) {
-    if (__eventTimeline) {
-        __eventTimeline.addEvent(ev);
-    }
-}
-
-
 })();
 
   // === from formula-manager.js ===

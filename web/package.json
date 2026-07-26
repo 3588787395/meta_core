@@ -2,10 +2,16 @@
   "name": "meta-core-frontend-tests",
   "version": "1.0.0",
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "test:playwright": "cd ../tests/playwright && npx playwright test",
+    "test:playwright:headed": "cd ../tests/playwright && npx playwright test --headed",
+    "test:playwright:ui": "cd ../tests/playwright && npx playwright test --ui"
   },
   "devDependencies": {
     "jest": "^29.0.0",
     "jest-environment-jsdom": "^29.0.0"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.61.1"
   }
 }

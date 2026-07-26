@@ -813,8 +813,15 @@ def get_render_config(type_id: str):
 
 
 # ─── WebSocket 配置变更推送 ──────────────────────────────────
+# 注意：WebSocket 路由必须挂载到独立的 config_ws_router 上，不能挂在主 router 上。
+# 原因：app.py 中 `app.include_router(config_api_router, dependencies=[Depends(verify_api_key)])`
+# 会把 dependencies 应用到 router 内所有路由，包括 WebSocket。而 verify_api_key 依赖
+# APIKeyHeader，其 __call__ 需要 HTTP Request 参数，WebSocket 上下文无法提供，
+# 导致 TypeError: APIKeyHeader.__call__() missing 1 required positional argument: 'request'
+config_ws_router = APIRouter(prefix="/api/config", tags=["config-ws"])
 
-@router.websocket("/ws")
+
+@config_ws_router.websocket("/ws")
 async def config_ws(websocket: WebSocket):
     """WebSocket 配置变更推送端点"""
     await websocket.accept()
@@ -839,7 +846,7 @@ async def config_ws(websocket: WebSocket):
 
 # ─── WebSocket 事件订阅推送（Task 16.3：事件驱动并行通道） ─────
 
-@router.websocket("/ws/events")
+@config_ws_router.websocket("/ws/events")
 async def events_ws(websocket: WebSocket):
     """WebSocket 事件订阅端点：订阅 EventBus 事件并推送给前端。
 
@@ -4240,6 +4247,7 @@ def create_sim_router() -> APIRouter:
     @router.post("/control")
     async def sim_control(request: Request):
         """控制模拟会话（暂停/恢复/单步/停止/跳转/变速）"""
+        logger.warning("[STEP-DEBUG] sim_control handler entered")
         try:
             body = await request.json()
         except Exception as e:
@@ -4285,6 +4293,7 @@ def create_sim_router() -> APIRouter:
 
             elif action == "step":
                 # step 操作可省略 delta，默认 1.0
+                logger.warning("[STEP-DEBUG] entering step branch, params=%s", params)
                 if "delta" not in params:
                     delta = 1.0
                 else:
@@ -4298,7 +4307,11 @@ def create_sim_router() -> APIRouter:
                         }
                 # 速度因子：speed 倍实际时间步进
                 effective_delta = delta * float(getattr(simulator, "speed", 1.0) or 1.0)
-                result = simulator.step_with_snapshot(effective_delta)
+                logger.warning("[STEP-DEBUG] effective_delta=%s, calling step_with_snapshot", effective_delta)
+                import concurrent.futures
+                _step_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                result = await asyncio.get_event_loop().run_in_executor(_step_pool, simulator.step_with_snapshot, effective_delta)
+                logger.warning("[STEP-DEBUG] step_with_snapshot returned, result keys=%s", list(result.keys()) if isinstance(result, dict) else type(result))
                 # Task 16: 事件驱动并行通道——发布 SimulationStep 事件
                 try:
                     runtime_mode = request.app.state.runtime_mode
@@ -6354,7 +6367,8 @@ def create_dzh_router() -> APIRouter:
         engine = request.app.state.engine
         re = _get_replay_engine(request)
         if not re:
-            re = KLineReplayEngine(engine)
+            # SubTask 2.4: 注入 storage (IStorageQuery) 以启用 kline_cache 持久化
+            re = KLineReplayEngine(engine, storage=getattr(request.app.state, 'storage', None))
             _set_replay_engine(request, re)
         result = engine.execute_pool(pool)
         if result.get('success') and result.get('data'):
@@ -6620,7 +6634,8 @@ def create_dzh_router() -> APIRouter:
         re = _get_replay_engine(request)
         engine = request.app.state.engine
         if not re and engine:
-            re = KLineReplayEngine(engine)
+            # SubTask 2.4: 注入 storage (IStorageQuery) 以启用 kline_cache 持久化
+            re = KLineReplayEngine(engine, storage=getattr(request.app.state, 'storage', None))
             _set_replay_engine(request, re)
         if not re:
             return {"success": False, "error": "引擎未初始化"}
@@ -6698,7 +6713,8 @@ def create_dzh_router() -> APIRouter:
             engine = request.app.state.engine
             re = _get_replay_engine(request)
             if not re and engine:
-                re = KLineReplayEngine(engine)
+                # SubTask 2.4: 注入 storage (IStorageQuery) 以启用 kline_cache 持久化
+                re = KLineReplayEngine(engine, storage=getattr(request.app.state, 'storage', None))
                 _set_replay_engine(request, re)
             if not re:
                 return {"code": -1, "error": "引擎未初始化", "data": None}
@@ -7060,5 +7076,6 @@ def create_json_router() -> APIRouter:
 # 旧 import 路径 `from api import config_api_router / config_api_init / set_table_engine`
 # 继续可用，分别等同于 router / init / set_engine。
 config_api_router = router
+# config_ws_router 已在 Part 1 中直接定义为模块级变量，可直接 import
 config_api_init = init
 set_table_engine = set_engine

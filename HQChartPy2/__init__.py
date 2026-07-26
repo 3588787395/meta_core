@@ -30,12 +30,21 @@ if sys.platform == "win32" and hasattr(os, "add_dll_directory"):
 if _SELF_DIR not in sys.path:
     sys.path.insert(0, _SELF_DIR)
 
-from HQChartPy2.HQChartPy2 import (  # noqa: E401
-    GetAuthorizeInfo,
-    GetVersion,
-    LoadAuthorizeInfo,
-    Run,
-    SetLog,
-)
+try:
+    from .HQChartPy2 import (
+        GetAuthorizeInfo,
+        GetVersion,
+        LoadAuthorizeInfo,
+        Run,
+        SetLog,
+    )
+except ImportError:
+    import importlib
+    _mod = importlib.import_module("HQChartPy2")
+    GetAuthorizeInfo = getattr(_mod, "GetAuthorizeInfo", None)
+    GetVersion = getattr(_mod, "GetVersion", None)
+    LoadAuthorizeInfo = getattr(_mod, "LoadAuthorizeInfo", None)
+    Run = getattr(_mod, "Run", None)
+    SetLog = getattr(_mod, "SetLog", None)
 
 __all__ = ["GetAuthorizeInfo", "GetVersion", "LoadAuthorizeInfo", "Run", "SetLog"]

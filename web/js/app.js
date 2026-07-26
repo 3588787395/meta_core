@@ -13,6 +13,146 @@
 (function () {
   'use strict';
 
+  // ─── Global Application State Management ────────────────────────────────────
+  window.AppState = {
+    mode: 'design',
+    simulationState: 'stopped',
+    simulationTime: 0,
+    simStartRealTime: 0,
+    _subscribers: [],
+
+    setMode: function (newMode) {
+      var oldMode = this.mode;
+      this.mode = newMode;
+      this._notify('mode', newMode, oldMode);
+    },
+
+    setSimulationState: function (newState) {
+      var oldState = this.simulationState;
+      this.simulationState = newState;
+      if (newState === 'running' && oldState !== 'running' && this.simStartRealTime === 0) {
+        this.simStartRealTime = Date.now();
+      }
+      this._notify('simulationState', newState, oldState);
+    },
+
+    setSimulationTime: function (ms) {
+      var oldTime = this.simulationTime;
+      this.simulationTime = ms;
+      this._notify('simulationTime', ms, oldTime);
+    },
+
+    resetSimulation: function () {
+      this.simulationTime = 0;
+      this.simStartRealTime = 0;
+      this.simulationState = 'stopped';
+      this._notify('simulationReset', true, false);
+    },
+
+    getCurrentDisplayTime: function () {
+      if (this.mode === 'simulation') {
+        return this.simulationTime || 0;
+      }
+      if (this.mode === 'replay') {
+        return this.simulationTime || 0;
+      }
+      return Date.now();
+    },
+
+    isSimulationMode: function () {
+      return this.mode === 'simulation' || this.mode === 'replay';
+    },
+
+    subscribe: function (callback) {
+      this._subscribers.push(callback);
+      var self = this;
+      return function unsubscribe() {
+        var idx = self._subscribers.indexOf(callback);
+        if (idx !== -1) self._subscribers.splice(idx, 1);
+      };
+    },
+
+    _notify: function (key, newValue, oldValue) {
+      this._subscribers.forEach(function (cb) {
+        try { cb(key, newValue, oldValue); } catch (e) { console.error('AppState subscriber error:', e); }
+      });
+    }
+  };
+
+  // ─── Keyboard Shortcuts (表驱动) ────────────────────────────────────────────
+  function toggleSimPlayPause() {
+    if (AppState.mode !== 'simulation') return;
+    if (_simAutoStepping) {
+      stopSimAutoStep();
+    } else {
+      startSimAutoStep();
+    }
+  }
+
+  function simStepForward() {
+    if (AppState.mode !== 'simulation') return;
+    stopSimAutoStep();
+    runSimulationStep(_getSimDelta());
+  }
+
+  function simReset() {
+    if (AppState.mode !== 'simulation') return;
+    var resetBtn = $('simBtnReset');
+    if (resetBtn) resetBtn.click();
+  }
+
+  function toggleEventPanel() {
+    if (typeof window.toggleEventPanel === 'function') {
+      window.toggleEventPanel();
+    } else {
+      var ep = $('eventPanel');
+      if (ep) {
+        if (ep.classList.contains('hidden') || !ep.classList.contains('visible')) {
+          if (typeof window.showEventPanel === 'function') window.showEventPanel();
+        } else {
+          var closeBtn = $('btnCloseEvents');
+          if (closeBtn) closeBtn.click();
+        }
+      }
+    }
+  }
+
+  function toggleTimerPanel() {
+    var tq = document.getElementById('eventTimerQueue');
+    if (tq) tq.classList.toggle('collapsed');
+  }
+
+  function showShortcutsHelp() {
+    var helpText = '快捷键帮助:\n\n' +
+      'Space: 播放/暂停仿真\n' +
+      'S: 仿真步进\n' +
+      'R: 重置仿真\n' +
+      'E: 切换事件面板\n' +
+      'T: 切换定时器面板\n' +
+      'F: 切换连线模式\n' +
+      'Delete/Backspace: 删除选中项\n' +
+      'Ctrl+S: 保存\n' +
+      'Ctrl+Z: 撤销\n' +
+      'Ctrl+Y: 重做\n' +
+      '?: 显示帮助\n\n' +
+      '注意: 播放/暂停/步进/重置仅在仿真模式下有效';
+    alert(helpText);
+  }
+
+  var SHORTCUTS = {
+    ' ': toggleSimPlayPause,
+    's': simStepForward,
+    'S': simStepForward,
+    'r': simReset,
+    'R': simReset,
+    'e': toggleEventPanel,
+    'E': toggleEventPanel,
+    't': toggleTimerPanel,
+    'T': toggleTimerPanel,
+    '?': showShortcutsHelp,
+    '/': showShortcutsHelp
+  };
+
   // === from data.js ===
 
 /**
@@ -1069,6 +1209,7 @@ class PoolDataManager {
   }
 
   // 获取节点的数字 cell type（兼容 DZH/TDX，优先 dzh_cell_type，回退 params.type / node.type）
+  // 字符串类型节点（如 'market_source'/'statepool'）通过反向映射转回数字 cell type
   _getNodeCellType(node) {
     if (!node) return null;
     if (node.dzh_cell_type !== undefined && node.dzh_cell_type !== null) {
@@ -1081,6 +1222,17 @@ class PoolDataManager {
     if (node.type !== undefined && node.type !== null) {
       var nt = Number(node.type);
       if (!isNaN(nt)) return nt;
+      // 字符串类型 → 数字 cell type 反向映射（与 cell_type_registry.canvas_cell_type_map 对齐）
+      var STR_TO_CELL_TYPE = {
+        'market_source': 202, 'candidate_dzh': 202,
+        'stock_state_pool': 200, 'statepool': 200, 'state_pool': 200,
+        'transfer_condition': 201,
+        'discard_pool': 4,
+        'tdx_candidate': 7,
+        'tdx_state_pool': 8,
+        'tdx_condition': 3
+      };
+      if (STR_TO_CELL_TYPE[node.type] !== undefined) return STR_TO_CELL_TYPE[node.type];
     }
     return null;
   }
@@ -4813,11 +4965,11 @@ window.ruleEditor = new RuleEditor();
     });
 
     var source = data.nodes.find(function(n) {
-      return (n.dzh_cell_type === 202 || n.dzh_cell_type === 7) && inEdges[n.id].length === 0;
+      return isSourcePoolNode(n) && inEdges[n.id].length === 0;
     });
     if (!source) {
       source = data.nodes.find(function(n) {
-        return n.dzh_cell_type === 202 || n.dzh_cell_type === 7;
+        return isSourcePoolNode(n);
       });
     }
     return source || null;
@@ -4877,14 +5029,31 @@ window.ruleEditor = new RuleEditor();
   }
 
   function isPoolNode(n) {
-    return n && (n.dzh_cell_type === 202 || n.dzh_cell_type === 200 ||
-                 n.dzh_cell_type === 7 || n.dzh_cell_type === 8);
+    if (!n) return false;
+    if (n.dzh_cell_type === 202 || n.dzh_cell_type === 200 ||
+        n.dzh_cell_type === 7 || n.dzh_cell_type === 8) return true;
+    var t = n.type;
+    return t === 'market_source' || t === 'candidate_dzh' || t === 'candidate_provider' ||
+           t === 'statepool' || t === 'state_pool' || t === 'stock_state_pool' ||
+           t === 'tdx_state_pool' || t === 'tdx_candidate' || t === 'discard_sink';
   }
   function isConditionNode(n) {
-    return n && n.dzh_cell_type === 201;
+    if (!n) return false;
+    if (n.dzh_cell_type === 201) return true;
+    var t = n.type;
+    return t === 'condition' || t === 'transfer_condition' || t === 'tdx_condition';
   }
   function isStatePoolNode(n) {
-    return n && (n.dzh_cell_type === 200 || n.dzh_cell_type === 8);
+    if (!n) return false;
+    if (n.dzh_cell_type === 200 || n.dzh_cell_type === 8) return true;
+    var t = n.type;
+    return t === 'statepool' || t === 'state_pool' || t === 'stock_state_pool' || t === 'tdx_state_pool';
+  }
+  function isSourcePoolNode(n) {
+    if (!n) return false;
+    if (n.dzh_cell_type === 202 || n.dzh_cell_type === 7) return true;
+    var t = n.type;
+    return t === 'market_source' || t === 'candidate_dzh' || t === 'candidate_provider' || t === 'tdx_candidate';
   }
 
   // ─── 表格行模型 ───
@@ -4934,18 +5103,20 @@ window.ruleEditor = new RuleEditor();
       var toId   = edge.target ? edge.target.node_id : edge.to;
       var fromNode = nodeMap[fromId];
       var toNode   = nodeMap[toId];
-      var fromIsPool = fromNode && (fromNode.dzh_cell_type === 202 || fromNode.dzh_cell_type === 7 ||
-                                    fromNode.dzh_cell_type === 200 || fromNode.dzh_cell_type === 8);
+      var fromIsPool = isPoolNode(fromNode);
       if (!fromNode || !fromIsPool) return;
 
       // 情形 A: 源池 → 条件节点 (上游边)
-      if (toNode && toNode.dzh_cell_type === 201) {
-        if (!edge.params || edge.params.begin === undefined) return;
+      if (isConditionNode(toNode)) {
+        // 触发条件配置在连接上：支持 DZH 的 begin 字段或通用 time_gate_interval/jgtime
+        var hasTiming = edge.params && (edge.params.begin !== undefined ||
+                                        edge.params.time_gate_interval !== undefined ||
+                                        edge.params.jgtime !== undefined);
+        if (!hasTiming) return;
         var outEdge = (outEdges[toId] || []).find(function(e) {
           var outTargetId = e.target ? e.target.node_id : e.to;
           var outNode = nodeMap[outTargetId];
-          return outNode && (outNode.dzh_cell_type === 200 || outNode.dzh_cell_type === 8 ||
-                             outNode.dzh_cell_type === 202 || outNode.dzh_cell_type === 7);
+          return isPoolNode(outNode);
         });
         if (!outEdge) return;
         var targetId   = outEdge.target ? outEdge.target.node_id : outEdge.to;
@@ -4954,8 +5125,7 @@ window.ruleEditor = new RuleEditor();
         candidates.push({ edgeIndex: edgeIndex, fromPool: fromNode, condNode: toNode, targetPool: targetNode, upstreamEdge: edge });
       }
       // 情形 B: 源池 → 目标池（无条件直连）
-      else if (toNode && (toNode.dzh_cell_type === 200 || toNode.dzh_cell_type === 8 ||
-                          toNode.dzh_cell_type === 202 || toNode.dzh_cell_type === 7)) {
+      else if (isPoolNode(toNode)) {
         candidates.push({ edgeIndex: edgeIndex, fromPool: fromNode, condNode: null, targetPool: toNode, upstreamEdge: edge });
       }
     });
@@ -4963,7 +5133,7 @@ window.ruleEditor = new RuleEditor();
     // BFS 遍历 —— 支持多备选池，每个备选池独立 BFS（独立的 visited）
     // 这样当股票池包含多个不连通的备选池树时，每棵树都能完整显示
     var sourcePools = data.nodes.filter(function(n) {
-      return n.dzh_cell_type === 202 || n.dzh_cell_type === 7;
+      return isSourcePoolNode(n);
     });
 
     sourcePools.forEach(function(sourcePool) {
@@ -4971,7 +5141,7 @@ window.ruleEditor = new RuleEditor();
 
       // 先输出源池声明
       rows.push({
-        type: sourcePool.dzh_cell_type === 202 || sourcePool.dzh_cell_type === 7 ? 'source' : 'pool-decl',
+        type: isSourcePoolNode(sourcePool) ? 'source' : 'pool-decl',
         cell: sourcePool,
         sourceCell: null,
         depth: 0,
@@ -5407,8 +5577,8 @@ window.ruleEditor = new RuleEditor();
     if (!node) {
       throw new Error('[CS] openCandidatePoolEditor: 未找到节点 ' + nodeId);
     }
-    if (node.dzh_cell_type !== 202 && node.dzh_cell_type !== 7) {
-      throw new Error('[CS] openCandidatePoolEditor: 节点 ' + nodeId + ' 不是备选池(type=202|7)');
+    if (!isSourcePoolNode(node)) {
+      throw new Error('[CS] openCandidatePoolEditor: 节点 ' + nodeId + ' 不是备选池');
     }
 
     $fieldEditorOverlay.innerHTML = '';
@@ -5972,8 +6142,8 @@ window.ruleEditor = new RuleEditor();
     if (!node) {
       throw new Error('[CS] openStateAttributeEditor: 未找到节点 ' + nodeId);
     }
-    if (node.dzh_cell_type !== 200 && node.dzh_cell_type !== 8) {
-      throw new Error('[CS] openStateAttributeEditor: 节点 ' + nodeId + ' 不是状态池(type=200|8)');
+    if (!isStatePoolNode(node)) {
+      throw new Error('[CS] openStateAttributeEditor: 节点 ' + nodeId + ' 不是状态池');
     }
 
     $fieldEditorOverlay.innerHTML = '';
@@ -6139,9 +6309,9 @@ window.ruleEditor = new RuleEditor();
 
     var condNode = row && row.conditionNode;
 
-    // 对象隔离：必须是条件节点 (type=201)
-    if (condNode && condNode.dzh_cell_type !== 201) {
-      throw new Error('[CS] openConditionEditor: 目标不是条件节点(type=201)');
+    // 对象隔离：必须是条件节点
+    if (condNode && !isConditionNode(condNode)) {
+      throw new Error('[CS] openConditionEditor: 目标不是条件节点');
     }
 
     $fieldEditorOverlay.innerHTML = '';
@@ -6456,7 +6626,7 @@ window.ruleEditor = new RuleEditor();
   function applyCandidatePoolEditor(nodeId, reloadArg) {
     var data = poolData && poolData.data;
     var node = data && data.nodes ? data.nodes.find(function(n) { return n.id === nodeId; }) : null;
-    if (!node || (node.dzh_cell_type !== 202 && node.dzh_cell_type !== 7)) {
+    if (!node || !isSourcePoolNode(node)) {
       // 对象隔离：错误对象类型，不写入内存
       closeFieldEditor();
       return;
@@ -6512,7 +6682,7 @@ window.ruleEditor = new RuleEditor();
   function applyStateAttributeEditor(nodeId) {
     var data = poolData && poolData.data;
     var node = data && data.nodes ? data.nodes.find(function(n) { return n.id === nodeId; }) : null;
-    if (!node || (node.dzh_cell_type !== 200 && node.dzh_cell_type !== 8)) {
+    if (!node || !isStatePoolNode(node)) {
       // 对象隔离：错误对象类型，不写入内存
       closeFieldEditor();
       return;
@@ -7558,7 +7728,7 @@ window.ruleEditor = new RuleEditor();
         '" data-table="' + t.name + '" title="' + escHtml(t.desc || '') + '">' +
         '<span class="cfg-table-name">' + escHtml(t.label) + '</span>' +
         (isLocked ? '<span class="cfg-table-lock" title="已锁定" style="font-size:11px">🔒</span>' : '') +
-        (schemaMissing ? '<span class="cfg-table-warn" title="Schema 未覆盖" style="font-size:11px;color:#f39c12">⚠</span>' : '') +
+        (schemaMissing ? '<span class="cfg-table-warn" title="Schema 未覆盖" style="font-size:11px;color:#e67e22">⚠</span>' : '') +
         (badgeCls ? '<span class="cfg-table-badge ' + badgeCls + '">' + badgeCls + '</span>' : '') +
         (countStr ? '<span style="font-size:11px;color:var(--cfg-text-muted)">' + countStr + '</span>' : '') +
         '</div>';
@@ -7640,7 +7810,7 @@ window.ruleEditor = new RuleEditor();
     }
     var locked = isTableLocked(name);
     if (locked) {
-      metaHtml += '<span style="color:#f39c12">🔒 已锁定</span>';
+      metaHtml += '<span style="color:#e67e22">🔒 已锁定</span>';
     }
     metaHtml += ' <button class="cfg-lock-btn ' + (locked ? 'unlock' : 'lock') +
       '" onclick="ConfigManager.toggleLock(\'' + escHtml(name) + '\')">' +
@@ -8294,8 +8464,8 @@ window.ruleEditor = new RuleEditor();
         var hasChanges = false;
         if (diff.added && diff.added.length) {
           hasChanges = true;
-          html += '<div class="cfg-diff-section"><strong style="color:#2ecc71;">新增 (+' + diff.added.length + ')</strong><ul>';
-          diff.added.forEach(function (item) { html += '<li style="color:#2ecc71;">+ ' + escHtml(JSON.stringify(item)) + '</li>'; });
+          html += '<div class="cfg-diff-section"><strong style="color:#27ae60;">新增 (+' + diff.added.length + ')</strong><ul>';
+          diff.added.forEach(function (item) { html += '<li style="color:#27ae60;">+ ' + escHtml(JSON.stringify(item)) + '</li>'; });
           html += '</ul></div>';
         }
         if (diff.removed && diff.removed.length) {
@@ -8306,10 +8476,10 @@ window.ruleEditor = new RuleEditor();
         }
         if (diff.modified) {
           hasChanges = true;
-          html += '<div class="cfg-diff-section"><strong style="color:#f39c12;">修改</strong><ul>';
+          html += '<div class="cfg-diff-section"><strong style="color:#e67e22;">修改</strong><ul>';
           Object.keys(diff.modified).forEach(function (field) {
             var change = diff.modified[field];
-            html += '<li style="color:#f39c12;">~ ' + escHtml(field) + ': <span style="color:#e74c3c;">' + escHtml(JSON.stringify(change.old)) + '</span> → <span style="color:#2ecc71;">' + escHtml(JSON.stringify(change.new)) + '</span></li>';
+            html += '<li style="color:#e67e22;">~ ' + escHtml(field) + ': <span style="color:#e74c3c;">' + escHtml(JSON.stringify(change.old)) + '</span> → <span style="color:#27ae60;">' + escHtml(JSON.stringify(change.new)) + '</span></li>';
           });
           html += '</ul></div>';
         }
@@ -8490,7 +8660,7 @@ window.ruleEditor = new RuleEditor();
       '.cfg-history-item:hover { background: rgba(255,255,255,.02); }',
       '.cfg-history-time { color: #9090b0; min-width: 120px; }',
       '.cfg-history-op { padding: 1px 6px; border-radius: 3px; font-size: 10px; }',
-      '.cfg-history-op.create { background: rgba(46,204,113,.15); color: #2ecc71; }',
+      '.cfg-history-op.create { background: rgba(39,174,96,.15); color: #27ae60; }',
       '.cfg-history-op.update { background: rgba(74,144,217,.15); color: #4a90d9; }',
       '.cfg-history-op.delete { background: rgba(231,76,60,.15); color: #e74c3c; }',
       '.cfg-history-op.rollback { background: rgba(155,89,182,.15); color: #9b59b6; }',
@@ -8498,8 +8668,8 @@ window.ruleEditor = new RuleEditor();
       '.cfg-history-actions { display: flex; gap: 4px; }',
       '.cfg-lock-btn { padding: 2px 8px; border: 1px solid #3a3a6e; border-radius: 3px; background: rgba(255,255,255,.03); color: #9090b0; font-size: 10px; cursor: pointer; white-space: nowrap; }',
       '.cfg-lock-btn:hover { background: rgba(255,255,255,.07); color: #d8d8ec; }',
-      '.cfg-lock-btn.lock { color: #f39c12; border-color: rgba(243,156,18,.4); }',
-      '.cfg-lock-btn.unlock { color: #2ecc71; border-color: rgba(46,204,113,.4); }'
+      '.cfg-lock-btn.lock { color: #e67e22; border-color: rgba(230,126,34,.4); }',
+      '.cfg-lock-btn.unlock { color: #27ae60; border-color: rgba(39,174,96,.4); }'
     ].join('\n');
     document.head.appendChild(style);
   }
@@ -8691,7 +8861,9 @@ window.ruleEditor = new RuleEditor();
 
       this._ws.onerror = function (e) {
         if (self._onError) self._onError(e);
-        console.error('[ConfigSync] WebSocket 错误', e);
+        // 降级为 warn：WebSocket 断连由 onclose + _scheduleReconnect 自动重连，
+        // 不应作为 error 污染控制台（连接恢复后即恢复正常）。
+        console.warn('[ConfigSync] WebSocket 连接异常，将自动重连');
       };
 
       this._ws.onmessage = function (event) {
@@ -8895,7 +9067,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
   var propPanel = null;
   var highlightManager = null;
 
-  var currentMode = 'design';   // 'design' | 'run' | 'replay' | 'simulation'
+  var poolRunStatus = 'stopped';
   var flowMode = false;
   var flowSourceId = null;
 
@@ -9318,6 +9490,35 @@ var TableDrivenPanel = window.TableDrivenPanel;
     // Load config registry
     poolData.loadRegistry().catch(function(err) { console.warn('加载配置注册表失败:', err); });
 
+    // 实例化 ConfigSync 并连接 WebSocket 监听后端配置变更
+    // ConfigSync 类内部收到变更消息时已自动派发 'configChanged' CustomEvent（见 app.js:8950-8953）
+    var configSync = new ConfigManager.ConfigSync({});
+    configSync.connect();
+    window._configSync = configSync; // 保存引用避免被 GC
+
+    // 监听 configChanged 事件：配置变更后重新加载 registry 并刷新属性面板
+    document.addEventListener('configChanged', function(e) {
+      var tables = (e.detail && e.detail.tables) || [];
+      var changedStr = tables.join(',');
+      // 检查是否包含 loadRegistry() 关心的配置表（表名为配置文件名去掉 .json 后缀）
+      if (changedStr.indexOf('field_definitions') !== -1 ||
+          changedStr.indexOf('cell_type_registry') !== -1 ||
+          changedStr.indexOf('dzh_type_map') !== -1 ||
+          changedStr.indexOf('flow_mode_registry') !== -1 ||
+          changedStr.indexOf('edge_strategies') !== -1 ||
+          changedStr.indexOf('defaults') !== -1 ||
+          changedStr.indexOf('modules') !== -1) {
+        poolData.loadRegistry().then(function() {
+          // 重新渲染当前属性面板以反映新配置
+          if (propPanel && typeof propPanel._reRenderCurrentPanel === 'function') {
+            propPanel._reRenderCurrentPanel();
+          }
+        }).catch(function(err) {
+          console.warn('[ConfigSync] 重新加载 registry 失败:', err);
+        });
+      }
+    });
+
     // 加载表驱动配置表（工具栏/右键菜单/快捷键/节点类型/数据源/默认值）
     loadConfig('cell_type_registry');
     loadConfig('data_providers');
@@ -9343,6 +9544,15 @@ var TableDrivenPanel = window.TableDrivenPanel;
     }
     loadConfig('context_menu_config');
     loadConfig('keyboard_shortcuts').then(function(cfg) { applyKeyboardConfig(cfg); });
+
+    // SubTask 2.2: 初始化模式指示器为设计模式（页面加载时 modeIndicator 默认为空）
+    var _initMi = $('modeIndicator');
+    if (_initMi && !_initMi.textContent) {
+      _initMi.className = 'mode-design';
+      _initMi.textContent = '设计模式';
+      _initMi.style.display = '';
+    }
+    updateModeButtons();
   }
 
   // ─── Pool List Sidebar ──────────────────────────────────────────────────────
@@ -9822,36 +10032,48 @@ var TableDrivenPanel = window.TableDrivenPanel;
   // ─── Mode Switching ─────────────────────────────────────────────────────────
 
   function setMode(mode) {
-    // Exit current mode first
-    if (currentMode === 'run') exitRunMode();
-    if (currentMode === 'replay') exitReplayMode();
-    if (currentMode === 'simulation') exitSimulationMode();
+    // 仿真模式运行中允许切换模式（exitSimulationMode 会清理运行状态）
+    if (poolRunStatus !== 'stopped' && mode !== AppState.mode && AppState.mode !== 'simulation') {
+      showToast('股票池正在运行中，请先停止运行后再切换模式', 'error');
+      return;
+    }
 
-    currentMode = mode;
+    if (AppState.mode === 'run') exitRunMode();
+    if (AppState.mode === 'replay') exitReplayMode();
+    if (AppState.mode === 'simulation') exitSimulationMode();
 
     if (mode === 'design') {
-      $('modeIndicator').className = '';
-      $('modeIndicator').style.display = 'none';
+      $('modeIndicator').className = 'mode-design';
+      $('modeIndicator').textContent = '设计模式';
+      $('modeIndicator').style.display = '';
       enableEditingUI();
       canvas.setRunMode(false);
       propPanel.setReadOnly(false);
+      $('replayPanel').classList.remove('visible');
+      $('simulationPanel').classList.remove('visible');
+      if (typeof window.hideEventPanel === 'function') window.hideEventPanel(); else $('eventPanel').classList.add('hidden');
     } else if (mode === 'run') {
       $('modeIndicator').className = 'mode-run';
-      $('modeIndicator').textContent = '实盘中';
+      $('modeIndicator').textContent = '实盘模式';
       $('modeIndicator').style.display = '';
       disableEditingUI();
       canvas.setRunMode(true);
       propPanel.setReadOnly(true);
+      $('replayPanel').classList.remove('visible');
+      $('simulationPanel').classList.remove('visible');
+      if (typeof window.hideEventPanel === 'function') window.hideEventPanel(); else $('eventPanel').classList.add('hidden');
       executePool();
       startStockPolling();
     } else if (mode === 'replay') {
       $('modeIndicator').className = 'mode-replay';
-      $('modeIndicator').textContent = '回放中';
+      $('modeIndicator').textContent = '回放模式';
       $('modeIndicator').style.display = '';
       disableEditingUI();
       canvas.setRunMode(true);
       propPanel.setReadOnly(true);
       $('replayPanel').classList.add('visible');
+      $('simulationPanel').classList.remove('visible');
+      if (typeof window.showEventPanel === 'function') window.showEventPanel();
       if (highlightManager) {
         highlightManager.setReplayMode(true);
         highlightManager.destroy();
@@ -9860,20 +10082,22 @@ var TableDrivenPanel = window.TableDrivenPanel;
       startReplaySession();
     } else if (mode === 'simulation') {
       $('modeIndicator').className = 'mode-simulation';
-      $('modeIndicator').textContent = '仿真中';
+      $('modeIndicator').textContent = '仿真模式';
       $('modeIndicator').style.display = '';
       disableEditingUI();
       canvas.setRunMode(true);
       propPanel.setReadOnly(true);
+      $('replayPanel').classList.remove('visible');
       $('simulationPanel').classList.add('visible');
-      $('eventPanel').classList.add('visible');
-      eventPanelLoad();
+      if (typeof window.showEventPanel === 'function') window.showEventPanel();
+      else $('eventPanel').classList.add('visible');
       if (highlightManager) {
         highlightManager.destroy();
         highlightManager.init();
       }
       startSimulationSession();
     }
+    AppState.setMode(mode);
     updateModeButtons();
   }
 
@@ -9887,15 +10111,15 @@ var TableDrivenPanel = window.TableDrivenPanel;
     var btnReplayOverflow = $('btnReplayOverflow');
     var btnSimulationOverflow = $('btnSimulationOverflow');
 
-    var isDesign = (currentMode === 'design');
+    var isDesign = (AppState.mode === 'design');
     if (btnDesign) btnDesign.classList.toggle('active', isDesign);
-    if (btnRun) btnRun.classList.toggle('active', currentMode === 'run');
-    if (btnReplay) btnReplay.classList.toggle('active', currentMode === 'replay');
-    if (btnSimulation) btnSimulation.classList.toggle('active', currentMode === 'simulation');
+    if (btnRun) btnRun.classList.toggle('active', AppState.mode === 'run');
+    if (btnReplay) btnReplay.classList.toggle('active', AppState.mode === 'replay');
+    if (btnSimulation) btnSimulation.classList.toggle('active', AppState.mode === 'simulation');
     if (btnDesignOverflow) btnDesignOverflow.classList.toggle('active', isDesign);
-    if (btnRunOverflow) btnRunOverflow.classList.toggle('active', currentMode === 'run');
-    if (btnReplayOverflow) btnReplayOverflow.classList.toggle('active', currentMode === 'replay');
-    if (btnSimulationOverflow) btnSimulationOverflow.classList.toggle('active', currentMode === 'simulation');
+    if (btnRunOverflow) btnRunOverflow.classList.toggle('active', AppState.mode === 'run');
+    if (btnReplayOverflow) btnReplayOverflow.classList.toggle('active', AppState.mode === 'replay');
+    if (btnSimulationOverflow) btnSimulationOverflow.classList.toggle('active', AppState.mode === 'simulation');
   }
 
   function exitRunMode() {
@@ -9913,6 +10137,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
     replaySessionId = null;
     currentReplayTime = '';
     $('replayPanel').classList.remove('visible');
+    if (typeof window.hideEventPanel === 'function') window.hideEventPanel(); else $('eventPanel').classList.add('hidden');
     canvas.setRunMode(false);
     propPanel.setReadOnly(false);
     if (highlightManager) {
@@ -9922,14 +10147,65 @@ var TableDrivenPanel = window.TableDrivenPanel;
     }
   }
 
+  // 运行控制按钮状态切换（IIFE 顶层定义，供 exitSimulationMode/updateSimBtnState/controlPool 共享）
+  function updateRunControlButtons() {
+    var btnStart = $('btnStart');
+    var btnPause = $('btnPause');
+    var btnStop = $('btnStop');
+    if (!btnStart || !btnPause || !btnStop) return;
+
+    // 仿真模式下，主工具栏按钮状态由仿真运行状态决定
+    if (AppState.mode === 'simulation') {
+      if (AppState.simulationState === 'running') {
+        btnStart.disabled = true;
+        btnPause.disabled = false;
+        btnStop.disabled = false;
+        btnStart.textContent = '▶ 运行中';
+      } else if (AppState.simulationState === 'paused') {
+        btnStart.disabled = false;
+        btnPause.disabled = true;
+        btnStop.disabled = false;
+        btnStart.textContent = '▶ 继续';
+      } else {
+        btnStart.disabled = false;
+        btnPause.disabled = true;
+        btnStop.disabled = true;
+        btnStart.textContent = '▶ 开始';
+      }
+      return;
+    }
+
+    if (poolRunStatus === 'running') {
+      btnStart.disabled = true;
+      btnPause.disabled = false;
+      btnStop.disabled = false;
+      btnStart.textContent = '▶ 运行中';
+    } else if (poolRunStatus === 'paused') {
+      btnStart.disabled = false;
+      btnPause.disabled = true;
+      btnStop.disabled = false;
+      btnStart.textContent = '▶ 继续';
+    } else {
+      btnStart.disabled = false;
+      btnPause.disabled = true;
+      btnStop.disabled = true;
+      btnStart.textContent = '▶ 开始';
+    }
+  }
+
   function exitSimulationMode() {
     stopSimAutoStep();
     stopSimulationPolling();
     simSessionId = null;
+    window.simSessionId = null;
+    _simEventOffset = 0;
     simStepCount = 0;
     _simSpeed = 1.0;
+    AppState.resetSimulation();
+    // 重置主工具栏运行控制按钮状态（仿真退出后恢复为 stopped）
+    updateRunControlButtons();
     $('simulationPanel').classList.remove('visible');
-    $('eventPanel').classList.remove('visible');
+    if (typeof window.hideEventPanel === 'function') window.hideEventPanel(); else $('eventPanel').classList.add('hidden');
     canvas.setRunMode(false);
     propPanel.setReadOnly(false);
     if (highlightManager) {
@@ -10098,7 +10374,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
       }
     } else {
       propPanel.showForNode(nodeId);
-      if (currentMode !== 'design') propPanel.setReadOnly(true);
+      if (AppState.mode !== 'design') propPanel.setReadOnly(true);
       try { if (window.ComprehensiveSettings && window.ComprehensiveSettings.syncFromCanvas) window.ComprehensiveSettings.syncFromCanvas(nodeId); } catch (e) {}
       if (node && (node.type === 'stock_state_pool' || node.type === 'tdx_state_pool' || node.dzh_cell_type === 200 || node.dzh_cell_type === '200' || node.type === 'statepool')) {
         var pid = poolData._poolId;
@@ -10123,7 +10399,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
     } else {
       propPanel.showPlaceholder();
     }
-    if (currentMode !== 'design') propPanel.setReadOnly(true);
+    if (AppState.mode !== 'design') propPanel.setReadOnly(true);
     flowSourceId = null;
     clearFlowHighlight();
   }
@@ -10186,18 +10462,18 @@ var TableDrivenPanel = window.TableDrivenPanel;
   // 表驱动：获取当前 UI 状态（供 ToolbarRenderer 条件求值使用）
   function getUIState() {
     return {
-      mode: currentMode === 'design' ? 'edit' : currentMode,
+      mode: AppState.mode === 'design' ? 'edit' : AppState.mode,
       pool_loaded: !!poolData.hasData,
       can_undo: poolData.canUndo(),
       can_redo: poolData.canRedo(),
       has_unsaved_changes: !!poolData.hasData,
-      is_running: currentMode === 'run',
-      is_replay_mode: currentMode === 'replay',
+      is_running: AppState.mode === 'run',
+      is_replay_mode: AppState.mode === 'replay',
       selection: (canvas && canvas.selectedNodeId) ? canvas.selectedNodeId : null,
       has_clipboard: !!(window._clipboardData),
-      is_edit_mode: currentMode === 'design',
-      is_design_mode: currentMode === 'design',
-      design_mode: currentMode === 'design'
+      is_edit_mode: AppState.mode === 'design',
+      is_design_mode: AppState.mode === 'design',
+      design_mode: AppState.mode === 'design'
     };
   }
 
@@ -10212,8 +10488,8 @@ var TableDrivenPanel = window.TableDrivenPanel;
     if (cond === 'pool_loaded') return poolLoaded;
     if (cond === 'can_undo') return poolData.canUndo();
     if (cond === 'can_redo') return poolData.canRedo();
-    if (cond === "mode == 'edit'") return currentMode === 'design';
-    if (cond === "pool_loaded && mode == 'edit'") return poolLoaded && currentMode === 'design';
+    if (cond === "mode == 'edit'") return AppState.mode === 'design';
+    if (cond === "pool_loaded && mode == 'edit'") return poolLoaded && AppState.mode === 'design';
     if (cond === 'has_unsaved_changes && pool_loaded') return poolLoaded;
     return true;
   }
@@ -10472,7 +10748,6 @@ var TableDrivenPanel = window.TableDrivenPanel;
     var btnDesign = $('btnDesign');
     var isDesignMode = true;
     var currentRunMode = 'simulation';
-    var poolRunStatus = 'stopped';
 
     if (btnDesign) btnDesign.addEventListener('click', function () {
       isDesignMode = !isDesignMode;
@@ -10485,6 +10760,10 @@ var TableDrivenPanel = window.TableDrivenPanel;
     });
 
     function setRunMode(mode) {
+      if (poolRunStatus !== 'stopped') {
+        showToast('股票池正在运行中，请先停止运行后再切换模式', 'error');
+        return;
+      }
       currentRunMode = mode;
       if (isDesignMode) {
         isDesignMode = false;
@@ -10501,10 +10780,10 @@ var TableDrivenPanel = window.TableDrivenPanel;
     var btnLoadDemo = $('btnLoadDemo');
     if (btnLoadDemo) {
       btnLoadDemo.addEventListener('click', function () {
-        loadPool('target_pool_100').then(function () {
-          showToast('已加载示例池: target_pool_100');
+        loadPool('sim_test_pool_100').then(function () {
+          showToast('已加载示例池: sim_test_pool_100');
           if (typeof window.logSystemEvent === 'function') {
-            window.logSystemEvent('已加载示例池 target_pool_100');
+            window.logSystemEvent('已加载示例池 sim_test_pool_100');
           }
         }).catch(function (err) {
           showToast('加载示例池失败: ' + (err.message || err), 'error');
@@ -10513,31 +10792,20 @@ var TableDrivenPanel = window.TableDrivenPanel;
     }
 
     // 运行控制按钮
-    function updateRunControlButtons() {
-      var btnStart = $('btnStart');
-      var btnPause = $('btnPause');
-      var btnStop = $('btnStop');
-      if (!btnStart || !btnPause || !btnStop) return;
-
-      if (poolRunStatus === 'running') {
-        btnStart.disabled = true;
-        btnPause.disabled = false;
-        btnStop.disabled = false;
-        btnStart.textContent = '▶ 运行中';
-      } else if (poolRunStatus === 'paused') {
-        btnStart.disabled = false;
-        btnPause.disabled = true;
-        btnStop.disabled = false;
-        btnStart.textContent = '▶ 继续';
-      } else {
-        btnStart.disabled = false;
-        btnPause.disabled = true;
-        btnStop.disabled = true;
-        btnStart.textContent = '▶ 开始';
-      }
-    }
-
     async function controlPool(action) {
+      // 仿真模式下，主工具栏运行按钮路由到仿真控制
+      if (AppState.mode === 'simulation') {
+        if (action === 'start' || action === 'resume') {
+          startSimAutoStep();
+        } else if (action === 'pause') {
+          stopSimAutoStep();
+        } else if (action === 'stop') {
+          stopSimAutoStep();
+          setMode('design');
+        }
+        return;
+      }
+
       var poolId = poolData && poolData._poolId;
       if (!poolId) {
         showToast('请先加载一个股票池', 'error');
@@ -11049,7 +11317,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
         if (nidX) { poolData.cutToClipboard(nidX); canvas.render(poolData.data); }
         break;
       case 'deleteSelected':
-        if (currentMode !== 'design') return;
+        if (AppState.mode !== 'design') return;
         if (flowMode && flowSourceId) {
           flowSourceId = null;
           clearFlowHighlight();
@@ -11108,6 +11376,16 @@ var TableDrivenPanel = window.TableDrivenPanel;
       var isInput = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable);
       if (isInput) return;
 
+      // 处理内置快捷键表（不覆盖Ctrl/Alt/Meta组合键）
+      if (!e.ctrlKey && !e.altKey && !e.metaKey) {
+        var handler = SHORTCUTS[e.key];
+        if (handler) {
+          if (e.key === ' ') e.preventDefault();
+          handler();
+          return;
+        }
+      }
+
       // 表驱动：从 keyboard_shortcuts 配置匹配快捷键
       var cfg = getConfig('keyboard_shortcuts');
       var shortcuts = cfg.shortcuts || [];
@@ -11151,7 +11429,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
         var nid2 = canvas.getSelectedNodeId();
         if (nid2) { poolData.cutToClipboard(nid2); canvas.render(poolData.data); }
       } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (currentMode !== 'design') return;
+        if (AppState.mode !== 'design') return;
         if (flowMode && flowSourceId) {
           flowSourceId = null;
           clearFlowHighlight();
@@ -11244,7 +11522,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
     // ── 构建三维菜单 ──
     function _buildContextMenu(targetInfo) {
       var t = targetInfo.type;
-      var isDesign = currentMode === 'design';
+      var isDesign = AppState.mode === 'design';
       var items = [];
 
       if (!t) {
@@ -11413,9 +11691,9 @@ var TableDrivenPanel = window.TableDrivenPanel;
       var targetInfo = _resolveCtxTarget();
       _ctxTargetType = targetInfo.type;
       _ctxTargetId = targetInfo.id;
-      _ctxIsRuntime = currentMode !== 'design';
+      _ctxIsRuntime = AppState.mode !== 'design';
 
-      var isDesign = currentMode === 'design';
+      var isDesign = AppState.mode === 'design';
       var menuHtml = null;
 
       // 表驱动：尝试从 context_menu_config 构建菜单
@@ -11560,7 +11838,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
     // ── 操作实现 ──
     function _doAddNode(action) {
       var cellType = _getAddNodeCellTypeByAction(action);
-      if (currentMode !== 'design') return;
+      if (AppState.mode !== 'design') return;
       var node = poolData.addNode(cellType, { x: Math.max(0, _ctxCanvasX - 40), y: Math.max(0, _ctxCanvasY - 20) });
       if (node) {
         canvas.render(poolData.data);
@@ -11803,46 +12081,47 @@ var TableDrivenPanel = window.TableDrivenPanel;
     });
     var simBtnStart = $('simBtnStart');
     if (simBtnStart) simBtnStart.addEventListener('click', function () {
-      if (currentMode !== 'simulation') return;
+      if (AppState.mode !== 'simulation') return;
       startSimAutoStep();
     });
     var simBtnPause = $('simBtnPause');
     if (simBtnPause) simBtnPause.addEventListener('click', function () {
-      if (currentMode !== 'simulation') return;
+      if (AppState.mode !== 'simulation') return;
       stopSimAutoStep();
     });
     var simBtnStep = $('simBtnStep');
     if (simBtnStep) simBtnStep.addEventListener('click', function () {
-      if (currentMode !== 'simulation') return;
+      if (AppState.mode !== 'simulation') return;
       stopSimAutoStep();
-      var deltaSelect = $('simDeltaSelect');
-      var delta = deltaSelect ? parseFloat(deltaSelect.value) || 60 : 60;
-      runSimulationStep(delta);
+      runSimulationStep(_getSimDelta());
     });
     var simBtnReset = $('simBtnReset');
     if (simBtnReset) simBtnReset.addEventListener('click', function () {
-      if (currentMode !== 'simulation') return;
+      if (AppState.mode !== 'simulation') return;
       stopSimAutoStep();
+      var oldSessionId = simSessionId;
+      simSessionId = null;
+      _simEventOffset = 0;
       simStepCount = 0;
+      AppState.resetSimulation();
       var stepCountEl = $('simulationStepCount');
       if (stepCountEl) stepCountEl.textContent = '步数: 0';
       var clockEl = $('simulationClock');
-      if (clockEl) clockEl.textContent = '--';
+      if (clockEl) clockEl.textContent = '00:00:00';
       clearEventPanel();
-      var poolId = poolData._poolId;
-      var poolName = poolId || (poolData._data && poolData._data.name) || '';
-      if (!poolName && poolData._isTDX && poolData._tdxFilename) {
-        poolName = poolData._tdxFilename.replace(/\.xml$/i, '');
+      if (typeof window.clearEventPanel === 'function') window.clearEventPanel();
+      function restartSim() {
+        updateSimBtnState(false);
+        startSimulationSession();
       }
-      if (poolName) {
-        var url = '/api/pool/' + encodeURIComponent(poolName) + '/sim/init';
-        fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
-          .then(function (r) { return r.json(); })
-          .then(function (result) {
-            if (result.success) {
-              updateSimBtnState(false);
-            }
-          });
+      if (oldSessionId) {
+        fetch('/api/sim/control', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: oldSessionId, action: 'stop' })
+        }).then(restartSim).catch(restartSim);
+      } else {
+        restartSim();
       }
     });
     var simSpeedSlider = $('simSpeedSlider');
@@ -11850,18 +12129,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
       _simSpeed = parseFloat(this.value) || 1.0;
       var speedValEl = $('simSpeedValue');
       if (speedValEl) speedValEl.textContent = _simSpeed + 'x';
-      var poolId = poolData._poolId;
-      var poolName = poolId || (poolData._data && poolData._data.name) || '';
-      if (!poolName && poolData._isTDX && poolData._tdxFilename) {
-        poolName = poolData._tdxFilename.replace(/\.xml$/i, '');
-      }
-      if (poolName) {
-        fetch('/api/pool/' + encodeURIComponent(poolName) + '/sim/speed', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ speed: _simSpeed })
-        });
-      }
+
     });
 
     var _clearBtn = $('eventPanelClear');
@@ -11872,8 +12140,8 @@ var TableDrivenPanel = window.TableDrivenPanel;
     var _toggleBtn = $('eventPanelToggle');
     if (_toggleBtn) _toggleBtn.addEventListener('click', function () {
       _eventPanelCollapsed = !_eventPanelCollapsed;
-      var _body = $('eventPanelBody');
-      if (_body) _body.classList.toggle('collapsed', _eventPanelCollapsed);
+      var _panel = $('eventPanel');
+      if (_panel) _panel.classList.toggle('collapsed', _eventPanelCollapsed);
       _toggleBtn.textContent = _eventPanelCollapsed ? '▴' : '▾';
     });
 
@@ -11883,15 +12151,15 @@ var TableDrivenPanel = window.TableDrivenPanel;
     });
 
     $('replayPeriodSelect').addEventListener('change', function () {
-      if (currentMode === 'replay') startReplaySession();
+      if (AppState.mode === 'replay') startReplaySession();
     });
 
     // Date Range 选择器：日期变更时重启回放会话
     $('replayStartDate').addEventListener('change', function () {
-      if (currentMode === 'replay') startReplaySession();
+      if (AppState.mode === 'replay') startReplaySession();
     });
     $('replayEndDate').addEventListener('change', function () {
-      if (currentMode === 'replay') startReplaySession();
+      if (AppState.mode === 'replay') startReplaySession();
     });
 
     // Progress Bar 拖拽跳转（支持点击和拖动）
@@ -11927,30 +12195,48 @@ var TableDrivenPanel = window.TableDrivenPanel;
     var rawPoolId = poolData._poolId;
     var config = poolData._data;
     var configId = config && config.id ? String(config.id) : '';
-    // 优先使用有效的数据库 UUID；示例/本地文件使用 config 方式启动
-    var isValidPoolId = function (id) { return id && /^[0-9a-f]{8,}-/.test(id); };
-    var poolId = isValidPoolId(rawPoolId) ? rawPoolId : (isValidPoolId(configId) ? configId : null);
+    var isBackendPoolId = rawPoolId && /^[0-9a-f]{8,}-/.test(rawPoolId);
+    var poolId = isBackendPoolId ? rawPoolId : null;
     if (!poolId && !config) {
-      console.error('请先打开或保存一个有效股票池');
-      return;
+      config = createDefaultSimPool();
     }
-    var poolName = poolId || (config && config.name) || '';
+    var poolName = (isBackendPoolId ? rawPoolId : null) || (config && config.name) || '';
     if (!poolName && poolData._isTDX && poolData._tdxFilename) {
       poolName = poolData._tdxFilename.replace(/\.xml$/i, '');
     }
-    if (!poolId && !config) {
-      alert('请先加载股票池');
-      setMode('design');
-      return;
+
+    function createDefaultSimPool() {
+      var defaultPool = {
+        name: '仿真测试池',
+        nodes: [
+          { id: 'm_100', type: 'market_source', label: 'A股备选池', dzh_cell_type: 202, position: { x: 80, y: 150, width: 80, height: 60 }, params: { markets: ['fz_a'], reload_sec: 300, clr: '', name: 'A股' } }
+        ],
+        edges: [],
+        pool_meta: { type: 'ss-pool', ver: '1.0', mode: '1', nextid: 101, backcolor: 16777216 },
+        trades: [],
+        opentrades: []
+      };
+      poolData.setData(defaultPool);
+      return defaultPool;
     }
     simStepCount = 0;
     simSessionId = null;
+    _simEventOffset = 0;
     _simAutoStepping = false;
     _simSpeed = 1.0;
+    AppState.resetSimulation();
+    // 显式将按钮置为"已暂停"状态：步进/启动可点击，暂停隐藏。
+    // 避免上一轮 auto-step 残留的 disabled 状态导致步进按钮持续禁用。
+    updateSimBtnState(false);
+    if (typeof window.clearEventPanel === 'function') window.clearEventPanel();
     var simSpeedValue = $('simSpeedValue');
     var simSpeedSlider = $('simSpeedSlider');
     if (simSpeedValue) simSpeedValue.textContent = '1x';
     if (simSpeedSlider) simSpeedSlider.value = 1;
+    var clockEl = $('simulationClock');
+    var stepCountEl = $('simulationStepCount');
+    if (clockEl) clockEl.textContent = '00:00:00';
+    if (stepCountEl) stepCountEl.textContent = '步数: 0';
     // Switch data source to mock, then start a new sim session
     fetch('/api/data_source/select/mock', {
       method: 'POST',
@@ -11969,54 +12255,85 @@ var TableDrivenPanel = window.TableDrivenPanel;
       .then(function (result) {
         if (result.code === 0 && result.data && result.data.session_id) {
           simSessionId = result.data.session_id;
-          var clockEl = $('simulationClock');
-          var stepCountEl = $('simulationStepCount');
-          if (clockEl) clockEl.textContent = '--';
-          if (stepCountEl) stepCountEl.textContent = '步数: 0';
-          // 启动事件浮窗轮询
+          window.simSessionId = simSessionId;
+          _simEventOffset = 0;
           if (typeof window.eventPanelSetSession === 'function') {
             window.eventPanelSetSession(simSessionId);
           }
-          // 自动开始步进，避免用户需多点一次“启动”
           startSimAutoStep();
         } else {
           console.error('仿真启动失败:', result.msg);
+          // 启动失败时恢复按钮到可步进状态，避免步进按钮持续禁用。
+          updateSimBtnState(false);
         }
       })
       .catch(function (err) {
         console.error('仿真初始化失败:', err);
+        // 网络异常时同样恢复按钮到可步进状态。
+        updateSimBtnState(false);
       });
+  }
+
+  function _getSimDelta() {
+    // 读取步长下拉框（1s/1min/5min/1h）；缺失或无效时回退到 1 秒。
+    var sel = $('simDeltaSelect');
+    if (sel) {
+      var v = parseInt(sel.value, 10);
+      if (!isNaN(v) && v > 0) return v;
+    }
+    return 1;
   }
 
   function runSimulationStep(delta) {
     if (!simSessionId) {
-      console.error('仿真会话未启动');
+      console.error('仿真会话未启动，自动重新创建会话');
+      startSimulationSession();
       return Promise.resolve();
     }
+    var stepDelta = delta || _getSimDelta();
     return fetch('/api/sim/control', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: simSessionId, action: 'step', params: { delta: delta || 60 } })
+      body: JSON.stringify({ session_id: simSessionId, action: 'step', params: { delta: stepDelta } })
     })
       .then(function (r) { return r.json(); })
       .then(function (result) {
         if (result.code === 0 && result.data) {
-          simStepCount++;
           var clock = result.data.clock;
-          var clockEl2 = $('simulationClock');
-          var stepCountEl2 = $('simulationStepCount');
-          if (clock != null && clockEl2) {
-            var sec = Math.floor(clock);
-            var hh = String(Math.floor(sec / 3600) % 24).padStart(2, '0');
-            var mm = String(Math.floor(sec / 60) % 60).padStart(2, '0');
-            var ss = String(sec % 60).padStart(2, '0');
-            clockEl2.textContent = hh + ':' + mm + ':' + ss;
+          if (clock != null) {
+            var clockMs = Math.floor(clock * 1000);
+            if (clockMs > AppState.simulationTime) {
+              AppState.setSimulationTime(clockMs);
+              simStepCount++;
+              var clockEl2 = $('simulationClock');
+              var stepCountEl2 = $('simulationStepCount');
+              var sec = Math.floor(clock);
+              var hh = String(Math.floor(sec / 3600) % 24).padStart(2, '0');
+              var mm = String(Math.floor(sec / 60) % 60).padStart(2, '0');
+              var ss = String(sec % 60).padStart(2, '0');
+              if (clockEl2) clockEl2.textContent = hh + ':' + mm + ':' + ss;
+              if (stepCountEl2) stepCountEl2.textContent = '步数: ' + simStepCount;
+              window.simStepCount = simStepCount;
+              var stepEvents = result.data.events || [];
+              if (stepEvents.length > 0 && typeof window.timelineAddEvent === 'function') {
+                for (var ei = 0; ei < stepEvents.length; ei++) {
+                  window.timelineAddEvent(stepEvents[ei]);
+                }
+                _simEventOffset += stepEvents.length;
+              }
+              eventPanelLoad();
+              refreshSimNodeStocks();
+            }
           }
-          if (stepCountEl2) stepCountEl2.textContent = '步数: ' + simStepCount;
-          window.simStepCount = simStepCount;
-          eventPanelLoad();
-          // Update node stocks on canvas
-          refreshSimNodeStocks();
+        } else if (result.code === 102) {
+          console.log('[Sim] 初始化中，稍后重试:', result.msg);
+        } else if (result.msg === '会话不存在') {
+          // 会话在后端已失效（如服务器重启），清除本地 stale session_id 并重新创建会话
+          console.warn('[Sim] 会话不存在，重新创建仿真会话');
+          simSessionId = null;
+          window.simSessionId = null;
+          _simEventOffset = 0;
+          startSimulationSession();
         } else {
           console.error('仿真步进失败:', result.msg || result.error);
         }
@@ -12032,7 +12349,9 @@ var TableDrivenPanel = window.TableDrivenPanel;
       .then(function (r) { return r.json(); })
       .then(function (result) {
         if (result.code !== 0 || !result.data) return;
-        var pools = result.data.pools || result.data.node_stocks || {};
+        // V5 Task 6: 前端 API 调用必须使用 StatePoolView 视图接口（result.data.pools），
+        // 严禁直接操作 node_stocks 旧扁平接口。删除 || result.data.node_stocks 兼容回退。
+        var pools = result.data.pools || {};
         var execResult = {};
         Object.keys(pools).forEach(function (cellId) {
           var info = pools[cellId];
@@ -12047,6 +12366,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
 
   function updateSimBtnState(isAutoStepping) {
     _simAutoStepping = isAutoStepping;
+    AppState.setSimulationState(isAutoStepping ? 'running' : 'paused');
     var startBtn = $('simBtnStart');
     var pauseBtn = $('simBtnPause');
     var stepBtn = $('simBtnStep');
@@ -12059,6 +12379,8 @@ var TableDrivenPanel = window.TableDrivenPanel;
       pauseBtn.disabled = !isAutoStepping;
     }
     if (stepBtn) stepBtn.disabled = isAutoStepping;
+    // 同步主工具栏运行控制按钮状态（仿真模式下 btnPause/btnStart 由仿真状态决定）
+    updateRunControlButtons();
   }
 
   function startSimAutoStep() {
@@ -12068,22 +12390,19 @@ var TableDrivenPanel = window.TableDrivenPanel;
   }
 
   function _simAutoTick() {
-    if (!_simAutoStepping || currentMode !== 'simulation') {
+    if (!_simAutoStepping || AppState.mode !== 'simulation') {
       updateSimBtnState(false);
       return;
     }
-    var deltaSelect = $('simDeltaSelect');
-    var stepDelta = deltaSelect ? parseFloat(deltaSelect.value) || 1 : 1;
-    var effectiveDelta = stepDelta / _simSpeed;
-    runSimulationStep(effectiveDelta).then(function() {
-      if (!_simAutoStepping || currentMode !== 'simulation') {
+    runSimulationStep(_getSimDelta()).then(function() {
+      if (!_simAutoStepping || AppState.mode !== 'simulation') {
         updateSimBtnState(false);
         return;
       }
-      var interval = Math.max(100, Math.round(1000 / _simSpeed));
+      var interval = Math.max(50, Math.round(1000 / _simSpeed));
       _simAutoInterval = setTimeout(_simAutoTick, interval);
     }).catch(function() {
-      if (_simAutoStepping && currentMode === 'simulation') {
+      if (_simAutoStepping && AppState.mode === 'simulation') {
         _simAutoInterval = setTimeout(_simAutoTick, 1000);
       }
     });
@@ -12095,6 +12414,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
       clearTimeout(_simAutoInterval);
       _simAutoInterval = null;
     }
+    AppState.setSimulationState('paused');
     updateSimBtnState(false);
   }
 
@@ -12107,67 +12427,123 @@ var TableDrivenPanel = window.TableDrivenPanel;
 
   var _eventPanelCollapsed = false;
   var _lastEventPanelCount = 0;
+  var _simEventOffset = 0;
+
+  // ── Task 9 SubTask 9.4: 事件类型 → 分类映射 + 图标 + 颜色 ──────────────────
+  // 用户要求：事件面板必须用图标和颜色展示，并且可分类选择范围
+  // 图标显示在代表时间的矩形上（事件列表每行的时间戳左侧）
+  var _EVENT_CATEGORY_MAP = {
+    // Tick / 数据变化类 → 灰色
+    'TickReceived': 'tick', 'DataChanged': 'tick', 'TickDue': 'tick',
+    // Bar / K线合成类 → 蓝色
+    'BarComposed': 'bar', 'Bar': 'bar',
+    // 公式 / 筛选类 → 绿色（FormulaEvaluated / StockFiltered）
+    'FormulaEvaluated': 'formula', 'StockFiltered': 'formula', 'Formula': 'formula',
+    // 边触发类 → 橙色（EdgeFired / CrossOver）
+    'EdgeFired': 'edge', 'CrossOverDetected': 'edge', 'Edge': 'edge',
+    // 转移类 → 紫色（TransferExecuted / Executed）
+    'TransferExecuted': 'transfer', 'Executed': 'transfer', 'Transfer': 'transfer',
+    // 信号类 → 红色（Signal BUY/SELL）
+    'Signal': 'signal', 'BUY': 'signal', 'SELL': 'signal',
+    // 订单类 → 黄色（OrderPlaced / OrderFilled / PositionUpdated）
+    'OrderPlaced': 'order', 'OrderFilled': 'order', 'PositionUpdated': 'order', 'Order': 'order',
+    // TTL 过期类 → 深红（TTLExpired / TTLDue）
+    'TTLExpired': 'ttl', 'TTLDue': 'ttl', 'Timeout': 'ttl', 'TTL': 'ttl',
+    // 系统类 → 青色
+    'SimulationStep': 'system', 'TimeAdvanced': 'system', 'ModeChanged': 'system',
+    'PoolLoaded': 'system', 'ConfigChanged': 'system', 'ConfigLoaded': 'system',
+    'EventLogged': 'system', 'AlertRaised': 'system', 'Snapshot': 'system',
+    'Statistics': 'system', 'Replay': 'system', 'Simulation': 'system',
+    'Import': 'system', 'Export': 'system'
+  };
+
+  var _EVENT_CATEGORY_ICON = {
+    tick: '📊', bar: '📈', formula: '🧮', edge: '⚡', transfer: '🔄',
+    signal: '💰', order: '📋', ttl: '⏰', system: '🔧'
+  };
+
+  var _EVENT_CATEGORY_COLOR = {
+    tick: '#9e9e9e', bar: '#2196f3', formula: '#4caf50', edge: '#ff9800',
+    transfer: '#9c27b0', signal: '#f44336', order: '#ffc107', ttl: '#b71c1c',
+    system: '#00bcd4'
+  };
+
+  // 信号类子图标：BUY▲ / SELL▼
+  function _getEventIcon(category, type) {
+    if (category === 'signal') {
+      if (type === 'BUY') return '▲';
+      if (type === 'SELL') return '▼';
+      return '💰';
+    }
+    return _EVENT_CATEGORY_ICON[category] || '📝';
+  }
+
+  function _categorizeEventType(type) {
+    if (!type) return 'system';
+    if (_EVENT_CATEGORY_MAP[type]) return _EVENT_CATEGORY_MAP[type];
+    // 兜底：按事件类型名前缀分类
+    var t = String(type);
+    if (t.indexOf('Tick') === 0 || t.indexOf('Data') === 0) return 'tick';
+    if (t.indexOf('Bar') === 0) return 'bar';
+    if (t.indexOf('Formula') === 0 || t.indexOf('Stock') === 0 || t.indexOf('Filter') === 0) return 'formula';
+    if (t.indexOf('Edge') === 0 || t.indexOf('Cross') === 0) return 'edge';
+    if (t.indexOf('Transfer') === 0 || t.indexOf('Execut') === 0) return 'transfer';
+    if (t.indexOf('Signal') === 0 || t === 'BUY' || t === 'SELL') return 'signal';
+    if (t.indexOf('Order') === 0 || t.indexOf('Position') === 0) return 'order';
+    if (t.indexOf('TTL') === 0 || t.indexOf('Timeout') === 0) return 'ttl';
+    return 'system';
+  }
+
+  // 收集当前激活的事件分类过滤器（修正选择器 .etp-filter）
+  function _getActiveEventCategories() {
+    var activeCats = new Set();
+    var allChecked = false;
+    document.querySelectorAll('.etp-filter input[type="checkbox"]').forEach(function (cb) {
+      var f = cb.dataset.filter;
+      if (!f) return;
+      if (f === 'all') {
+        if (cb.checked) allChecked = true;
+      } else if (cb.checked) {
+        activeCats.add(f);
+      }
+    });
+    if (allChecked) {
+      // "全选"勾选时返回所有分类
+      return new Set(Object.keys(_EVENT_CATEGORY_ICON));
+    }
+    return activeCats;
+  }
 
   function eventPanelLoad() {
+    // 统一通过新事件面板 API 加载事件
+    if (typeof timelineAddEvent !== 'function') return;
+
     // 仿真模式：从 /api/sim/events 读取会话事件
-    if (currentMode === 'simulation' && simSessionId) {
-      fetch('/api/sim/events?session_id=' + encodeURIComponent(simSessionId) + '&since=0&limit=500')
+    if (AppState.mode === 'simulation' && simSessionId) {
+      fetch('/api/sim/events?session_id=' + encodeURIComponent(simSessionId) + '&since=' + _simEventOffset + '&limit=500')
         .then(function (r) { return r.json(); })
         .then(function (result) {
           if (result.code !== 0 || !result.data) return;
           var events = result.data.events || [];
+          var total = result.data.total || 0;
+          if (events.length > 0) _simEventOffset = total;
           _lastEventPanelCount = events.length;
-          var eventCountEl = $('eventCount');
-          if (eventCountEl) eventCountEl.textContent = events.length > 99 ? '99+' : String(events.length);
-          var eventList = $('eventList');
-          if (!eventList) return;
-          eventList.innerHTML = '';
-          var activeFilters = new Set();
-          document.querySelectorAll('.ep-filter input[type="checkbox"]').forEach(function (cb) {
-            if (cb.checked) activeFilters.add(cb.dataset.filter);
-          });
+          var clock = result.data.clock;
+          if (clock != null) {
+            var clockMs = Number(clock) < 1e12 ? Number(clock) * 1000 : Number(clock);
+            AppState.setSimulationTime(clockMs);
+          }
           for (var i = 0; i < events.length; i++) {
             var ev = events[i];
-            var type = ev.event_type || 'UNKNOWN';
-            if (type === 'RANK_CHANGED') continue;
-            var code = ev.code || '';
-            var pool = ev.pool_id || '';
-            var ts = ev.ts || ev.time || 0;
-            var key = type + '|' + code + '|' + pool + '|' + ts;
-            var div = document.createElement('div');
-            div.className = 'event-item ' + escHtml(type);
-            if (!activeFilters.has(type)) div.classList.add('hidden');
-            div.dataset.type = type;
-            div.dataset.key = key;
-            if (code) div.dataset.code = code;
-            var timeStr = '';
-            if (ts) {
-              var sec = Math.floor(ts % 86400);
-              var hh = String(Math.floor(sec / 3600)).padStart(2, '0');
-              var mm = String(Math.floor(sec / 60) % 60).padStart(2, '0');
-              var ss = String(sec % 60).padStart(2, '0');
-              timeStr = hh + ':' + mm + ':' + ss;
-            }
-            var detailParts = [];
-            var d = ev.details || {};
-            // BUY/SELL 信号字段在顶层（price/qty/condition），合并到详情显示
-            if (type === 'BUY' || type === 'SELL' || type === 'Signal') {
-              if (ev.quantity != null) detailParts.push('qty=' + ev.quantity);
-              if (ev.price != null) detailParts.push('px=' + Number(ev.price).toFixed(2));
-              if (ev.condition) detailParts.push('cond=' + ev.condition);
-              if (ev.profit_pct != null) detailParts.push('pnl=' + Number(ev.profit_pct).toFixed(2) + '%');
-            }
-            if (d.quantity) detailParts.push('qty=' + d.quantity);
-            if (d.price) detailParts.push('px=' + d.price);
-            if (d.flow_id) detailParts.push('flow=' + d.flow_id);
-            var detailStr = detailParts.join(' ');
-            div.innerHTML = '<span class="ev-time">' + escHtml(timeStr) + '</span><span class="ev-type">[' + escHtml(type) + ']</span> ' + escHtml(code) + ' ' + escHtml(pool) + ' ' + escHtml(detailStr);
-            eventList.prepend(div);
+            if ((ev.event_type || ev.type || 'UNKNOWN') === 'RANK_CHANGED') continue;
+            timelineAddEvent(ev);
           }
         })
         .catch(function () {});
       return;
     }
+
+    // 普通模式：从 /api/pool/{poolName}/event-panel 读取历史事件
     var poolId = poolData._poolId;
     var poolName = poolId || (poolData._data && poolData._data.name) || '';
     if (!poolName && poolData._isTDX && poolData._tdxFilename) {
@@ -12180,65 +12556,10 @@ var TableDrivenPanel = window.TableDrivenPanel;
         if (!result.success) return;
         var events = result.events || [];
         _lastEventPanelCount = events.length;
-        var eventCountEl = $('eventCount');
-        if (eventCountEl) eventCountEl.textContent = events.length > 99 ? '99+' : String(events.length);
-        var eventList = $('eventList');
-        if (!eventList) return;
-        if (events.length === 0) {
-          eventList.innerHTML = '';
-          return;
-        }
-        // Build a key set of existing items to avoid duplicates
-        var existingKeys = new Set();
-        eventList.querySelectorAll('.event-item').forEach(function (el) {
-          existingKeys.add(el.dataset.key || '');
-        });
-        // Read active filters from checkboxes
-        var activeFilters = new Set();
-        document.querySelectorAll('.ep-filter input[type="checkbox"]').forEach(function (cb) {
-          if (cb.checked) activeFilters.add(cb.dataset.filter);
-        });
         for (var i = 0; i < events.length; i++) {
           var ev = events[i];
-          var type = ev.event_type || 'UNKNOWN';
-          if (type === 'RANK_CHANGED') continue;
-          var code = ev.code || '';
-          var pool = ev.pool_id || '';
-          var ts = ev.ts || ev.time || 0;
-          var key = type + '|' + code + '|' + pool + '|' + ts;
-          if (existingKeys.has(key)) continue;
-          existingKeys.add(key);
-          var div = document.createElement('div');
-          div.className = 'event-item ' + escHtml(type);
-          if (!activeFilters.has(type)) div.classList.add('hidden');
-          div.dataset.type = type;
-          div.dataset.key = key;
-          if (code) div.dataset.code = code;
-          var timeStr = '';
-          if (ts) {
-            var sec = Math.floor(ts % 86400);
-            var hh = String(Math.floor(sec / 3600)).padStart(2, '0');
-            var mm = String(Math.floor(sec / 60) % 60).padStart(2, '0');
-            var ss = String(sec % 60).padStart(2, '0');
-            timeStr = hh + ':' + mm + ':' + ss;
-          }
-          var detailParts = [];
-          var d = ev.details || {};
-          if (type === 'BUY' || type === 'SELL' || type === 'Signal') {
-            if (ev.quantity != null) detailParts.push('qty=' + ev.quantity);
-            if (ev.price != null) detailParts.push('px=' + Number(ev.price).toFixed(2));
-            if (ev.condition) detailParts.push('cond=' + ev.condition);
-            if (ev.profit_pct != null) detailParts.push('pnl=' + Number(ev.profit_pct).toFixed(2) + '%');
-          }
-          if (d.quantity) detailParts.push('qty=' + d.quantity);
-          if (d.price) detailParts.push('px=' + d.price);
-          if (d.flow_id) detailParts.push('flow=' + d.flow_id);
-          var detailStr = detailParts.join(' ');
-          div.innerHTML = '<span class="ev-time">' + escHtml(timeStr) + '</span><span class="ev-type">[' + escHtml(type) + ']</span> ' + escHtml(code) + ' ' + escHtml(pool) + ' ' + escHtml(detailStr);
-          eventList.prepend(div);
-        }
-        while (eventList.children.length > 300) {
-          eventList.lastChild.remove();
+          if ((ev.event_type || 'UNKNOWN') === 'RANK_CHANGED') continue;
+          timelineAddEvent(ev);
         }
       })
       .catch(function () {});
@@ -12461,7 +12782,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
   }
 
   function addNodeAtCenter(cellType) {
-    if (currentMode !== 'design') return;
+    if (AppState.mode !== 'design') return;
     var vpRect = canvas.viewportEl.getBoundingClientRect();
     var cx = (vpRect.width / 2 - canvas.transform.x) / canvas.transform.zoom;
     var cy = (vpRect.height / 2 - canvas.transform.y) / canvas.transform.zoom;
@@ -12476,15 +12797,51 @@ var TableDrivenPanel = window.TableDrivenPanel;
 
   // ─── Status Bar ─────────────────────────────────────────────────────────────
 
+  function getModeLabel() {
+    switch (AppState.mode) {
+      case 'design': return '🎨 设计';
+      case 'run': return '▶ 实盘';
+      case 'replay': return '⏪ 回放';
+      case 'simulation': return '🔬 仿真';
+      default: return AppState.mode;
+    }
+  }
+
   function updateStatusBar() {
     if (!poolData.data) return;
     $('statusNodes').textContent = '节点: ' + poolData.getNodeCount();
     $('statusEdges').textContent = '连线: ' + poolData.getEdgeCount();
-    var now = new Date();
-    $('statusTime').textContent = now.getHours().toString().padStart(2, '0') + ':' +
-      now.getMinutes().toString().padStart(2, '0') + ':' +
-      now.getSeconds().toString().padStart(2, '0');
     $('statusZoom').textContent = Math.round(canvas.transform.zoom * 100) + '%';
+  }
+
+  function updateStatusBarTime() {
+    var timeEl = $('statusTime');
+    if (!timeEl) return;
+
+    var parts = [getModeLabel()];
+
+    if (AppState.mode === 'simulation' && AppState.simulationTime > 0) {
+      var simSec = Math.floor(AppState.simulationTime / 1000);
+      var hh = String(Math.floor(simSec / 3600) % 24).padStart(2, '0');
+      var mm = String(Math.floor(simSec / 60) % 60).padStart(2, '0');
+      var ss = String(simSec % 60).padStart(2, '0');
+      parts.push('⏱ ' + hh + ':' + mm + ':' + ss);
+      if (typeof simStepCount !== 'undefined' && simStepCount > 0) {
+        parts.push('步:' + simStepCount);
+      }
+    } else {
+      var now = new Date();
+      parts.push(now.getHours().toString().padStart(2, '0') + ':' +
+        now.getMinutes().toString().padStart(2, '0') + ':' +
+        now.getSeconds().toString().padStart(2, '0'));
+    }
+
+    if (typeof window.getEventCount === 'function') {
+      var evtCount = window.getEventCount();
+      if (evtCount > 0) parts.push('事件:' + (evtCount > 999 ? '999+' : evtCount));
+    }
+
+    timeEl.textContent = parts.join(' | ');
   }
 
   function updateToolbarButtons() {
@@ -12528,14 +12885,16 @@ var TableDrivenPanel = window.TableDrivenPanel;
   }
 
   function startStatusBarClock() {
-    setInterval(function () {
-      var el = $('statusTime');
-      if (!el) return;
-      var now = new Date();
-      el.textContent = now.getHours().toString().padStart(2, '0') + ':' +
-        now.getMinutes().toString().padStart(2, '0') + ':' +
-        now.getSeconds().toString().padStart(2, '0');
-    }, 1000);
+    updateStatusBarTime();
+    setInterval(updateStatusBarTime, 1000);
+
+    if (window.AppState && typeof window.AppState.subscribe === 'function') {
+      window.AppState.subscribe(function (key) {
+        if (key === 'mode' || key === 'simulationTime' || key === 'simulationReset' || key === 'simulationState') {
+          updateStatusBarTime();
+        }
+      });
+    }
   }
 
   // ─── Toast Notifications ────────────────────────────────────────────────────
@@ -12545,7 +12904,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
     t.className = 'toast toast-' + (type || 'success');
     t.textContent = msg;
     t.style.cssText = 'position:fixed;top:60px;right:20px;z-index:9999;padding:10px 20px;border-radius:6px;font-size:13px;color:#fff;pointer-events:none;opacity:0.95;transition:opacity 0.3s;' +
-      'background:' + (type === 'error' ? '#e74c3c' : type === 'warn' ? '#f39c12' : '#27ae60') + ';';
+      'background:' + (type === 'error' ? '#e74c3c' : type === 'warn' ? '#e67e22' : '#27ae60') + ';';
     document.body.appendChild(t);
     setTimeout(function () { t.style.opacity = '0'; }, 2500);
     setTimeout(function () { t.remove(); }, 3000);

@@ -37,8 +37,8 @@ from core.event_bus import (
     OrderPlaced,
     PositionUpdated,
     Signal,
+    TTLDue,
     TransferExecuted,
-    TTLExpired,
     is_event_bus,
 )
 from core.domain import ActionSpec
@@ -685,8 +685,8 @@ class TradeModule:
         self._bus.subscribe(TransferExecuted, self._on_transfer_executed)
         # 仿真链路修复：订阅DataChanged(tick)更新最新价缓存
         self._bus.subscribe(DataChanged, self._on_data_changed)
-        # 仿真链路修复：订阅TTLExpired事件（TTL出池已通过SELL Signal处理，此处做日志/清理）
-        self._bus.subscribe(TTLExpired, self._on_ttl_expired)
+        # G2：订阅 TTLDue 事件，TradeModule 自行处理 TTL 到期卖出/删除
+        self._bus.subscribe(TTLDue, self._on_ttl_due)
 
     # ------------------------------------------------------------------
     # SubTask 20.3：ModeChanged → 切换交易接口类型
@@ -737,37 +737,70 @@ class TradeModule:
     def _on_data_changed(self, event: DataChanged) -> None:
         """DataChanged事件处理：更新最新价缓存 + paper_trade持仓价格。
 
-        只处理source=tick的事件，从tick中提取price/lastprice字段更新缓存，
+        只处理source=tick的事件，支持单 tick dict 或 {code: tick_dict} 批量格式，
+        从tick中提取close/price/lastprice字段更新缓存，
         同时更新_PaperTradeEngine中的持仓当前价格。
+        兼容 fz 前缀仿真代码（8字符）与真实6位代码。
         """
         try:
             if event.source != "tick":
                 return
             data = event.data or {}
-            code = str(data.get("code", "")).strip()
-            if not code or len(code) != 6:
+            if not isinstance(data, dict):
                 return
-            price = float(data.get("price", data.get("lastprice", 0.0)) or 0.0)
-            if price > 0:
-                self._latest_prices[code] = price
-                if hasattr(self._trading_service, "update_prices"):
-                    self._trading_service.update_prices({code: price})
+
+            # 支持两种数据格式：单 tick dict 或 {code: tick_dict} 批量
+            if "code" in data:
+                ticks = [data]
+            else:
+                ticks = []
+                for code, tick in data.items():
+                    if isinstance(tick, dict):
+                        tick_copy = dict(tick)
+                        tick_copy["code"] = code
+                        ticks.append(tick_copy)
+                    else:
+                        ticks.append({"code": code, "price": tick})
+
+            for tick in ticks:
+                code = str(tick.get("code", "")).strip()
+                if not code:
+                    continue
+                price = float(
+                    tick.get("close", tick.get("price", tick.get("lastprice", 0.0)))
+                    or 0.0
+                )
+                if price > 0:
+                    self._latest_prices[code] = price
+                    if hasattr(self._trading_service, "update_prices"):
+                        self._trading_service.update_prices({code: price})
         except Exception as ex:
             logger.warning("TradeModule _on_data_changed 异常: %s", ex)
 
-    def _on_ttl_expired(self, event: TTLExpired) -> None:
-        """TTLExpired事件处理：TTL出池日志记录。
+    def _on_ttl_due(self, event: TTLDue) -> None:
+        """TTLDue 事件处理：对 auto_sell_pools 中的池发布 SELL Signal（G2）。
 
-        TTL出池的SELL Signal已由ExecutionModule._make_ttl_interval_action发布，
-        此处仅做日志和tracker清理，避免重复下单。
+        G2：引擎只发事件不执行计算，TTL 到期时 EventDriver action 仅发布 TTLDue，
+        TradeModule 订阅后自行完成卖出逻辑。无持仓时仍发布 Signal(sell_all)
+       （quantity=0），由下游 _on_signal 优雅降级。
         """
         try:
-            logger.info(
-                "TradeModule 收到TTLExpired: node=%s, codes=%s",
-                event.node_id, event.codes,
-            )
+            auto_sell_pools = self._config.get("auto_sell_pools", []) or []
+            if event.node_id not in auto_sell_pools:
+                return
+            code = event.code
+            if not code:
+                return
+            qty = self._get_position_qty(code, event.node_id)
+            price = self._get_latest_price(code, fallback=0.0)
+            # 无持仓时仍发布 Signal(sell_all)（quantity=0），
+            # 不在此跳过 — 下游 _on_signal 负责优雅降级。
+            self._bus.publish(Signal(
+                signal_type="SELL", code=code, pool_id=event.node_id,
+                price=price, ts=event.ts, quantity=qty,
+            ))
         except Exception as ex:
-            logger.warning("TradeModule _on_ttl_expired 异常: %s", ex)
+            logger.warning("TradeModule _on_ttl_due 异常: %s", ex)
 
     def _get_latest_price(self, code: str, fallback: float = 0.0) -> float:
         """获取股票最新价，优先从_latest_prices缓存，无缓存返回fallback。"""
@@ -806,6 +839,8 @@ class TradeModule:
         仿真链路修复：
         - price=0（市价单）时取最新tick价格
         - SELL quantity<=0时卖全部持仓
+        - spec L142-143: SELL 无持仓时发布 rejected OrderPlaced（quantity=0，
+          不实际下单），而非静默跳过 — 确保 Signal 已发出的下游可观测。
         """
         try:
             code = event.code
@@ -819,10 +854,22 @@ class TradeModule:
             if side == "SELL" and qty <= 0:
                 qty = self._get_position_qty(code, event.pool_id)
                 if qty <= 0:
+                    # spec L142-143: Signal(sell_all) 已发出，
+                    # OrderPlaced 失败或为空（quantity=0, status=rejected 不实际下单）
                     logger.info(
-                        "TradeModule SELL信号跳过：%s 无持仓（pool=%s）",
+                        "TradeModule SELL信号无持仓：%s（pool=%s）发布 rejected OrderPlaced",
                         code, event.pool_id,
                     )
+                    self._bus.publish(OrderPlaced(
+                        order={
+                            "code": code, "side": "SELL", "qty": 0,
+                            "price": price, "pool_id": event.pool_id,
+                            "order_type": "market", "condition": event.condition,
+                            "status": "rejected", "reason": "no_position",
+                            "ts": event.ts,
+                        },
+                        ts=event.ts,
+                    ))
                     return
             elif side == "BUY" and qty <= 0:
                 qty = 100
@@ -916,6 +963,13 @@ class TradeModule:
         """订单提交后，模拟成交（实盘模式下需等待真实成交回报）。"""
         order = event.order
         try:
+            # spec L143: rejected 订单不实际成交（OrderPlaced 失败或为空）
+            if order.get("status") == "rejected":
+                logger.info(
+                    "TradeModule OrderPlaced rejected: %s %s (qty=0, reason=%s)",
+                    order.get("side"), order.get("code"), order.get("reason", ""),
+                )
+                return
             if self._interface_type == "live_order":
                 # 实盘模式：等待真实成交回报（适配器未接入时简化为立即成交）
                 wait = getattr(self._trading_service, "wait_fill", None)
@@ -969,16 +1023,22 @@ class TradeModule:
         try:
             auto_buy_pools = self._config.get("auto_buy_pools", []) or []
             auto_sell_pools = self._config.get("auto_sell_pools", []) or []
-            # 入池即买入（仅 move 模式表示股票实际离开源池进入目标池）
-            if event.mode == "move" and event.tgt in auto_buy_pools:
+            # 入池即买入：股票进入 auto_buy_pools 目标池时发布 BUY Signal。
+            # Spec: C 池入池买入链 TransferExecuted → Signal(buy,100)。
+            # 适用 copy/move/overwrite 全模式——股票进入目标池即触发买入，
+            # 与是否离开源池无关（copy 模式源池保留但目标池也入池）。
+            if event.tgt in auto_buy_pools and event.codes:
                 for code in event.codes:
                     self._bus.publish(Signal(
                         signal_type="BUY", code=code, pool_id=event.tgt,
                         price=0.0, ts=event.ts, quantity=100,
                     ))
-            # 出池即卖出（src 池标记为 auto_sell 时，查持仓量卖出）
-            if event.src in auto_sell_pools:
-                for code in event.codes:
+            # 出池即卖出：仅 move/overwrite 模式（股票实际离开源池）时，
+            # 对 auto_sell_pools 源池发布 SELL Signal。copy 模式股票未离开源池不卖。
+            # 使用 exited_codes（实际离开源池的代码），而非 entered_codes。
+            if event.mode in ("move", "overwrite") and event.src in auto_sell_pools:
+                exited_codes = getattr(event, "exited_codes", None) or event.codes
+                for code in exited_codes:
                     key = (event.src, code)
                     tracker = self._trackers.get(key, {})
                     qty = int(tracker.get("qty", 0) or 0)

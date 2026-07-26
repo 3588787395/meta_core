@@ -44,13 +44,7 @@ from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, 
 
 import pandas as pd
 
-from core.domain import DZH_COL_MAP, SimTickSource, _hash_tick, _normalize_to_fz, _stock_code, time_at, _safe_timestamp
-
-# EdgeState 在 execution_module 中定义（运行时边状态）
-try:
-    from .execution_module import EdgeState
-except ImportError:
-    from execution_module import EdgeState
+from core.domain import DZH_COL_MAP, MockDataSource, _hash_tick, _normalize_to_fz, _stock_code, time_at, _safe_timestamp, EdgeState
 
 if TYPE_CHECKING:
     from core.engine import PoolEngine
@@ -613,7 +607,9 @@ class KLineReplayEngine:
         pe = self._engine._pool_engine
         if current_dt and pe is not None:
             pe.state.time_source["current_ts"] = _safe_timestamp(current_dt)
-            pe.state.time_source.setdefault("driver_type", "sequence")
+            # G2 硬约束：回放模式必须用 sequence driver，直接覆盖不用 setdefault
+            # （engine.py 默认 wall_clock，setdefault 不覆盖会污染时间坐标系）
+            pe.state.time_source["driver_type"] = "sequence"
 
         coro = self._engine._tick(
             self._pool_model,
@@ -1168,6 +1164,7 @@ class RuntimeSimulator:
         self._thread_lock = threading.Lock()
         self._resume_event = threading.Event()
         self._resume_event.set()
+        self._astep_mode: bool = False
 
     # ------------------------------------------------------------------
     # Pool config conversion
@@ -1203,7 +1200,7 @@ class RuntimeSimulator:
     # Async helper
     # ------------------------------------------------------------------
     def _run_coro(self, coro):
-        """复用持久事件循环，避免每步 new_event_loop 开销"""
+        """复用持久事件循环，避免每步 new_event_loop 开销。"""
         try:
             running = asyncio.get_running_loop()
         except RuntimeError:
@@ -1218,7 +1215,7 @@ class RuntimeSimulator:
         if not running.is_running():
             return running.run_until_complete(coro)
 
-        # 已有运行中的循环（如 Jupyter）— 在线程中执行
+        # 已有运行中的循环（uvicorn）— 在线程中执行
         result = []
 
         def _runner():
@@ -1335,57 +1332,30 @@ class RuntimeSimulator:
             if nid:
                 ids.add(nid)
         for e in self.pool_config.get("edges", []):
-            fid = (
-                e.get("from")
-                or e.get("from_cell_id")
-                or e.get("source", {}).get("node_id", "")
-            )
-            tid = (
-                e.get("to")
-                or e.get("to_cell_id")
-                or e.get("target", {}).get("node_id", "")
-            )
-            if fid:
-                ids.add(fid)
-            if tid:
-                ids.add(tid)
+            src = e.get("from") or e.get("from_cell_id")
+            if src is None:
+                src_obj = e.get("source")
+                src = src_obj.get("node_id", "") if isinstance(src_obj, dict) else (src_obj or "")
+            tgt = e.get("to") or e.get("to_cell_id")
+            if tgt is None:
+                tgt_obj = e.get("target")
+                tgt = tgt_obj.get("node_id", "") if isinstance(tgt_obj, dict) else (tgt_obj or "")
+            if src:
+                ids.add(src)
+            if tgt:
+                ids.add(tgt)
         return ids
 
     def _generate_mock_bar_data(self):
-        # 表驱动：候选股票 codes 取自 (a) 当前所有 node_stocks 残留 + (b) market_source 节点
-        # 的 markets 配置 — 避免 move 后 n1 空导致 bar_data 空、股票池不可恢复
         codes = set()
         if self._mode_state:
             for stocks in self._mode_state.get("node_stocks", {}).values():
                 for s in stocks:
                     codes.add(_scode(s))
-        # 补足：从 market_source 节点读取 markets，解析出全市场代码作为后备候选
-        for n in self.pool_config.get("nodes", []):
-            if n.get("type") == "market_source":
-                p = n.get("params", {}) or {}
-                markets = p.get("markets") or p.get("attrtext") or []
-                if isinstance(markets, str):
-                    markets = [m.strip() for m in markets.replace('\t', ',').split(',') if m.strip()]
-                if not markets:
-                    markets = ["sh_a", "sz_a"]
-                for m in markets:
-                    try:
-                        codes.update(self._markets_to_codes(m))
-                    except Exception:
-                        pass
         if not codes:
-            return {}
-        # 为所有 node_stocks 中的代码生成 bar_data，确保边转移时能获取价格；
-        # market_source 补充代码限量 200 避免性能问题
-        node_codes = set()
-        if self._mode_state:
-            for stocks in self._mode_state.get("node_stocks", {}).values():
-                for s in stocks:
-                    node_codes.add(_scode(s))
-        market_codes = codes - node_codes
-        if len(market_codes) > 200:
-            market_codes = set(self.rng.sample(list(market_codes), 200))
-        codes_list = sorted(node_codes | market_codes)
+            for i in range(1, self._SIM_FZ_CODE_COUNT + 1):
+                codes.add(f"fz{i:06d}")
+        codes_list = sorted(codes)
         bar_data = {}
         pr = self._gn.get("price_range", [5.0, 200.0])
         for code in codes_list:
@@ -1413,11 +1383,13 @@ class RuntimeSimulator:
         items = scopes.get(market, scopes.get("all_a", []))
         codes = set()
         for it in items:
-            pfx, sfx = it.get("prefix", ""), it.get("suffix", "SH")
+            pfx, sfx = it.get("prefix", ""), it.get("suffix", "")
             rs, re_ = it.get("range_start", 0), it.get("range_end", 9)
             for n in range(rs, re_ + 1):
                 if sfx:
                     codes.add("%s%03d.%s" % (pfx, n, sfx))
+                elif pfx == "fz":
+                    codes.add("fz%06d" % n)
                 else:
                     codes.add("%s%06d" % (pfx, n))
         return codes
@@ -1470,7 +1442,9 @@ class RuntimeSimulator:
         pe = self._engine._pool_engine
         if pe is not None:
             for nid, stocks in node_stocks.items():
-                pe.state.set_node_stocks(nid, list(stocks))
+                pool = pe.state.get_pool(nid)
+                pool.remove_stocks(list(pool.get_stock_codes()))
+                pool.add_stocks(list(stocks))
 
     def get_bars(self, period='1min'):
         """返回已闭合的K线bar数据，支持 1min 和 5min 周期。"""
@@ -1489,41 +1463,29 @@ class RuntimeSimulator:
         return result
 
     def _seed_market_source_stocks(self):
-        """仿真模式下为 market_source 节点填充 mock 候选股票。
-
-        market_source 节点 stocks 为空（依赖实时市场数据），仿真模式需从
-        mock_data.json 的 market_scopes 生成候选代码写入 node_stocks，
-        否则源节点为空导致边执行无股票可转移、events=0。
-        """
+        """仿真模式下为 market_source 节点填充 fz000001~fz000100 标的。"""
         node_stocks = self._mode_state.get("node_stocks", {})
         pe = self._engine._pool_engine
+        fz_codes = [f"fz{i:06d}" for i in range(1, self._SIM_FZ_CODE_COUNT + 1)]
         for n in self.pool_config.get("nodes", []):
             if n.get("type") != "market_source":
                 continue
             nid = n.get("id", "")
             if node_stocks.get(nid):
                 continue
-            p = n.get("params", {}) or {}
-            markets = p.get("markets") or p.get("attrtext") or []
-            if isinstance(markets, str):
-                markets = [m.strip() for m in markets.replace('\t', ',').split(',') if m.strip()]
-            if not markets:
-                markets = ["sh_a", "sz_a"]
-            codes = set()
-            for m in markets:
-                try:
-                    codes.update(self._markets_to_codes(m))
-                except Exception:
-                    pass
-            stocks = [{"code": _normalize_to_fz(c), "name": c} for c in sorted(codes)]
+            stocks = [{"code": c, "name": c} for c in fz_codes]
             node_stocks[nid] = stocks
             if pe is not None:
-                pe.state.set_node_stocks(nid, list(stocks))
+                pe.state.get_pool(nid).add_stocks(list(stocks))
             logger.info("seeded market_source %s with %d fz stocks", nid, len(stocks))
 
+    _SIM_FZ_CODE_COUNT = 20
+
     def _collect_all_fz_codes(self) -> List[str]:
-        """从 node_stocks 收集所有 fz 前缀的股票代码。"""
+        """返回仿真固定标的集 fz000001~fz000100，并合并 node_stocks 中已有的 fz 代码。"""
         codes: Set[str] = set()
+        for i in range(1, self._SIM_FZ_CODE_COUNT + 1):
+            codes.add(f"fz{i:06d}")
         if self._mode_state:
             for stocks in self._mode_state.get("node_stocks", {}).values():
                 for s in stocks:
@@ -1533,17 +1495,18 @@ class RuntimeSimulator:
         return sorted(codes)
 
     def _configure_sim_tick_source(self) -> None:
-        """配置 engine._components["tick_source"] 为正确的 SimTickSource 实例。
+        """配置 engine._components["tick_source"] 为正确的 MockDataSource 实例。
 
         在 _normalize_mode_codes 和 _seed_market_source_stocks 之后调用，
         确保所有 codes 都是 fz 前缀且 clock_start 与虚拟时钟对齐。
+        G5：MockDataSource 的 tick 定时器注册到 EventDriver 统一优先队列。
         """
         pe = self._engine._pool_engine
         if pe is None:
             return
         codes_list = self._collect_all_fz_codes()
         cfg = self._gn.get("price_range", [5.0, 200.0])
-        tick_source = SimTickSource(
+        tick_source = MockDataSource(
             codes=codes_list,
             clock_start=self.clock,
             price_range=cfg if isinstance(cfg, (tuple, list)) and len(cfg) >= 2 else (5.0, 200.0),
@@ -1551,8 +1514,78 @@ class RuntimeSimulator:
             volume_lognorm_mu=float(self._gn.get("volume_lognorm_mu", 14.0)),
             volume_lognorm_sigma=float(self._gn.get("volume_lognorm_sigma", 2.0)),
         )
+        # G5：注入 EventDriver/EventBus 并注册 tick 定时器到统一优先队列
+        event_driver = pe._components.get("event_driver")
+        event_bus = pe._components.get("event_bus")
+        if event_driver is not None:
+            tick_source.set_event_driver(event_driver, event_bus)
+            tick_source.register_tick_timers(self.clock)
         pe._components["tick_source"] = tick_source
-        logger.info("configured SimTickSource for %d fz codes, clock_start=%.1f", len(codes_list), self.clock)
+        logger.info("configured MockDataSource for %d fz codes, clock_start=%.1f", len(codes_list), self.clock)
+
+    def _post_init_mode_state(self):
+        """run_mode 得到初始 node_stocks 后的后处理：对齐虚拟时钟、归一化代码、注入 tick_source、同步 Pool 股票。"""
+        pe = self._engine._pool_engine
+        if pe is not None:
+            pe.state.time_source["start_ts"] = self.clock
+            pe.state.time_source["current_ts"] = self.clock
+            # G2 硬约束：仿真模式必须用 virtual driver，直接覆盖不用 setdefault
+            pe.state.time_source["driver_type"] = "virtual"
+            # 修复：current_ts 设置后重建边触发规格。
+            # _init_pool_runtime 在 current_ts 设置前调用 build_timed_event_specs，
+            # 导致 first_fire_time 使用 wall clock 而非虚拟时钟，边触发永不执行。
+            pe.rebuild_timed_specs()
+        self._normalize_mode_codes()
+        self._seed_market_source_stocks()
+        self._configure_sim_tick_source()
+        if pe is not None:
+            for nid, stocks in self._mode_state.get("node_stocks", {}).items():
+                pool = pe.state.get_pool(nid)
+                pool.remove_stocks(list(pool.get_stock_codes()))
+                pool.add_stocks(list(stocks))
+
+    def _ensure_mode_state(self):
+        """同步路径：延迟调用 run_mode 获取初始 mode_state（首次 step 时执行）。"""
+        if self._mode_state is not None:
+            return
+        self._mode_state = self._run_coro(
+            self._engine.run_mode("simulation", self.pool_config)
+        )
+        self._post_init_mode_state()
+
+    async def _aensure_mode_state(self):
+        """异步路径：延迟 await run_mode 获取初始 mode_state（首次 astep 时执行）。
+
+        Task 14：run_mode 内部无 await 点，直接在 Uvicorn 事件循环中执行会阻塞。
+        使用 asyncio.to_thread 在后台线程中运行 run_mode，同时用引擎级锁避免
+        多个仿真会话并发修改共享 engine.state。
+        """
+        if self._mode_state is not None:
+            return
+        lock = getattr(self._engine, "_sim_init_lock", None)
+        if lock is not None:
+            await lock.acquire()
+        try:
+            if self._mode_state is not None:
+                return
+
+            def _run_mode_sync():
+                # run_mode 是 async def，但本质上为同步计算；在线程内新建临时事件循环运行，
+                # 避免占用 Uvicorn 事件循环。
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    return loop.run_until_complete(
+                        self._engine.run_mode("simulation", self.pool_config)
+                    )
+                finally:
+                    loop.close()
+
+            self._mode_state = await asyncio.to_thread(_run_mode_sync)
+            self._post_init_mode_state()
+        finally:
+            if lock is not None:
+                lock.release()
 
     def initialize(self):
         if self._ini:
@@ -1564,46 +1597,78 @@ class RuntimeSimulator:
                 self._tracemalloc_started = True
         except ValueError as ex:
             logger.warning("tracemalloc already started: %s", ex)
-        self._mode_state = self._run_coro(
-            self._engine.run_mode("simulation", self.pool_config)
-        )
-        pe = self._engine._pool_engine
-        if pe is not None:
-            pe.state.time_source["start_ts"] = self.clock
-            pe.state.time_source["current_ts"] = self.clock
-            pe.state.time_source.setdefault("driver_type", "virtual")
-        self._normalize_mode_codes()
-        self._seed_market_source_stocks()
-        self._configure_sim_tick_source()
-        if pe is not None:
-            for nid, stocks in self._mode_state.get("node_stocks", {}).items():
-                pe.state.set_node_stocks(nid, list(stocks))
+        # Task 14：启动只做轻量同步初始化，run_mode 的 heavyweight 执行延迟到第一次 step，
+        # 避免在 Uvicorn 事件循环中同步阻塞。
+        self._engine._ensure_pool_engine(self.pool_config)
         self._ini = True
         self._run = True
         logger.info("simulator initialized: time_source=virtual_clock, clock=%.1f", self.clock)
 
     def step(self, d=1.0):
         if self._pau:
-            return []
+            return {"bar_data": {}, "changed_codes": [], "events": []}
         if not self._ini:
             self.initialize()
+        self._ensure_mode_state()
         all_events = []
+        all_bar_data = {}
+        all_changed_codes = []
         remaining = float(d)
         sub_step = 1.0
         while remaining > 0:
             sd = min(sub_step, remaining)
             self.clock += sd
             remaining -= sd
-            events = self._step_once(sd)
+            step_result = self._step_once(sd)
+            events = step_result.get("events", [])
             all_events.extend(events)
-        return all_events
+            all_bar_data.update(step_result.get("bar_data", {}))
+            all_changed_codes.extend(step_result.get("changed_codes", []))
+        return {
+            "events": all_events,
+            "bar_data": all_bar_data,
+            "changed_codes": sorted(set(all_changed_codes)),
+        }
+
+    async def astep(self, d=1.0):
+        """async 版本的 step：直接 await engine._tick()，避免跨 loop 死锁。"""
+        self._astep_mode = True
+        try:
+            if self._pau:
+                return {"bar_data": {}, "changed_codes": [], "events": []}
+            if not self._ini:
+                self.initialize()
+            await self._aensure_mode_state()
+            all_events = []
+            all_bar_data = {}
+            all_changed_codes = []
+            remaining = float(d)
+            sub_step = 1.0
+            while remaining > 0:
+                sd = min(sub_step, remaining)
+                self.clock += sd
+                remaining -= sd
+                step_result = await self._astep_once(sd)
+                events = step_result.get("events", [])
+                all_events.extend(events)
+                all_bar_data.update(step_result.get("bar_data", {}))
+                all_changed_codes.extend(step_result.get("changed_codes", []))
+            return {
+                "events": all_events,
+                "bar_data": all_bar_data,
+                "changed_codes": sorted(set(all_changed_codes)),
+            }
+        finally:
+            self._astep_mode = False
 
     def _step_once(self, d):
         tick_seq = self._perf_tick_count
         pe = self._engine._pool_engine
         if pe is not None:
+            # G2 硬约束：仿真模式 driver_type 由 _post_init_mode_state 一次性设置（virtual），
+            # 此处仅推进虚拟时钟 current_ts（每 tick 必须推进，否则 fire_due 永不触发）。
+            # 不重复覆盖 driver_type——_post_init_mode_state 已设置，重复覆盖是冗余。
             pe.state.time_source["current_ts"] = self.clock
-            pe.state.time_source.setdefault("driver_type", "virtual")
         logger.info("tick=%d clock=%.1f (%s) step=%.1f",
                      tick_seq, self.clock, self._ft(self.clock), d)
 
@@ -1612,12 +1677,69 @@ class RuntimeSimulator:
 
         t_tick_start = time.perf_counter()
 
+        # ── 1. 从 MockDataSource 获取本步 tick 更新 ──
+        tick_source = pe._components.get("tick_source") if pe is not None else None
+        changed_codes: List[str] = []
+        bar_data: Dict[str, Any] = {}
+        tick_data: Dict[str, Any] = {}
+
+        if tick_source is not None:
+            t_mock_start = time.perf_counter()
+            step_result = tick_source.step(d)
+            t_mock_ms = (time.perf_counter() - t_mock_start) * 1000.0
+            self._perf_phases['mock_generate'].append(t_mock_ms)
+
+            changed_codes = step_result.get("changed_codes", [])
+            bar_data = step_result.get("bar_data", {})
+            tick_data = step_result.get("tick_data", {})
+            # 同步虚拟时钟（MockDataSource 内部已推进）
+            if step_result.get("virtual_clock") is not None:
+                self.clock = step_result["virtual_clock"]
+                if pe is not None:
+                    pe.state.time_source["current_ts"] = self.clock
+
+            logger.info("tick=%d tick_source: changed=%d bar_data_keys=%d mock_ms=%.2f",
+                         tick_seq, len(changed_codes), len(bar_data), t_mock_ms)
+
+            # ── 1b. 通过 EventBus 发布 TickReceived 事件 ──
+            # 注意：MockDataSource.next_ticks 返回空（G5 重构后 tick 由 EventDriver 调度），
+            # 此处的 tick_data 来自 tick_source.step()，可能为空。
+            # TickReceived → DataChanged(tick) → BarComposed 的桥接由
+            # PoolEngine._on_tick_received 订阅者完成（engine.py）。
+            if event_bus is not None and tick_data:
+                for code, tick in tick_data.items():
+                    if not code or not isinstance(tick, dict):
+                        continue
+                    try:
+                        event_bus.publish(TickReceived(
+                            tick_data=dict(tick),
+                            code=str(code),
+                            ts=float(tick.get("_ts", self.clock)),
+                        ))
+                    except Exception as ex:
+                        logger.warning("TickReceived publish failed for %s: %s", code, ex)
+        else:
+            # 无 tick_source（兼容旧路径）：使用 _generate_mock_bar_data
+            t_mock_start = time.perf_counter()
+            bar_data = self._generate_mock_bar_data()
+            t_mock_ms = (time.perf_counter() - t_mock_start) * 1000.0
+            self._perf_phases['mock_generate'].append(t_mock_ms)
+            changed_codes = list(bar_data.keys())
+
+        # ── 2. 同步 bar_data 到 node_stocks 价格字段 ──
+        self._sync_stock_prices(bar_data)
+
+        # ── 3. 记录 changed_codes 到 DirtyState ──
+        if pe is not None and changed_codes:
+            pe.state.add_changed_codes(changed_codes)
+
+        # ── 4. 执行引擎 tick（统一代码路径：live/sim 共用） ──
         t_engine_start = time.perf_counter()
         self._mode_state["node_stocks"] = self._run_coro(
             self._engine._tick(
                 None,
                 self._mode_state["node_stocks"],
-                None,
+                bar_data if bar_data else None,
                 self._mode_state,
             )
         )
@@ -1625,6 +1747,7 @@ class RuntimeSimulator:
         self._perf_phases['engine_tick'].append(t_engine_ms)
         logger.info("tick=%d phase=engine_tick duration_ms=%.2f", tick_seq, t_engine_ms)
 
+        # ── 5. 收集事件 ──
         t_evt_start = time.perf_counter()
         events = []
         if event_bus is not None:
@@ -1653,7 +1776,7 @@ class RuntimeSimulator:
         if len(self.event_log) > EVENT_LOG_MAX_SIZE:
             del self.event_log[:len(self.event_log) - EVENT_LOG_MAX_SIZE]
 
-        if self._bus is not None:
+        if self._bus is not None and not self._astep_mode:
             try:
                 pre_step_offset = event_bus.total_published if event_bus is not None else 0
                 self._bus.publish(SimulationStep(
@@ -1662,6 +1785,7 @@ class RuntimeSimulator:
                         "virtual_ts": self.clock,
                         "interval": d,
                         "events_count": len(events),
+                        "changed_codes": changed_codes,
                     },
                     session_id=str(self.pool_config.get("id", "")),
                 ))
@@ -1703,9 +1827,185 @@ class RuntimeSimulator:
                 logger.info("tick=%d node_id=%s stock_count=%d sample=%s",
                              tick_seq, nid, len(stocks), codes)
 
-        logger.info("tick=%d done total_ms=%.2f events=%d",
-                     tick_seq, t_tick_total, len(events))
-        return events
+        logger.info("tick=%d done total_ms=%.2f events=%d changed=%d",
+                     tick_seq, t_tick_total, len(events), len(changed_codes))
+        return {
+            "events": events,
+            "bar_data": bar_data,
+            "changed_codes": changed_codes,
+        }
+
+    async def _astep_once(self, d):
+        """async 版 _step_once：直接 await engine._tick() 避免跨 loop 死锁。"""
+        tick_seq = self._perf_tick_count
+        pe = self._engine._pool_engine
+        if pe is not None:
+            # G2 硬约束：仿真模式 driver_type 由 _post_init_mode_state 一次性设置（virtual），
+            # 此处仅推进虚拟时钟 current_ts。
+            pe.state.time_source["current_ts"] = self.clock
+        logger.info("tick=%d clock=%.1f (%s) astep=%.1f",
+                     tick_seq, self.clock, self._ft(self.clock), d)
+
+        event_bus = pe._components.get("event_bus") if pe is not None else None
+        event_offset = event_bus.total_published if event_bus is not None else 0
+
+        t_tick_start = time.perf_counter()
+
+        # ── 1. 从 MockDataSource 获取本步 tick 更新 ──
+        tick_source = pe._components.get("tick_source") if pe is not None else None
+        changed_codes: List[str] = []
+        bar_data: Dict[str, Any] = {}
+        tick_data: Dict[str, Any] = {}
+
+        if tick_source is not None:
+            t_mock_start = time.perf_counter()
+            step_result = tick_source.step(d)
+            t_mock_ms = (time.perf_counter() - t_mock_start) * 1000.0
+            self._perf_phases['mock_generate'].append(t_mock_ms)
+
+            changed_codes = step_result.get("changed_codes", [])
+            bar_data = step_result.get("bar_data", {})
+            tick_data = step_result.get("tick_data", {})
+            if step_result.get("virtual_clock") is not None:
+                self.clock = step_result["virtual_clock"]
+                if pe is not None:
+                    pe.state.time_source["current_ts"] = self.clock
+
+            if event_bus is not None and tick_data:
+                for code, tick in tick_data.items():
+                    if not code or not isinstance(tick, dict):
+                        continue
+                    try:
+                        event_bus.publish(TickReceived(
+                            tick_data=dict(tick),
+                            code=str(code),
+                            ts=float(tick.get("_ts", self.clock)),
+                        ))
+                    except Exception as ex:
+                        logger.warning("TickReceived publish failed for %s: %s", code, ex)
+        else:
+            t_mock_start = time.perf_counter()
+            bar_data = self._generate_mock_bar_data()
+            t_mock_ms = (time.perf_counter() - t_mock_start) * 1000.0
+            self._perf_phases['mock_generate'].append(t_mock_ms)
+            changed_codes = list(bar_data.keys())
+
+        # ── 2. 同步 bar_data 到 node_stocks 价格字段 ──
+        self._sync_stock_prices(bar_data)
+
+        # ── 3. 记录 changed_codes 到 DirtyState ──
+        if pe is not None and changed_codes:
+            pe.state.add_changed_codes(changed_codes)
+
+        # ── 4. 直接 await engine._tick() —— 无需 _run_coro ──
+        t_engine_start = time.perf_counter()
+        self._mode_state["node_stocks"] = await self._engine._tick(
+            None,
+            self._mode_state["node_stocks"],
+            bar_data if bar_data else None,
+            self._mode_state,
+        )
+        t_engine_ms = (time.perf_counter() - t_engine_start) * 1000.0
+        self._perf_phases['engine_tick'].append(t_engine_ms)
+        logger.info("tick=%d phase=engine_tick duration_ms=%.2f", tick_seq, t_engine_ms)
+
+        # ── 5. 收集事件 ──
+        t_evt_start = time.perf_counter()
+        events = []
+        if event_bus is not None:
+            new_events = event_bus.get_events_since(event_offset)
+            _ASTEP_KEY_TYPES = frozenset({
+                "EdgeFired", "TransferExecuted", "Signal",
+                "OrderPlaced", "OrderFilled", "PositionUpdated",
+                "StockFiltered", "FormulaEvaluated",
+            })
+            for ev in new_events:
+                ev_type = type(ev).__name__
+                if ev_type not in _ASTEP_KEY_TYPES:
+                    continue
+                try:
+                    ev_dict = asdict(ev) if hasattr(ev, '__dataclass_fields__') else dict(ev)
+                except Exception:
+                    ev_dict = {"repr": repr(ev)}
+                ev_dict["event_type"] = ev_type
+                ev_dict["time"] = self.clock
+                events.append(ev_dict)
+                if len(events) >= 200:
+                    break
+        while not self._engine._event_queue.empty():
+            try:
+                self._engine._event_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        while not self._engine._signal_queue.empty():
+            try:
+                self._engine._signal_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        t_evt_ms = (time.perf_counter() - t_evt_start) * 1000.0
+        self._perf_phases['event_collect'].append(t_evt_ms)
+        self.event_log.extend(events)
+        if len(self.event_log) > EVENT_LOG_MAX_SIZE:
+            del self.event_log[:len(self.event_log) - EVENT_LOG_MAX_SIZE]
+
+        if self._bus is not None and not self._astep_mode:
+            try:
+                pre_step_offset = event_bus.total_published if event_bus is not None else 0
+                self._bus.publish(SimulationStep(
+                    step={
+                        "step_idx": tick_seq,
+                        "virtual_ts": self.clock,
+                        "interval": d,
+                        "events_count": len(events),
+                        "changed_codes": changed_codes,
+                    },
+                    session_id=str(self.pool_config.get("id", "")),
+                ))
+                if event_bus is not None:
+                    post_events = event_bus.get_events_since(pre_step_offset)
+                    _KEY_EVENT_TYPES = frozenset({
+                        "TickReceived", "DataChanged", "BarComposed",
+                        "FormulaEvaluated", "StockFiltered", "EdgeFired",
+                        "Executed", "TransferExecuted", "Signal",
+                        "OrderPlaced", "OrderFilled", "PositionUpdated",
+                        "TTLExpired", "SimulationStep", "TimeAdvanced",
+                        "EventLogged", "AlertRaised",
+                    })
+                    for ev in post_events:
+                        ev_type = type(ev).__name__
+                        if ev_type not in _KEY_EVENT_TYPES:
+                            continue
+                        try:
+                            ev_dict = asdict(ev) if hasattr(ev, '__dataclass_fields__') else dict(ev)
+                        except Exception:
+                            ev_dict = {"repr": repr(ev)}
+                        ev_dict["event_type"] = ev_type
+                        ev_dict["time"] = self.clock
+                        events.append(ev_dict)
+                        self.event_log.append(ev_dict)
+                    if len(self.event_log) > EVENT_LOG_MAX_SIZE:
+                        del self.event_log[:len(self.event_log) - EVENT_LOG_MAX_SIZE]
+            except Exception as ex:
+                logger.warning("SimulationStep 发布失败 (tick=%d): %s", tick_seq, ex)
+
+        t_tick_total = (time.perf_counter() - t_tick_start) * 1000.0
+        self._perf_phases['tick_total'].append(t_tick_total)
+        self._perf_tick_count += 1
+
+        ns = self._mode_state.get("node_stocks", {}) if self._mode_state else {}
+        for nid, stocks in ns.items():
+            if isinstance(stocks, list) and stocks:
+                codes = [_scode(s) for s in stocks[:5]]
+                logger.info("tick=%d node_id=%s stock_count=%d sample=%s",
+                             tick_seq, nid, len(stocks), codes)
+
+        logger.info("tick=%d done total_ms=%.2f events=%d changed=%d",
+                     tick_seq, t_tick_total, len(events), len(changed_codes))
+        return {
+            "events": events,
+            "bar_data": bar_data,
+            "changed_codes": changed_codes,
+        }
 
     def run_to(self, t):
         ts = self._parse_target_seconds(t)
@@ -2479,6 +2779,50 @@ class DirtyState:
         return self.data
 
 
+def _extract_code(s: Any) -> str:
+    """从股票对象提取代码：dict 取 code（fallback label），其余 str()。
+
+    与 ``core.domain._stock_code`` 语义一致，本文件内独立定义以避免循环导入。
+    """
+    if isinstance(s, dict):
+        return str(s.get('code', s.get('label', '')))
+    return str(s)
+
+
+class StatePoolView:
+    """状态池视图：脏股票在 tick 表变更列（state.dirty.changed_codes），本类是访问接口。
+
+    G4：状态池是视图，不独立维护脏股票集合。
+    - get_dirty_codes() = state.dirty.changed_codes ∩ 本池股票
+    - add_stocks() 入池 + 标脏；remove_stocks() 出池 + 标脏
+    """
+
+    def __init__(self, state: 'PoolState', nid: str):
+        self._state = state
+        self._nid = nid
+
+    def get_stocks(self) -> List[Any]:
+        return list(self._state.node_stocks.get(self._nid, []))
+
+    def get_stock_codes(self) -> Set[str]:
+        return {_extract_code(s) for s in self._state.node_stocks.get(self._nid, [])}
+
+    def get_dirty_codes(self) -> Set[str]:
+        return set(self._state.get_changed_codes()) & self.get_stock_codes()
+
+    def add_stocks(self, stocks: List[Any]) -> None:
+        self._state.node_stocks.setdefault(self._nid, []).extend(stocks)
+        self._state.add_changed_codes({_extract_code(s) for s in stocks})
+
+    def remove_stocks(self, codes: List[Any]) -> None:
+        code_set = {_extract_code(c) for c in codes}
+        self._state.node_stocks[self._nid] = [
+            s for s in self._state.node_stocks.get(self._nid, [])
+            if _extract_code(s) not in code_set
+        ]
+        self._state.add_changed_codes(code_set)
+
+
 class PoolStateMixin:
     """PoolState 表级访问方法集合。
 
@@ -2533,13 +2877,10 @@ class PoolStateMixin:
         return self.edge_state.filter_inputs
 
     # ------------------------------------------------------------------
-    # node_stocks
+    # node_stocks（G4：通过 StatePoolView 视图访问，删除扁平接口）
     # ------------------------------------------------------------------
-    def get_node_stocks(self, nid: str) -> List[Any]:
-        return list(self.node_stocks.get(nid, []))
-
-    def set_node_stocks(self, nid: str, stocks: List[Any]) -> None:
-        self.node_stocks[nid] = list(stocks)
+    def get_pool(self, nid: str) -> StatePoolView:
+        return StatePoolView(self, nid)
 
     # ------------------------------------------------------------------
     # latest_tick（行情唯一真相源）

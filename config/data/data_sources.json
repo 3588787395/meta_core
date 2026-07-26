@@ -58,7 +58,7 @@
       "on_unavailable": "raise",
       "mock_fallback_allowed": true,
       "explicit_only": true,
-      "desc": "模拟交易模式：使用 SimTickSource 按需生成 fz 前缀行情，无外部依赖"
+      "desc": "模拟交易模式：使用 MockDataSource 按需生成 fz 前缀行情，无外部依赖"
     }
   },
   "default_chain": ["live"],

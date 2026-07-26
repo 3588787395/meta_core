@@ -21,7 +21,7 @@
 | 表引擎 | table_engine.py | TableRegistry, TableLoader | 指标表加载、缓存、查询 |
 | 边执行 | execution_module.py | EdgeExecutor, FilterExecutor, TTLManager | 条件边触发、股票池转移、TTL过期 |
 | 池引擎 | engine.py | PoolEngine, GlobalState | 股票池管理、全局状态维护 |
-| 运行控制 | runtime_mode_module.py | RuntimeSimulator, SimTickSource, SimScheduler | 仿真/实盘模式控制、Tick源 |
+| 运行控制 | runtime_mode_module.py | RuntimeSimulator, MockDataSource, SimScheduler | 仿真/实盘模式控制、Tick源 |
 | 监控 | monitoring_module.py | EventRecorder, SSEStreamer | 事件记录、SSE实时推送 |
 | 交易 | trade_module.py | OrderManager | 信号转订单、持仓管理 |
 | 筛选 | screening_module.py | StockScreener | 初始股票池筛选 |
@@ -36,7 +36,7 @@
                                        ▲         ▲         ▲         ▲         ▲
          TickReceived                  │         │         │         │         │ Signal(BUY/SELL)
     ┌──────────────────┐               │         │         │         │         │    ┌──────────────┐
-    │  SimTickSource   │──────────────►│         │         │         │         ├────┤  OrderManager│
+    │  MockDataSource  │──────────────►│         │         │         │         ├────┤  OrderManager│
     │  / LiveTickSource│DataChanged    │         │         │         │         │    │  (trade)     │
     └──────────────────┘(tick)         │         │         │         │         │    └──────────────┘
                                        ▼         │         │         │         │
@@ -80,7 +80,7 @@
 
 | 维度 | 仿真模式 (Simulation) | 实盘模式 (Live) |
 |------|---------------------|----------------|
-| Tick来源 | SimTickSource（内置生成器，按固定间隔生成fzxxxxxx格式模拟Tick） | LiveTickSource（对接真实行情源） |
+| Tick来源 | MockDataSource（内置生成器，按固定间隔生成fzxxxxxx格式模拟Tick） | LiveTickSource（对接真实行情源） |
 | 时间推进 | SimulationScheduler按仿真时间快进 | 真实 wall-clock 时间 |
 | 订单成交 | 立即成交（不模拟撮合） | 真实订单路由到券商 |
 | 其他模块 | 完全相同 | 完全相同 |

@@ -147,12 +147,17 @@ class BarComposed:
 
 @dataclass
 class FormulaEvaluated:
-    """公式求值完成事件。"""
+    """公式求值完成事件。
+
+    error 字段（spec.md L128 要求）：公式求值异常或无效配置时携带错误信息，
+    默认空串表示无错误。下游订阅者可据此诊断公式失败原因。
+    """
 
     formula_ref: str
     result: Any
     code: str = ""
     bar_hash: str = ""
+    error: str = ""
 
 
 @dataclass
@@ -173,20 +178,19 @@ class StockFiltered:
     passed: List[str]
     rejected: List[str]
     filter_ref: str = ""
+    ts: float = 0.0
 
 
 @dataclass
 class EdgeFired:
     """边触发事件。
 
-    一条边到期触发时发布一个事件，携带本次有数据变化的股票代码集合。
-    changed_codes: 本周期内有Tick/Bar更新的股票（用于增量筛选）。
-    筛选器据此仅对变化股票重新评估公式，未变化股票使用上次缓存结果。
+    一条边到期触发时发布一个事件，只携带 eid 和 ts。
+    脏股票由 EdgeExecutor 从源池 StatePoolView.get_dirty_codes() 取（G3）。
     """
 
     eid: str
     ts: float
-    changed_codes: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -198,15 +202,42 @@ class TransferExecuted:
     codes: List[str]
     mode: str = "copy"
     ts: float = 0.0
+    entered_codes: List[str] = field(default_factory=list)
+    exited_codes: List[str] = field(default_factory=list)
 
 
 @dataclass
 class TTLExpired:
-    """TTL 过期事件。"""
+    """TTL 过期事件（兼容旧监控/面板，G2 后由 TTLDue 取代主事件）。"""
 
     node_id: str
     codes: List[str]
     ts: float = 0.0
+
+
+@dataclass
+class TTLDue:
+    """TTL 到期事件。
+
+    G2：引擎只发事件不执行计算，TTL 到期时由 EventDriver action 发布 TTLDue，
+    TradeModule 订阅后自行完成卖出/删除。
+    """
+
+    node_id: str
+    code: str
+    ts: float
+
+
+@dataclass
+class TickDue:
+    """Tick 到期事件。
+
+    G2：引擎只发事件不执行计算，tick 定时器到时由 EventDriver action 发布 TickDue，
+    TickBarModule 订阅后调用数据源生成 tick 数据并发布 TickReceived/DataChanged。
+    """
+
+    code: str
+    ts: float
 
 
 @dataclass
@@ -347,6 +378,8 @@ EVENT_STOCK_FILTERED = "StockFiltered"
 EVENT_EDGE_FIRED = "EdgeFired"
 EVENT_TRANSFER_EXECUTED = "TransferExecuted"
 EVENT_TTL_EXPIRED = "TTLExpired"
+EVENT_TTL_DUE = "TTLDue"
+EVENT_TICK_DUE = "TickDue"
 EVENT_ORDER_PLACED = "OrderPlaced"
 EVENT_ORDER_FILLED = "OrderFilled"
 EVENT_POSITION_UPDATED = "PositionUpdated"
@@ -522,9 +555,11 @@ __all__ = [
     "EVENT_SNAPSHOT_UPDATED",
     "EVENT_STATISTICS_UPDATED",
     "EVENT_STOCK_FILTERED",
+    "EVENT_TICK_DUE",
     "EVENT_TICK_RECEIVED",
     "EVENT_TIME_ADVANCED",
     "EVENT_TRANSFER_EXECUTED",
+    "EVENT_TTL_DUE",
     "EVENT_TTL_EXPIRED",
     "EdgeFired",
     "EventBus",
@@ -546,7 +581,9 @@ __all__ = [
     "SnapshotUpdated",
     "StatisticsUpdated",
     "StockFiltered",
+    "TTLDue",
     "TTLExpired",
+    "TickDue",
     "TickReceived",
     "TimeAdvanced",
     "TransferExecuted",

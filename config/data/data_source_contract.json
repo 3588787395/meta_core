@@ -4,7 +4,7 @@
   "sources": {
     "local_file": {
       "name": "本地文件数据",
-      "module": "meta_core.services.providers",
+      "module": "services.providers",
       "class": "LocalFileProvider",
       "probe": {
         "method": "_probe",
@@ -19,7 +19,7 @@
     },
     "tq_dll": {
       "name": "通达信TQ量化",
-      "module": "meta_core.services.providers",
+      "module": "services.providers",
       "class": "TqDllProvider",
       "probe": {
         "method": "_probe",
@@ -34,7 +34,7 @@
     },
     "tq_sdk": {
       "name": "天勤TQ SDK",
-      "module": "meta_core.services.providers",
+      "module": "services.providers",
       "class": "TqSdkProvider",
       "probe": {"method": "_probe", "args": [], "timeout_ms": 3000},
       "on_unavailable": "raise",
@@ -42,7 +42,7 @@
     },
     "akshare": {
       "name": "AkShare",
-      "module": "meta_core.services.providers",
+      "module": "services.providers",
       "class": "AkShareProvider",
       "probe": {"method": "_probe", "args": [], "timeout_ms": 5000},
       "on_unavailable": "raise",
@@ -50,7 +50,7 @@
     },
     "mock": {
       "name": "模拟数据",
-      "module": "meta_core.services.providers",
+      "module": "services.providers",
       "class": "MockProvider",
       "probe": {"method": "_probe", "args": [], "timeout_ms": 100},
       "on_unavailable": "raise",

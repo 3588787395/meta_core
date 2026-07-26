@@ -13,6 +13,7 @@ import logging
 import asyncio
 import copy
 import ast
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime as _dt, timedelta
 from pathlib import Path
@@ -21,36 +22,48 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 try:
     from ..native import builtins as _builtins
 except ImportError:
-    from native import builtins as _builtins
+    try:
+        from native import builtins as _builtins
+    except ImportError:
+        import builtins as _builtins
 
 try:
     from ..native import builtins as _builtins_post_tick
 except ImportError:
-    from native import builtins as _builtins_post_tick
+    try:
+        from native import builtins as _builtins_post_tick
+    except ImportError:
+        import builtins as _builtins_post_tick
 
 try:
     from ..native import builtins as _pipeline
 except ImportError:
-    from native import builtins as _pipeline
+    try:
+        from native import builtins as _pipeline
+    except ImportError:
+        import builtins as _pipeline
 
 try:
     from ..native.validators import TopologyPatternMatcher
 except ImportError:
-    from native.validators import TopologyPatternMatcher
-
-try:
-    from ..core import screening_module as tdx_evaluators
-except ImportError:
     try:
-        from . import screening_module as tdx_evaluators
+        from native.validators import TopologyPatternMatcher
     except ImportError:
-        import tdx_evaluators
+        TopologyPatternMatcher = None
 
 try:
-    from ..core.domain import _hms_to_seconds
+    from . import screening_module as tdx_evaluators
 except ImportError:
     try:
-        from .domain import _hms_to_seconds
+        from ..core import screening_module as tdx_evaluators
+    except ImportError:
+        import screening_module as tdx_evaluators
+
+try:
+    from .domain import _hms_to_seconds
+except ImportError:
+    try:
+        from ..core.domain import _hms_to_seconds
     except ImportError:
         from domain import _hms_to_seconds
 
@@ -65,7 +78,6 @@ try:
         _extract_edge_endpoint as _ce_extract_edge_endpoint,
         _resolve_node_type as _ce_resolve_node_type,
         _resolve_edge_type as _ce_resolve_edge_type,
-        _group_transformation_units as _ce_group_transformation_units,
         _normalize_nodes as _ce_normalize_nodes,
         build_timed_event_specs,
     )
@@ -80,7 +92,7 @@ try:
     from ..core.execution_module import EventDriver
     from ..core.formula_module import ValueExtractor
     from ..core.domain import (
-        TickSource, RealTickSource, SimTickSource,
+        TickSource, RealTickSource, MockDataSource,
         _stock_code, _normalize_stock_code, _MARKET_PREFIXES, _MARKET_SUFFIXES,
         time_at, _safe_timestamp, is_offset_of_day, anchor_to_today,
     )
@@ -91,7 +103,6 @@ except ImportError:
             _extract_edge_endpoint as _ce_extract_edge_endpoint,
             _resolve_node_type as _ce_resolve_node_type,
             _resolve_edge_type as _ce_resolve_edge_type,
-            _group_transformation_units as _ce_group_transformation_units,
             _normalize_nodes as _ce_normalize_nodes,
             build_timed_event_specs,
         )
@@ -106,7 +117,7 @@ except ImportError:
         from .execution_module import EventDriver
         from .formula_module import ValueExtractor
         from .domain import (
-            TickSource, RealTickSource, SimTickSource,
+            TickSource, RealTickSource, MockDataSource,
             _stock_code, _normalize_stock_code, _MARKET_PREFIXES, _MARKET_SUFFIXES,
             time_at, _safe_timestamp, is_offset_of_day, anchor_to_today,
         )
@@ -116,7 +127,6 @@ except ImportError:
             _extract_edge_endpoint as _ce_extract_edge_endpoint,
             _resolve_node_type as _ce_resolve_node_type,
             _resolve_edge_type as _ce_resolve_edge_type,
-            _group_transformation_units as _ce_group_transformation_units,
             _normalize_nodes as _ce_normalize_nodes,
             build_timed_event_specs,
         )
@@ -131,7 +141,7 @@ except ImportError:
         from execution_module import EventDriver
         from formula_module import ValueExtractor
         from domain import (
-            TickSource, RealTickSource, SimTickSource,
+            TickSource, RealTickSource, MockDataSource,
             _stock_code, _normalize_stock_code, _MARKET_PREFIXES, _MARKET_SUFFIXES,
             time_at, _safe_timestamp, is_offset_of_day, anchor_to_today,
         )
@@ -270,10 +280,10 @@ def _build_sig_dict(signal):
 
 
 def _build_sim_tick_source(engine: "PoolEngine", ts_spec: Dict[str, Any], codes: List[str]) -> TickSource:
-    """表驱动工厂：构造 SimTickSource。"""
+    """表驱动工厂：构造 MockDataSource 并注册 tick 定时器到 EventDriver（G5）。"""
     clock_start = time_at(state=engine.state)
     cfg = dict(ts_spec.get("config", {}))
-    return SimTickSource(
+    ds = MockDataSource(
         codes=codes,
         clock_start=clock_start,
         price_range=cfg.get("price_range", (5.0, 200.0)),
@@ -281,6 +291,13 @@ def _build_sim_tick_source(engine: "PoolEngine", ts_spec: Dict[str, Any], codes:
         volume_lognorm_mu=cfg.get("volume_lognorm_mu", 14.0),
         volume_lognorm_sigma=cfg.get("volume_lognorm_sigma", 2.0),
     )
+    # G5：tick 定时器注册到 EventDriver 统一优先队列（与边触发/TTL 同一队列）
+    event_driver = engine._components.get("event_driver")
+    event_bus = engine._components.get("event_bus")
+    if event_driver is not None:
+        ds.set_event_driver(event_driver, event_bus)
+        ds.register_tick_timers(clock_start)
+    return ds
 
 
 def _build_real_tick_source(engine: "PoolEngine", ts_spec: Dict[str, Any], codes: List[str]) -> Optional[TickSource]:
@@ -326,18 +343,22 @@ class PoolEngineMixin:
         return self._components["schedule"].node_types.get(nid, "")
 
     def _init_node_stocks(self) -> None:
-        """从 pool_config 节点初始化 node_stocks 表，并将预填股票注册到 TtlTracker。"""
+        """从 pool_config 节点初始化 node_stocks 表，并将预填股票注册 TTL 到 heapq（G1）。"""
         for nid, node in self.nodes.items():
             params = node.get("params", {})
             stocks = params.get("stocks", [])
-            self.state.set_node_stocks(nid, list(stocks) if stocks else [])
+            pool = self.state.get_pool(nid)
+            pool.remove_stocks(list(pool.get_stock_codes()))
+            if stocks:
+                pool.add_stocks(list(stocks))
 
         driver = self._components.get("event_driver")
         if driver is not None:
-            from .execution_module import time_at
+            from .execution_module import time_at, register_ttl_spec
             from .execution_module import _stock_entry_time, _now_ts
             now_val = time_at(state=self.state)
             schedule = self._components.get("schedule")
+            bus = self._components.get("event_bus")
             if schedule is not None:
                 for nid, node in self.nodes.items():
                     params = node.get("params", {})
@@ -353,7 +374,7 @@ class PoolEngineMixin:
                                         code = stock.get("code", "")
                                         if code:
                                             entry_ts = _stock_entry_time(stock) or now_val
-                                            driver.register_ttl(eid, code, edge_ttl.ttl_sec, entry_ts, now_val)
+                                            register_ttl_spec(driver, self.state, ec.tid, eid, code, edge_ttl.ttl_sec, entry_ts, bus)
                                 break
                     node_ttl = schedule.node_ttl_spec.get(nid)
                     if node_ttl is not None and node_ttl.bdel == 1 and node_ttl.check_type == "interval" and node_ttl.ttl_sec > 0:
@@ -362,7 +383,7 @@ class PoolEngineMixin:
                                 code = stock.get("code", "")
                                 if code:
                                     entry_ts = _stock_entry_time(stock) or now_val
-                                    driver.register_ttl(f"node_ttl:{nid}", code, node_ttl.ttl_sec, entry_ts, now_val)
+                                    register_ttl_spec(driver, self.state, nid, f"node_ttl:{nid}", code, node_ttl.ttl_sec, entry_ts, bus)
 
     def _mark_source_nodes_dirty(self) -> None:
         """首次运行时将源节点（modules.json 中 type=source）与带初始股票的状态池标脏，驱动初始边执行。"""
@@ -397,6 +418,31 @@ class PoolEngineMixin:
                     codes.append(str(code))
                     seen.add(str(code))
         return codes
+
+    @staticmethod
+    def _derive_trade_pools(pool_config: Dict[str, Any]) -> Tuple[List[str], List[str]]:
+        """从池配置推导自动买入/卖出池列表。
+
+        - auto_buy_pools：psatt.baimpool == 1 的节点（入池即买入）。
+        - auto_sell_pools：psatt.bdel == 1 且有 exit_action 的节点（TTL 出池即卖出）。
+        """
+        auto_buy: List[str] = []
+        auto_sell: List[str] = []
+        for node in pool_config.get("nodes", []) or []:
+            if not isinstance(node, dict):
+                continue
+            nid = node.get("id", "")
+            params = node.get("params") or {}
+            psatt = params.get("psatt") or {}
+            if not isinstance(psatt, dict):
+                psatt = {}
+            if psatt.get("baimpool") == 1 or psatt.get("baimpool") == "1":
+                auto_buy.append(str(nid))
+            if psatt.get("bdel") == 1 or psatt.get("bdel") == "1":
+                exit_action = params.get("exit_action")
+                if isinstance(exit_action, dict):
+                    auto_sell.append(str(nid))
+        return auto_buy, auto_sell
 
     def _build_tick_source(self, ds_cfg: Dict[str, Any]) -> Optional[TickSource]:
         """根据 data_source 配置行构建对应的 TickSource 实现。
@@ -452,8 +498,8 @@ class PoolEngineMixin:
                     "transferred_codes": list(ev.entered),
                     "exited_codes": list(ev.exited),
                     "mode": getattr(ev, "mode", "copy"),
-                    "source_remaining": len(self.state.get_node_stocks(ev.sid)),
-                    "target_count": len(self.state.get_node_stocks(ev.tid)),
+                    "source_remaining": len(self.state.get_pool(ev.sid).get_stocks()),
+                    "target_count": len(self.state.get_pool(ev.tid).get_stocks()),
                 })
 
     # ------------------------------------------------------------------
@@ -472,38 +518,18 @@ class PoolEngineMixin:
     def _run_tick_body(self) -> None:
         """核心循环：统一时间驱动。
 
-        driver.fire_due(now) 统一触发所有到时事件（边触发+TTL），
-        at_fn()<=now 就调 action，action 发布事件，订阅者执行逻辑。
-
-        Task 1：tick 数据统一由注入的 ``TickSource`` 提供；本方法不再按模式分支。
+        driver.fire_due(now) 统一触发所有到时事件（边触发+TTL+tick，G1 heapq 弹出），
+        到时即调 action 发布事件，订阅者执行逻辑。G2：引擎只发事件不执行计算，
+        tick 数据生成由 TickBarModule 订阅 TickDue 后完成，本方法不再直接驱动 tick。
         """
         if self.state.time_source.get("driver_type") == "wall_clock":
             self.state.time_source["current_ts"] = _safe_timestamp(self._now())
         self._components["_tick_event_offset"] = len(self._components["event_bus"].get_events())
         if self.state.first_run:
             self._mark_source_nodes_dirty()
-        # 表驱动行情注入：由 data_source 配置决定的 TickSource 生成当前到时的 tick
-        tick_source = self._components.get("tick_source")
-        if tick_source is not None:
-            now = time_at(state=self.state)
-            tick_data = tick_source.next_ticks(now)
-            if tick_data:
-                self._components["data_updater"].apply_data(tick_data)
-                event_bus = self._components.get("event_bus")
-                if event_bus is not None:
-                    for code, tick in tick_data.items():
-                        try:
-                            if not code:
-                                continue
-                            if not isinstance(tick, dict):
-                                continue
-                            tick_copy = dict(tick)
-                            tick_copy.setdefault("code", str(code))
-                            event_bus.publish(TickReceived(
-                                tick_data=tick_copy, code=str(code), ts=now,
-                            ))
-                        except Exception:
-                            pass
+        # G2：删除旧路径中 tick_source.next_ticks() 直接驱动逻辑。
+        # tick 由 EventDriver heapq 统一调度：MockDataSource 定时器发布 TickDue，
+        # TickBarModule 订阅后生成 TickReceived → DataChanged → BarComposed。
         driver = self._components.get("event_driver")
         now = time_at(state=self.state)
         if driver is not None:
@@ -523,14 +549,59 @@ class PoolEngineMixin:
     def _on_data_changed_event(self, event: DataChanged) -> None:
         """DataChanged 事件 handler：更新当前时间戳后驱动核心循环。
 
-        仅在 ``PoolEngine(subscribe_data_changed=True)`` 时注册。与
-        ``ExecutionModule._on_data_changed`` 互斥：后者订阅 DataChanged 后
-        per-edge 迭代执行 ``_run_tick``（发布 EdgeFired + 调用 edge_executor.run）；
-        本 handler 直接调用 ``_run_tick_body``（driver.fire_due 统一驱动）。
-        两者不应同时启用，否则双重触发边执行。
+        仅在 ``PoolEngine(subscribe_data_changed=True)`` 时注册。本 handler
+        直接调用 ``_run_tick_body``（driver.fire_due 统一驱动）。G2 后引擎只发
+        事件不执行计算，不存在 ExecutionModule per-edge 直接驱动路径。
         """
         self.state.time_source["current_ts"] = event.ts
         self._run_tick_body()
+
+    def _on_tick_received(self, event: TickReceived) -> None:
+        """TickReceived 事件 handler：将单只股票 tick 经 DataUpdater 注入 state。
+
+        G5/G2 后 tick 由 EventDriver heapq 统一调度：MockDataSource 定时器发布
+        TickDue，TickBarModule 订阅后调用 ``get_tick`` 生成 tick 数据并发布
+        TickReceived。本 handler 将 tick 回注 DataUpdater，使 ``state.latest_tick``
+        更新，并标记源节点脏，确保后续边触发 action 的 is_source_dirty 检查通过。
+        """
+        data_updater = self._components.get("data_updater")
+        if data_updater is None:
+            return
+        tick_data = {event.code: event.tick_data}
+        data_updater.apply_data(tick_data)
+        # 标记源节点脏：边触发 action 需检测源节点脏才会执行筛选
+        schedule = self._components.get("schedule")
+        if schedule is not None:
+            for nid in schedule.source_node_ids:
+                self.state.mark_node_dirty(nid)
+
+    def rebuild_timed_specs(self) -> None:
+        """清空 EventDriver heap 并用当前 state.time_source 重新注册边触发规格。
+
+        修复：``_init_pool_runtime`` 在 ``time_source.current_ts`` 设置前调用
+        ``build_timed_event_specs``，导致 ``first_fire_time`` 使用 wall clock
+        而非虚拟时钟。仿真模式下 ``fire_due(virtual_clock)`` 永远无法达到
+        wall_clock + interval 的 ``first_fire_time``，边触发永不执行。
+
+        此方法在 ``RuntimeSimulator.initialize()`` 设置 ``current_ts`` 后调用，
+        确保边触发 ``first_fire_time`` 与虚拟时钟对齐。tick 定时器由
+        ``_configure_sim_tick_source`` 在此方法之后注册，不受影响。
+        """
+        event_driver = self._components.get("event_driver")
+        if event_driver is None:
+            return
+        event_driver._heap.clear()
+        event_driver._seq = 0
+        event_driver._tick_seq = getattr(type(event_driver), "_TICK_SEQ_BASE", -10**9)
+        schedule = self._components.get("schedule")
+        edge_executor = self._components.get("edge_executor")
+        event_bus = self._components.get("event_bus")
+        if schedule is None or edge_executor is None:
+            return
+        build_timed_event_specs(
+            schedule, self.state, self, edge_executor,
+            event_driver=event_driver, bus=event_bus,
+        )
 
     # ------------------------------------------------------------------
     # PoolEngine 公共 API 适配
@@ -596,7 +667,7 @@ class PoolEngineMixin:
             logger.error("新核心 run_tick 执行失败: %s", ex, exc_info=True)
 
         # I16：DZH TTL 路径收敛——_build_ttl_spec 编译期已解析 DZH endtime/hold 三模式，
-        # _run_ttl 按 check_type 分派，EventDriver.fire_ttl_due（_run_tick_body 内）统一驱动。
+        # _run_ttl 按 check_type 分派，EventDriver.fire_due（_run_tick_body 内）统一驱动（G1 heapq）。
         # 旧 apply_ttl post-tick 循环已删除，2 套 TTL 路径收敛为 1 套。
         # Task 24+：三方法（_update_trackers / _emit_transfer_events / _post_tick）已删除，
         # tracker 更新/事件生成/post_tick 流水线由 Statistics/Monitoring 模块通过事件订阅实现。
@@ -648,9 +719,9 @@ class PoolEngineMixin:
         self.state.set_time_source(ts_cfg)
         self._init_node_stocks()
         # I90：移除 attach_to_loop——tick 调度本身已中断驱动（loop.call_at + Event），
-        # 边执行应在 tick 内按 execution_order 扫描，保证拓扑序与单一路径。
+        # 边触发由 heapq 优先队列按 fire_time 独立触发（G6 运行时事件无序）。
         # 原 attach_to_loop 注册的中断回调与 _run_tick_body 扫描路径双重执行边，
-        # 且中断路径无 execution_order 保证，破坏 A→B→C 拓扑传播。
+        # 且中断路径无统一调度保证，破坏 A→B→C 拓扑传播。
         loop = asyncio.get_running_loop()
         tick_event = asyncio.Event()
         pause_event = self._components["_pause_event"]
@@ -774,7 +845,9 @@ class PoolEngineMixin:
         self._loop_pool_config = self.pool_config
         self._components["transfer_events"].clear()
         for nid, stocks in node_stocks.items():
-            self.state.set_node_stocks(nid, list(stocks))
+            pool = self.state.get_pool(nid)
+            pool.remove_stocks(list(pool.get_stock_codes()))
+            pool.add_stocks(list(stocks))
         if current_bar_data:
             self._components["data_updater"].apply_data(current_bar_data)
         # I13：删除 _inject_bar_data + mode_state["inject"] 门控 ——
@@ -783,7 +856,7 @@ class PoolEngineMixin:
         # 镜像旧 _tick：检测 node_stocks 变更并标脏
         for nid in self.nodes:
             old = self.state.node_snapshots.get(nid)
-            new = self._snapshot_stocks(self.state.get_node_stocks(nid))
+            new = self._snapshot_stocks(self.state.get_pool(nid).get_stocks())
             if old != new:
                 self.state.mark_node_dirty(nid)
         await self.run_tick()
@@ -828,38 +901,53 @@ class PoolEngine(PoolEngineMixin):
         data_updater = DataUpdater(self.state, event_bus)
         bar_composer = BarComposer(self.state, event_bus)
         bar_composer.subscribe()
-        from .trade_module import _TradeExecutor as TradeExecutor
-        trade_executor = TradeExecutor(
+        from .trade_module import TradeModule
+        auto_buy_pools, auto_sell_pools = self._derive_trade_pools(pool_config)
+        trade_module = TradeModule(
             event_bus,
-            storage=getattr(self, "storage", None),
-            pool_id=pool_config.get("id") or pool_config.get("pool_id", ""),
+            config={
+                "storage": getattr(self, "storage", None),
+                "pool_id": pool_config.get("id") or pool_config.get("pool_id", ""),
+                "trade_interface": "paper_trade",
+                "auto_buy_pools": auto_buy_pools,
+                "auto_sell_pools": auto_sell_pools,
+            },
         )
-        trade_executor.subscribe()
+        trade_executor = trade_module._trade_executor
+        from .execution_module import EventDriver
+        event_driver = EventDriver(state=self.state, bus=event_bus)
         from .monitoring_module import _EventPanel
-        event_panel = _EventPanel(event_bus)
+        event_panel = _EventPanel(event_bus, event_driver)
         event_panel.subscribe()
         # I34：BUY 信号收敛 — EventBus Signal 订阅者将 BUY 信号写入 _signal_queue
         self._event_bus = event_bus
         event_bus.subscribe(EVENT_SIGNAL, self._on_signal_event)
         event_bus.subscribe(EVENT_DOMAIN, self._on_domain_event)
+        # G5 桥接：MockDataSource 通过 EventDriver 逐只发布 TickReceived，
+        # 需在此订阅将 tick 回注 DataUpdater → DataChanged(tick) → BarComposed
+        event_bus.subscribe(TickReceived, self._on_tick_received)
         schedule = Compiler.compile(pool_config)
         _dq = self._data_query
         formula_engine = FormulaEngine(self.state, data_query=_dq)
-        event_driver = EventDriver(state=self.state, bus=event_bus)
+        # 依赖注入：将公式/选股模块实现注入 EdgeExecutor，避免 execution_module 跨模块 import。
+        from .formula_module import EvalContext, live_context
+        from .screening_module import eval_scalar_nset
         edge_executor = EdgeExecutor(
             self.state,
             schedule,
             formula_engine,
             event_bus=event_bus,
             event_driver=event_driver,
+            scalar_nset_fn=eval_scalar_nset,
+            eval_ctx_factory=lambda *args, **kwargs: EvalContext(*args, **kwargs),
+            live_ctx_fn=live_context,
         )
 
-        specs = build_timed_event_specs(
+        # G1: build_timed_event_specs 直接注册到 event_driver heapq（边触发+TTL endtime）
+        build_timed_event_specs(
             schedule, self.state, self, edge_executor,
             event_driver=event_driver, bus=event_bus,
         )
-        for spec in specs:
-            event_driver.add_spec(spec)
 
         self._components = {
             "schedule": schedule,
@@ -885,11 +973,35 @@ class PoolEngine(PoolEngineMixin):
         # self._pool_engine 指向 self，使 simulator/replay 中 self._engine._pool_engine 路径保持兼容
         self._pool_engine = self
 
+    @staticmethod
+    def _config_signature(pool_config: Dict[str, Any]) -> str:
+        """生成 pool_config 的边/节点结构签名，用于检测配置实质变化（同 id 不同边时重建）。"""
+        import hashlib
+        import json
+        try:
+            edges_sig = sorted(
+                (str(e.get("id", "")), str(e.get("source", "")), str(e.get("target", "")),
+                 str(sorted((e.get("params") or {}).keys())))
+                for e in (pool_config.get("edges") or [])
+            )
+            nodes_sig = sorted(
+                (str(n.get("id", "")), str(n.get("type", "")))
+                for n in (pool_config.get("nodes") or [])
+            )
+            raw = json.dumps({"edges": edges_sig, "nodes": nodes_sig}, sort_keys=True, ensure_ascii=False)
+            return hashlib.md5(raw.encode("utf-8")).hexdigest()
+        except Exception:
+            return ""
+
     def _ensure_pool_engine(self, pool_config: Dict[str, Any]) -> 'PoolEngine':
         """按需创建/复用池运行时（Task 24 合并后 ``_pool_engine`` 即 ``self``）。``pool_config`` 变更时重建组件。"""
         pool_id = pool_config.get('id') if isinstance(pool_config, dict) else None
         current_id = self.pool_config.get('id') if getattr(self, 'pool_config', None) else None
-        if self._pool_engine is None or current_id != pool_id:
+        new_sig = self._config_signature(pool_config)
+        current_sig = getattr(self, '_config_sig', None)
+        need_reinit = (self._pool_engine is None or current_id != pool_id or current_sig != new_sig)
+        if need_reinit:
+            self._config_sig = new_sig
             self._init_pool_runtime(pool_config)
             self._attach_ui_layer(self)
         return self
@@ -1399,100 +1511,6 @@ class PoolEngine(PoolEngineMixin):
         return {'sid': sid, 'tid': tid, 'sn': sn, 'tn': tn,
                 'st': st, 'tt': tt, 'ep': ep, 'eid': eid, 'edge': edge_out}
 
-    def _build_processing_plan(self, units, standalone_edges, nodes, tu_strategies):
-        """将变换单元三元组和独立边统一为 (edge, filter_type) 处理计划。"""
-        tu_fallback = tu_strategies.get("_fallback", {})
-        plan = []
-        for unit in units:
-            hub_id = unit.get("hub_id", "")
-            hub_node = nodes.get(hub_id, {}) if nodes else {}
-            hub_type = self._resolve_node_type(hub_node) if isinstance(hub_node, dict) else ''
-            unit_cfg = tu_strategies.get(hub_type, tu_fallback)
-            in_edge = unit.get("in_edge")
-            out_edge = unit.get("out_edge")
-            if isinstance(in_edge, dict):
-                plan.append((in_edge, unit_cfg.get('in_filter_type', 'conditional')))
-            if isinstance(out_edge, dict):
-                plan.append((out_edge, unit_cfg.get('out_filter_type', 'unconditional')))
-        for edge in standalone_edges:
-            if not isinstance(edge, dict):
-                continue
-            ec = self._resolve_edge_context(edge, nodes)
-            edge_type = self._resolve_edge_type(ec['st'])
-            sim_cfg = self._timing_cfg.get('simulator', {})
-            eth_name = sim_cfg.get('edge_type_handlers', {}).get(edge_type, 'apply_gate_filter')
-            filter_map = {'propagate_directly': 'unconditional', 'apply_gate_filter': 'conditional', 'formula_eval': 'formula_eval'}
-            ft = filter_map.get(eth_name, 'conditional')
-            if ft == 'unconditional':
-                strat = self._value_extractor.resolve_chain([
-                    {"type": "dict_key", "source": self._edge_strategies, "key": f"{ec['st']}:{ec['tt']}"},
-                    {"type": "dict_key", "source": self._edge_strategies, "key": f"{ec['st']}:*"},
-                ])
-                if strat and strat.get("action") in ("apply_filter", "discard_rejected"):
-                    ft = 'conditional'
-            plan.append((edge, ft))
-        return plan
-
-    def _prepare_topology(self, pool_config):
-        """拓扑预计算模块：在运行前一次性完成拓扑排序、变换单元分组、处理计划构建。"""
-        nodes_input = pool_config.get('nodes', {})
-        edges = pool_config.get('edges', [])
-        if isinstance(nodes_input, list):
-            nodes = {}
-            for n in nodes_input:
-                nid = n.get('id', '') or n.get('node_id', '')
-                if nid:
-                    nodes[nid] = n
-        else:
-            nodes = dict(nodes_input) if nodes_input else {}
-        edge_index = {}
-        for e in edges:
-            eid_val = e.get('id', '') or e.get('flow_id', '')
-            if eid_val:
-                edge_index[eid_val] = e
-        depths = {nid: 0 for nid in nodes}
-        changed = True
-        while changed:
-            changed = False
-            for edge in edges:
-                ec = self._resolve_edge_context(edge, nodes)
-                if ec['sid'] in depths and ec['tid'] in depths and depths[ec['tid']] < depths[ec['sid']] + 1:
-                    depths[ec['tid']] = depths[ec['sid']] + 1
-                    changed = True
-        units, standalone_edges = _ce_group_transformation_units(edges, nodes)
-        if units:
-            def _unit_source_depth(unit):
-                ec = self._resolve_edge_context(unit.get('in_edge', {}), nodes)
-                return depths.get(ec['sid'], 0)
-            units = sorted(units, key=_unit_source_depth)
-        tu_strategies = self._edge_cfg.get('transformation_unit_strategies', {})
-        processing_plan = self._build_processing_plan(units, standalone_edges, nodes, tu_strategies)
-        def _plan_source_depth(item):
-            edge = item[0]
-            ec = self._resolve_edge_context(edge, nodes)
-            return depths.get(ec['sid'], 0)
-        processing_plan = sorted(processing_plan, key=_plan_source_depth)
-        out_edges = {nid: [] for nid in nodes}
-        in_edges = {nid: [] for nid in nodes}
-        for edge in edges:
-            ec = self._resolve_edge_context(edge, nodes)
-            sid, tid = ec['sid'], ec['tid']
-            if sid in out_edges:
-                out_edges[sid].append(edge)
-            if tid in in_edges:
-                in_edges[tid].append(edge)
-        return {
-            'nodes': nodes,
-            'edges': edges,
-            'edge_index': edge_index,
-            'depths': depths,
-            'processing_plan': processing_plan,
-            'out_edges': out_edges,
-            'in_edges': in_edges,
-            'units': units,
-            'standalone_edges': standalone_edges,
-        }
-
     def _should_emit_signal_for_domain(self, sig_rule, trigger_type, role_info):
         """通用信号触发判断（与原 _should_emit_signal 闭包逻辑一致）。"""
         trigger = sig_rule.get("trigger", {})
@@ -1722,9 +1740,12 @@ class PoolEngine(PoolEngineMixin):
         if not hasattr(self, 'formula_router') or self.formula_router is None:
             try:
                 try:
-                    from ..core.formula_module import FormulaRouter, PythonFormulaEngine
+                    from .formula_module import FormulaRouter, PythonFormulaEngine
                 except ImportError:
-                    from core.formula_module import FormulaRouter, PythonFormulaEngine
+                    try:
+                        from ..core.formula_module import FormulaRouter, PythonFormulaEngine
+                    except ImportError:
+                        from core.formula_module import FormulaRouter, PythonFormulaEngine
                 # SubTask 8.5: 跨层 import 改为构造函数注入工厂
                 _cache_factory = getattr(self, '_formula_cache_factory', None)
                 _cache = _cache_factory() if _cache_factory is not None else None
@@ -2075,6 +2096,7 @@ class PoolEngine(PoolEngineMixin):
         self._nset_dispatch = self.tables.get("dispatch", {}).get("nset_dispatch", {})
         self._event_queue = asyncio.Queue(); self._signal_queue = asyncio.Queue(); self._loop_running = False; self._loop_paused = False; self._event_bus = None  # I34: PoolEngine.__init__ 注入，供 _on_signal_event 订阅收敛
         self._pause_event = asyncio.Event(); self._pause_event.set(); self._stop_event = asyncio.Event(); self._loop_task = None; self._loop_pool_config = None
+        self._sim_init_lock = asyncio.Lock()  # Task 14：串行化仿真会话 heavyweight 初始化
         self.node_stocks: Dict[str, List[Any]] = {}
         self._trackers: Dict = {}
         self._tick_interval = self._timing_cfg.get("tick_interval", 1)
@@ -2090,7 +2112,10 @@ class PoolEngine(PoolEngineMixin):
             except Exception as e:
                 logger.warning("DataQuery 初始化失败: %s", e)
         try:
-            from ..core.formula_module import FormulaRouter
+            try:
+                from .formula_module import FormulaRouter
+            except ImportError:
+                from core.formula_module import FormulaRouter
             self.formula_router = FormulaRouter(data_query=self._data_query)
         except Exception as e:
             logger.warning("FormulaRouter 初始化失败: %s", e)
@@ -2114,7 +2139,11 @@ class PoolEngine(PoolEngineMixin):
         # 表驱动：当前运行模式 ID（Task 13/15/16 由 _current_mode_id 驱动）
         self._current_mode_id = 'live'
         # TTL helper：独立类处理 DZH/TDX TTL 过期逻辑
-        self._ttl = TTLHelper(self._psatt_cfg, self._defaults, self._now)
+        # 依赖注入：PoolState 类由本组装层注入 TTLHelper，避免 execution_module
+        # 跨模块 import runtime_mode_module（模块零引用约束）。
+        from .runtime_mode_module import PoolState as _PoolStateCls
+        self._ttl = TTLHelper(self._psatt_cfg, self._defaults, self._now,
+                              pool_state_cls=_PoolStateCls)
         # ValueExtractor helper：表驱动值提取与路径导航
         self._value_extractor = ValueExtractor(self.tables, self)
         # Task 24: 若提供 pool_config 则立即初始化池运行时

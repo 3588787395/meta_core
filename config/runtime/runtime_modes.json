@@ -52,7 +52,7 @@
       "gate_evaluator_id": "virtual_gate",
       "data_injector_id": "mock_generate",
       "refresh_handler": "mock_advance_refresh",
-      "desc": "模拟交易模式：使用 SimTickSource 生成 fz 前缀行情，与实盘共享核心循环"
+      "desc": "模拟交易模式：使用 MockDataSource 生成 fz 前缀行情，与实盘共享核心循环"
     }
   },
   "platform_essence": {

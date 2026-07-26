@@ -10,7 +10,7 @@ SubTask 29.1 合并：将原 ``core/domain/`` 包下的 6 个源文件合并为�
 - edges.py: ConditionalEdge / UnconditionalEdge + from_dzh_attr / from_tdx_source_type 工厂
 - specs.py: TimingSpec / FilterSpec / PropagateSpec / ActionSpec / TTLSpec / CandidateRange / ReloadSchedule
 - evaluators.py: Evaluator 层次（nset 0-5）+ FINANCIAL_INDICATORS / MARKET_FIELDS 常量
-- tick_source.py: TickSource / RealTickSource / SimTickSource + 市场代码工具
+- tick_source.py: TickSource / RealTickSource / MockDataSource + 市场代码工具
 
 注意：原 ``core/domain/{base,nodes,edges,specs,evaluators,tick_source}.py`` 中的
 ``Path(__file__).parent.parent.parent`` 路径已修正为 ``parent.parent``（文件上移一级）。
@@ -18,8 +18,8 @@ SubTask 29.1 合并：将原 ``core/domain/`` 包下的 6 个源文件合并为�
 from __future__ import annotations
 
 import ast
+import copy
 import hashlib
-import heapq
 import json
 import logging
 import operator
@@ -1322,6 +1322,110 @@ def _eval_derived_expr(expr: str, ctx: dict, guard: str | None = None) -> float 
 
 
 # ════════════════════════════════════════════════════════════════
+# Section: TDX nperiod → 周期映射（从 screening_module 迁移，供所有模块共用）
+# ════════════════════════════════════════════════════════════════
+
+# TDX nperiod 整数码 → 标准周期字符串映射（项目实例规范）
+# 按 spec.md R6：nperiod=1 表示 1 分钟 K 线，nperiod=5 表示 5 分钟 K 线。
+# 为兼容既有配置，保留原通达信部分约定：0=日线, 2=月线, 6=30分钟线,
+# 7=60分钟线, 9/10/11=日线, 同时 3/8 也映射为 1 分钟线。
+_TDX_NPERIOD_TO_PERIOD: Dict[int, str] = {
+    0: '1d', 1: '1m', 2: '1mon', 3: '1m', 4: '5m', 5: '5m',
+    6: '30m', 7: '60m', 8: '1m', 9: '1d', 10: '1d', 11: '1d',
+}
+
+
+def _nperiod_to_period(nperiod) -> str:
+    """TDX nperiod 整数码映射为标准周期字符串。
+
+    1 → '1m'（1 分钟线），4/5 → '5m'（5 分钟线），
+    3/8 → '1m'，6 → '30m'，7 → '60m'，0/2/9/10/11 → '1d'。
+    缺失或无效返回 '1d'。
+    """
+    try:
+        return _TDX_NPERIOD_TO_PERIOD.get(int(nperiod), '1d')
+    except (TypeError, ValueError):
+        return '1d'
+
+
+# ════════════════════════════════════════════════════════════════
+# Section: 交集条件评估器（从 screening_module 迁移，供 execution_module 共用）
+# ════════════════════════════════════════════════════════════════
+
+
+def evaluate_intersection(codes: List[str], state: Any, edge_params: dict) -> List[str]:
+    """交集条件评估器：筛选同时存在于指定源状态池中的股票。
+
+    Args:
+        codes: 当前待筛选的股票代码列表。
+        state: 运行期状态对象，需提供 get_pool(nid) 方法。
+        edge_params: 边参数字典，需包含 intersection_source 键指定源状态池 ID。
+
+    Returns:
+        交集结果：codes 中同时存在于 intersection_source 指定状态池的股票代码列表。
+    """
+    source_pool = edge_params.get('intersection_source', '')
+    other_stocks: set = set()
+    for s in (state.get_pool(source_pool).get_stocks() if source_pool else []):
+        other_stocks.add(s.get('code', '') if isinstance(s, dict) else str(s))
+    return [c for c in codes if c in other_stocks]
+
+
+# ════════════════════════════════════════════════════════════════
+# Section: 内置公式查找（builtin_formulas.json）
+# I96 fail-fast 策略：模块加载时一次性读取并构建索引，消除重复 I/O 与静默回退。
+# 从 core/screening_module.py 迁移至此（白名单模块），解除 formula_module → screening_module 耦合。
+# ════════════════════════════════════════════════════════════════
+
+_builtin_formulas_cache = None
+
+def _load_builtin_formulas():
+    global _builtin_formulas_cache
+    if _builtin_formulas_cache is not None:
+        return _builtin_formulas_cache
+    path = Path(__file__).parent.parent / "config" / "data" / "builtin_formulas.json"
+    try:
+        _builtin_formulas_cache = json.loads(path.read_text("utf-8"))
+    except (OSError, json.JSONDecodeError) as ex:
+        raise RuntimeError(
+            f"无法加载配置表 {path}: {ex}（fail-fast：禁止静默回退空字符串）"
+        ) from ex
+    return _builtin_formulas_cache
+
+_BUILTIN_FORMULAS = _load_builtin_formulas()
+_BUILTIN_FORMULA_INDEX = {f.get("name"): f.get("script", "") for f in _BUILTIN_FORMULAS.get("formulas", [])}
+_BUILTIN_FORMULA_INFO = {f.get("name"): f for f in _BUILTIN_FORMULAS.get("formulas", []) if f.get("name")}
+
+
+def _lookup_builtin_script(name: str) -> str:
+    """从 config/builtin_formulas.json 按名称查找公式脚本。
+
+    Args:
+        name: 公式名称（如 "MA"、"MACD"）。
+
+    Returns:
+        公式脚本文本；未找到时返回空字符串。
+    """
+    if not name:
+        return ""
+    return _BUILTIN_FORMULA_INDEX.get(name, "")
+
+
+def _lookup_builtin_formula_info(name: str) -> dict:
+    """从 config/builtin_formulas.json 按名称查找完整公式信息。
+
+    Args:
+        name: 公式名称（如 "KDJ_5MIN_CROSS"）。
+
+    Returns:
+        完整公式信息字典（含 script/period/eval_field 等）；未找到时返回空字典。
+    """
+    if not name:
+        return {}
+    return _BUILTIN_FORMULA_INFO.get(name, {})
+
+
+# ════════════════════════════════════════════════════════════════
 # Section: tick_source.py — 行情 tick 源抽象与实现（领域层白名单模块）
 # Task 23.5：从 core/tick_source.py 迁移至 core/domain/ 白名单，
 # 消除 services/providers/mock_provider.py → core.tick_source 跨层违规 import。
@@ -1372,10 +1476,20 @@ def _stock_code(s: Any) -> str:
 
 
 def _normalize_stock_code(code: Any) -> str:
-    """归一化股票代码：去除市场前缀(SH/SZ/BJ)和后缀(.SH/.SZ/.BJ)，返回纯数字代码。"""
-    if not code or not isinstance(code, str):
-        return str(code) if code is not None else ''
+    """归一化股票代码：统一为 ``fz`` 前缀的 8 字符格式。
+
+    先去除市场前缀(SH/SZ/BJ)、后缀(.SH/.SZ/.BJ)以及已有的 ``fz`` 前缀，
+    保留纯数字部分并补零到 6 位，最后返回 ``fz<6位数字>``。
+    例如 ``SH600000`` / ``600000.SH`` / ``fz1`` 均归一化为 ``fz600000``。
+    """
+    if code is None:
+        return ''
+    if not isinstance(code, str):
+        code = str(code)
     c = code.strip()
+    # 去除已有的 fz 前缀（不区分大小写），避免重复
+    if c.lower().startswith("fz"):
+        c = c[2:]
     for prefix in _MARKET_PREFIXES:
         if c.upper().startswith(prefix) and len(c) > len(prefix) and c[len(prefix)].isdigit():
             c = c[len(prefix):]
@@ -1384,23 +1498,28 @@ def _normalize_stock_code(code: Any) -> str:
         if c.upper().endswith(suffix) and len(c) > len(suffix):
             c = c[:-len(suffix)]
             break
-    return c
+    numeric = "".join(ch for ch in c if ch.isdigit())
+    return f"fz{numeric.zfill(6)}"
 
 
 def _normalize_to_fz(code: str) -> str:
-    """将 ``600000.SH`` / ``SZ000001`` 等统一归一化为 ``fz<numeric>`` 格式。
+    """将 ``600000.SH`` / ``SZ000001`` 等统一归一化为 ``fzNNNNNN`` 格式。
 
     规则：
-      - 已以 ``fz`` 开头直接返回（数字部分补零到6位）。
+      - 已以 ``fz`` 开头（含 ``fz_`` 或 ``fz000001``）提取数字部分。
       - 移除 ``.SH`` / ``.SZ`` / ``.BJ`` 等后缀，再移除 ``SH/SZ/BJ`` 前缀。
-      - 保留纯数字部分，前接 ``fz``，数字补零到6位。
-    输出格式：``fz`` + 6位数字（小写，如 fz000001）。
+      - 保留纯数字部分，补零到 6 位，前接 ``fz``。
+    输出格式：``fz`` + 6位数字（如 fz000001, fz600000）。
     """
     if not isinstance(code, str):
         code = str(code)
     code = code.strip()
     if code.lower().startswith("fz"):
-        code = code[2:]
+        # fz000001 / fz_1 / FZ000001 → 提取数字部分
+        remainder = code[2:]
+        if remainder.startswith("_"):
+            remainder = remainder[1:]
+        numeric = "".join(ch for ch in remainder if ch.isdigit())
     else:
         code_upper = code.upper()
         for suffix in (".SH", ".SZ", ".BJ"):
@@ -1412,15 +1531,17 @@ def _normalize_to_fz(code: str) -> str:
             if code_upper.startswith(prefix):
                 code = code[len(prefix) :]
                 break
-    numeric = "".join(ch for ch in code if ch.isdigit())
-    return f"fz{numeric.zfill(6)}"
+        numeric = "".join(ch for ch in code if ch.isdigit())
+    numeric = numeric.zfill(6) if numeric else "000000"
+    return f"fz{numeric}"
 
 
 _FZ_CODE_PATTERN = re.compile(r"^fz\d{6}$")
+_FZ_CODE_STRICT_PATTERN = _FZ_CODE_PATTERN
 
 
 def is_fz_code(code: str) -> bool:
-    """验证代码是否匹配 fz+6位数字 格式（如 fz000001，严格小写fz前缀）。"""
+    """验证代码是否匹配 fz 格式（``fz`` + 6位数字，严格小写 fz 前缀）。"""
     return bool(_FZ_CODE_PATTERN.match(str(code).strip()))
 
 
@@ -1428,6 +1549,41 @@ def _code_seed(code: str) -> int:
     """基于股票代码生成确定性随机种子。"""
     digest = hashlib.md5(code.encode("utf-8")).hexdigest()
     return int(digest, 16) % (2 ** 31)
+
+
+# ---------------------------------------------------------------------------
+# TimedEventSpec（统一到时事件规格）— 纯数据结构，下沉至 domain 避免跨模块懒加载
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TimedEventSpec:
+    """到时事件规格表行——边触发与 TTL 共用（G1 heapq 优先队列）。
+
+    所有到时事件统一为 TimedEventSpec，注册到 EventDriver 的单一 heapq。
+    到时触发是到时触发，执行事件是执行事件。区别仅在 params 不同：
+      - 边触发：interval>0，到时发布 EdgeFired + 立即注册下次
+      - TTL到期：interval=None（一次性），到时发布 DomainEvent(TIMEOUT)
+
+    原位于 ``core/execution_module.py``，现下沉至本纯数据模型模块，
+    使 ``execution_module`` 经白名单 ``from .domain import TimedEventSpec``
+    获取，避免 ``domain`` 反向函数级懒加载 ``execution_module``（模块零引用约束）。
+
+    Attributes:
+        action:   事件回调，签名为 ``action(params, fire_time=None)``，发布事件。
+                  fire_time 由 EventDriver.fire_due 注入，为 spec 实际触发的
+                  精确时刻（heapq 弹出时的 fire_time），用于让事件的 ts 反映
+                  实际触发顺序，避免同一仿真步内所有事件共享 self.clock 导致
+                  前端时间轴上堆叠为一条线。
+        params:   事件参数字典。
+        interval: 触发间隔（秒）。None=一次性事件，>0=周期触发。
+        end_fn:   结束时间判定函数（可选）。None=永久。
+    """
+
+    action: Callable[..., None]
+    params: dict = field(default_factory=dict)
+    interval: Optional[float] = None
+    end_fn: Optional[Callable[[], float]] = None
 
 
 class TickSource(ABC):
@@ -1491,14 +1647,19 @@ class RealTickSource(TickSource):
         return self._default_interval
 
 
-class SimTickSource(TickSource):
-    """仿真 tick 源：确定性生成 per-stock tick。
+class MockDataSource(TickSource):
+    """仿真 mock 数据源：产生 per-code tick 数据，定时器注册到 EventDriver 统一优先队列。
+
+    G5 重构：原仿真 tick 源重命名为 MockDataSource。tick 定时器不再使用内部 heapq，
+    而是注册到 EventDriver 的统一优先队列（与边触发/TTL 同一队列）。
 
     关键行为：
       - 所有输出股票代码统一替换为 ``fz`` 前缀。
-      - 每只股票分配 1~9 秒之间的固定随机间隔，同一只股票每次到达间隔相同。
-      - 使用基于股票代码 hash 的确定性随机种子，保证同一股票每次启动间隔一致。
+      - 每只股票分配 1~9 秒之间的固定随机间隔，同一只股票每次到达间隔相同，
+        不同股票间隔不同（基于股票代码 hash 的确定性随机种子）。
       - tick 字段至少包含 code / open / high / low / close / volume / amount / _ts。
+      - 定时器由 EventDriver 统一管理，MockDataSource 仅负责产生 tick 数据。
+      - 仿真与实盘除 tick 请求方式外共用同一套代码。
     """
 
     def __init__(
@@ -1518,10 +1679,11 @@ class SimTickSource(TickSource):
 
         self._codes: List[str] = sorted({_normalize_to_fz(c) for c in codes})
         self._intervals: Dict[str, int] = {}
-        self._queue: List[tuple[float, str]] = []
         self._rngs: Dict[str, random.Random] = {}
         self._prev_prices: Dict[str, float] = {}
         self._price_trend: Dict[str, float] = {}
+        self._event_driver: Any = None
+        self._event_bus: Any = None
 
         self._init_state()
 
@@ -1529,41 +1691,124 @@ class SimTickSource(TickSource):
     # 初始化
     # ------------------------------------------------------------------
     def _init_state(self) -> None:
-        for idx, code in enumerate(self._codes):
-            seed = _code_seed(code)
-            rng = random.Random(seed)
-            self._rngs[code] = rng
-            self._intervals[code] = rng.randint(1, 9)
-            if idx % 3 == 0:
-                first_tick_time = self._clock_start
-            else:
-                first_tick_time = self._clock_start + self._intervals[code]
-            heapq.heappush(self._queue, (first_tick_time, code))
-            self._prev_prices[code] = rng.uniform(*self._price_range)
-            self._price_trend[code] = 0.0
+        for code in self._codes:
+            self._init_code(code)
+
+    def _init_code(self, code: str) -> None:
+        """初始化单只股票的随机状态与固定间隔（同股票固定，不同股票不同）。"""
+        seed = _code_seed(code)
+        rng = random.Random(seed)
+        self._rngs[code] = rng
+        self._intervals[code] = rng.randint(1, 9)
+        self._prev_prices[code] = rng.uniform(*self._price_range)
+        self._price_trend[code] = 0.0
+
+    # ------------------------------------------------------------------
+    # EventDriver 集成（G5：tick 定时器注册到统一优先队列）
+    # ------------------------------------------------------------------
+    def set_event_driver(self, event_driver: Any, event_bus: Any = None) -> None:
+        """注入 EventDriver 与 EventBus 引用，供 register_tick_timers 使用。"""
+        self._event_driver = event_driver
+        self._event_bus = event_bus
+
+    def register_tick_timers(self, now: float) -> None:
+        """为每只股票创建 TimedEventSpec 并注册到 EventDriver 统一优先队列。
+
+        tick 定时器与边触发/TTL 共用同一优先队列。到时由 EventDriver.fire_due
+        触发 action，action 只发布 TickDue(code, ts) 事件；tick 数据生成由
+        TickBarModule 订阅 TickDue 后完成。
+
+        Args:
+            now: 当前时间戳，首次触发时间 = now + interval。
+        """
+        if self._event_driver is None:
+            return
+        from .event_bus import TickDue
+
+        for code in self._codes:
+            interval = float(self._intervals[code])
+            action = self._make_tick_action(code, TickDue)
+            spec = TimedEventSpec(
+                action=action,
+                params={"kind": "tick", "code": code},
+                interval=interval,
+            )
+            self._event_driver.add_spec(spec, first_fire_time=now + interval)
+
+    def _make_tick_action(self, code: str, TickDueCls: Any) -> Callable[..., None]:
+        """创建 tick 定时器 action：到时只发布 TickDue(code, ts) 事件。
+
+        G2：引擎只发事件不执行计算，tick 数据生成由 TickBarModule 订阅 TickDue
+        后调用 ``get_tick`` 完成。
+
+        fire_time 由 EventDriver.fire_due 注入（spec 在 heapq 中实际到期的时刻），
+        使 TickDue.ts 反映真实触发顺序，避免同一仿真步内所有 tick 事件共享
+        self.clock 导致前端时间轴堆叠为一条线。
+        """
+        def action(params: Any, fire_time: Optional[float] = None) -> None:
+            ts = fire_time if fire_time is not None else self._current_ts()
+            if self._event_bus is not None:
+                try:
+                    self._event_bus.publish(TickDueCls(
+                        code=code, ts=ts,
+                    ))
+                except Exception:
+                    pass
+        return action
+
+    def _current_ts(self) -> float:
+        """获取当前时间戳，与 EventDriver.fire_due 的 now 一致。
+
+        G2 硬约束：统一委托 ``time_at(state)``，无 ``time.time()`` fallback。
+        EventDriver 在 ``_init_pool_runtime`` 装配时即注入（engine.py:925），
+        其 ``_state`` 即 PoolState 实例；``time_at`` 按 ``state.time_source.driver_type``
+        分派：仿真返回虚拟秒（current_ts 缺失返回 0），实盘返回墙钟。
+        """
+        if self._event_driver is not None:
+            state = getattr(self._event_driver, "_state", None)
+            if state is not None:
+                return time_at(state=state)
+        # 仅在 EventDriver 未注入（异常装配路径）时退化到 _clock_start；
+        # 不调用 time.time()——那会污染仿真时间坐标系。
+        return float(self._clock_start) if self._clock_start else 0.0
 
     # ------------------------------------------------------------------
     # TickSource 接口
     # ------------------------------------------------------------------
     def next_ticks(self, now: float) -> Dict[str, Dict[str, Any]]:
-        """弹出所有调度时间 <= now 的股票，生成 tick 后重新入队。"""
-        result: Dict[str, Dict[str, Any]] = {}
-        now = float(now)
-        while self._queue and self._queue[0][0] <= now:
-            tick_time, code = heapq.heappop(self._queue)
-            tick = self._generate_tick(code, tick_time)
-            result[code] = tick
-            self._prev_prices[code] = float(tick.get("close", 0.0))
-            interval = self._intervals[code]
-            heapq.heappush(self._queue, (tick_time + interval, code))
-        return result
+        """返回空字典——tick 由 EventDriver 统一驱动，不再使用内部 heapq 调度。
+
+        G5 重构后，tick 定时器注册到 EventDriver 统一优先队列，到时由
+        ``EventDriver.fire_due`` 触发 action → ``get_tick`` → 发布 ``TickReceived``。
+        本方法保留以满足 ``TickSource`` 抽象接口（实盘 ``RealTickSource`` 仍使用拉取模式）。
+        """
+        return {}
 
     def interval_for(self, code: str) -> float:
         return float(self._intervals.get(_normalize_to_fz(code), 1.0))
 
     # ------------------------------------------------------------------
-    # 内部辅助
+    # tick 数据生成
     # ------------------------------------------------------------------
+    def get_tick(self, code: str, ts: Optional[float] = None) -> Dict[str, Any]:
+        """生成单只股票的 tick 数据（供 TickBarModule 订阅 TickDue 后调用）。
+
+        Args:
+            code: 股票代码（自动归一化为 fz 前缀）。
+            ts: 时间戳；None 时使用当前虚拟时钟或墙钟。
+
+        Returns:
+            ``{code, open, high, low, close, volume, amount, pre_close, _ts}`` 字典。
+        """
+        code = _normalize_to_fz(code)
+        if code not in self._rngs:
+            self.add_code(code)
+        if ts is None:
+            ts = self._current_ts()
+        tick = self._generate_tick(code, ts)
+        self._prev_prices[code] = float(tick.get("close", 0.0))
+        return tick
+
     def _generate_tick(self, code: str, tick_time: float) -> Dict[str, Any]:
         rng = self._rngs[code]
         prev_close = self._prev_prices.get(code, 0.0)
@@ -1614,20 +1859,67 @@ class SimTickSource(TickSource):
     def intervals(self) -> Dict[str, int]:
         return dict(self._intervals)
 
+    @property
+    def _tick_intervals(self) -> Dict[str, int]:
+        return dict(self._intervals)
+
     def add_code(self, code: str) -> None:
-        """运行时动态增加监控代码。"""
+        """运行时动态增加监控代码，并注册 tick 定时器到 EventDriver。"""
         norm = _normalize_to_fz(code)
         if norm in self._codes:
             return
         self._codes.append(norm)
         self._codes.sort()
-        seed = _code_seed(norm)
-        rng = random.Random(seed)
-        self._rngs[norm] = rng
-        self._intervals[norm] = rng.randint(1, 9)
-        self._prev_prices[norm] = rng.uniform(*self._price_range)
-        self._price_trend[norm] = 0.0
-        heapq.heappush(self._queue, (self._clock_start + self._intervals[norm], norm))
+        self._init_code(norm)
+        self._register_tick_timer_for(norm)
+
+    def _register_tick_timer_for(self, code: str) -> None:
+        """为单只股票注册 tick 定时器到 EventDriver（若已注入）。"""
+        if self._event_driver is None:
+            return
+        from .event_bus import TickDue
+        now = self._current_ts()
+        interval = float(self._intervals[code])
+        action = self._make_tick_action(code, TickDue)
+        spec = TimedEventSpec(
+            action=action,
+            params={"kind": "tick", "code": code},
+            interval=interval,
+        )
+        self._event_driver.add_spec(spec, first_fire_time=now + interval)
+
+    # ------------------------------------------------------------------
+    # 步进接口（供 RuntimeSimulator._step_once 调用）
+    # ------------------------------------------------------------------
+    def step(self, delta_seconds: float) -> Dict[str, Any]:
+        """步进虚拟时钟 delta_seconds 秒。
+
+        G5/G2 重构后，tick 生成由 EventDriver 统一驱动（register_tick_timers 注册的
+        定时器），本方法仅推进虚拟时钟，返回空 tick_data。实际 tick 定时器由
+        ``EventDriver.fire_due`` 触发 action → 发布 ``TickDue``，下游
+        ``TickBarModule`` 订阅后调用 ``get_tick`` → 发布 ``TickReceived`` 处理。
+
+        返回字典格式::
+
+            {
+                "changed_codes": [],
+                "tick_data": {},
+                "bar_data": {},
+                "virtual_clock": <new_clock>,
+            }
+        """
+        self._clock_start += float(delta_seconds)
+        return {
+            "changed_codes": [],
+            "tick_data": {},
+            "bar_data": {},
+            "virtual_clock": self._clock_start,
+        }
+
+    @property
+    def virtual_clock(self) -> float:
+        """当前虚拟时钟值。"""
+        return self._clock_start
 
 
 def _hash_tick(tick: Dict[str, Any]) -> str:
@@ -1659,13 +1951,32 @@ def _hms_to_seconds(h: int, m: int, s: int) -> int:
 
 
 def time_at(source: Optional[str] = None, state: Any = None) -> float:
-    """统一时间入口。三模式差异仅在参数，不在代码分支。"""
+    """统一时间入口。三模式差异仅在参数（driver_type），不在代码分支。
+
+    G2 硬约束：仿真/实盘同代码，仅由 ``state.time_source.driver_type`` 决定时间源。
+    - ``source="wall"`` 或 ``state is None``：显式墙钟入口（如 ``_now()`` 无 state 上下文），
+      返回 ``time.time()``。
+    - ``driver_type in ("virtual", "sequence")``：返回 ``current_ts``（虚拟秒）；
+      ``current_ts`` 缺失返回 0.0（仿真冷启动前合法值）。
+    - ``driver_type in ("wall_clock", None)``：实盘模式，``current_ts`` 优先，否则 ``time.time()``。
+
+    不做任何"current_ts 是真实秒则返回 0"的 hack——那会形成仿真专用分支，违反 G2。
+    current_ts 的正确性由设置方保证（``_post_init_mode_state`` 仿真启动时设虚拟时钟，
+    ``run_pool`` 实盘启动时设墙钟）。
+    """
     if source == "wall" or state is None:
         return time.time()
-    ts_cfg = getattr(state, "time_source", None)
-    if not ts_cfg:
-        return time.time()
-    cur_ts = ts_cfg.get("current_ts")
+    ts_cfg = getattr(state, "time_source", None) or {}
+    driver = ts_cfg.get("driver_type") if isinstance(ts_cfg, dict) else None
+    cur_ts = ts_cfg.get("current_ts") if isinstance(ts_cfg, dict) else None
+    if driver in ("virtual", "sequence"):
+        if cur_ts is None:
+            return 0.0
+        try:
+            return float(cur_ts)
+        except (TypeError, ValueError):
+            return 0.0
+    # 实盘模式（wall_clock / None）：current_ts 优先，否则 time.time()
     if cur_ts is not None:
         try:
             return float(cur_ts)
@@ -1705,6 +2016,84 @@ def time_now_unix(state: Any) -> float:
     return sec
 
 
+# ════════════════════════════════════════════════════════════════
+# Section: EdgeState 边级运行时表（从 execution_module 迁移，供所有模块共用）
+# ════════════════════════════════════════════════════════════════
+
+
+class EdgeStateMixin:
+    """EdgeState 表级访问方法集合。
+
+    将公式结果缓存与过滤输入指纹的读写从 ``EdgeState`` 核心类中剥离，
+    使其属性/方法数满足架构约束。
+    """
+
+    def get_formula_result(self, formula_ref: Any, bar_hash: str) -> Any:
+        return self.formula_results.get((formula_ref, bar_hash))
+
+    def set_formula_result(self, formula_ref: Any, bar_hash: str, result: Any) -> None:
+        self.formula_results[(formula_ref, bar_hash)] = result
+
+    def set_filter_input(self, eid: str, codes: Iterable[str]) -> None:
+        self.filter_inputs[eid] = frozenset(codes)
+
+    def get_filter_input(self, eid: str) -> Optional[frozenset]:
+        return self.filter_inputs.get(eid)
+
+
+@dataclass
+class EdgeState(EdgeStateMixin):
+    """边级运行时表真相源。
+
+    属性（按架构 ≤5 个）：
+      - exec_ctx
+      - formula_results
+      - filter_inputs
+    """
+
+    exec_ctx: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    formula_results: Dict[Tuple[Any, str], Any] = field(default_factory=dict)
+    filter_inputs: Dict[str, frozenset] = field(default_factory=dict)
+
+    def get_exec_ctx(self, eid: str) -> Dict[str, Any]:
+        if eid not in self.exec_ctx:
+            self.exec_ctx[eid] = {
+                "count": 0,
+                "first_fire": None,
+                "last_fire": None,
+            }
+        return self.exec_ctx[eid]
+
+    def set_exec_ctx_fired(self, eid: str, now: Optional[float] = None) -> None:
+        ctx = self.get_exec_ctx(eid)
+        if now is None:
+            now = time.time()
+        ctx["count"] = ctx.get("count", 0) + 1
+        if ctx["first_fire"] is None:
+            ctx["first_fire"] = now
+        ctx["last_fire"] = now
+
+    # ------------------------------------------------------------------
+    # 快照 / 恢复
+    # ------------------------------------------------------------------
+    def snapshot(self) -> Dict[str, Any]:
+        return {
+            "exec_ctx": copy.deepcopy(self.exec_ctx),
+            "formula_results": copy.deepcopy(self.formula_results),
+            "filter_inputs": copy.deepcopy(self.filter_inputs),
+        }
+
+    def restore(self, data: Dict[str, Any]) -> None:
+        self.exec_ctx = copy.deepcopy(data.get("exec_ctx", {}))
+        self.formula_results = copy.deepcopy(data.get("formula_results", {}))
+        self.filter_inputs = copy.deepcopy(data.get("filter_inputs", {}))
+
+    def fresh(self) -> None:
+        self.exec_ctx.clear()
+        self.formula_results.clear()
+        self.filter_inputs.clear()
+
+
 __all__ = [
     # base
     "Node", "Edge",
@@ -1724,11 +2113,26 @@ __all__ = [
     "ExpertSystemEvaluator", "FinancialScalarEvaluator", "MarketScalarEvaluator",
     "SetOperationEvaluator", "FINANCIAL_INDICATORS", "MARKET_FIELDS",
     "evaluator_from_filter_spec", "all_evaluator_types",
+    # noperate evaluation (re-exported for screening_module backward compat)
+    "_noperate_data", "_NOPERATE_RULES", "_RANK_MODES", "_COMBINE_OPS",
+    "_build_op_ctx", "_eval_op",
+    "_tie_exact_rank", "_tie_slice", "_TIE_HANDLERS", "_resolve_rank",
+    "_DERIVED_BIN_OPS", "_DERIVED_CMP_OPS", "_DERIVED_BOOL_OPS", "_DERIVED_FUNCS",
+    "_eval_derived_ast", "_eval_derived_expr",
+    # builtin formulas lookup
+    "_BUILTIN_FORMULAS", "_BUILTIN_FORMULA_INDEX", "_BUILTIN_FORMULA_INFO",
+    "_lookup_builtin_script", "_lookup_builtin_formula_info",
     # tick_source
-    "TickSource", "RealTickSource", "SimTickSource", "_normalize_to_fz", "is_fz_code",
+    "TickSource", "RealTickSource", "MockDataSource", "_normalize_to_fz", "is_fz_code",
     # utilities
     "_hash_tick",
     # time utilities
     "_hms_to_seconds", "time_at", "_safe_timestamp",
     "is_offset_of_day", "anchor_to_today", "time_now_unix",
+    # TDX nperiod → period mapping (migrated from screening_module)
+    "_TDX_NPERIOD_TO_PERIOD", "_nperiod_to_period",
+    # intersection evaluator (migrated from screening_module)
+    "evaluate_intersection",
+    # edge state (migrated from execution_module)
+    "EdgeState", "EdgeStateMixin",
 ]
