@@ -108,6 +108,7 @@ except ImportError:
 try:
     from converters import (
         DZHPoolExecutor,
+        _tdx_pool_to_frontend,
         build_attrtext_from_selections,
         decode_action,
         decode_reload_mode,
@@ -132,6 +133,7 @@ try:
 except ImportError:
     from ..converters import (
         DZHPoolExecutor,
+        _tdx_pool_to_frontend,
         build_attrtext_from_selections,
         decode_action,
         decode_reload_mode,
@@ -5337,17 +5339,7 @@ def _import_as_tdx(content: bytes, filename: str) -> dict:
         tmp.write(content)
         tmp_path = tmp.name
     try:
-        try:
-            from converters import parse_tdx_xml
-        except ImportError:
-            from converters import parse_tdx_xml
         tdx_pool = parse_tdx_xml(tmp_path)
-        # 延迟导入避免循环依赖：app → import_api → app
-        import importlib
-        app_mod = importlib.import_module("meta_core.app")
-        _tdx_pool_to_frontend = getattr(app_mod, "_tdx_pool_to_frontend", None)
-        if _tdx_pool_to_frontend is None:
-            raise RuntimeError("_tdx_pool_to_frontend 未找到，无法转换 TDX 格式")
         pool_name = filename.rsplit(".", 1)[0] if "." in filename else filename
         return _tdx_pool_to_frontend(tdx_pool, pool_name)
     finally:

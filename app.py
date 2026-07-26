@@ -521,6 +521,8 @@ async def lifespan(app):
         minute_aggregator=app.state.minute_aggregator,
         tq_adapter=app.state.tq,
     )
+    # 注入 K 线数据源供回放引擎统一使用（后端提供，不降级到前端伪造）
+    app.state.engine.kline_provider = app.state.data_query_service
     app.state.data_sync_service = DataSyncService(
         storage=app.state.storage,
         minute_aggregator=app.state.minute_aggregator,

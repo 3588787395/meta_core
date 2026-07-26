@@ -18,12 +18,12 @@
   - [x] SubTask 3.3: 确保运行控制（开始/暂停/停止/模式切换）调用后端 API 后，由后端推送状态变更事件，前端仅做展示更新
   - [x] SubTask 3.4: 如后端缺少必要的事件 API（如 `/api/events/timer-queue`），在 `app.py`/`core/` 中补充，禁止前端绕过 API
 
-- [x] Task 4: 股票池功能正确性与模式一致性（返工完成）
-  - [x] SubTask 4.3: 修复导入导出（DZH XML、TDX XML、JSON）
-  - [x] SubTask 4.5: 修复 K线/公式面板后端数据与前端展示
+- [x] Task 4: 股票池功能正确性与模式一致性
+  - [x] SubTask 4.3: 修复 TDX XML 自动检测导入（`/api/dzh/import`）
+  - [x] SubTask 4.4: 修复回放模式启动（`/api/replay/start`）
   - [x] SubTask 4.1: 验证节点 CRUD（备选池、转移条件、状态池、丢弃池、文字标签）在画布与配置表双向同步
   - [x] SubTask 4.2: 验证连线与属性（条件/无条件、线形、描述文字、线条宽度）正确保存与回显
-  - [x] SubTask 4.4: 对齐设计/仿真/回放/实盘四种模式，确保仿真/回放仅替换数据源与时间推进，不引入特殊执行分支
+  - [x] SubTask 4.5: 验证事件面板、计时器队列、K线/公式面板能够正确展示后端事件，无前端私自推断的状态
 
 - [ ] Task 5: 清理多路径与兼容代码
   - [ ] SubTask 5.1: 扫描并删除 `try old else new`、`if (legacy)`、`if (compat)`、重复实现的函数路径
