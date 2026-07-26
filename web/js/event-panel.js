@@ -1,11 +1,8 @@
 /**
  * 事件面板 - 可视化版
- * 功能：
- * - 分类矩阵视图：每类事件一行图标，点击分类/图标在下方显示事件文本记录
- * - 散点分布视图：Canvas 绘制时间轴上的事件点（已发生/排队中）
- * - 定时器队列：单独显示排队中的 timer 事件
- * - SSE 实时事件流 + 历史事件加载
- * - 暂停/继续/清空、折叠/展开、拖拽
+ * 职责：仅渲染后端已格式化的事件流与计时器队列，不持有业务真值源。
+ * - 事件统一来自 /api/events/stream（SSE），历史首批通过 /api/events/recent
+ * - 所有 category / display_ts / display_time / state / trigger_type 等字段直接信任后端
  */
 (function () {
   'use strict';
@@ -40,10 +37,7 @@
   const btnToggleDetail = $('btnToggleDetail');
   const eventDetailToggleSym = $('eventDetailToggleSym');
 
-  // 9 个事件分类配置：颜色、图标、显示名称
-  // 图标语义对齐：tick=📡(实时行情流), bar=📈(K线), formula=🧮(计算),
-  //   edge=🔀(边触发分叉), transfer=🔄(状态流转), signal=🔔(信号铃),
-  //   order=📋(订单), ttl=⏰(计时器), system=⚙(系统齿轮)
+  // 分类展示配置：颜色、图标、显示名称（纯展示表）
   const CATEGORY_CONFIG = {
     tick:     { color: '#9e9e9e', icon: '📡', label: 'Tick' },
     bar:      { color: '#2196f3', icon: '📈', label: 'Bar' },
@@ -58,25 +52,7 @@
 
   const CATEGORIES = Object.keys(CATEGORY_CONFIG);
 
-  const EVENT_TYPE_TO_CATEGORY = {
-    'tickreceived': 'tick', 'datachanged': 'tick', 'tick': 'tick', 'tick_update': 'tick', 'tickdue': 'tick',
-    'barcomposed': 'bar', 'bar': 'bar', 'kline': 'bar',
-    'formulaevaluated': 'formula', 'stockfiltered': 'formula', 'formula': 'formula', 'filter': 'formula',
-    'edgefired': 'edge', 'crossoverdetected': 'edge', 'edge': 'edge', 'cross': 'edge', 'crossover': 'edge',
-    'transferexecuted': 'transfer', 'executed': 'transfer', 'rankingchanged': 'transfer',
-    'transfer': 'transfer', 'enter': 'transfer', 'exit': 'transfer', 'rank_changed': 'transfer',
-    'signal': 'signal', 'buy': 'signal', 'sell': 'signal',
-    'orderplaced': 'order', 'orderfilled': 'order', 'positionupdated': 'order', 'order': 'order',
-    'ttlexpired': 'ttl', 'ttldue': 'ttl', 'timeout': 'ttl', 'ttl': 'ttl',
-    'modechanged': 'system', 'timeadvanced': 'system', 'poolloaded': 'system', 'configloaded': 'system',
-    'configchanged': 'system', 'simulationstep': 'system', 'replaystep': 'system', 'replaystarted': 'system',
-    'importstarted': 'system', 'exportcompleted': 'system', 'statisticsupdated': 'system',
-    'snapshotupdated': 'system', 'eventlogged': 'system', 'alertraised': 'system', 'alert': 'system',
-    'loaded': 'system', 'saved': 'system', 'import': 'system', 'export': 'system', 'system': 'system',
-    'timerqueued': 'ttl', 'timerfired': 'ttl', 'timerexpired': 'ttl', 'edgetimer': 'ttl', 'ticktimer': 'ttl', 'unknown': 'system'
-  };
-
-  // 状态
+  // 状态（仅展示缓冲与纯 UI 状态）
   let events = [];
   let pendingEvents = [];
   let timerQueue = [];
@@ -92,15 +68,15 @@
   let dragStartX = 0, dragStartY = 0;
   let panelStartRight = 0, panelStartBottom = 0;
   let resizeStartY = 0, panelStartHeight = 0;
-  let activeCategory = null; // 当前选中的分类
-  let selectedEventId = null; // 当前选中的事件
+  let activeCategory = null;
+  let selectedEventId = null;
   let activeFilters = new Set(CATEGORIES);
-  let currentViz = 'matrix'; // 'matrix' | 'scatter'
-  let scatterLayout = 'category'; // 'category'(按分类分行) | 'merged'(同行显示)
-  let isDetailCollapsed = true; // 详情区默认折叠，增大可视化区
-  let scatterHitRegions = []; // 散点图标点击热区
-  let matrixHitRegions = []; // 矩阵图标点击热区
-  let timerHitRegions = []; // 定时器图标点击热区
+  let currentViz = 'matrix';
+  let scatterLayout = 'category';
+  let isDetailCollapsed = true;
+  let scatterHitRegions = [];
+  let matrixHitRegions = [];
+  let timerHitRegions = [];
   const RECONNECT_DELAY = 3000;
   const MAX_EVENTS = 2000;
   const RENDER_THROTTLE = 200;
@@ -114,230 +90,29 @@
   let matrixHoverEvent = null;
   let lastMatrixLayout = null;
   let lastScatterLayout = null;
-  let categoryRowContainer = null; // 分类行 DOM 容器（无障碍访问）
+  let categoryRowContainer = null;
 
-  const EVENT_STATE_STYLES = {
-    pending: {
-      borderStyle: [3, 2],
-      borderColor: '#ffc107',
-      fillAlpha: 0.6,
-      glowColor: 'rgba(255,193,7,0.4)',
-      glowSize: 4
-    },
-    triggered: {
-      borderStyle: null,
-      borderColor: null,
-      fillAlpha: 1.0,
-      glowColor: null,
-      glowSize: 5
-    },
-    expired: {
-      borderStyle: [2, 2],
-      borderColor: '#f44336',
-      fillAlpha: 0.5,
-      glowColor: 'rgba(244,67,54,0.5)',
-      glowSize: 6
-    }
+  // 简单展示用状态样式（无推断逻辑）
+  const STATE_STYLE = {
+    pending:   { borderStyle: [3, 2], borderColor: '#ffc107', fillAlpha: 0.6, glowColor: 'rgba(255,193,7,0.4)', glowSize: 4 },
+    triggered: { borderStyle: null,  borderColor: null,      fillAlpha: 1.0, glowColor: null,                glowSize: 5 },
+    expired:   { borderStyle: [2, 2], borderColor: '#f44336', fillAlpha: 0.5, glowColor: 'rgba(244,67,54,0.5)', glowSize: 6 }
   };
 
-  const TIMER_STATE_STYLES = {
-    waiting: {
-      label: '等待中',
-      fillColor: null,
-      strokeColor: null,
-      fillAlpha: 1.0,
-      lineStyle: null,
-      listBg: 'transparent',
-      listOpacity: 1.0,
-      textDecoration: 'none',
-      canvasShape: 'filled-circle'
-    },
-    fired: {
-      label: '已触发',
-      fillColor: '#9e9e9e',
-      strokeColor: '#9e9e9e',
-      fillAlpha: 0.6,
-      lineStyle: [4, 3],
-      listBg: 'rgba(158,158,158,0.15)',
-      listOpacity: 0.5,
-      textDecoration: 'line-through',
-      canvasShape: 'filled-circle'
-    },
-    expired: {
-      label: '已过期',
-      fillColor: 'rgba(0,0,0,0)',
-      strokeColor: '#f44336',
-      fillAlpha: 0.5,
-      lineStyle: [2, 2],
-      listBg: 'rgba(244,67,54,0.1)',
-      listOpacity: 0.5,
-      textDecoration: 'line-through',
-      canvasShape: 'hollow-circle'
-    }
+  const TIMER_LIST_STYLE = {
+    waiting: { label: '等待中', listBg: 'transparent',           listOpacity: 1.0, textDecoration: 'none',           fillColor: null,      strokeColor: null,      lineStyle: null,      fillAlpha: 1.0 },
+    fired:   { label: '已触发', listBg: 'rgba(158,158,158,0.15)', listOpacity: 0.5, textDecoration: 'line-through', fillColor: '#9e9e9e', strokeColor: '#9e9e9e', lineStyle: [4, 3],    fillAlpha: 0.6 },
+    expired: { label: '已过期', listBg: 'rgba(244,67,54,0.1)',    listOpacity: 0.5, textDecoration: 'line-through', fillColor: null,      strokeColor: '#f44336', lineStyle: [2, 2],    fillAlpha: 0.5 }
   };
 
-  function getTimerState(timerItem, now) {
-    if (timerItem.state) return timerItem.state;
-    const ev = timerItem.ev;
-    const fireAt = getFireAtMs(ev);
-    const type = String(ev.event_type || '').toLowerCase();
-    if (type.includes('fired') || type.includes('expired') || type.includes('triggered')) {
-      return 'fired';
-    }
-    if (fireAt < now - 100) {
-      return 'expired';
-    }
-    return 'waiting';
-  }
-
-  // 定时器触发类型分类（队列列表"触发类型"列）：
-  //   边定时器=边到时触发，TTL超时=股票在池中停留超限，Tick定时器=按tick间隔触发，
-  //   一次性=只触发一次后注销，循环=周期性触发
-  const TIMER_TRIGGER_TYPES = [
-    { key: 'edge_timer',    label: '边定时器',   match: /edge.*timer|edgetimer|edgefired|crossover/i,    color: '#ff9800' },
-    { key: 'ttl',           label: 'TTL超时',    match: /ttl|ttldue|ttlexpired|timeout/i,                 color: '#b71c1c' },
-    { key: 'tick_timer',    label: 'Tick定时器', match: /ticktimer|tick.*timer|tickdue|\btick\b/i,         color: '#9e9e9e' },
-    { key: 'one_shot',      label: '一次性',     match: /oneshot|one_shot|count_gte_1|single/i,           color: '#9c27b0' },
-    { key: 'recurring',     label: '循环',       match: /recurring|periodic|interval|cxtype.*0/i,         color: '#4caf50' },
-    { key: 'timer',         label: '定时器',     match: /timer|fire|due/i,                                  color: '#2196f3' }
-  ];
-  const TIMER_TRIGGER_COLORS = TIMER_TRIGGER_TYPES.reduce((m, t) => { m[t.label] = t.color; return m; }, {});
-
-  function getTimerTriggerType(ev) {
-    if (ev && ev.trigger_type) return ev.trigger_type;
-    const d = (ev && ev.details) || {};
-    const hints = [
-      String(ev.event_type || ''),
-      String(d.trigger_type || d.timer_kind || d.kind || ''),
-      String(d.fire_reason || d.reason || ''),
-      String(d.edge_id ? 'edge' : ''),
-      String(d.ttl ? 'ttl' : ''),
-      String(d.interval ? 'recurring' : ''),
-      String(d.one_shot ? 'oneshot' : ''),
-      String(d.count === 1 ? 'single' : '')
-    ].join(' ').toLowerCase();
-    for (const t of TIMER_TRIGGER_TYPES) {
-      if (t.match.test(hints)) return t.label;
-    }
-    return '定时器';
-  }
-
-  function formatRemainingTime(fireAt, now, ev) {
-    if (ev && ev.remaining_text) return ev.remaining_text;
-    const diff = fireAt - now;
-    if (diff <= 0) return '已触发';
-    if (diff < 1000) return Math.floor(diff) + 'ms后触发';
-    if (diff < 60000) return (diff / 1000).toFixed(1) + 's后触发';
-    if (diff < 3600000) return Math.floor(diff / 60000) + 'm' + Math.floor((diff % 60000) / 1000) + 's后触发';
-    return Math.floor(diff / 3600000) + 'h后触发';
-  }
-
-  const SCATTER_AGGREGATE_WINDOW = 500;
-  const SCATTER_TOOLTIP_DELAY = 100;
-
-  function classifyEvent(ev) {
-    // Task 1: 优先使用后端已计算的 category，仅对未格式化的遗留事件做极简兜底分类
-    if (ev.category) return ev.category;
-    const rawType = ev.event_type || ev.type || 'UNKNOWN';
-    const type = String(rawType).toLowerCase();
-    if (EVENT_TYPE_TO_CATEGORY[type]) return EVENT_TYPE_TO_CATEGORY[type];
-    if (type.includes('buy') || type.includes('sell')) return 'signal';
-    if (type.includes('tick') || type.includes('data')) return 'tick';
-    if (type.includes('bar') || type.includes('kline')) return 'bar';
-    if (type.includes('formula') || type.includes('filter')) return 'formula';
-    if (type.includes('edge') || type.includes('cross')) return 'edge';
-    if (type.includes('transfer') || type.includes('executed') || type.includes('rank') || type.includes('enter') || type.includes('exit')) return 'transfer';
-    if (type.includes('order') || type.includes('position')) return 'order';
-    if (type.includes('ttl') || type.includes('timeout') || type.includes('expire') || type.includes('timer')) return 'ttl';
-    return 'system';
-  }
-
-  function isSimulationMode() {
-    return window.AppState && typeof window.AppState.isSimulationMode === 'function'
-      ? window.AppState.isSimulationMode()
-      : false;
-  }
-
-
-  // Task 1: 时间戳统一由后端 web_state.py 归一化，前端仅做展示。
-  // 以下极简函数仅对未格式化的遗留事件做兜底，不再包含模式换算/仿真基准等复杂逻辑。
-  function getEventTs(ev) {
-    if (ev.display_ts != null) return Number(ev.display_ts);
-    if (ev.ts != null) return Number(ev.ts) < 1e12 ? Number(ev.ts) * 1000 : Number(ev.ts);
-    if (ev.timestamp != null) return Number(ev.timestamp) < 1e12 ? Number(ev.timestamp) * 1000 : Number(ev.timestamp);
-    if (ev.time != null) {
-      const n = Number(ev.time);
-      if (!isNaN(n)) return n < 1e12 ? n * 1000 : n;
-    }
-    return Date.now();
-  }
-
-  function getFireAtMs(ev) {
-    if (ev.fire_at_ms != null) return Number(ev.fire_at_ms);
-    const d = ev.details || {};
-    let t = null;
-    if (d.fire_at != null) t = Number(d.fire_at);
-    else if (d.fire_time != null) t = Number(d.fire_time);
-    else if (d.next_fire_time != null) t = Number(d.next_fire_time);
-    if (t == null || isNaN(t)) return getEventTs(ev);
-    return t < 1e12 ? t * 1000 : t;
-  }
-
-  function formatSimDuration(ms) {
-    if (ms < 0) ms = 0;
-    const totalSec = Math.floor(ms / 1000);
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    const milli = Math.floor(ms % 1000);
-    const pad = n => String(n).padStart(2, '0');
-    if (h > 0) return h + ':' + pad(m) + ':' + pad(s);
-    if (m > 0) return pad(m) + ':' + pad(s);
-    return s + '.' + String(milli).padStart(3, '0').slice(0, 1) + 's';
-  }
-
-  function formatSimDurationMs(ms) {
-    if (ms < 0) ms = 0;
-    const totalSec = Math.floor(ms / 1000);
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    const s = totalSec % 60;
-    const milli = Math.floor(ms % 1000);
-    const pad = n => String(n).padStart(2, '0');
-    const p3 = n => String(n).padStart(3, '0');
-    if (h > 0) return h + ':' + pad(m) + ':' + pad(s) + '.' + p3(milli);
-    if (m > 0) return pad(m) + ':' + pad(s) + '.' + p3(milli);
-    return s + '.' + p3(milli) + 's';
-  }
-
-  function formatTime(ts, timeMode) {
-    if (timeMode == null) timeMode = isSimulationMode() ? 'relative' : 'wall';
-    if (timeMode === 'relative') {
-      return formatSimDuration(ts);
-    }
-    const d = new Date(ts);
-    const pad = n => String(n).padStart(2, '0');
-    return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
-  }
-
-  function formatTimeMs(ts, timeMode) {
-    if (timeMode == null) timeMode = isSimulationMode() ? 'relative' : 'wall';
-    if (timeMode === 'relative') {
-      return formatSimDurationMs(ts);
-    }
-    const d = new Date(ts);
-    const pad = n => String(n).padStart(2, '0');
-    const p3 = n => String(n).padStart(3, '0');
-    return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + '.' + p3(d.getMilliseconds());
-  }
-
-  // 极简兜底：未从后端获取到 display_time 时使用
-  function formatTimeFallback(ts, timeMode) {
-    return formatTime(ts, timeMode);
-  }
-  function formatTimeMsFallback(ts, timeMode) {
-    return formatTimeMs(ts, timeMode);
-  }
+  const TRIGGER_TYPE_COLORS = {
+    '边定时器': '#ff9800',
+    'TTL超时': '#b71c1c',
+    'Tick定时器': '#9e9e9e',
+    '一次性': '#9c27b0',
+    '循环': '#4caf50',
+    '定时器': '#2196f3'
+  };
 
   function escapeHtml(s) {
     if (s == null) return '';
@@ -360,7 +135,7 @@
   }
 
   function buildEventId(ev) {
-    return ev.category + '-' + ev.ts + '-' + (ev.event_type || '') + '-' + Math.random().toString(36).slice(2, 7);
+    return (ev.category || 'system') + '-' + (ev.display_ts || ev.ts || 0) + '-' + (ev.event_type || '') + '-' + Math.random().toString(36).slice(2, 7);
   }
 
   function buildDetailsSummary(ev) {
@@ -380,9 +155,9 @@
     if (d.codes && Array.isArray(d.codes) && d.codes.length > 0) parts.push('codes:' + formatCodes(d.codes));
     if (d.message) parts.push(escapeHtml(String(d.message).slice(0, 80)));
     else if (d.reason) parts.push('reason:' + escapeHtml(d.reason));
-    if (d.fire_at) {
+    if (d.fire_at != null) {
       const fa = Number(d.fire_at);
-      if (!isNaN(fa)) parts.push('fire_at:' + escapeHtml(formatTimeMs(fa < 1e12 ? fa * 1000 : fa)));
+      if (!isNaN(fa)) parts.push('fire_at:' + escapeHtml(String(d.fire_at)));
       else parts.push('fire_at:' + escapeHtml(String(d.fire_at)));
     }
     if (d.queue_position != null) parts.push('queue:' + escapeHtml(String(d.queue_position)));
@@ -398,31 +173,34 @@
     return parts.join(' | ');
   }
 
-  // 添加事件
-  // Task 1: 事件已由后端 format_event 格式化，前端直接使用 category / display_ts / display_time 等字段；
-  // 对未格式化的遗留事件保留极简兜底。
+  function getEventPosTs(ev) {
+    return ev.category === 'ttl' ? (ev.fire_at_ms || ev.display_ts || 0) : (ev.display_ts || 0);
+  }
+
+  // 添加事件：统一入口，仅做展示缓冲
   function addEvent(ev) {
-    const cat = ev.category || classifyEvent(ev);
-    const ts = ev.display_ts != null ? Number(ev.display_ts) : getEventTs(ev);
+    if (!ev || !ev.event_type) return;
     const eventObj = {
       id: ev.id || buildEventId(ev),
-      ts: ts,
-      category: cat,
-      event_type: ev.event_type || ev.type || 'UNKNOWN',
+      ts: ev.display_ts != null ? Number(ev.display_ts) : 0,
+      category: ev.category || 'system',
+      event_type: ev.event_type,
       code: ev.code || '',
       codes: ev.codes || null,
       pool_id: ev.pool_id || '',
       edge_id: ev.edge_id || '',
       details: ev.details || {},
-      display_time: ev.display_time || formatTimeFallback(ts, ev.time_mode),
-      display_time_ms: ev.display_time_ms || formatTimeMsFallback(ts, ev.time_mode),
-      time_mode: ev.time_mode || (ts < 86400000.0 ? 'relative' : 'wall'),
+      display_time: ev.display_time || '',
+      display_time_ms: ev.display_time_ms || '',
+      fire_at_ms: ev.fire_at_ms != null ? Number(ev.fire_at_ms) : null,
+      display_fire_time_ms: ev.display_fire_time_ms || '',
+      time_mode: ev.time_mode || 'wall',
+      state: ev.state || 'triggered',
       raw: ev,
       pending: isPaused
     };
 
-    // 如果是 timer 排队事件，加入定时器队列
-    if (cat === 'ttl' && (eventObj.event_type.toLowerCase().includes('timer') || eventObj.details.fire_at || eventObj.details.queue_position != null)) {
+    if (eventObj.category === 'ttl' && (eventObj.fire_at_ms != null || (eventObj.details && eventObj.details.fire_at != null))) {
       addTimerQueueItem(eventObj);
     }
 
@@ -441,104 +219,11 @@
   }
 
   function addTimerQueueItem(ev) {
-    const fireAtMs = getFireAtMs(ev);
+    const fireAtMs = ev.fire_at_ms != null ? Number(ev.fire_at_ms) : (ev.display_ts || 0);
     const key = fireAtMs + '-' + ev.event_type + '-' + (ev.code || '');
     const idx = timerQueue.findIndex(t => t.key === key);
-    if (idx >= 0) timerQueue[idx] = { key, ev, updated: ev.ts, source: 'event' };
-    else timerQueue.push({ key, ev, updated: ev.ts, source: 'event' });
-    cleanupExpiredTimers();
-  }
-
-  function cleanupExpiredTimers() {
-    const now = getCurrentTime();
-    const realNow = Date.now();
-    timerQueue = timerQueue.filter(t => {
-      if (t.source === 'poll') {
-        const fireAt = getFireAtMs(t.ev);
-        if (fireAt < now - 5000) return false;
-        return true;
-      }
-      if (t.updated < realNow - 120000) return false;
-      const fireAt = getFireAtMs(t.ev);
-      const type = String(t.ev.event_type || '').toLowerCase();
-      if (type.includes('fired') || type.includes('expired') || type.includes('triggered')) {
-        return fireAt > now - 60000;
-      }
-      return true;
-    });
-  }
-
-  let timerPollTimer = null;
-  async function syncTimerQueue() {
-    if (!isSimulationMode()) return;
-    try {
-      var sid = (typeof window.simSessionId !== 'undefined') ? window.simSessionId : '';
-      var url = '/api/events/timer-queue' + (sid ? '?session_id=' + encodeURIComponent(sid) : '');
-      const res = await fetch(url);
-      if (!res.ok) return;
-      const data = await res.json();
-      if (!data.success || !Array.isArray(data.timers)) return;
-      // Task 1: 计时器队列已由后端 format_timer_queue 格式化，前端直接使用 display_fire_ms / state / trigger_type 等字段
-      const now = Number(data.now_ms) || getCurrentTime();
-      const pollKeys = new Set();
-      data.timers.forEach(spec => {
-        const fireMs = Number(spec.display_fire_ms) || Number(spec.fire_at) || 0;
-        if (fireMs <= 0) return;
-        const code = spec.code || '';
-        const key = 'poll-' + fireMs + '-' + (spec.edge_id || '') + '-' + code;
-        pollKeys.add(key);
-        const existingIdx = timerQueue.findIndex(t => t.key === key);
-        const pseudoEvent = {
-          id: 'timer-' + key,
-          ts: now,
-          display_ts: fireMs,
-          category: spec.category || 'ttl',
-          event_type: spec.kind === 'edge' ? 'EdgeTimer' : 'TimerQueued',
-          code: code,
-          pool_id: spec.pool_id || '',
-          edge_id: spec.edge_id || '',
-          display_fire_time: spec.display_fire_time || '',
-          state: spec.state || 'waiting',
-          trigger_type: spec.trigger_type || '定时器',
-          remaining_text: spec.remaining_text || '',
-          details: {
-            fire_at: fireMs < 1e12 ? fireMs / 1000 : fireMs,
-            queue_position: 0,
-            kind: spec.kind || 'ttl'
-          },
-          raw: spec,
-          pending: false
-        };
-        if (existingIdx >= 0) {
-          timerQueue[existingIdx].ev = pseudoEvent;
-          timerQueue[existingIdx].updated = now;
-          timerQueue[existingIdx].state = spec.state || 'waiting';
-        } else {
-          timerQueue.push({ key, ev: pseudoEvent, updated: now, source: 'poll', state: spec.state || 'waiting' });
-        }
-      });
-      timerQueue = timerQueue.filter(t => {
-        if (t.source === 'poll') {
-          return pollKeys.has(t.key);
-        }
-        return true;
-      });
-      cleanupExpiredTimers();
-    } catch (e) { /* ignore */ }
-  }
-
-  function startTimerPolling() {
-    if (timerPollTimer) return;
-    syncTimerQueue();
-    timerPollTimer = setInterval(syncTimerQueue, 1000);
-  }
-
-  function stopTimerPolling() {
-    if (timerPollTimer) {
-      clearInterval(timerPollTimer);
-      timerPollTimer = null;
-    }
-    timerQueue = timerQueue.filter(t => t.source !== 'poll');
+    if (idx >= 0) timerQueue[idx] = { key, ev, updated: ev.ts || Date.now(), source: 'event' };
+    else timerQueue.push({ key, ev, updated: ev.ts || Date.now(), source: 'event' });
   }
 
   function flushPendingEvents() {
@@ -575,28 +260,17 @@
   }
 
   function getCurrentTime() {
-    if (window.AppState && typeof window.AppState.getCurrentDisplayTime === 'function') {
-      return window.AppState.getCurrentDisplayTime();
+    if (window.RuntimeState && typeof window.RuntimeState.getCurrentDisplayTime === 'function') {
+      return window.RuntimeState.getCurrentDisplayTime();
     }
     return Date.now();
-  }
-
-  function getEventState(ev, now) {
-    if (ev.pending) return 'pending';
-    if (ev.category === 'ttl') {
-      const fireAt = getFireAtMs(ev);
-      const type = String(ev.event_type || '').toLowerCase();
-      if (type.includes('timerqueued') && fireAt > now) return 'pending';
-      if (fireAt > 0 && fireAt < now - 5000 && type.includes('timer') && !type.includes('fired') && !type.includes('expired')) return 'expired';
-    }
-    return 'triggered';
   }
 
   function scheduleRender() {
     render();
   }
 
-  // ===== 渲染：分类矩阵（每行按时间轴分布图标） =====
+  // ===== 渲染：分类矩阵 =====
   function ensureMatrixNowLine() {
     if (matrixNowLine) return matrixNowLine;
     if (!eventMatrix) return null;
@@ -623,24 +297,8 @@
     matrixNowLine.style.transform = 'translateX(' + x + 'px)';
   }
 
-  function chooseTickInterval(span) {
-    var targets = [5000, 10000, 15000, 20000, 30000, 60000];
-    for (var i = 0; i < targets.length; i++) {
-      if (span / targets[i] >= 4 && span / targets[i] <= 12) return targets[i];
-    }
-    if (span <= 30000) return 5000;
-    if (span <= 60000) return 10000;
-    if (span <= 120000) return 20000;
-    return 30000;
-  }
-
-  // ===== 共用绘制辅助函数：标签区/时间轴/事件图标 =====
-
-  function getEventPosTs(ev) {
-    return ev.category === 'ttl' ? getFireAtMs(ev) : getEventTs(ev);
-  }
-
-  function computeTimeWindow(all, now) {
+  function computeTimeWindow(all) {
+    var now = getCurrentTime();
     var minTs = now - DEFAULT_TIME_WINDOW;
     var maxTs = now;
     all.forEach(function (ev) {
@@ -656,12 +314,6 @@
     if (timeSpan > MAX_TIME_WINDOW) {
       minTs = now - MAX_TIME_WINDOW;
       timeSpan = MAX_TIME_WINDOW;
-    }
-    if (isSimulationMode() && minTs < 0) {
-      var shift = -minTs;
-      minTs = 0;
-      timeSpan = Math.max(timeSpan - shift, DEFAULT_TIME_WINDOW);
-      if (timeSpan > MAX_TIME_WINDOW) timeSpan = MAX_TIME_WINDOW;
     }
     return { minTs: minTs, timeSpan: timeSpan };
   }
@@ -705,27 +357,49 @@
     var H = opts.H;
     var minTs = opts.minTs;
     var timeSpan = opts.timeSpan;
-    var tickInterval = chooseTickInterval(timeSpan);
+    var all = opts.all;
     ctx.strokeStyle = 'rgba(255,255,255,0.06)';
     ctx.lineWidth = 1;
     ctx.fillStyle = '#8080a0';
     ctx.font = '9px Consolas, monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
-    var firstTick = Math.ceil(minTs / tickInterval) * tickInterval;
-    for (var t = firstTick; t <= minTs + timeSpan + 1; t += tickInterval) {
-      var ratio = (t - minTs) / timeSpan;
-      var tx = plotX + ratio * plotW;
-      if (tx >= plotX && tx <= plotX + plotW) {
-        ctx.beginPath();
-        ctx.setLineDash([2, 3]);
-        ctx.moveTo(tx, 0);
-        ctx.lineTo(tx, plotH);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillText(formatTime(t), tx, H - 4);
+
+    // 以事件 display_ts 为刻度，使用后端已格式化的 display_time_ms
+    var ticks = [];
+    var seen = new Set();
+    all.forEach(function (ev) {
+      var t = getEventPosTs(ev);
+      var key = Math.round(t / 1000) + '-' + ev.category;
+      if (!seen.has(key) && t >= minTs && t <= minTs + timeSpan) {
+        seen.add(key);
+        ticks.push({ ts: t, label: ev.display_time_ms || ev.display_time || '' });
       }
-    }
+    });
+    ticks.sort(function (a, b) { return a.ts - b.ts; });
+    // 避免过密：间隔至少 60px
+    var minPx = 60;
+    var filtered = [];
+    var lastX = -Infinity;
+    ticks.forEach(function (tick) {
+      var x = plotX + ((tick.ts - minTs) / timeSpan) * plotW;
+      if (x - lastX >= minPx) {
+        filtered.push(tick);
+        lastX = x;
+      }
+    });
+
+    filtered.forEach(function (tick) {
+      var x = plotX + ((tick.ts - minTs) / timeSpan) * plotW;
+      ctx.beginPath();
+      ctx.setLineDash([2, 3]);
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, plotH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillText(tick.label, x, H - 4);
+    });
+
     ctx.strokeStyle = 'rgba(255,255,255,0.2)';
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -738,11 +412,11 @@
     var ex = opts.ex;
     var ey = opts.ey;
     var cfg = opts.cfg;
-    var state = opts.state;
+    var state = opts.state || 'triggered';
     var iconSize = opts.iconSize || 14;
     var labelFont = opts.labelFont;
     var isHover = opts.isHover;
-    var style = EVENT_STATE_STYLES[state];
+    var style = STATE_STYLE[state] || STATE_STYLE.triggered;
     if (style.borderStyle) {
       ctx.save();
       ctx.setLineDash(style.borderStyle);
@@ -834,7 +508,6 @@
       ctx.fillText('暂无事件', W / 2, H / 2);
       if (matrixNowLine) matrixNowLine.style.display = 'none';
       lastMatrixLayout = null;
-      // 即使无事件也更新分类行位置和计数（全部为 0）
       var emptyByCat = {};
       CATEGORIES.forEach(function (c) { emptyByCat[c] = []; });
       updateCategoryRows({ rowH: rowH }, emptyByCat);
@@ -844,13 +517,12 @@
     if (matrixNowLine) matrixNowLine.style.display = '';
 
     var now = getCurrentTime();
-    var win = computeTimeWindow(all, now);
+    var win = computeTimeWindow(all);
     var minTs = win.minTs;
     var timeSpan = win.timeSpan;
 
     lastMatrixLayout = { plotX: plotX, plotW: plotW, plotTop: 0, plotH: plotH, minTs: minTs, timeSpan: timeSpan, rowH: rowH, W: W, H: H, axisH: axisH, labelWidth: labelWidth };
 
-    // 分类统计与绘制
     var byCat = {};
     CATEGORIES.forEach(function (c) { byCat[c] = []; });
     all.forEach(function (ev) { byCat[ev.category].push(ev); });
@@ -859,12 +531,11 @@
     var labelFont = 'Segoe UI Emoji, Apple Color Emoji, Segoe UI, Microsoft YaHei, system-ui, sans-serif';
     drawLabelArea(ctx, { labelWidth: labelWidth, plotH: plotH, W: W });
     drawHorizontalGrid(ctx, { plotX: plotX, W: W, plotH: plotH, rowH: rowH, catCount: catCount, padRight: padRight });
-    drawTimeAxis(ctx, { plotX: plotX, plotW: plotW, plotH: plotH, H: H, minTs: minTs, timeSpan: timeSpan });
+    drawTimeAxis(ctx, { plotX: plotX, plotW: plotW, plotH: plotH, H: H, minTs: minTs, timeSpan: timeSpan, all: all });
 
-    // 分桶处理同毫秒事件
     var buckets = {};
     all.forEach(function (ev) {
-      var posTs = ev.category === 'ttl' ? getFireAtMs(ev) : getEventTs(ev);
+      var posTs = getEventPosTs(ev);
       var key = ev.category + '-' + posTs;
       if (!buckets[key]) buckets[key] = [];
       buckets[key].push(ev);
@@ -879,7 +550,7 @@
       var idx = CATEGORIES.indexOf(ev.category);
       if (idx < 0) return;
       var cfg = CATEGORY_CONFIG[ev.category];
-      var posTs = ev.category === 'ttl' ? getFireAtMs(ev) : getEventTs(ev);
+      var posTs = getEventPosTs(ev);
       if (posTs < minTs || posTs > minTs + timeSpan) return;
       var ex = plotX + ((posTs - minTs) / timeSpan) * plotW;
       var baseY = idx * rowH + rowH / 2;
@@ -891,7 +562,6 @@
       if (jitter > maxJitter) jitter = maxJitter;
       if (jitter < -maxJitter) jitter = -maxJitter;
       var ey = baseY + jitter;
-      // 严格裁剪：事件位置必须在绘图区和当前行内
       var exMin = plotX + iconSize / 2;
       var exMax = plotX + plotW - iconSize / 2;
       if (ex < exMin) ex = exMin;
@@ -901,14 +571,13 @@
       if (ey < eyMin) ey = eyMin;
       if (ey > eyMax) ey = eyMax;
 
-      var state = getEventState(ev, now);
       drawEventIcon(ctx, {
-        ex: ex, ey: ey, cfg: cfg, state: state,
+        ex: ex, ey: ey, cfg: cfg, state: ev.state,
         iconSize: iconSize, labelFont: labelFont,
         isHover: !!(matrixHoverEvent && matrixHoverEvent.id === ev.id)
       });
 
-      matrixHitRegions.push({ x: ex - iconSize / 2, y: ey - iconSize / 2, w: iconSize, h: iconSize, ev: ev, state: state });
+      matrixHitRegions.push({ x: ex - iconSize / 2, y: ey - iconSize / 2, w: iconSize, h: iconSize, ev: ev });
     });
 
     updateMatrixNowLinePosition();
@@ -949,11 +618,9 @@
       matrixHoverEvent = ev;
       if (ev) {
         var cfg = CATEGORY_CONFIG[ev.category];
-        var state = hit.state;
-        var stateLabel = state === 'pending' ? ' [排队中]' : (state === 'expired' ? ' [已过期]' : '');
-        var stateColor = state === 'pending' ? '#ffc107' : (state === 'expired' ? '#f44336' : '#4caf50');
-        var displayTs = ev.category === 'ttl' && ev.details.fire_at ? getFireAtMs(ev) : getEventTs(ev);
-        var displayTime = ev.display_time_ms || formatTimeMs(displayTs, ev.time_mode);
+        var stateLabel = ev.state === 'pending' ? ' [排队中]' : (ev.state === 'expired' ? ' [已过期]' : '');
+        var stateColor = ev.state === 'pending' ? '#ffc107' : (ev.state === 'expired' ? '#f44336' : '#4caf50');
+        var displayTime = ev.category === 'ttl' ? (ev.display_fire_time_ms || ev.display_time_ms) : ev.display_time_ms;
         tooltip.innerHTML =
           '<div class="tt-head"><span style="color:' + cfg.color + '">' + cfg.icon + '</span> ' +
           escapeHtml(ev.event_type) + '<span style="color:' + stateColor + '">' + stateLabel + '</span></div>' +
@@ -1016,20 +683,14 @@
     });
   }
 
-  // ===== 分类行 DOM 元素（统一矩阵与散点的左侧标签区，避免 Canvas 与 DOM 重复绘制）=====
+  // ===== 分类行 DOM =====
   let currentCategoryRowConfig = null;
 
   function getCategoryRowConfig() {
     if (currentViz === 'scatter' && scatterLayout === 'merged') {
-      return {
-        rows: [{ cat: 'all', label: '事件', icon: '📊', color: '#e0e0ff' }],
-        single: true
-      };
+      return { rows: [{ cat: 'all', label: '事件', icon: '📊', color: '#e0e0ff' }], single: true };
     }
-    return {
-      rows: CATEGORIES.map(function (cat) { return { cat: cat, ...CATEGORY_CONFIG[cat] }; }),
-      single: false
-    };
+    return { rows: CATEGORIES.map(function (cat) { return { cat: cat, ...CATEGORY_CONFIG[cat] }; }), single: false };
   }
 
   function ensureCategoryRows() {
@@ -1167,8 +828,10 @@
     }
   }
 
-  // ===== 散点聚合辅助函数：按时间窗口聚合 =====
-  // layout='category' 时按分类独立分行聚合；layout='merged' 时所有分类同行聚合。
+  // ===== 散点聚合：仅按时间窗口聚合，状态信任后端 =====
+  const SCATTER_AGGREGATE_WINDOW = 500;
+  const SCATTER_TOOLTIP_DELAY = 100;
+
   function aggregateScatterEvents(allEvents, minTs, span, layout) {
     const windowMs = SCATTER_AGGREGATE_WINDOW;
     const sorted = allEvents.slice().sort((a, b) => getEventPosTs(a) - getEventPosTs(b));
@@ -1191,39 +854,29 @@
         found.events.push(ev);
         found.centerTs = found.events.reduce((sum, e) => sum + getEventPosTs(e), 0) / found.events.length;
       } else {
-        clusters.push({
-          centerTs: posTs,
-          events: [ev],
-          primaryCategory: cat,
-          timeMode: ev.time_mode || (posTs < 86400000.0 ? 'relative' : 'wall')
-        });
+        clusters.push({ centerTs: posTs, events: [ev], primaryCategory: cat });
       }
     });
 
     clusters.forEach(cluster => {
       const catCounts = {};
       const codes = new Set();
-      let hasPending = false;
-      let anyExpired = false;
       cluster.events.forEach(ev => {
         const cat = ev.category;
         catCounts[cat] = (catCounts[cat] || 0) + 1;
         if (ev.code) codes.add(formatCode(ev.code));
         if (ev.codes && Array.isArray(ev.codes)) ev.codes.forEach(c => codes.add(formatCode(c)));
-        if (ev.pending) hasPending = true;
-        const state = getEventState(ev, getCurrentTime());
-        if (state === 'expired') anyExpired = true;
       });
       cluster.catCounts = catCounts;
       cluster.codes = Array.from(codes);
-      cluster.hasPending = hasPending;
-      cluster.anyExpired = anyExpired;
+      const states = cluster.events.map(ev => ev.state);
+      cluster.state = states.includes('pending') ? 'pending' : (states.includes('expired') ? 'expired' : 'triggered');
     });
 
     return clusters.sort((a, b) => a.centerTs - b.centerTs);
   }
 
-  // ===== 渲染：散点分布（图标沿时间轴分布，带聚合） =====
+  // ===== 渲染：散点分布 =====
   function renderScatter() {
     if (!eventScatterCanvas) return;
     eventMatrix.style.display = 'none';
@@ -1270,7 +923,7 @@
     }
 
     const now = getCurrentTime();
-    const win = computeTimeWindow(all, now);
+    const win = computeTimeWindow(all);
     const minTs = win.minTs;
     const span = win.timeSpan;
     lastScatterLayout = { minTs: minTs, span: span, W: W, H: H, rowH: rowH, catCount: catCount };
@@ -1280,7 +933,6 @@
 
     const labelFont = 'Segoe UI Emoji, Apple Color Emoji, Segoe UI, Microsoft YaHei, system-ui, sans-serif';
 
-    // 分类统计与绘制
     const byCat = {};
     CATEGORIES.forEach(c => byCat[c] = []);
     all.forEach(ev => { byCat[ev.category].push(ev); });
@@ -1288,7 +940,7 @@
 
     drawLabelArea(ctx, { labelWidth: labelPadLeft, plotH: plotH, W: W });
     drawHorizontalGrid(ctx, { plotX: labelPadLeft, W: W, plotH: plotH, rowH: rowH, catCount: catCount, padRight: 8 });
-    drawTimeAxis(ctx, { plotX: labelPadLeft, plotW: plotW, plotH: plotH, H: H, minTs: minTs, timeSpan: span });
+    drawTimeAxis(ctx, { plotX: labelPadLeft, plotW: plotW, plotH: plotH, H: H, minTs: minTs, timeSpan: span, all: all });
 
     const clusters = aggregateScatterEvents(all, minTs, span, scatterLayout);
     const iconSize = 14;
@@ -1300,17 +952,11 @@
       const idx = catIndex[cat];
       if (idx < 0) return;
       const cx = labelPadLeft + ((cluster.centerTs - minTs) / span) * plotW;
-      // 按布局决定垂直位置：category 模式在分类行中线上；merged 模式全部在中线
       const cy = scatterLayout === 'category' ? idx * rowH + rowH / 2 : plotH / 2;
       const isCluster = cluster.events.length > 1;
       const hasSelected = cluster.events.some(e => e.id === selectedEventId);
 
-      drawEventIcon(ctx, {
-        ex: cx, ey: cy, cfg: cfg,
-        state: cluster.anyExpired ? 'expired' : (cluster.hasPending ? 'pending' : 'triggered'),
-        iconSize: iconSize, labelFont: labelFont,
-        isHover: hasSelected
-      });
+      drawEventIcon(ctx, { ex: cx, ey: cy, cfg: cfg, state: cluster.state, iconSize: iconSize, labelFont: labelFont, isHover: hasSelected });
 
       if (isCluster) {
         const badgeX = cx + iconSize / 2 - 2;
@@ -1351,11 +997,6 @@
     return best;
   }
 
-  function getScatterEventAt(x, y) {
-    const hit = getScatterClusterAt(x, y);
-    return hit ? (hit.cluster.events.length === 1 ? hit.cluster.events[0] : null) : null;
-  }
-
   function initScatterInteraction() {
     if (!eventScatterCanvas) return;
     const canvas = eventScatterCanvas;
@@ -1373,9 +1014,13 @@
       const cluster = hit.cluster;
       const events = cluster.events;
       const isMulti = events.length > 1;
+      const centerEv = events.reduce((best, ev) => {
+        const d = Math.abs(getEventPosTs(ev) - cluster.centerTs);
+        return d < best.d ? { ev: ev, d: d } : best;
+      }, { ev: events[0], d: Infinity }).ev;
 
       let html = '<div class="tt-head">';
-      html += '<span style="color:#ff9800">⏱</span> <b>' + escapeHtml(formatTimeMs(cluster.centerTs, cluster.timeMode)) + '</b>';
+      html += '<span style="color:#ff9800">⏱</span> <b>' + escapeHtml(centerEv.display_time_ms || centerEv.display_time || '') + '</b>';
       if (isMulti) html += ' <span style="color:#ff5722">(' + events.length + '个事件)</span>';
       html += '</div>';
 
@@ -1496,10 +1141,9 @@
     });
   }
 
-  // ===== 渲染：定时器队列（时间分布图 + 列表） =====
+  // ===== 渲染：定时器队列 =====
   function renderTimerQueue() {
     if (!timerQueueBody || !timerQueueCanvas) return;
-    cleanupExpiredTimers();
     timerQueueCount.textContent = timerQueue.length;
     renderTimerQueueTimeline();
 
@@ -1509,7 +1153,6 @@
       return;
     }
 
-    // 添加列标题行，明确各列含义
     var headerRow = document.createElement('div');
     headerRow.className = 'etp-timer-item etp-timer-header';
     headerRow.style.cssText = 'font-weight:600;color:#c0c0e0;background:rgba(255,255,255,0.04);border-bottom:1px solid #3a3a5a;cursor:default;';
@@ -1522,19 +1165,19 @@
       '<span class="ti-remain">剩余</span>';
     timerQueueBody.appendChild(headerRow);
 
-    const now = getCurrentTime();
     const sortedItems = timerQueue.slice().sort((a, b) => {
-      return getFireAtMs(a.ev) - getFireAtMs(b.ev);
+      const fa = a.ev.fire_at_ms != null ? a.ev.fire_at_ms : a.ev.display_ts;
+      const fb = b.ev.fire_at_ms != null ? b.ev.fire_at_ms : b.ev.display_ts;
+      return fa - fb;
     });
 
     sortedItems.forEach((timerItem) => {
       const ev = timerItem.ev;
-      const fireAt = getFireAtMs(ev);
-      const state = timerItem.state || getTimerState(timerItem, now);
-      const style = TIMER_STATE_STYLES[state];
+      const state = ev.state || 'waiting';
+      const style = TIMER_LIST_STYLE[state] || TIMER_LIST_STYLE.waiting;
       const cfg = CATEGORY_CONFIG[ev.category] || CATEGORY_CONFIG.ttl;
-      const triggerType = ev.trigger_type || getTimerTriggerType(ev);
-      const triggerColor = TIMER_TRIGGER_COLORS[triggerType] || '#c0c0e0';
+      const triggerType = ev.trigger_type || '定时器';
+      const triggerColor = TRIGGER_TYPE_COLORS[triggerType] || '#c0c0e0';
 
       const item = document.createElement('div');
       item.className = 'etp-timer-item' + (selectedEventId === ev.id ? ' selected' : '');
@@ -1547,17 +1190,14 @@
       let timeDisplay;
       let statusColor;
       if (state === 'waiting') {
-        timeDisplay = ev.remaining_text || formatRemainingTime(fireAt, now, ev);
+        timeDisplay = ev.remaining_text || '';
         statusColor = cfg.color;
-      } else if (state === 'expired') {
-        timeDisplay = style.label;
-        statusColor = '#f44336';
       } else {
         timeDisplay = style.label;
-        statusColor = '#9e9e9e';
+        statusColor = state === 'expired' ? '#f44336' : '#9e9e9e';
       }
 
-      const fireTimeDisplay = ev.display_fire_time_ms || ev.display_time_ms || formatTimeMs(fireAt, ev.time_mode);
+      const fireTimeDisplay = ev.display_fire_time_ms || ev.display_time_ms || '';
       item.innerHTML =
         '<span class="ti-time">' + escapeHtml(fireTimeDisplay) + '</span>' +
         '<span class="ti-trigger" style="color:' + triggerColor + ';font-weight:600;">' + escapeHtml(triggerType) + '</span>' +
@@ -1602,22 +1242,19 @@
 
     const now = getCurrentTime();
     const items = timerQueue.slice().sort((a, b) => {
-      return getFireAtMs(a.ev) - getFireAtMs(b.ev);
+      const fa = a.ev.fire_at_ms != null ? a.ev.fire_at_ms : a.ev.display_ts;
+      const fb = b.ev.fire_at_ms != null ? b.ev.fire_at_ms : b.ev.display_ts;
+      return fa - fb;
     }).map(t => {
-      const state = t.state || getTimerState(t, now);
-      return {
-        ev: t.ev,
-        fireAt: getFireAtMs(t.ev),
-        createdAt: t.ev.ts || t.updated,
-        state: state
-      };
+      const ev = t.ev;
+      const fireAt = ev.fire_at_ms != null ? ev.fire_at_ms : ev.display_ts;
+      return { ev: ev, fireAt: fireAt, state: ev.state || 'waiting' };
     });
 
     let minTs = now - 5000;
     let maxTs = now + 60000;
     items.forEach(it => {
       if (it.fireAt < minTs) minTs = it.fireAt;
-      if (it.createdAt && it.createdAt < minTs) minTs = it.createdAt;
       if (it.fireAt > maxTs) maxTs = it.fireAt;
     });
     const span = Math.max(maxTs - minTs, 30000);
@@ -1659,32 +1296,15 @@
     items.forEach((it) => {
       const x = timeToX(it.fireAt);
       const cfg = CATEGORY_CONFIG[it.ev.category] || CATEGORY_CONFIG.ttl;
-      const style = TIMER_STATE_STYLES[it.state];
-
-      if (it.createdAt && it.state === 'waiting' && it.createdAt < it.fireAt) {
-        const startX = timeToX(it.createdAt);
-        if (startX < x - 2) {
-          ctx.save();
-          ctx.strokeStyle = cfg.color;
-          ctx.globalAlpha = 0.35;
-          ctx.lineWidth = 2;
-          ctx.setLineDash([3, 2]);
-          ctx.beginPath();
-          ctx.moveTo(startX, markerY);
-          ctx.lineTo(x - markerRadius - 2, markerY);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.restore();
-        }
-      }
+      const style = TIMER_LIST_STYLE[it.state] || TIMER_LIST_STYLE.waiting;
 
       ctx.save();
       ctx.globalAlpha = style.fillAlpha;
 
-      if (style.canvasShape === 'hollow-circle') {
+      if (it.state === 'expired' || style.fillColor === null) {
         ctx.beginPath();
         ctx.arc(x, markerY, markerRadius, 0, Math.PI * 2);
-        ctx.strokeStyle = style.strokeColor;
+        ctx.strokeStyle = style.strokeColor || cfg.color;
         ctx.lineWidth = 2;
         ctx.stroke();
         if (style.lineStyle) {
@@ -1716,7 +1336,7 @@
 
       ctx.restore();
 
-      timerHitRegions.push({ x: x - markerRadius - 4, y: markerY - markerRadius - 4, w: markerRadius * 2 + 8, h: markerRadius * 2 + 8, ev: it.ev, state: it.state });
+      timerHitRegions.push({ x: x - markerRadius - 4, y: markerY - markerRadius - 4, w: markerRadius * 2 + 8, h: markerRadius * 2 + 8, ev: it.ev });
     });
 
     ctx.save();
@@ -1774,8 +1394,7 @@
       const y = e.clientY - rect.top;
       const ev = getTimerEventAt(x, y);
       if (ev) {
-        const fireAt = getFireAtMs(ev);
-        const fireTime = ev.display_fire_time_ms || ev.display_time_ms || formatTimeMs(fireAt, ev.time_mode);
+        const fireTime = ev.display_fire_time_ms || ev.display_time_ms || '';
         tooltip.innerHTML =
           '<div class="tt-head"><span style="color:#b71c1c">⏰</span> ' + escapeHtml(ev.event_type) + '</div>' +
           '<div class="tt-row">fire_at: ' + escapeHtml(fireTime) + '</div>' +
@@ -1818,7 +1437,6 @@
 
   function renderDetailForCategory(cat) {
     if (!eventDetailBody) return;
-    // 自动展开详情区
     if (eventDetail) {
       eventDetail.classList.remove('collapsed');
       isDetailCollapsed = false;
@@ -1836,7 +1454,6 @@
       return;
     }
 
-    // 排队中的先显示
     pendingList.slice().reverse().forEach(ev => eventDetailBody.appendChild(createDetailItem(ev, true)));
     list.slice().reverse().forEach(ev => eventDetailBody.appendChild(createDetailItem(ev, false)));
   }
@@ -1864,7 +1481,6 @@
 
   function renderDetailForEvent(ev) {
     if (!eventDetailBody) return;
-    // 自动展开详情区
     if (eventDetail) {
       eventDetail.classList.remove('collapsed');
       isDetailCollapsed = false;
@@ -1875,7 +1491,6 @@
     eventDetailTitle.textContent = cfg.icon + ' ' + ev.event_type;
     eventDetailBody.innerHTML = '';
     eventDetailBody.appendChild(createDetailItem(ev, ev.pending));
-    // 同时显示同分类相邻事件
     const list = events.filter(e => e.category === ev.category && e.id !== ev.id).slice(-20);
     if (list.length > 0) {
       const sep = document.createElement('div');
@@ -1888,40 +1503,26 @@
 
   function renderDetailForCluster(cluster) {
     if (!eventDetailBody) return;
-    // 自动展开详情区
     if (eventDetail) {
       eventDetail.classList.remove('collapsed');
       isDetailCollapsed = false;
       if (eventDetailToggleSym) eventDetailToggleSym.textContent = '▼';
       savePanelState();
     }
-    const evs = cluster.events.slice().sort((a, b) => a.ts - b.ts);
-    eventDetailTitle.textContent = '📌 ' + formatTimeMs(cluster.centerTs, cluster.timeMode) + ' (' + evs.length + '个事件)';
+    const centerEv = cluster.events.reduce((best, ev) => {
+      const d = Math.abs(getEventPosTs(ev) - cluster.centerTs);
+      return d < best.d ? { ev: ev, d: d } : best;
+    }, { ev: cluster.events[0], d: Infinity }).ev;
+    eventDetailTitle.textContent = '📌 ' + (centerEv.display_time_ms || centerEv.display_time || '') + ' (' + cluster.events.length + '个事件)';
     eventDetailBody.innerHTML = '';
+    const evs = cluster.events.slice().sort((a, b) => a.ts - b.ts);
     evs.forEach((ev, i) => {
-      const d = document.createElement('div');
-      d.className = 'event-item ev-' + ev.category + (ev.pending ? ' pending' : '') + (selectedEventId === ev.id ? ' selected' : '');
-      d.setAttribute('role', 'button');
-      d.setAttribute('tabindex', '0');
-      d.dataset.id = ev.id;
-      const cfg = CATEGORY_CONFIG[ev.category];
-      const cs = ev.code ? formatCode(ev.code) : (ev.codes && ev.codes.length > 0 ? formatCodes(ev.codes) : '-');
-      const ds = buildDetailsSummary(ev);
-      const ts = ev.category === 'ttl' ? getFireAtMs(ev) : getEventTs(ev);
-      const tsDisplay = ev.display_time_ms || formatTimeMs(ts, ev.time_mode);
-      d.innerHTML =
-        '<span class="ev-time">' + escapeHtml(tsDisplay) + '</span>' +
-        '<span class="ev-idx" style="color:#505070;font-size:9px;margin-right:4px;">#' + (i + 1) + '</span>' +
-        '<span class="ev-icon" title="' + cfg.label + '" style="color:' + cfg.color + '">' + cfg.icon + '</span>' +
-        '<span class="ev-type">' + escapeHtml(ev.event_type) + '</span>' +
-        '<span class="ev-code">' + escapeHtml(cs) + '</span>' +
-        '<span class="ev-details">' + escapeHtml(ds) + '</span>';
-      d.addEventListener('click', function () {
-        selectedEventId = ev.id;
-        activeCategory = ev.category;
-        renderDetailForEvent(ev);
-        render();
-      });
+      const d = createDetailItem(ev, false);
+      const idxSpan = document.createElement('span');
+      idxSpan.className = 'ev-idx';
+      idxSpan.style.cssText = 'color:#505070;font-size:9px;margin-right:4px;';
+      idxSpan.textContent = '#' + (i + 1);
+      d.insertBefore(idxSpan, d.children[1]);
       eventDetailBody.appendChild(d);
     });
   }
@@ -1935,8 +1536,7 @@
     const cfg = CATEGORY_CONFIG[ev.category];
     const codeStr = ev.code ? formatCode(ev.code) : (ev.codes && ev.codes.length > 0 ? formatCodes(ev.codes) : '-');
     const detailsStr = buildDetailsSummary(ev);
-
-    const tsDisplay = ev.display_time || formatTime(ev.ts, ev.time_mode);
+    const tsDisplay = ev.display_time || '';
     div.innerHTML =
       '<span class="ev-time">' + escapeHtml(tsDisplay) + '</span>' +
       '<span class="ev-icon" title="' + cfg.label + '" style="color:' + cfg.color + '">' + cfg.icon + '</span>' +
@@ -1953,7 +1553,7 @@
     return div;
   }
 
-  // ===== 总渲染（带节流，避免高频事件下 DOM 抖动）=====
+  // ===== 总渲染 =====
   function render() {
     if (renderTimer) return;
     renderTimer = setTimeout(function () {
@@ -2108,9 +1708,7 @@
       isPanelHidden = true;
       eventPanel.classList.add('hidden');
       eventPanel.classList.remove('visible');
-      if (!raw) {
-        return;
-      }
+      if (!raw) return;
       const state = JSON.parse(raw);
       var _vw = window.innerWidth;
       var _vh = window.innerHeight;
@@ -2147,9 +1745,9 @@
         if (wasPaused) {
           const count = pendingEvents.length;
           flushPendingEvents();
-          logSystem('事件接收已继续，已刷新 ' + count + ' 条排队事件');
+          console.log('[EventPanel] 事件接收已继续，已刷新 ' + count + ' 条排队事件');
         } else {
-          logSystem('事件接收已暂停，新事件进入排队队列');
+          console.log('[EventPanel] 事件接收已暂停，新事件进入排队队列');
         }
       });
     }
@@ -2157,7 +1755,6 @@
     if (btnClearEvents) {
       btnClearEvents.addEventListener('click', function () {
         clearEvents();
-        logSystem('事件已清空');
       });
     }
 
@@ -2193,7 +1790,6 @@
       });
     }
 
-    // 定时器队列折叠
     if (eventTimerQueue) {
       const header = eventTimerQueue.querySelector('.etp-timer-queue-header');
       if (header) {
@@ -2204,13 +1800,29 @@
     }
   }
 
-  // ===== SSE =====
+  // ===== SSE：唯一事件入口 =====
+  const _eventSubscribers = [];
+
+  function subscribeEvents(callback) {
+    _eventSubscribers.push(callback);
+    return function () {
+      var idx = _eventSubscribers.indexOf(callback);
+      if (idx !== -1) _eventSubscribers.splice(idx, 1);
+    };
+  }
+
+  function _notifyEventSubscribers(ev) {
+    _eventSubscribers.forEach(function (cb) {
+      try { cb(ev); } catch (e) { console.error('[EventPanel] event subscriber error:', e); }
+    });
+  }
+
   async function loadRecentEvents() {
     try {
       const res = await fetch('/api/events/recent');
       if (!res.ok) return;
       const data = await res.json();
-      const list = Array.isArray(data) ? data : (data.events || data.data || []);
+      const list = (data && data.events) || (Array.isArray(data) ? data : []);
       if (Array.isArray(list)) list.forEach(ev => addEvent(ev));
     } catch (e) { /* ignore */ }
   }
@@ -2222,7 +1834,11 @@
       eventSource = new EventSource('/api/events/stream');
       eventSource.onopen = function () { console.log('[EventPanel] SSE connected'); };
       eventSource.onmessage = function (e) {
-        try { const ev = JSON.parse(e.data); addEvent(ev); } catch (err) { console.error('[EventPanel] Parse SSE event failed:', err); }
+        try {
+          const ev = JSON.parse(e.data);
+          _notifyEventSubscribers(ev);
+          addEvent(ev);
+        } catch (err) { console.error('[EventPanel] Parse SSE event failed:', err); }
       };
       eventSource.onerror = function () {
         console.warn('[EventPanel] SSE error, reconnect in ' + (RECONNECT_DELAY / 1000) + 's...');
@@ -2240,15 +1856,75 @@
     if (eventSource) { eventSource.close(); eventSource = null; }
   }
 
-  // ===== 对外接口 =====
-  function logSystem(msg) {
-    addEvent({ event_type: 'EventLogged', time: new Date().toTimeString().slice(0, 8), details: { message: msg } });
+  // ===== 计时器队列轮询：仅作为展示 =====
+  let timerPollTimer = null;
+
+  async function syncTimerQueue() {
+    try {
+      var sid = sessionId || '';
+      var url = '/api/events/timer-queue' + (sid ? '?session_id=' + encodeURIComponent(sid) : '');
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.success || !Array.isArray(data.timers)) return;
+      const pollKeys = new Set();
+      data.timers.forEach(spec => {
+        const fireMs = Number(spec.fire_at_ms != null ? spec.fire_at_ms : spec.display_fire_ms);
+        if (isNaN(fireMs)) return;
+        const code = spec.code || '';
+        const key = 'poll-' + fireMs + '-' + (spec.edge_id || '') + '-' + code;
+        pollKeys.add(key);
+        const existingIdx = timerQueue.findIndex(t => t.key === key);
+        const pseudoEvent = {
+          id: 'timer-' + key,
+          ts: fireMs,
+          display_ts: fireMs,
+          category: spec.category || 'ttl',
+          event_type: spec.event_type || (spec.kind === 'edge' ? 'EdgeTimer' : 'TimerQueued'),
+          code: code,
+          pool_id: spec.pool_id || '',
+          edge_id: spec.edge_id || '',
+          display_fire_time: spec.display_fire_time || '',
+          display_fire_time_ms: spec.display_fire_time_ms || '',
+          state: spec.state || 'waiting',
+          trigger_type: spec.trigger_type || '定时器',
+          remaining_text: spec.remaining_text || '',
+          details: spec.details || { fire_at: fireMs < 1e12 ? fireMs / 1000 : fireMs, queue_position: 0, kind: spec.kind || 'ttl' },
+          raw: spec,
+          pending: false
+        };
+        if (existingIdx >= 0) {
+          timerQueue[existingIdx].ev = pseudoEvent;
+          timerQueue[existingIdx].updated = Date.now();
+        } else {
+          timerQueue.push({ key, ev: pseudoEvent, updated: Date.now(), source: 'poll' });
+        }
+      });
+      timerQueue = timerQueue.filter(t => {
+        if (t.source === 'poll') return pollKeys.has(t.key);
+        return true;
+      });
+      scheduleRender();
+    } catch (e) { /* ignore */ }
+  }
+
+  function startTimerPolling() {
+    if (timerPollTimer) return;
+    syncTimerQueue();
+    timerPollTimer = setInterval(syncTimerQueue, 1000);
+  }
+
+  function stopTimerPolling() {
+    if (timerPollTimer) {
+      clearInterval(timerPollTimer);
+      timerPollTimer = null;
+    }
+    timerQueue = timerQueue.filter(t => t.source !== 'poll');
   }
 
   function setSession(sid) {
     sessionId = sid;
     window.sessionId = sid;
-    if (sid) logSystem('Session: ' + sid.slice(0, 8));
   }
 
   function showEventPanel() {
@@ -2257,7 +1933,6 @@
       eventPanel.classList.add('visible');
       isPanelHidden = false;
       savePanelState();
-      // 面板可能因之前 hidden/collapsed 导致 Canvas 尺寸为 0，强制重绘
       requestAnimationFrame(function () {
         if (renderTimer) clearTimeout(renderTimer);
         renderTimer = null;
@@ -2285,16 +1960,14 @@
     }
   }
 
-  window.logSystemEvent = logSystem;
+  // 暴露最小必要全局接口
+  window.EventPanelBus = { subscribe: subscribeEvents };
   window.eventPanelSetSession = setSession;
   window.showEventPanel = showEventPanel;
   window.hideEventPanel = hideEventPanel;
   window.toggleEventPanel = toggleEventPanel;
   window.getEventCount = function() { return totalEventCount; };
-  window.MetaSim = { startSim: () => logSystem('Simulation started...'), stopSim: () => logSystem('Simulation stopped'), clearEvents: clearEvents, showPanel: showEventPanel };
-  window.eventPanelLoad = function () {};
   window.clearEventPanel = clearEvents;
-  window.timelineAddEvent = addEvent;
 
   // ===== 初始化 =====
   function init() {
@@ -2316,37 +1989,8 @@
       else if (currentViz === 'scatter') renderScatter();
     });
 
-    if (window.AppState && typeof window.AppState.subscribe === 'function') {
-      window.AppState.subscribe(function (key) {
-        if (key === 'mode' || key === 'simulationReset') {
-          if (isSimulationMode()) {
-            startTimerPolling();
-          } else {
-            stopTimerPolling();
-          }
-          if (key === 'simulationReset') {
-            timerQueue = timerQueue.filter(t => t.source !== 'poll');
-          }
-          scheduleRender();
-        }
-      });
-    }
-    if (window.RuntimeState && typeof window.RuntimeState.subscribe === 'function') {
-      window.RuntimeState.subscribe(function (key) {
-        if (key === 'runtimeState') {
-          updateMatrixNowLinePosition();
-          scheduleRender();
-        }
-      });
-    }
-    if (isSimulationMode()) {
-      startTimerPolling();
-    }
-
     loadRecentEvents();
     initSSE();
-
-    setTimeout(function () { logSystem('事件面板就绪'); }, 300);
   }
 
   if (document.readyState === 'loading') {

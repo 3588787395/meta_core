@@ -333,12 +333,21 @@ def format_timer_item(spec: Dict[str, Any], now_ms: float) -> Dict[str, Any]:
     ev_type = str(spec.get("event_type") or spec.get("kind") or "TimerQueued")
     state = get_timer_state(fire_at_ms, now_ms, ev_type)
     item["category"] = "ttl"
+    item["fire_at_ms"] = fire_at_ms
     item["display_fire_ms"] = fire_at_ms
     item["display_fire_time"] = format_display_time(fire_at_ms, relative=fire_at_ms < 86400000.0)
     item["display_fire_time_ms"] = format_display_time_ms(fire_at_ms, relative=fire_at_ms < 86400000.0)
     item["state"] = state
     item["trigger_type"] = get_timer_trigger_type(spec)
     item["remaining_text"] = format_remaining_time(fire_at_ms, now_ms)
+    if "event_type" not in item or not item["event_type"]:
+        item["event_type"] = ev_type
+    if "details" not in item or not item["details"]:
+        raw_fire_at = spec.get("fire_at")
+        item["details"] = {
+            "fire_at": raw_fire_at if raw_fire_at is not None else (fire_at_ms / 1000.0),
+            "kind": spec.get("kind", ""),
+        }
     return item
 
 

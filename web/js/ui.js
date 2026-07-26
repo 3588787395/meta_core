@@ -5818,7 +5818,7 @@ if (typeof module !== 'undefined' && module.exports) {
 
   async function fetchBars(code, period) {
     const sid = window.sessionId;
-    if (!sid) { if (typeof window.logSystemEvent === 'function') window.logSystemEvent('请先启动仿真'); return; }
+    if (!sid) { console.warn('请先启动仿真'); return; }
     if (!chartPanel) return;
     try {
       const res = await fetch('/api/sim/bars?session_id=' + sid + '&code=' + encodeURIComponent(code) + '&period=' + period);
@@ -6998,12 +6998,5 @@ function initEventTimeline() {
         });
     });
 }
-
-function timelineAddEvent(ev) {
-    if (__eventTimeline) {
-        __eventTimeline.addEvent(ev);
-    }
-}
-
 
 })();

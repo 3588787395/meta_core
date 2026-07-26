@@ -872,17 +872,25 @@ async def get_events_timer_queue(request: Request, session_id: str = ""):
                 pe = getattr(ep, "bus", None)
         specs = []
         if event_driver is not None:
-            for entry in getattr(event_driver, '_heap', []):
+            for idx, entry in enumerate(getattr(event_driver, '_heap', [])):
                 fire_time = entry[0] if isinstance(entry, (list, tuple)) and len(entry) >= 2 else 0
                 spec = entry[2] if isinstance(entry, (list, tuple)) and len(entry) >= 3 else None
                 params = getattr(spec, 'params', {}) if spec else {}
+                kind = params.get("kind", '')
+                event_type = params.get("event_type") or ("EdgeTimer" if kind == "edge" else "TimerQueued")
                 specs.append({
                     "edge_id": params.get("eid", ''),
                     "pool_id": params.get("tgt", ''),
                     "code": params.get("code", ''),
-                    "kind": params.get("kind", ''),
+                    "kind": kind,
+                    "event_type": event_type,
                     "fire_at": fire_time,
                     "interval": getattr(spec, 'interval', None) if spec else None,
+                    "details": {
+                        "fire_at": fire_time,
+                        "kind": kind,
+                        "queue_position": idx,
+                    },
                 })
             if now_ts is None:
                 state = getattr(event_driver, "_state", None)

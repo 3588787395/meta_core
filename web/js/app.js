@@ -10234,7 +10234,6 @@ var TableDrivenPanel = window.TableDrivenPanel;
     stopSimulationPolling();
     simSessionId = null;
     window.simSessionId = null;
-    _simEventOffset = 0;
     simStepCount = 0;
     _simSpeed = 1.0;
     AppState.resetSimulation();
@@ -10376,9 +10375,6 @@ var TableDrivenPanel = window.TableDrivenPanel;
           });
           node.params.stock_count = stocks.length;
           canvas._rerenderNode(nodeId);
-          if (typeof window.logSystemEvent === 'function') {
-            window.logSystemEvent('节点 ' + nodeId + ' 股票数: ' + stocks.length);
-          }
         }
       }
     } catch (e) {
@@ -10818,9 +10814,6 @@ var TableDrivenPanel = window.TableDrivenPanel;
       btnLoadDemo.addEventListener('click', function () {
         loadPool('sim_test_pool_100').then(function () {
           showToast('已加载示例池: sim_test_pool_100');
-          if (typeof window.logSystemEvent === 'function') {
-            window.logSystemEvent('已加载示例池 sim_test_pool_100');
-          }
         }).catch(function (err) {
           showToast('加载示例池失败: ' + (err.message || err), 'error');
         });
@@ -10860,9 +10853,6 @@ var TableDrivenPanel = window.TableDrivenPanel;
           else if (action === 'stop') poolRunStatus = 'stopped';
           updateRunControlButtons();
           showToast('已' + (action === 'start' ? '启动' : action === 'pause' ? '暂停' : action === 'resume' ? '继续' : '停止') + '池运行');
-          if (typeof window.logSystemEvent === 'function') {
-            window.logSystemEvent('池' + poolId + ' ' + (action === 'start' ? '启动' : action === 'pause' ? '暂停' : action === 'resume' ? '继续' : '停止'));
-          }
         } else {
           showToast('操作失败: ' + (data.msg || '未知错误'), 'error');
         }
@@ -12137,14 +12127,12 @@ var TableDrivenPanel = window.TableDrivenPanel;
       stopSimAutoStep();
       var oldSessionId = simSessionId;
       simSessionId = null;
-      _simEventOffset = 0;
       simStepCount = 0;
       AppState.resetSimulation();
       var stepCountEl = $('simulationStepCount');
       if (stepCountEl) stepCountEl.textContent = '步数: 0';
       var clockEl = $('simulationClock');
       if (clockEl) clockEl.textContent = '00:00:00';
-      clearEventPanel();
       if (typeof window.clearEventPanel === 'function') window.clearEventPanel();
       function restartSim() {
         updateSimBtnState(false);
@@ -12170,7 +12158,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
 
     var _clearBtn = $('eventPanelClear');
     if (_clearBtn) _clearBtn.addEventListener('click', function () {
-      clearEventPanel();
+      if (typeof window.clearEventPanel === 'function') window.clearEventPanel();
     });
 
     var _toggleBtn = $('eventPanelToggle');
@@ -12257,7 +12245,6 @@ var TableDrivenPanel = window.TableDrivenPanel;
     }
     simStepCount = 0;
     simSessionId = null;
-    _simEventOffset = 0;
     _simAutoStepping = false;
     _simSpeed = 1.0;
     AppState.resetSimulation();
@@ -12292,7 +12279,6 @@ var TableDrivenPanel = window.TableDrivenPanel;
         if (result.code === 0 && result.data && result.data.session_id) {
           simSessionId = result.data.session_id;
           window.simSessionId = simSessionId;
-          _simEventOffset = 0;
           if (typeof window.eventPanelSetSession === 'function') {
             window.eventPanelSetSession(simSessionId);
           }
@@ -12350,14 +12336,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
               if (clockEl2) clockEl2.textContent = hh + ':' + mm + ':' + ss;
               if (stepCountEl2) stepCountEl2.textContent = '步数: ' + simStepCount;
               window.simStepCount = simStepCount;
-              var stepEvents = result.data.events || [];
-              if (stepEvents.length > 0 && typeof window.timelineAddEvent === 'function') {
-                for (var ei = 0; ei < stepEvents.length; ei++) {
-                  window.timelineAddEvent(stepEvents[ei]);
-                }
-                _simEventOffset += stepEvents.length;
-              }
-              eventPanelLoad();
+              // 仿真步进产生的事件统一由后端 SSE 推送到事件面板，前端不再直接注入
               refreshSimNodeStocks();
             }
           }
@@ -12368,7 +12347,6 @@ var TableDrivenPanel = window.TableDrivenPanel;
           console.warn('[Sim] 会话不存在，重新创建仿真会话');
           simSessionId = null;
           window.simSessionId = null;
-          _simEventOffset = 0;
           startSimulationSession();
         } else {
           console.error('仿真步进失败:', result.msg || result.error);
@@ -12462,173 +12440,6 @@ var TableDrivenPanel = window.TableDrivenPanel;
   }
 
   var _eventPanelCollapsed = false;
-  var _lastEventPanelCount = 0;
-  var _simEventOffset = 0;
-
-  // ── Task 9 SubTask 9.4: 事件类型 → 分类映射 + 图标 + 颜色 ──────────────────
-  // 用户要求：事件面板必须用图标和颜色展示，并且可分类选择范围
-  // 图标显示在代表时间的矩形上（事件列表每行的时间戳左侧）
-  var _EVENT_CATEGORY_MAP = {
-    // Tick / 数据变化类 → 灰色
-    'TickReceived': 'tick', 'DataChanged': 'tick', 'TickDue': 'tick',
-    // Bar / K线合成类 → 蓝色
-    'BarComposed': 'bar', 'Bar': 'bar',
-    // 公式 / 筛选类 → 绿色（FormulaEvaluated / StockFiltered）
-    'FormulaEvaluated': 'formula', 'StockFiltered': 'formula', 'Formula': 'formula',
-    // 边触发类 → 橙色（EdgeFired / CrossOver）
-    'EdgeFired': 'edge', 'CrossOverDetected': 'edge', 'Edge': 'edge',
-    // 转移类 → 紫色（TransferExecuted / Executed）
-    'TransferExecuted': 'transfer', 'Executed': 'transfer', 'Transfer': 'transfer',
-    // 信号类 → 红色（Signal BUY/SELL）
-    'Signal': 'signal', 'BUY': 'signal', 'SELL': 'signal',
-    // 订单类 → 黄色（OrderPlaced / OrderFilled / PositionUpdated）
-    'OrderPlaced': 'order', 'OrderFilled': 'order', 'PositionUpdated': 'order', 'Order': 'order',
-    // TTL 过期类 → 深红（TTLExpired / TTLDue）
-    'TTLExpired': 'ttl', 'TTLDue': 'ttl', 'Timeout': 'ttl', 'TTL': 'ttl',
-    // 系统类 → 青色
-    'SimulationStep': 'system', 'TimeAdvanced': 'system', 'ModeChanged': 'system',
-    'PoolLoaded': 'system', 'ConfigChanged': 'system', 'ConfigLoaded': 'system',
-    'EventLogged': 'system', 'AlertRaised': 'system', 'Snapshot': 'system',
-    'Statistics': 'system', 'Replay': 'system', 'Simulation': 'system',
-    'Import': 'system', 'Export': 'system'
-  };
-
-  var _EVENT_CATEGORY_ICON = {
-    tick: '📊', bar: '📈', formula: '🧮', edge: '⚡', transfer: '🔄',
-    signal: '💰', order: '📋', ttl: '⏰', system: '🔧'
-  };
-
-  var _EVENT_CATEGORY_COLOR = {
-    tick: '#9e9e9e', bar: '#2196f3', formula: '#4caf50', edge: '#ff9800',
-    transfer: '#9c27b0', signal: '#f44336', order: '#ffc107', ttl: '#b71c1c',
-    system: '#00bcd4'
-  };
-
-  // 信号类子图标：BUY▲ / SELL▼
-  function _getEventIcon(category, type) {
-    if (category === 'signal') {
-      if (type === 'BUY') return '▲';
-      if (type === 'SELL') return '▼';
-      return '💰';
-    }
-    return _EVENT_CATEGORY_ICON[category] || '📝';
-  }
-
-  function _categorizeEventType(type) {
-    if (!type) return 'system';
-    if (_EVENT_CATEGORY_MAP[type]) return _EVENT_CATEGORY_MAP[type];
-    // 兜底：按事件类型名前缀分类
-    var t = String(type);
-    if (t.indexOf('Tick') === 0 || t.indexOf('Data') === 0) return 'tick';
-    if (t.indexOf('Bar') === 0) return 'bar';
-    if (t.indexOf('Formula') === 0 || t.indexOf('Stock') === 0 || t.indexOf('Filter') === 0) return 'formula';
-    if (t.indexOf('Edge') === 0 || t.indexOf('Cross') === 0) return 'edge';
-    if (t.indexOf('Transfer') === 0 || t.indexOf('Execut') === 0) return 'transfer';
-    if (t.indexOf('Signal') === 0 || t === 'BUY' || t === 'SELL') return 'signal';
-    if (t.indexOf('Order') === 0 || t.indexOf('Position') === 0) return 'order';
-    if (t.indexOf('TTL') === 0 || t.indexOf('Timeout') === 0) return 'ttl';
-    return 'system';
-  }
-
-  // 收集当前激活的事件分类过滤器（修正选择器 .etp-filter）
-  function _getActiveEventCategories() {
-    var activeCats = new Set();
-    var allChecked = false;
-    document.querySelectorAll('.etp-filter input[type="checkbox"]').forEach(function (cb) {
-      var f = cb.dataset.filter;
-      if (!f) return;
-      if (f === 'all') {
-        if (cb.checked) allChecked = true;
-      } else if (cb.checked) {
-        activeCats.add(f);
-      }
-    });
-    if (allChecked) {
-      // "全选"勾选时返回所有分类
-      return new Set(Object.keys(_EVENT_CATEGORY_ICON));
-    }
-    return activeCats;
-  }
-
-  function eventPanelLoad() {
-    // 统一通过新事件面板 API 加载事件
-    if (typeof timelineAddEvent !== 'function') return;
-
-    // 仿真模式：从 /api/sim/events 读取会话事件
-    if (AppState.mode === 'simulation' && simSessionId) {
-      fetch('/api/sim/events?session_id=' + encodeURIComponent(simSessionId) + '&since=' + _simEventOffset + '&limit=500')
-        .then(function (r) { return r.json(); })
-        .then(function (result) {
-          if (result.code !== 0 || !result.data) return;
-          var events = result.data.events || [];
-          var total = result.data.total || 0;
-          if (events.length > 0) _simEventOffset = total;
-          _lastEventPanelCount = events.length;
-          // 仿真时间由后端 /api/state/runtime 统一提供，前端不再自行维护
-          var clock = result.data.clock;
-          for (var i = 0; i < events.length; i++) {
-            var ev = events[i];
-            if ((ev.event_type || ev.type || 'UNKNOWN') === 'RANK_CHANGED') continue;
-            timelineAddEvent(ev);
-          }
-        })
-        .catch(function () {});
-      return;
-    }
-
-    // 普通模式：从 /api/pool/{poolName}/event-panel 读取历史事件
-    var poolId = poolData._poolId;
-    var poolName = poolId || (poolData._data && poolData._data.name) || '';
-    if (!poolName && poolData._isTDX && poolData._tdxFilename) {
-      poolName = poolData._tdxFilename.replace(/\.xml$/i, '');
-    }
-    if (!poolName) return;
-    fetch('/api/pool/' + encodeURIComponent(poolName) + '/event-panel?limit=500')
-      .then(function (r) { return r.json(); })
-      .then(function (result) {
-        if (!result.success) return;
-        var events = result.events || [];
-        _lastEventPanelCount = events.length;
-        for (var i = 0; i < events.length; i++) {
-          var ev = events[i];
-          if ((ev.event_type || 'UNKNOWN') === 'RANK_CHANGED') continue;
-          timelineAddEvent(ev);
-        }
-      })
-      .catch(function () {});
-  }
-
-  function formatEventTs(ts) {
-    if (typeof ts !== 'number') return String(ts);
-    var d = new Date(ts * 1000);
-    if (isNaN(d.getTime())) return String(ts);
-    var hh = String(d.getHours()).padStart(2, '0');
-    var mm = String(d.getMinutes()).padStart(2, '0');
-    var ss = String(d.getSeconds()).padStart(2, '0');
-    return hh + ':' + mm + ':' + ss;
-  }
-
-  function formatEventDetail(type, d) {
-    if (type === 'Signal') return (d.signal_type || '') + ' ' + (d.code || '') + ' @' + (d.price || 0) + ' qty=' + (d.quantity || 0);
-    if (type === 'Executed') return (d.edge_id || '') + ' enter:' + (d.entered || []).join(',') + ' exit:' + (d.exited || []).join(',');
-    if (type === 'DomainEvent') return (d.event_type || '') + ' ' + (d.code || '') + '→' + (d.pool_id || '');
-    if (type === 'DataChanged') return (d.source || '') + ' ' + (d.period || '') + ' [' + (d.codes || []).join(',') + ']';
-    return JSON.stringify(d);
-  }
-
-  function escHtml(s) {
-    var div = document.createElement('div');
-    div.textContent = s;
-    return div.innerHTML;
-  }
-
-  function clearEventPanel() {
-    var eventList = $('eventList');
-    if (eventList) eventList.innerHTML = '';
-    var eventCountEl = $('eventCount');
-    if (eventCountEl) eventCountEl.textContent = '0';
-    _lastEventPanelCount = 0;
-  }
 
   function startReplaySession() {
     var period = $('replayPeriodSelect').value;
