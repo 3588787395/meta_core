@@ -6,11 +6,11 @@
   - [x] SubTask 1.3: 将复杂计算（如事件时间归一化、TTL 计算、事件分类聚合、仿真时间换算）从 `event-panel.js` 和 `app.js` 后移到后端 `core/` 或新增 `web_engine` 模块
   - [x] SubTask 1.4: 保留在前端的仅限：UI 渲染、用户输入转发、SSE 订阅、纯界面状态（面板折叠/缩放/选中）
 
-- [ ] Task 2: 表驱动 UI 唯一路径实现
-  - [ ] SubTask 2.1: 梳理 `config/ui/ui_components.json`、`field_definitions.json`、`fields.json`、`ui_layouts.json`、`action_table.json`、`action_pipeline.json`、`api_routes.json`，补全缺失的节点/边/工具栏/菜单定义
-  - [ ] SubTask 2.2: 改造 `TableDrivenPanel`，使其渲染流程完全由配置表驱动，删除硬编码节点类型分支
-  - [ ] SubTask 2.3: 改造工具栏、右键菜单、移动端溢出菜单，统一从配置表生成，消除重复写死的菜单条目
-  - [ ] SubTask 2.4: 校验所有 UI 组件类型（`text_input`、`select`、`color_picker`、`flag_group` 等）在配置表与渲染器之间一一对应
+- [x] Task 2: 表驱动 UI 唯一路径实现
+  - [x] SubTask 2.1: 梳理 `config/ui/ui_components.json`、`field_definitions.json`、`fields.json`、`ui_layouts.json`、`action_table.json`、`action_pipeline.json`、`api_routes.json`，补全缺失的节点/边/工具栏/菜单定义
+  - [x] SubTask 2.2: 改造 `TableDrivenPanel`，使其渲染流程完全由配置表驱动，删除硬编码节点类型分支
+  - [x] SubTask 2.3: 改造工具栏、右键菜单、移动端溢出菜单，统一从配置表生成，消除重复写死的菜单条目
+  - [x] SubTask 2.4: 校验所有 UI 组件类型（`text_input`、`select`、`color_picker`、`flag_group` 等）在配置表与渲染器之间一一对应
 
 - [ ] Task 3: 事件驱动唯一路径实现
   - [ ] SubTask 3.1: 统一前端事件入口为单一 `EventSource('/api/events/stream')`，事件格式与 `core/event_bus.py` 事件契约对齐

@@ -4,94 +4,13 @@
   "menus": {
     "node": [
       {
-        "id": "ctx_properties",
-        "label": "属性",
-        "icon": "🔧",
-        "action": "properties",
-        "order": 1,
-        "visible_when": "always",
-        "separator_before": false,
-        "cell_types": ["all"]
-      },
-      {
-        "id": "ctx_comprehensive_settings",
-        "label": "综合设置",
-        "icon": "⚙",
-        "action": "comprehensiveSettings",
-        "order": 2,
-        "visible_when": "always",
-        "separator_before": false,
-        "cell_types": ["all"]
-      },
-      {
-        "id": "ctx_copy",
-        "label": "复制",
-        "icon": "📋",
-        "action": "copy",
-        "order": 3,
-        "visible_when": "always",
-        "separator_before": true,
-        "cell_types": ["all"]
-      },
-      {
-        "id": "ctx_cut",
-        "label": "剪切",
-        "icon": "✂",
-        "action": "cut",
-        "order": 4,
-        "visible_when": "always",
-        "separator_before": false,
-        "cell_types": ["all"]
-      },
-      {
-        "id": "ctx_paste",
-        "label": "粘贴",
-        "icon": "📄",
-        "action": "paste",
-        "order": 5,
-        "visible_when": "has_clipboard",
-        "separator_before": false,
-        "cell_types": ["all"]
-      },
-      {
-        "id": "ctx_bring_to_front",
-        "label": "置于顶层",
-        "icon": "⬆",
-        "action": "bringToFront",
-        "order": 6,
-        "visible_when": "always",
-        "separator_before": true,
-        "cell_types": ["all"]
-      },
-      {
-        "id": "ctx_send_to_back",
-        "label": "置于底层",
-        "icon": "⬇",
-        "action": "sendToBack",
-        "order": 7,
-        "visible_when": "always",
-        "separator_before": false,
-        "cell_types": ["all"]
-      },
-      {
-        "id": "ctx_delete_node",
-        "label": "删除",
-        "icon": "🗑",
-        "action": "delete",
-        "order": 8,
-        "visible_when": "always",
-        "separator_before": true,
-        "cell_types": ["all"],
-        "danger": true
-      },
-      {
         "id": "ctx_add_node_submenu",
         "label": "添加节点",
         "icon": "➕",
         "action": "addNode",
-        "order": 9,
+        "order": 1,
         "visible_when": "design_mode",
-        "separator_before": true,
+        "separator_before": false,
         "cell_types": ["all"],
         "submenu": [
           {
@@ -137,6 +56,87 @@
             "action": "addColumn"
           }
         ]
+      },
+      {
+        "id": "ctx_properties",
+        "label": "属性",
+        "icon": "🔧",
+        "action": "properties",
+        "order": 2,
+        "visible_when": "always",
+        "separator_before": true,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_comprehensive_settings",
+        "label": "综合设置",
+        "icon": "⚙",
+        "action": "comprehensiveSettings",
+        "order": 3,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_copy",
+        "label": "复制",
+        "icon": "📋",
+        "action": "copy",
+        "order": 4,
+        "visible_when": "always",
+        "separator_before": true,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_cut",
+        "label": "剪切",
+        "icon": "✂",
+        "action": "cut",
+        "order": 5,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_paste",
+        "label": "粘贴",
+        "icon": "📄",
+        "action": "paste",
+        "order": 6,
+        "visible_when": "has_clipboard",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_bring_to_front",
+        "label": "置于顶层",
+        "icon": "⬆",
+        "action": "bringToFront",
+        "order": 7,
+        "visible_when": "always",
+        "separator_before": true,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_send_to_back",
+        "label": "置于底层",
+        "icon": "⬇",
+        "action": "sendToBack",
+        "order": 8,
+        "visible_when": "always",
+        "separator_before": false,
+        "cell_types": ["all"]
+      },
+      {
+        "id": "ctx_delete_node",
+        "label": "删除",
+        "icon": "🗑",
+        "action": "delete",
+        "order": 9,
+        "visible_when": "always",
+        "separator_before": true,
+        "cell_types": ["all"],
+        "danger": true
       }
     ],
     "edge": [

@@ -586,6 +586,50 @@
             {"key": "clr", "comp": "color_picker", "label": "线条颜色", "data_path": "clr", "default": -1, "hint": "DZH GDI 颜色整数值"},
             {"key": "mid", "comp": "number_input", "label": "弯曲度 (mid)", "data_path": "mid", "default": 0, "hint": "正值向右弯曲，负值向左弯曲"}
           ]
+        },
+        {
+          "title": "计算参数",
+          "collapsible": true,
+          "fields": [
+            {"key": "formula_ref", "comp": "text_input", "label": "公式引用", "data_path": "formula_ref", "default": "", "hint": "如 KDJ / MACD"},
+            {"key": "operator", "comp": "select", "label": "操作符", "data_path": "operator", "default": "", "options": [
+              {"value": "", "label": "未设置"}, {"value": "0", "label": "等于"}, {"value": "1", "label": "大于"},
+              {"value": "2", "label": "小于"}, {"value": "3", "label": "金叉"}, {"value": "4", "label": "死叉"},
+              {"value": "5", "label": "排名为"}, {"value": "6", "label": "排名前N"}, {"value": "7", "label": "排名后N"},
+              {"value": "8", "label": "上拐"}, {"value": "9", "label": "下拐"}
+            ]},
+            {"key": "threshold", "comp": "number_input", "label": "阈值", "data_path": "threshold", "default": "", "step": 0.01},
+            {"key": "nset", "comp": "select", "label": "公式类型(nset)", "data_path": "nset", "default": "", "options": [
+              {"value": "", "label": "未设置"}, {"value": "0", "label": "技术指标"}, {"value": "1", "label": "条件选股"},
+              {"value": "2", "label": "专家系统"}, {"value": "3", "label": "最新财务"},
+              {"value": "4", "label": "实时行情"}, {"value": "5", "label": "逻辑运算"}
+            ]},
+            {"key": "noperate", "comp": "select", "label": "操作(noperate)", "data_path": "noperate", "default": "", "options": [
+              {"value": "", "label": "未设置"}, {"value": "0", "label": "等于"}, {"value": "1", "label": "大于"},
+              {"value": "2", "label": "小于"}, {"value": "3", "label": "金叉"}, {"value": "4", "label": "死叉"},
+              {"value": "5", "label": "排名为"}, {"value": "6", "label": "排名前N"}, {"value": "7", "label": "排名后N"},
+              {"value": "8", "label": "上拐"}, {"value": "9", "label": "下拐"}
+            ]}
+          ]
+        },
+        {
+          "title": "K 线配置",
+          "collapsible": true,
+          "fields": [
+            {"key": "period", "comp": "select", "label": "周期(period)", "data_path": "period", "default": "", "options": [
+              {"value": "", "label": "未设置"}, {"value": "0", "label": "分笔"}, {"value": "1", "label": "1分钟"},
+              {"value": "2", "label": "5分钟"}, {"value": "3", "label": "15分钟"}, {"value": "4", "label": "30分钟"},
+              {"value": "5", "label": "60分钟"}, {"value": "6", "label": "日线"},
+              {"value": "7", "label": "周线"}, {"value": "8", "label": "月线"}
+            ]},
+            {"key": "length", "comp": "number_input", "label": "长度(length)", "data_path": "length", "default": "", "min": 0},
+            {"key": "bar_type", "comp": "select", "label": "K线类型(bar_type)", "data_path": "bar_type", "default": "", "options": [
+              {"value": "", "label": "未设置"}, {"value": "0", "label": "分笔"}, {"value": "1", "label": "1分钟"},
+              {"value": "5", "label": "5分钟"}, {"value": "15", "label": "15分钟"}, {"value": "30", "label": "30分钟"},
+              {"value": "60", "label": "60分钟"}, {"value": "daily", "label": "日线"},
+              {"value": "weekly", "label": "周线"}, {"value": "monthly", "label": "月线"}
+            ]}
+          ]
         }
       ]
     },

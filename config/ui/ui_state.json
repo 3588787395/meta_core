@@ -18,6 +18,7 @@
   },
   "buttons": {
     "btnNew": {"enabled": "is_edit_mode"},
+    "btnLoadDemo": {"enabled": "is_edit_mode"},
     "btnSave": {"enabled": "has_unsaved_changes && pool_loaded"},
     "btnUndo": {"enabled": "can_undo"},
     "btnRedo": {"enabled": "can_redo"},
@@ -28,10 +29,17 @@
     "btnTdxPools": {"enabled": "always"},
     "btnExecOrder": {"enabled": "pool_loaded && is_edit_mode"},
     "btnFlowMode": {"enabled": "is_edit_mode"},
+    "btnEdgeLineType": {"enabled": "is_edit_mode"},
+    "btnStart": {"enabled": "pool_loaded && !is_running"},
+    "btnPause": {"enabled": "is_running"},
+    "btnStop": {"enabled": "is_running"},
+    "btnDesign": {"enabled": "always"},
     "btnRun": {"enabled": "pool_loaded"},
     "btnReplay": {"enabled": "pool_loaded"},
+    "btnSimulation": {"enabled": "pool_loaded"},
     "btnRuleEditor": {"enabled": "always"},
     "btnComprehensiveSettings": {"enabled": "pool_loaded"},
+    "btnFormula": {"enabled": "always"},
     "btnConfigCenter": {"enabled": "always"}
   },
   "panels": {

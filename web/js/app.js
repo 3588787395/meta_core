@@ -10721,59 +10721,25 @@ var TableDrivenPanel = window.TableDrivenPanel;
       });
     }
 
-    // Edge line type selector — 按钮常驻工具栏，菜单挂到 dropdownContainer 避免残留
+    // Edge line type selector — 使用 toolbar_config.json 渲染的下拉菜单
     var btnEdgeLineType = $('btnEdgeLineType');
-    if (btnEdgeLineType) {
-      var ltDropdown = $('edgeLineTypeDropdown');
-
-      // ── Clean up stale line-type menus from previous loads ──
-      var dc = document.getElementById('dropdownContainer');
-      if (dc) {
-        dc.querySelectorAll('.tb-dropdown-menu').forEach(function (m) {
-          if (m.querySelectorAll('[data-linetype]').length > 0) m.remove();
-        });
-      }
-
-      // ── Always create fresh menu in dropdownContainer ──
-      var ltMenu = document.createElement('div');
-      ltMenu.className = 'tb-dropdown-menu';
-      ltMenu.style.minWidth = '120px';
-      ltMenu.style.display = 'none';
-      ltMenu.style.pointerEvents = 'auto';  // 覆盖父容器 pointer-events:none
-      ['bezier', 'orthogonal', 'straight'].forEach(function (lt) {
-        var item = document.createElement('div');
-        item.className = 'tb-dropdown-item';
-        item.setAttribute('data-linetype', lt);
-        item.textContent = { bezier: '〰 贝兹曲线', orthogonal: '├ 横竖折线', straight: '─ 直线' }[lt];
-        ltMenu.appendChild(item);
+    var ltDropdown = $('edgeLineTypeDropdown');
+    if (btnEdgeLineType && ltDropdown) {
+      btnEdgeLineType.addEventListener('click', function (e) {
+        e.stopPropagation();
+        ltDropdown.classList.toggle('hidden');
+        positionDropdown(ltDropdown, this);
       });
-      if (dc) { dc.appendChild(ltMenu); } else if (ltDropdown) { ltDropdown.appendChild(ltMenu); }
-
-      var ltItems = ltMenu ? ltMenu.querySelectorAll('[data-linetype]') : [];
-      if (ltItems.length) {
-        btnEdgeLineType.addEventListener('click', function (e) {
-          e.stopPropagation();
-          if (!ltMenu) return;
-          // 定位菜单到按钮下方
-          var rect = btnEdgeLineType.getBoundingClientRect();
-          ltMenu.style.position = 'fixed';
-          ltMenu.style.left = rect.left + 'px';
-          ltMenu.style.top = (rect.bottom + 2) + 'px';
-          ltMenu.style.display = ltMenu.style.display === 'block' ? 'none' : 'block';
-        });
-        ltItems.forEach(function (item) {
-          item.addEventListener('click', function () {
-            var lt = this.getAttribute('data-linetype');
-            canvas.setEdgeLineType(lt);
-            btnEdgeLineType.textContent = { bezier: '〰 贝兹', orthogonal: '├ 横竖', straight: '─ 直线' }[lt] + ' ▼';
-            if (ltMenu) ltMenu.style.display = 'none';
-            showToast('线形: ' + { bezier: '贝兹曲线', orthogonal: '横竖折线', straight: '直线' }[lt]);
-          });
-        });
-        document.addEventListener('click', function () {
-          if (ltMenu) ltMenu.style.display = 'none';
-        });
-      }
+      ltDropdown.addEventListener('click', function (e) {
+        var item = e.target.closest('[data-linetype]');
+        if (!item) return;
+        e.stopPropagation();
+        var lt = item.getAttribute('data-linetype');
+        ltDropdown.classList.add('hidden');
+        canvas.setEdgeLineType(lt);
+        btnEdgeLineType.innerHTML = { bezier: '〰 贝兹', orthogonal: '├ 横竖', straight: '─ 直线' }[lt] + ' <span class="tb-dropdown-arrow">▼</span>';
+        showToast('线形: ' + { bezier: '贝兹曲线', orthogonal: '横竖折线', straight: '直线' }[lt]);
+      });
     }
 
     // Mode switch buttons — 设计模式单独切换，运行模式互斥

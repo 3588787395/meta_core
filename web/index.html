@@ -34,124 +34,14 @@
     <span class="pool-name-display" id="poolNameDisplay"></span>
     <span class="tb-sep"></span>
 
-    <button class="tb-btn" id="btnNew" title="新建空白池">🆕 新建</button>
-    <button class="tb-btn" id="btnLoadDemo" title="加载示例池 sim_test_pool_100">📊 加载示例池</button>
-
-    <div class="tb-dropdown-wrapper">
-      <button class="tb-btn tb-btn-dropdown" id="btnAddNode" title="添加节点">➕ 添加 <span class="tb-dropdown-arrow">▼</span></button>
-      <div class="tb-dropdown-menu hidden" id="addNodeDropdown">
-        <div class="tb-dropdown-item" data-node-type="source" data-action="addSource">📦 备选池</div>
-        <div class="tb-dropdown-item" data-node-type="condition" data-action="addCondition">🔀 转移条件</div>
-        <div class="tb-dropdown-item" data-node-type="statepool" data-action="addStatePool">🏷 状态池</div>
-        <div class="tb-dropdown-item" data-node-type="discard" data-action="addDiscard">🗑 丢弃池</div>
-        <div class="tb-dropdown-item" data-node-type="label" data-action="addLabel">📝 文字标签</div>
-      </div>
-    </div>
-
-    <div class="tb-dropdown-wrapper">
-      <button class="tb-btn tb-btn-dropdown" id="btnImport" title="导入">📥 导入 <span class="tb-dropdown-arrow">▼</span></button>
-      <div class="tb-dropdown-menu hidden" id="importDropdown">
-        <div class="tb-dropdown-item" data-format="dzh">📥 DZH格式 XML</div>
-        <div class="tb-dropdown-item" data-format="tdx">📥 通达信格式 XML</div>
-        <div class="tb-dropdown-item" data-format="json">📥 JSON 格式</div>
-      </div>
-    </div>
-
-    <div class="tb-dropdown-wrapper">
-      <button class="tb-btn tb-btn-dropdown" id="btnExport" title="导出" disabled>📤 导出 <span class="tb-dropdown-arrow">▼</span></button>
-      <div class="tb-dropdown-menu hidden" id="exportDropdown">
-        <div class="tb-dropdown-item" data-format="dzh">📤 DZH格式 XML</div>
-        <div class="tb-dropdown-item" data-format="tdx">📤 通达信格式 XML</div>
-        <div class="tb-dropdown-item" data-format="json">📤 JSON 格式</div>
-      </div>
-    </div>
-
-    <button class="tb-btn" id="btnSave" title="保存到服务器" disabled>💾 保存</button>
-    <span class="tb-sep"></span>
-    <button class="tb-btn" id="btnUndo" title="撤销 (Ctrl+Z)" disabled>↩ 撤销</button>
-    <button class="tb-btn" id="btnRedo" title="重做 (Ctrl+Y)" disabled>↪ 重做</button>
-    <span class="tb-sep"></span>
-    <button class="tb-btn" id="btnFit" title="适应画布">⊡ 适应</button>
-    <button class="tb-btn" id="btnExecOrder" title="执行顺序">🔢 顺序</button>
-    <button class="tb-btn" id="btnFlowMode" title="连线模式 (F)">🔗 连线</button>
-    <div class="tb-dropdown" id="edgeLineTypeDropdown">
-      <button class="tb-btn tb-dropdown-toggle" id="btnEdgeLineType" title="连线线形">📐 线形 ▼</button>
-      <div class="tb-dropdown-menu" style="min-width:120px;">
-        <div class="tb-dropdown-item" data-linetype="bezier">〰 贝兹曲线</div>
-        <div class="tb-dropdown-item" data-linetype="orthogonal">├ 横竖折线</div>
-        <div class="tb-dropdown-item" data-linetype="straight">─ 直线</div>
-      </div>
-    </div>
-    <span class="tb-sep"></span>
-    <div class="run-control-group" id="runControlGroup" style="display:inline-flex;gap:2px;background:rgba(0,0,0,0.2);padding:2px;border-radius:6px;border:1px solid var(--border-color);">
-      <button class="tb-btn run-btn" id="btnStart" title="开始运行" style="background:#27ae60;color:#fff;border-color:#27ae60;">▶ 开始</button>
-      <button class="tb-btn run-btn" id="btnPause" title="暂停运行" disabled>⏸ 暂停</button>
-      <button class="tb-btn run-btn" id="btnStop" title="停止运行" disabled>⏹ 停止</button>
-    </div>
-    <span class="tb-sep"></span>
-    <div class="mode-switch-group" id="modeSwitchGroup">
-      <button class="tb-btn mode-btn active" id="btnDesign" title="设计模式切换">🎨 设计模式</button>
-    </div>
-    <div class="run-mode-group" id="runModeGroup" style="display:inline-flex;gap:2px;background:rgba(0,0,0,0.2);padding:2px;border-radius:6px;border:1px solid var(--border-color);">
-      <button class="tb-btn run-mode-btn" id="btnRun" title="实盘模式">▶ 实盘</button>
-      <button class="tb-btn run-mode-btn" id="btnReplay" title="回放模式">⏪ 回放</button>
-      <button class="tb-btn run-mode-btn active" id="btnSimulation" title="仿真模式">🔬 仿真</button>
-    </div>
-    <span class="tb-sep"></span>
-    <button class="tb-btn" id="btnTdxPools" title="显示/隐藏池列表侧栏">☰ 列表</button>
-    <span class="tb-sep"></span>
-    <button class="tb-btn" id="btnRuleEditor" title="规则配置编辑器">⚙ 规则</button>
-    <button class="tb-btn" id="btnComprehensiveSettings" title="股票池流程综合设置">⚙ 综合设置</button>
-    <a href="#/formula" class="tb-btn" title="公式编辑器" style="text-decoration:none">📐 公式</a>
-    <a href="#/config" class="tb-btn" title="配置中心" style="text-decoration:none">⚙ 配置中心</a>
+    <div class="topbar-center" id="toolbarButtons"></div>
 
     <div class="topbar-spacer"></div>
     <span class="topbar-zoom" id="topbarZoom">100%</span>
   </header>
 
-  <!-- Overflow menu for mobile/tablet (mirrors hidden toolbar buttons) -->
-  <div class="overflow-menu" id="overflowMenu">
-    <button class="tb-btn" id="btnNewOverflow" title="新建空白池">🆕 新建</button>
-    <div class="tb-dropdown-wrapper">
-      <button class="tb-btn tb-btn-dropdown" id="btnAddNodeOverflow" title="添加节点">➕ 添加 <span class="tb-dropdown-arrow">▼</span></button>
-      <div class="tb-dropdown-menu hidden" id="addNodeDropdownOverflow">
-        <div class="tb-dropdown-item" data-node-type="source" data-action="addSource">📦 备选池</div>
-        <div class="tb-dropdown-item" data-node-type="condition" data-action="addCondition">🔀 转移条件</div>
-        <div class="tb-dropdown-item" data-node-type="statepool" data-action="addStatePool">🏷 状态池</div>
-        <div class="tb-dropdown-item" data-node-type="discard" data-action="addDiscard">🗑 丢弃池</div>
-        <div class="tb-dropdown-item" data-node-type="label" data-action="addLabel">📝 文字标签</div>
-      </div>
-    </div>
-    <div class="tb-dropdown-wrapper">
-      <button class="tb-btn tb-btn-dropdown" id="btnImportOverflow" title="导入">📥 导入 <span class="tb-dropdown-arrow">▼</span></button>
-      <div class="tb-dropdown-menu hidden" id="importDropdownOverflow">
-        <div class="tb-dropdown-item" data-format="dzh">📥 DZH格式 XML</div>
-        <div class="tb-dropdown-item" data-format="tdx">📥 通达信格式 XML</div>
-        <div class="tb-dropdown-item" data-format="json">📥 JSON 格式</div>
-      </div>
-    </div>
-    <div class="tb-dropdown-wrapper">
-      <button class="tb-btn tb-btn-dropdown" id="btnExportOverflow" title="导出">📤 导出 <span class="tb-dropdown-arrow">▼</span></button>
-      <div class="tb-dropdown-menu hidden" id="exportDropdownOverflow">
-        <div class="tb-dropdown-item" data-format="dzh">📤 DZH格式 XML</div>
-        <div class="tb-dropdown-item" data-format="tdx">📤 通达信格式 XML</div>
-        <div class="tb-dropdown-item" data-format="json">📤 JSON 格式</div>
-      </div>
-    </div>
-    <button class="tb-btn" id="btnFitOverflow" title="适应画布">⊡ 适应</button>
-    <button class="tb-btn" id="btnExecOrderOverflow" title="执行顺序">🔢 顺序</button>
-    <button class="tb-btn" id="btnFlowModeOverflow" title="连线模式">🔗 连线</button>
-    <button class="tb-btn mode-btn" id="btnDesignOverflow" title="设计模式">🎨 设计</button>
-    <button class="tb-btn mode-btn" id="btnRunOverflow" title="实盘模式">▶ 实盘</button>
-    <button class="tb-btn mode-btn" id="btnReplayOverflow" title="回放模式">⏪ 回放</button>
-    <button class="tb-btn mode-btn" id="btnSimulationOverflow" title="仿真模式">🔬 仿真</button>
-    <button class="tb-btn" id="btnTdxPoolsOverflow" title="显示/隐藏池列表侧栏">☰ 列表</button>
-    <button class="tb-btn" id="btnRuleEditorOverflow" title="规则配置">⚙ 规则</button>
-    <button class="tb-btn" id="btnComprehensiveSettingsOverflow" title="综合设置">⚙ 综合设置</button>
-    <a href="#/formula" class="tb-btn" title="公式编辑器" style="text-decoration:none">📐 公式</a>
-    <button class="tb-btn" id="btnUndoOverflow" title="撤销" disabled>↩ 撤销</button>
-    <button class="tb-btn" id="btnRedoOverflow" title="重做" disabled>↪ 重做</button>
-  </div>
+  <!-- Overflow menu for mobile/tablet (rendered from toolbar_config.json) -->
+  <div class="overflow-menu" id="overflowMenu"></div>
 
   <!-- ===== Mode Indicator ===== -->
   <div id="modeIndicator"></div>
@@ -234,30 +124,8 @@
   <button class="mobile-float-btn" id="mobileAddPool" title="添加状态池">📦</button>
 </div>
 
-<!-- ===== Context Menu ===== -->
-<div id="contextMenu">
-  <div class="ctx-item ctx-has-sub" data-action="addNode">➕ 添加节点 ▸
-    <div class="ctx-sub">
-      <div class="ctx-item" data-action="addSource">📦 备选池</div>
-      <div class="ctx-item" data-action="addCondition">🔀 转移条件</div>
-      <div class="ctx-item" data-action="addStatePool">🏷 状态池</div>
-      <div class="ctx-item" data-action="addDiscard">🗑 丢弃池</div>
-      <div class="ctx-item" data-action="addLabel">📝 文字标签</div>
-    </div>
-  </div>
-  <div class="ctx-sep"></div>
-  <div class="ctx-item" data-action="properties">🔧 属性</div>
-    <div class="ctx-item" data-action="comprehensiveSettings">⚙ 综合设置</div>
-    <div class="ctx-sep"></div>
-  <div class="ctx-item" data-action="copy">📋 复制</div>
-  <div class="ctx-item" data-action="cut">✂ 剪切</div>
-  <div class="ctx-item" data-action="paste">📄 粘贴</div>
-  <div class="ctx-sep"></div>
-  <div class="ctx-item" data-action="bringToFront">⬆ 置于顶层</div>
-  <div class="ctx-item" data-action="sendToBack">⬇ 置于底层</div>
-  <div class="ctx-sep"></div>
-  <div class="ctx-item ctx-danger" data-action="delete">🗑 删除</div>
-</div>
+<!-- ===== Context Menu (rendered from context_menu_config.json) ===== -->
+<div id="contextMenu"></div>
 
 <!-- ===== Context Dialogs (TDX V8 + DZH Right-Click) ===== -->
 <div id="lineWidthDialog" class="ctx-dialog" style="display:none;">

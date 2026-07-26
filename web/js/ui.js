@@ -433,7 +433,7 @@
   });
 
   // 颜色选择器（增强版：色块+名称+hex可视化显示，点击可复制）
-  ComponentRegistry.register('color_picker', function (field, data) {
+  var _colorPickerRenderer = function (field, data) {
     var val = DataBinder.get(data, field.data_path, field.default || -1);
     // 处理字符串格式的颜色值（如 "16744448"）
     var intVal = (typeof val === 'string' && val !== '') ? parseInt(val, 10) : (typeof val === 'number' ? val : -1);
@@ -459,7 +459,9 @@
     html += '<div class="td-color-badge-wrap" style="margin-top:4px;padding:4px 6px;background:var(--bg-secondary);border-radius:3px;border:1px solid var(--border-color);">' + colorBadgeHtml + '</div>';
     html += '</div>';
     return html;
-  });
+  };
+  ComponentRegistry.register('color_picker', _colorPickerRenderer);
+  ComponentRegistry.register('color_input', _colorPickerRenderer);
 
   // 位标志组（复选框组）
   ComponentRegistry.register('flag_group', function (field, data) {
@@ -1467,63 +1469,6 @@
         data: data
       }, function (resp) {
         if (resp && !resp.error) {
-          // 边属性面板：补充计算参数与 K 线配置字段（Task 1）
-          if ((resp.layout_id === 'flow_edge' || resp.layout_id === 'tdx_flow_edge') && resp.sections) {
-            var existingKeys = {};
-            resp.sections.forEach(function(sec) {
-              (sec.fields || []).forEach(function(f) { existingKeys[f.key] = true; });
-            });
-            var extraSections = [
-              {
-                title: '计算参数',
-                collapsible: true,
-                fields: [
-                  { key: 'formula_ref', comp: 'text_input', label: '公式引用', data_path: 'formula_ref', default: '', hint: '如 KDJ / MACD' },
-                  { key: 'operator', comp: 'select', label: '操作符', data_path: 'operator', default: '', options: [
-                    { value: '', label: '未设置' }, { value: '0', label: '等于' }, { value: '1', label: '大于' },
-                    { value: '2', label: '小于' }, { value: '3', label: '金叉' }, { value: '4', label: '死叉' },
-                    { value: '5', label: '排名为' }, { value: '6', label: '排名前N' }, { value: '7', label: '排名后N' },
-                    { value: '8', label: '上拐' }, { value: '9', label: '下拐' }
-                  ]},
-                  { key: 'threshold', comp: 'number_input', label: '阈值', data_path: 'threshold', default: '', step: 0.01 },
-                  { key: 'nset', comp: 'select', label: '公式类型(nset)', data_path: 'nset', default: '', options: [
-                    { value: '', label: '未设置' }, { value: '0', label: '技术指标' }, { value: '1', label: '条件选股' },
-                    { value: '2', label: '专家系统' }, { value: '3', label: '最新财务' },
-                    { value: '4', label: '实时行情' }, { value: '5', label: '逻辑运算' }
-                  ]},
-                  { key: 'noperate', comp: 'select', label: '操作(noperate)', data_path: 'noperate', default: '', options: [
-                    { value: '', label: '未设置' }, { value: '0', label: '等于' }, { value: '1', label: '大于' },
-                    { value: '2', label: '小于' }, { value: '3', label: '金叉' }, { value: '4', label: '死叉' },
-                    { value: '5', label: '排名为' }, { value: '6', label: '排名前N' }, { value: '7', label: '排名后N' },
-                    { value: '8', label: '上拐' }, { value: '9', label: '下拐' }
-                  ]}
-                ]
-              },
-              {
-                title: 'K 线配置',
-                collapsible: true,
-                fields: [
-                  { key: 'period', comp: 'select', label: '周期(period)', data_path: 'period', default: '', options: [
-                    { value: '', label: '未设置' }, { value: '0', label: '分笔' }, { value: '1', label: '1分钟' },
-                    { value: '2', label: '5分钟' }, { value: '3', label: '15分钟' }, { value: '4', label: '30分钟' },
-                    { value: '5', label: '60分钟' }, { value: '6', label: '日线' },
-                    { value: '7', label: '周线' }, { value: '8', label: '月线' }
-                  ]},
-                  { key: 'length', comp: 'number_input', label: '长度(length)', data_path: 'length', default: '', min: 0 },
-                  { key: 'bar_type', comp: 'select', label: 'K线类型(bar_type)', data_path: 'bar_type', default: '', options: [
-                    { value: '', label: '未设置' }, { value: '0', label: '分笔' }, { value: '1', label: '1分钟' },
-                    { value: '5', label: '5分钟' }, { value: '15', label: '15分钟' }, { value: '30', label: '30分钟' },
-                    { value: '60', label: '60分钟' }, { value: 'daily', label: '日线' },
-                    { value: 'weekly', label: '周线' }, { value: 'monthly', label: '月线' }
-                  ]}
-                ]
-              }
-            ];
-            extraSections.forEach(function(sec) {
-              sec.fields = sec.fields.filter(function(f) { return !existingKeys[f.key]; });
-              if (sec.fields.length) resp.sections.push(sec);
-            });
-          }
           // 缓存布局配置（用于后续字段查找和联动处理）
           if (resp.layout_id) {
             self._layoutCache.set(cacheKey, resp);
@@ -5581,6 +5526,9 @@ if (typeof module !== 'undefined' && module.exports) {
     var firstGroup = true;
 
     groups.forEach(function (group) {
+      var groupButtons = buttons.filter(function (btn) { return btn.group === group.group_id; });
+      if (!groupButtons.length) return;
+
       // 组间分隔符
       if (!firstGroup) {
         var sep = document.createElement('span');
@@ -5589,15 +5537,21 @@ if (typeof module !== 'undefined' && module.exports) {
       }
       firstGroup = false;
 
-      // 渲染该组的按钮
-      buttons.filter(function (btn) { return btn.group === group.group_id; })
-        .forEach(function (btn) {
-          var el = _renderButton(btn, state, false);
-          if (el) {
-            container.appendChild(el);
-            _renderedButtons.push(btn.id);
-          }
-        });
+      // 若分组配置了 wrapper_class，则用包装器包裹该组按钮
+      var wrapper = container;
+      if (group.wrapper_class) {
+        wrapper = document.createElement('div');
+        wrapper.className = group.wrapper_class;
+        container.appendChild(wrapper);
+      }
+
+      groupButtons.forEach(function (btn) {
+        var el = _renderButton(btn, state, false);
+        if (el) {
+          wrapper.appendChild(el);
+          _renderedButtons.push(btn.id);
+        }
+      });
     });
   }
 
@@ -5688,19 +5642,16 @@ if (typeof module !== 'undefined' && module.exports) {
     if (!container || !config || !config.buttons) return;
     container.innerHTML = '';
 
-    // 溢出菜单只渲染部分按钮（与原 HTML 一致：新建/添加/导入/导出/适应/顺序/连线/列表/规则/综合设置/撤销/重做）
-    var overflowIds = [
-      'btnNew', 'btnAddNode', 'btnImport', 'btnExport',
-      'btnFit', 'btnExecOrder', 'btnFlowMode', 'btnTdxPools',
-      'btnRuleEditor', 'btnComprehensiveSettings', 'btnUndo', 'btnRedo'
-    ];
-
-    overflowIds.forEach(function (bid) {
-      var btn = config.buttons.find(function (b) { return b.id === bid; });
-      if (!btn) return;
-      var el = _renderButton(btn, {}, true);
-      if (el) container.appendChild(el);
+    // 溢出菜单按配置表的 overflow 标志渲染，不再硬编码 ID 列表
+    var buttons = config.buttons.slice().sort(function (a, b) {
+      return (a.order || 0) - (b.order || 0);
     });
+
+    buttons.filter(function (btn) { return btn.overflow; })
+      .forEach(function (btn) {
+        var el = _renderButton(btn, {}, true);
+        if (el) container.appendChild(el);
+      });
   }
 
   // ─── 按钮状态更新 ─────────────────────────────────────────────

@@ -385,6 +385,46 @@
       "validation_rules": [],
       "description": "股票数据表格：表格+计数+滚动"
     },
+    "stock_list_editor": {
+      "component_type": "stock_list_editor",
+      "renderer": "stock_list_editor_renderer",
+      "html_tag": "div",
+      "default_props": {},
+      "validation_rules": [],
+      "description": "股票列表管理组件：TDX备选池专用列表编辑"
+    },
+    "indicator_select": {
+      "component_type": "indicator_select",
+      "renderer": "indicator_select_renderer",
+      "html_tag": "select",
+      "default_props": {},
+      "validation_rules": ["is_valid_option"],
+      "description": "指标选择器：TDX系统指标下拉"
+    },
+    "indicator_browser": {
+      "component_type": "indicator_browser",
+      "renderer": "indicator_browser_renderer",
+      "html_tag": "div",
+      "default_props": {},
+      "validation_rules": [],
+      "description": "指标浏览选择组件：TDX条件专用指标浏览"
+    },
+    "condition_summary": {
+      "component_type": "condition_summary",
+      "renderer": "condition_summary_renderer",
+      "html_tag": "div",
+      "default_props": {},
+      "validation_rules": [],
+      "description": "条件公式摘要：边编辑器中直接显示当前条件公式"
+    },
+    "formula_args_container": {
+      "component_type": "formula_args_container",
+      "renderer": "formula_args_container_renderer",
+      "html_tag": "div",
+      "default_props": {},
+      "validation_rules": [],
+      "description": "公式参数容器：渲染占位并接收动态参数行"
+    },
     "color_input": {
       "component_type": "color_input",
       "html_tag": "input",

@@ -1349,6 +1349,10 @@
     display: inline-flex;
     align-items: center;
     gap: 2px;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 2px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
   }
   .run-control-group .tb-btn {
     min-width: 56px;
@@ -1393,6 +1397,10 @@
     display: inline-flex;
     align-items: center;
     gap: 2px;
+    background: rgba(0, 0, 0, 0.2);
+    padding: 2px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
   }
   .run-mode-group .tb-btn {
     min-width: 56px;
