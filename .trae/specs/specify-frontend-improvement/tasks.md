@@ -1,10 +1,10 @@
 # Tasks
 
-- [ ] Task 1: 前端职责边界梳理与复杂逻辑后移
-  - [ ] SubTask 1.1: 审计 `web/js/app.js` 中的 `AppState`、LRUCache、PoolDataManager、Charts、FormulaEditor、RuleEditor、ComprehensiveSettings 等模块，明确哪些属于业务逻辑
-  - [ ] SubTask 1.2: 将业务状态（池运行时状态、模式状态、事件队列、计时器队列）从 `AppState` 剥离，改为通过 `/api/state/*` 或 SSE 从后端获取
-  - [ ] SubTask 1.3: 将复杂计算（如事件时间归一化、TTL 计算、事件分类聚合、仿真时间换算）从 `event-panel.js` 和 `app.js` 后移到后端 `core/` 或新增 `web_engine` 模块
-  - [ ] SubTask 1.4: 保留在前端的仅限：UI 渲染、用户输入转发、SSE 订阅、纯界面状态（面板折叠/缩放/选中）
+- [x] Task 1: 前端职责边界梳理与复杂逻辑后移
+  - [x] SubTask 1.1: 审计 `web/js/app.js` 中的 `AppState`、LRUCache、PoolDataManager、Charts、FormulaEditor、RuleEditor、ComprehensiveSettings 等模块，明确哪些属于业务逻辑
+  - [x] SubTask 1.2: 将业务状态（池运行时状态、模式状态、事件队列、计时器队列）从 `AppState` 剥离，改为通过 `/api/state/*` 或 SSE 从后端获取
+  - [x] SubTask 1.3: 将复杂计算（如事件时间归一化、TTL 计算、事件分类聚合、仿真时间换算）从 `event-panel.js` 和 `app.js` 后移到后端 `core/` 或新增 `web_engine` 模块
+  - [x] SubTask 1.4: 保留在前端的仅限：UI 渲染、用户输入转发、SSE 订阅、纯界面状态（面板折叠/缩放/选中）
 
 - [ ] Task 2: 表驱动 UI 唯一路径实现
   - [ ] SubTask 2.1: 梳理 `config/ui/ui_components.json`、`field_definitions.json`、`fields.json`、`ui_layouts.json`、`action_table.json`、`action_pipeline.json`、`api_routes.json`，补全缺失的节点/边/工具栏/菜单定义

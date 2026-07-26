@@ -14,11 +14,12 @@
   'use strict';
 
   // ─── Global Application State Management ────────────────────────────────────
+  // Task 1: 前端仅保留纯 UI 状态（当前模式、仿真运行控制态）。
+  // 业务真值源（当前展示时间、计时器队列、事件队列）统一从后端 API/SSE 获取，
+  // 不再在前端维护 simulationTime / simStartRealTime 等运行时状态。
   window.AppState = {
     mode: 'design',
     simulationState: 'stopped',
-    simulationTime: 0,
-    simStartRealTime: 0,
     _subscribers: [],
 
     setMode: function (newMode) {
@@ -30,33 +31,16 @@
     setSimulationState: function (newState) {
       var oldState = this.simulationState;
       this.simulationState = newState;
-      if (newState === 'running' && oldState !== 'running' && this.simStartRealTime === 0) {
-        this.simStartRealTime = Date.now();
-      }
       this._notify('simulationState', newState, oldState);
     },
 
-    setSimulationTime: function (ms) {
-      var oldTime = this.simulationTime;
-      this.simulationTime = ms;
-      this._notify('simulationTime', ms, oldTime);
-    },
-
     resetSimulation: function () {
-      this.simulationTime = 0;
-      this.simStartRealTime = 0;
       this.simulationState = 'stopped';
       this._notify('simulationReset', true, false);
     },
 
     getCurrentDisplayTime: function () {
-      if (this.mode === 'simulation') {
-        return this.simulationTime || 0;
-      }
-      if (this.mode === 'replay') {
-        return this.simulationTime || 0;
-      }
-      return Date.now();
+      return window.RuntimeState ? window.RuntimeState.getCurrentDisplayTime() : Date.now();
     },
 
     isSimulationMode: function () {
@@ -78,6 +62,58 @@
       });
     }
   };
+
+  // ─── Runtime State：业务真值源，通过 /api/state/runtime 与 SSE 保持同步 ─────
+  window.RuntimeState = {
+    mode: 'live',
+    displayNowMs: 0,
+    displayNowTime: '',
+    activeSessionId: null,
+    _subscribers: [],
+    _pollTimer: null,
+
+    init: function () {
+      this._poll();
+      this._pollTimer = setInterval(function () { window.RuntimeState._poll(); }, 1000);
+    },
+
+    _poll: function () {
+      try {
+        fetch('/api/state/runtime')
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            if (data && data.success) window.RuntimeState.update(data);
+          })
+          .catch(function () {});
+      } catch (e) { /* ignore */ }
+    },
+
+    update: function (data) {
+      var old = { mode: this.mode, displayNowMs: this.displayNowMs };
+      this.mode = data.mode || this.mode;
+      this.displayNowMs = data.display_now_ms || this.displayNowMs;
+      this.displayNowTime = data.display_now_time || this.displayNowTime;
+      this.activeSessionId = data.active_session_id || this.activeSessionId;
+      this._subscribers.forEach(function (cb) {
+        try { cb('runtimeState', { mode: this.mode, displayNowMs: this.displayNowMs }, old); } catch (e) {}
+      }.bind(this));
+    },
+
+    getCurrentDisplayTime: function () {
+      return this.displayNowMs || Date.now();
+    },
+
+    subscribe: function (callback) {
+      this._subscribers.push(callback);
+      var self = this;
+      return function unsubscribe() {
+        var idx = self._subscribers.indexOf(callback);
+        if (idx !== -1) self._subscribers.splice(idx, 1);
+      };
+    }
+  };
+
+  window.RuntimeState.init();
 
   // ─── Keyboard Shortcuts (表驱动) ────────────────────────────────────────────
   function toggleSimPlayPause() {
@@ -12302,8 +12338,8 @@ var TableDrivenPanel = window.TableDrivenPanel;
           var clock = result.data.clock;
           if (clock != null) {
             var clockMs = Math.floor(clock * 1000);
-            if (clockMs > AppState.simulationTime) {
-              AppState.setSimulationTime(clockMs);
+            if (clockMs > 0) {
+              // 仿真时间由后端 /api/state/runtime 提供，前端不再自行维护真值源
               simStepCount++;
               var clockEl2 = $('simulationClock');
               var stepCountEl2 = $('simulationStepCount');
@@ -12528,11 +12564,8 @@ var TableDrivenPanel = window.TableDrivenPanel;
           var total = result.data.total || 0;
           if (events.length > 0) _simEventOffset = total;
           _lastEventPanelCount = events.length;
+          // 仿真时间由后端 /api/state/runtime 统一提供，前端不再自行维护
           var clock = result.data.clock;
-          if (clock != null) {
-            var clockMs = Number(clock) < 1e12 ? Number(clock) * 1000 : Number(clock);
-            AppState.setSimulationTime(clockMs);
-          }
           for (var i = 0; i < events.length; i++) {
             var ev = events[i];
             if ((ev.event_type || ev.type || 'UNKNOWN') === 'RANK_CHANGED') continue;
@@ -12820,8 +12853,9 @@ var TableDrivenPanel = window.TableDrivenPanel;
 
     var parts = [getModeLabel()];
 
-    if (AppState.mode === 'simulation' && AppState.simulationTime > 0) {
-      var simSec = Math.floor(AppState.simulationTime / 1000);
+    var runtimeNow = window.RuntimeState ? window.RuntimeState.displayNowMs : Date.now();
+    if (AppState.mode === 'simulation' && runtimeNow > 0) {
+      var simSec = Math.floor(runtimeNow / 1000);
       var hh = String(Math.floor(simSec / 3600) % 24).padStart(2, '0');
       var mm = String(Math.floor(simSec / 60) % 60).padStart(2, '0');
       var ss = String(simSec % 60).padStart(2, '0');
@@ -12890,9 +12924,14 @@ var TableDrivenPanel = window.TableDrivenPanel;
 
     if (window.AppState && typeof window.AppState.subscribe === 'function') {
       window.AppState.subscribe(function (key) {
-        if (key === 'mode' || key === 'simulationTime' || key === 'simulationReset' || key === 'simulationState') {
+        if (key === 'mode' || key === 'simulationReset' || key === 'simulationState') {
           updateStatusBarTime();
         }
+      });
+    }
+    if (window.RuntimeState && typeof window.RuntimeState.subscribe === 'function') {
+      window.RuntimeState.subscribe(function (key) {
+        if (key === 'runtimeState') updateStatusBarTime();
       });
     }
   }

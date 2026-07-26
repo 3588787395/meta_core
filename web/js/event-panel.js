@@ -177,6 +177,7 @@
   };
 
   function getTimerState(timerItem, now) {
+    if (timerItem.state) return timerItem.state;
     const ev = timerItem.ev;
     const fireAt = getFireAtMs(ev);
     const type = String(ev.event_type || '').toLowerCase();
@@ -203,6 +204,7 @@
   const TIMER_TRIGGER_COLORS = TIMER_TRIGGER_TYPES.reduce((m, t) => { m[t.label] = t.color; return m; }, {});
 
   function getTimerTriggerType(ev) {
+    if (ev && ev.trigger_type) return ev.trigger_type;
     const d = (ev && ev.details) || {};
     const hints = [
       String(ev.event_type || ''),
@@ -220,7 +222,8 @@
     return '定时器';
   }
 
-  function formatRemainingTime(fireAt, now) {
+  function formatRemainingTime(fireAt, now, ev) {
+    if (ev && ev.remaining_text) return ev.remaining_text;
     const diff = fireAt - now;
     if (diff <= 0) return '已触发';
     if (diff < 1000) return Math.floor(diff) + 'ms后触发';
@@ -233,13 +236,10 @@
   const SCATTER_TOOLTIP_DELAY = 100;
 
   function classifyEvent(ev) {
+    // Task 1: 优先使用后端已计算的 category，仅对未格式化的遗留事件做极简兜底分类
+    if (ev.category) return ev.category;
     const rawType = ev.event_type || ev.type || 'UNKNOWN';
     const type = String(rawType).toLowerCase();
-    const details = ev.details || {};
-
-    if (type === 'orderfilled' || type === 'orderplaced' || type === 'positionupdated') return 'order';
-    const signalType = (ev.signal_type || details.signal_type || details.side || '').toLowerCase();
-    if (signalType === 'buy' || signalType === 'sell' || type === 'signal' || type === 'buy' || type === 'sell') return 'signal';
     if (EVENT_TYPE_TO_CATEGORY[type]) return EVENT_TYPE_TO_CATEGORY[type];
     if (type.includes('buy') || type.includes('sell')) return 'signal';
     if (type.includes('tick') || type.includes('data')) return 'tick';
@@ -258,115 +258,29 @@
       : false;
   }
 
-  // 事件 ts 时间戳归一化到当前模式坐标系：
-  // - 仿真相对秒（如 self.clock=34500 表示 09:30:00）：ts < 1e9，直接 *1000 转毫秒
-  // - 真实 Unix 秒（如 time.time()=1.78e9）：ts >= 1e9 且 < 1e12，
-  //   仿真模式下需减去 simStartRealTime（真实 Date.now 毫秒）转为仿真相对毫秒
-  // - 真实 Unix 毫秒（如 Date.now()=1.78e12）：ts >= 1e12，仿真模式下同样减 base
-  function normalizeToModeMs(t) {
-    if (t == null || isNaN(t)) return null;
-    const n = Number(t);
-    if (isNaN(n)) return null;
-    const SIM_THRESHOLD = 1e9; // 仿真相对秒 < 10亿；真实 Unix 秒 > 10亿（2001 年后）
-    if (isSimulationMode()) {
-      if (n < SIM_THRESHOLD) {
-        // 仿真相对秒 → 毫秒
-        return n * 1000;
-      }
-      // 真实 Unix 秒/毫秒 → 减 base 转仿真相对毫秒
-      let ms = n < 1e12 ? n * 1000 : n;
-      const base = (window.AppState && window.AppState.simStartRealTime) ? window.AppState.simStartRealTime : 0;
-      if (base > 0) {
-        const rel = ms - base;
-        return rel < 0 ? 0 : rel;
-      }
-      return ms;
-    }
-    // 实盘模式：秒转毫秒
-    return n < 1e12 ? n * 1000 : n;
-  }
 
+  // Task 1: 时间戳统一由后端 web_state.py 归一化，前端仅做展示。
+  // 以下极简函数仅对未格式化的遗留事件做兜底，不再包含模式换算/仿真基准等复杂逻辑。
   function getEventTs(ev) {
-    const simMode = isSimulationMode();
-    if (ev.timestamp != null) {
-      const t = Number(ev.timestamp);
-      if (!isNaN(t)) {
-        const ms = normalizeToModeMs(t);
-        if (ms != null) return ms;
-      }
-    }
-    if (ev.ts != null) {
-      if (typeof ev.ts === 'number') {
-        const ms = normalizeToModeMs(ev.ts);
-        if (ms != null) return ms;
-      }
-      if (typeof ev.ts === 'string') {
-        const n = Number(ev.ts);
-        if (!isNaN(n)) {
-          const ms = normalizeToModeMs(n);
-          if (ms != null) return ms;
-        }
-        if (simMode) return getCurrentTime();
-        const d = new Date(ev.ts);
-        if (!isNaN(d.getTime())) return d.getTime();
-        return Date.now();
-      }
-      if (simMode) return getCurrentTime();
-      return new Date(ev.ts).getTime();
-    }
-    if (simMode) {
-      if (ev.time != null) {
-        const _t = Number(ev.time);
-        if (!isNaN(_t)) {
-          const ms = normalizeToModeMs(_t);
-          if (ms != null) return ms;
-        }
-      }
-      return getCurrentTime();
-    }
-    if (ev.time) {
-      const s = String(ev.time);
-      if (s.length >= 8 && /^\d{2}:\d{2}:\d{2}/.test(s)) {
-        const now = new Date();
-        const h = parseInt(s.slice(0, 2), 10);
-        const m = parseInt(s.slice(3, 5), 10);
-        const sec = parseInt(s.slice(6, 8), 10);
-        const ms = s.length > 9 ? parseInt(s.slice(9, 12), 10) : 0;
-        return new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, sec, ms).getTime();
-      }
-      if (typeof ev.time === 'number') {
-        const ms = normalizeToModeMs(ev.time);
-        if (ms != null) return ms;
-      }
-      const d = new Date(s);
-      if (!isNaN(d.getTime())) return d.getTime();
-      const _n = Number(s);
-      if (!isNaN(_n)) {
-        const ms = normalizeToModeMs(_n);
-        if (ms != null) return ms;
-      }
+    if (ev.display_ts != null) return Number(ev.display_ts);
+    if (ev.ts != null) return Number(ev.ts) < 1e12 ? Number(ev.ts) * 1000 : Number(ev.ts);
+    if (ev.timestamp != null) return Number(ev.timestamp) < 1e12 ? Number(ev.timestamp) * 1000 : Number(ev.timestamp);
+    if (ev.time != null) {
+      const n = Number(ev.time);
+      if (!isNaN(n)) return n < 1e12 ? n * 1000 : n;
     }
     return Date.now();
   }
 
   function getFireAtMs(ev) {
+    if (ev.fire_at_ms != null) return Number(ev.fire_at_ms);
     const d = ev.details || {};
     let t = null;
     if (d.fire_at != null) t = Number(d.fire_at);
     else if (d.fire_time != null) t = Number(d.fire_time);
     else if (d.next_fire_time != null) t = Number(d.next_fire_time);
-    else if (d.ttl != null) {
-      // ttl 是从事件时间起的相对偏移（秒或毫秒），加到事件时间上
-      const baseTs = getEventTs(ev);
-      const ttl = Number(d.ttl);
-      if (!isNaN(ttl)) {
-        const ttlMs = ttl < 1e6 ? ttl * 1000 : ttl;
-        return baseTs + ttlMs;
-      }
-    }
     if (t == null || isNaN(t)) return getEventTs(ev);
-    const ms = normalizeToModeMs(t);
-    return ms != null ? ms : getEventTs(ev);
+    return t < 1e12 ? t * 1000 : t;
   }
 
   function formatSimDuration(ms) {
@@ -396,8 +310,9 @@
     return s + '.' + p3(milli) + 's';
   }
 
-  function formatTime(ts) {
-    if (isSimulationMode()) {
+  function formatTime(ts, timeMode) {
+    if (timeMode == null) timeMode = isSimulationMode() ? 'relative' : 'wall';
+    if (timeMode === 'relative') {
       return formatSimDuration(ts);
     }
     const d = new Date(ts);
@@ -405,14 +320,23 @@
     return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
   }
 
-  function formatTimeMs(ts) {
-    if (isSimulationMode()) {
+  function formatTimeMs(ts, timeMode) {
+    if (timeMode == null) timeMode = isSimulationMode() ? 'relative' : 'wall';
+    if (timeMode === 'relative') {
       return formatSimDurationMs(ts);
     }
     const d = new Date(ts);
     const pad = n => String(n).padStart(2, '0');
     const p3 = n => String(n).padStart(3, '0');
     return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()) + '.' + p3(d.getMilliseconds());
+  }
+
+  // 极简兜底：未从后端获取到 display_time 时使用
+  function formatTimeFallback(ts, timeMode) {
+    return formatTime(ts, timeMode);
+  }
+  function formatTimeMsFallback(ts, timeMode) {
+    return formatTimeMs(ts, timeMode);
   }
 
   function escapeHtml(s) {
@@ -475,11 +399,13 @@
   }
 
   // 添加事件
+  // Task 1: 事件已由后端 format_event 格式化，前端直接使用 category / display_ts / display_time 等字段；
+  // 对未格式化的遗留事件保留极简兜底。
   function addEvent(ev) {
-    const cat = classifyEvent(ev);
-    const ts = getEventTs(ev);
+    const cat = ev.category || classifyEvent(ev);
+    const ts = ev.display_ts != null ? Number(ev.display_ts) : getEventTs(ev);
     const eventObj = {
-      id: buildEventId(ev),
+      id: ev.id || buildEventId(ev),
       ts: ts,
       category: cat,
       event_type: ev.event_type || ev.type || 'UNKNOWN',
@@ -488,6 +414,9 @@
       pool_id: ev.pool_id || '',
       edge_id: ev.edge_id || '',
       details: ev.details || {},
+      display_time: ev.display_time || formatTimeFallback(ts, ev.time_mode),
+      display_time_ms: ev.display_time_ms || formatTimeMsFallback(ts, ev.time_mode),
+      time_mode: ev.time_mode || (ts < 86400000.0 ? 'relative' : 'wall'),
       raw: ev,
       pending: isPaused
     };
@@ -549,12 +478,11 @@
       if (!res.ok) return;
       const data = await res.json();
       if (!data.success || !Array.isArray(data.timers)) return;
-      var serverNow = Number(data.now) || 0;
-      const now = serverNow > 0 ? (serverNow < 1e12 ? serverNow * 1000 : serverNow) : getCurrentTime();
+      // Task 1: 计时器队列已由后端 format_timer_queue 格式化，前端直接使用 display_fire_ms / state / trigger_type 等字段
+      const now = Number(data.now_ms) || getCurrentTime();
       const pollKeys = new Set();
       data.timers.forEach(spec => {
-        const fireSec = Number(spec.fire_at || spec.next_fire_time) || 0;
-        const fireMs = fireSec < 1e12 ? fireSec * 1000 : fireSec;
+        const fireMs = Number(spec.display_fire_ms) || Number(spec.fire_at) || 0;
         if (fireMs <= 0) return;
         const code = spec.code || '';
         const key = 'poll-' + fireMs + '-' + (spec.edge_id || '') + '-' + code;
@@ -563,11 +491,16 @@
         const pseudoEvent = {
           id: 'timer-' + key,
           ts: now,
-          category: 'ttl',
+          display_ts: fireMs,
+          category: spec.category || 'ttl',
           event_type: spec.kind === 'edge' ? 'EdgeTimer' : 'TimerQueued',
           code: code,
           pool_id: spec.pool_id || '',
           edge_id: spec.edge_id || '',
+          display_fire_time: spec.display_fire_time || '',
+          state: spec.state || 'waiting',
+          trigger_type: spec.trigger_type || '定时器',
+          remaining_text: spec.remaining_text || '',
           details: {
             fire_at: fireMs < 1e12 ? fireMs / 1000 : fireMs,
             queue_position: 0,
@@ -579,8 +512,9 @@
         if (existingIdx >= 0) {
           timerQueue[existingIdx].ev = pseudoEvent;
           timerQueue[existingIdx].updated = now;
+          timerQueue[existingIdx].state = spec.state || 'waiting';
         } else {
-          timerQueue.push({ key, ev: pseudoEvent, updated: now, source: 'poll' });
+          timerQueue.push({ key, ev: pseudoEvent, updated: now, source: 'poll', state: spec.state || 'waiting' });
         }
       });
       timerQueue = timerQueue.filter(t => {
@@ -1019,10 +953,11 @@
         var stateLabel = state === 'pending' ? ' [排队中]' : (state === 'expired' ? ' [已过期]' : '');
         var stateColor = state === 'pending' ? '#ffc107' : (state === 'expired' ? '#f44336' : '#4caf50');
         var displayTs = ev.category === 'ttl' && ev.details.fire_at ? getFireAtMs(ev) : getEventTs(ev);
+        var displayTime = ev.display_time_ms || formatTimeMs(displayTs, ev.time_mode);
         tooltip.innerHTML =
           '<div class="tt-head"><span style="color:' + cfg.color + '">' + cfg.icon + '</span> ' +
           escapeHtml(ev.event_type) + '<span style="color:' + stateColor + '">' + stateLabel + '</span></div>' +
-          '<div class="tt-row"><b>' + escapeHtml(formatTimeMs(displayTs)) + '</b></div>' +
+          '<div class="tt-row"><b>' + escapeHtml(displayTime) + '</b></div>' +
           '<div class="tt-row">类型: ' + escapeHtml(ev.event_type) + ' | ' + escapeHtml(ev.code || formatCodes(ev.codes) || '-') + '</div>' +
           '<div class="tt-detail">' + escapeHtml(buildDetailsSummary(ev)) + '</div>';
         tooltip.style.display = 'block';
@@ -1259,7 +1194,8 @@
         clusters.push({
           centerTs: posTs,
           events: [ev],
-          primaryCategory: cat
+          primaryCategory: cat,
+          timeMode: ev.time_mode || (posTs < 86400000.0 ? 'relative' : 'wall')
         });
       }
     });
@@ -1439,7 +1375,7 @@
       const isMulti = events.length > 1;
 
       let html = '<div class="tt-head">';
-      html += '<span style="color:#ff9800">⏱</span> <b>' + escapeHtml(formatTimeMs(cluster.centerTs)) + '</b>';
+      html += '<span style="color:#ff9800">⏱</span> <b>' + escapeHtml(formatTimeMs(cluster.centerTs, cluster.timeMode)) + '</b>';
       if (isMulti) html += ' <span style="color:#ff5722">(' + events.length + '个事件)</span>';
       html += '</div>';
 
@@ -1591,13 +1527,13 @@
       return getFireAtMs(a.ev) - getFireAtMs(b.ev);
     });
 
-    sortedItems.forEach(({ ev }) => {
+    sortedItems.forEach((timerItem) => {
+      const ev = timerItem.ev;
       const fireAt = getFireAtMs(ev);
-      const tempItem = { ev };
-      const state = getTimerState(tempItem, now);
+      const state = timerItem.state || getTimerState(timerItem, now);
       const style = TIMER_STATE_STYLES[state];
       const cfg = CATEGORY_CONFIG[ev.category] || CATEGORY_CONFIG.ttl;
-      const triggerType = getTimerTriggerType(ev);
+      const triggerType = ev.trigger_type || getTimerTriggerType(ev);
       const triggerColor = TIMER_TRIGGER_COLORS[triggerType] || '#c0c0e0';
 
       const item = document.createElement('div');
@@ -1611,7 +1547,7 @@
       let timeDisplay;
       let statusColor;
       if (state === 'waiting') {
-        timeDisplay = formatRemainingTime(fireAt, now);
+        timeDisplay = ev.remaining_text || formatRemainingTime(fireAt, now, ev);
         statusColor = cfg.color;
       } else if (state === 'expired') {
         timeDisplay = style.label;
@@ -1621,8 +1557,9 @@
         statusColor = '#9e9e9e';
       }
 
+      const fireTimeDisplay = ev.display_fire_time_ms || ev.display_time_ms || formatTimeMs(fireAt, ev.time_mode);
       item.innerHTML =
-        '<span class="ti-time">' + escapeHtml(formatTimeMs(fireAt)) + '</span>' +
+        '<span class="ti-time">' + escapeHtml(fireTimeDisplay) + '</span>' +
         '<span class="ti-trigger" style="color:' + triggerColor + ';font-weight:600;">' + escapeHtml(triggerType) + '</span>' +
         '<span class="ti-type" style="color:' + cfg.color + '" title="' + escapeHtml(ev.event_type) + '">' + escapeHtml(ev.event_type) + '</span>' +
         '<span class="ti-code">' + escapeHtml(formatCode(ev.code) || '-') + '</span>' +
@@ -1667,7 +1604,7 @@
     const items = timerQueue.slice().sort((a, b) => {
       return getFireAtMs(a.ev) - getFireAtMs(b.ev);
     }).map(t => {
-      const state = getTimerState(t, now);
+      const state = t.state || getTimerState(t, now);
       return {
         ev: t.ev,
         fireAt: getFireAtMs(t.ev),
@@ -1838,9 +1775,10 @@
       const ev = getTimerEventAt(x, y);
       if (ev) {
         const fireAt = getFireAtMs(ev);
+        const fireTime = ev.display_fire_time_ms || ev.display_time_ms || formatTimeMs(fireAt, ev.time_mode);
         tooltip.innerHTML =
           '<div class="tt-head"><span style="color:#b71c1c">⏰</span> ' + escapeHtml(ev.event_type) + '</div>' +
-          '<div class="tt-row">fire_at: ' + escapeHtml(formatTimeMs(fireAt)) + '</div>' +
+          '<div class="tt-row">fire_at: ' + escapeHtml(fireTime) + '</div>' +
           '<div class="tt-row">' + escapeHtml(ev.code || formatCodes(ev.codes) || '-') + '</div>' +
           '<div class="tt-detail">' + escapeHtml(buildDetailsSummary(ev)) + '</div>';
         tooltip.style.display = 'block';
@@ -1958,7 +1896,7 @@
       savePanelState();
     }
     const evs = cluster.events.slice().sort((a, b) => a.ts - b.ts);
-    eventDetailTitle.textContent = '📌 ' + formatTimeMs(cluster.centerTs) + ' (' + evs.length + '个事件)';
+    eventDetailTitle.textContent = '📌 ' + formatTimeMs(cluster.centerTs, cluster.timeMode) + ' (' + evs.length + '个事件)';
     eventDetailBody.innerHTML = '';
     evs.forEach((ev, i) => {
       const d = document.createElement('div');
@@ -1970,8 +1908,9 @@
       const cs = ev.code ? formatCode(ev.code) : (ev.codes && ev.codes.length > 0 ? formatCodes(ev.codes) : '-');
       const ds = buildDetailsSummary(ev);
       const ts = ev.category === 'ttl' ? getFireAtMs(ev) : getEventTs(ev);
+      const tsDisplay = ev.display_time_ms || formatTimeMs(ts, ev.time_mode);
       d.innerHTML =
-        '<span class="ev-time">' + escapeHtml(formatTimeMs(ts)) + '</span>' +
+        '<span class="ev-time">' + escapeHtml(tsDisplay) + '</span>' +
         '<span class="ev-idx" style="color:#505070;font-size:9px;margin-right:4px;">#' + (i + 1) + '</span>' +
         '<span class="ev-icon" title="' + cfg.label + '" style="color:' + cfg.color + '">' + cfg.icon + '</span>' +
         '<span class="ev-type">' + escapeHtml(ev.event_type) + '</span>' +
@@ -1997,8 +1936,9 @@
     const codeStr = ev.code ? formatCode(ev.code) : (ev.codes && ev.codes.length > 0 ? formatCodes(ev.codes) : '-');
     const detailsStr = buildDetailsSummary(ev);
 
+    const tsDisplay = ev.display_time || formatTime(ev.ts, ev.time_mode);
     div.innerHTML =
-      '<span class="ev-time">' + escapeHtml(formatTime(ev.ts)) + '</span>' +
+      '<span class="ev-time">' + escapeHtml(tsDisplay) + '</span>' +
       '<span class="ev-icon" title="' + cfg.label + '" style="color:' + cfg.color + '">' + cfg.icon + '</span>' +
       '<span class="ev-type">' + escapeHtml(ev.event_type) + '</span>' +
       '<span class="ev-code">' + escapeHtml(codeStr) + '</span>' +
@@ -2378,10 +2318,7 @@
 
     if (window.AppState && typeof window.AppState.subscribe === 'function') {
       window.AppState.subscribe(function (key) {
-        if (key === 'simulationTime') {
-          updateMatrixNowLinePosition();
-          scheduleRender();
-        } else if (key === 'mode' || key === 'simulationReset') {
+        if (key === 'mode' || key === 'simulationReset') {
           if (isSimulationMode()) {
             startTimerPolling();
           } else {
@@ -2393,9 +2330,17 @@
           scheduleRender();
         }
       });
-      if (isSimulationMode()) {
-        startTimerPolling();
-      }
+    }
+    if (window.RuntimeState && typeof window.RuntimeState.subscribe === 'function') {
+      window.RuntimeState.subscribe(function (key) {
+        if (key === 'runtimeState') {
+          updateMatrixNowLinePosition();
+          scheduleRender();
+        }
+      });
+    }
+    if (isSimulationMode()) {
+      startTimerPolling();
     }
 
     loadRecentEvents();

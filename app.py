@@ -120,6 +120,11 @@ except ImportError:
     from core.event_bus import EventBus
 
 try:
+    from .core.web_state import format_event, format_timer_queue, runtime_state, normalize_display_ms
+except ImportError:
+    from core.web_state import format_event, format_timer_queue, runtime_state, normalize_display_ms
+
+try:
     from .core.table_engine import ConfigStore
 except ImportError:
     from core.table_engine import ConfigStore
@@ -760,35 +765,91 @@ def _get_engine_event_panel(request: Request):
     return getattr(engine, "event_panel", None)
 
 
+def _event_to_dict(ev: Any) -> dict:
+    """将 EventBus 事件对象或字典统一转为字典供前端格式化使用。"""
+    if isinstance(ev, dict):
+        return ev
+    if dataclasses.is_dataclass(ev) and not isinstance(ev, type):
+        return dataclasses.asdict(ev)
+    if hasattr(ev, "__dict__"):
+        return vars(ev)
+    return {"event_type": str(type(ev).__name__)}
+
+
+def _infer_display_mode(request: Request) -> str:
+    """根据当前活跃会话推断展示时间坐标系。"""
+    if getattr(request.app.state, "_sim_session_map", {}) or getattr(request.app.state, "_simulators", {}):
+        return "simulation"
+    if getattr(request.app.state, "_replay_engines", {}):
+        return "replay"
+    runtime_mode = getattr(request.app.state, "runtime_mode", None)
+    if runtime_mode is not None:
+        return runtime_mode.current_mode
+    return "live"
+
+
+def _active_session_id(request: Request) -> Optional[str]:
+    sim_map = getattr(request.app.state, "_sim_session_map", {})
+    if sim_map:
+        return next(iter(sim_map.keys()))
+    return None
+
+
+@app.get("/api/state/runtime", tags=["state"])
+async def get_runtime_state(request: Request):
+    """返回当前运行时展示态（模式、当前展示时间、活跃会话 ID）。
+
+    前端通过本端点或 SSE 获取业务真值源，不再自行维护 simulationTime 等状态。
+    """
+    try:
+        mode = _infer_display_mode(request)
+        now_ts = None
+        sim_map = getattr(request.app.state, "_sim_session_map", {})
+        if sim_map:
+            session = next(iter(sim_map.values()))
+            simulator = session.get("simulator")
+            if simulator is not None:
+                now_ts = getattr(simulator, "clock", None)
+        if now_ts is None:
+            runtime_mode = getattr(request.app.state, "runtime_mode", None)
+            if runtime_mode is not None:
+                now_ts = getattr(runtime_mode, "current_ts", None)
+        return runtime_state(mode=mode, now_ts=now_ts, active_session_id=_active_session_id(request))
+    except Exception as ex:
+        return {"success": False, "error": str(ex)}
+
+
 @app.get("/api/events/recent", tags=["events"])
 async def get_events_recent(limit: int = 100, request: Request = None):
-    """返回最近已记录的事件（EventPanel 视图）。"""
+    """返回最近已记录的事件（EventPanel 视图），已按前端展示要求格式化。"""
     try:
         ep = _get_engine_event_panel(request)
         if ep is None:
             return {"success": True, "events": []}
-        events = ep.get_events()[-limit:]
-        return {"success": True, "count": len(events), "events": events}
+        raw_events = ep.get_events()[-limit:]
+        formatted = [format_event(_event_to_dict(ev)) for ev in raw_events]
+        return {"success": True, "count": len(formatted), "events": formatted}
     except Exception as ex:
         return {"success": False, "error": str(ex)}
 
 
 @app.get("/api/events/pending", tags=["events"])
 async def get_events_pending(clear: int = 1, request: Request = None):
-    """返回未排队事件（自上次清空后新增）。clear=1 时读取后清空 pending 缓存。"""
+    """返回未排队事件（自上次清空后新增），已按前端展示要求格式化。"""
     try:
         ep = _get_engine_event_panel(request)
         if ep is None:
             return {"success": True, "events": []}
-        events = ep.get_pending(clear=bool(clear))
-        return {"success": True, "count": len(events), "events": events}
+        raw_events = ep.get_pending(clear=bool(clear))
+        formatted = [format_event(_event_to_dict(ev)) for ev in raw_events]
+        return {"success": True, "count": len(formatted), "events": formatted}
     except Exception as ex:
         return {"success": False, "error": str(ex)}
 
 
 @app.get("/api/events/timer-queue", tags=["events"])
 async def get_events_timer_queue(request: Request, session_id: str = ""):
-    """返回当前定时器队列（EventDriver heap 中的待触发定时器）。"""
+    """返回当前定时器队列（EventDriver heap 中的待触发定时器），已按前端展示要求格式化。"""
     try:
         now_ts = None
         event_driver = None
@@ -827,7 +888,8 @@ async def get_events_timer_queue(request: Request, session_id: str = ""):
                 state = getattr(event_driver, "_state", None)
                 if state is not None:
                     now_ts = state.time_source.get("current_ts")
-        return {"success": True, "count": len(specs), "now": now_ts, "timers": specs}
+        now_ms = normalize_display_ms(now_ts) if now_ts is not None else None
+        return format_timer_queue(specs, now_ms=now_ms)
     except Exception as ex:
         return {"success": False, "error": str(ex), "count": 0, "now": None, "timers": []}
 
@@ -932,7 +994,7 @@ async def events_stream(request: Request):
                     "timestamp": float(ts_val)
                 }
                 try:
-                    sync_queue.put_nowait(event_data)
+                    sync_queue.put_nowait(format_event(event_data))
                 except thread_queue.Full:
                     pass
             except Exception:
@@ -1932,7 +1994,8 @@ async def sim_get_events(session_id: str = "", since: str = "0", limit: int = 20
                 "ts": ev_time,
             })
 
-    return {"code": 0, "data": {"events": normalized, "total": total, "clock": clock}}
+    formatted = [format_event(ev) for ev in normalized]
+    return {"code": 0, "data": {"events": formatted, "total": total, "clock": clock}}
 
 
 
@@ -2530,7 +2593,7 @@ async def get_kline(stock_code: str = "", period: str = "5m", limit: int = 300, 
 
 @app.get("/api/pool/{name:path}/event-panel", tags=["pool"])
 async def get_event_panel(name: str, limit: int = 100, request: _Request = None):
-    """获取事件面板数据（仿真模式读sim.event_log，live模式读EventPanel）"""
+    """获取事件面板数据（仿真模式读sim.event_log，live模式读EventPanel），已按前端展示要求格式化。"""
     try:
         engine = request.app.state.engine
         sims = getattr(request.app.state, "_simulators", {})
@@ -2539,7 +2602,7 @@ async def get_event_panel(name: str, limit: int = 100, request: _Request = None)
             event_log = getattr(sim, "event_log", None)
             if event_log is not None and len(event_log) > 0:
                 events = event_log[-limit:]
-                return {"success": True, "pool": name, "count": len(events), "events": events}
+                return {"success": True, "pool": name, "count": len(events), "events": [format_event(ev) for ev in events]}
             pe = getattr(sim, "_pool_engine", None)
             if pe is None:
                 inner = getattr(sim, "_engine", None)
@@ -2547,13 +2610,13 @@ async def get_event_panel(name: str, limit: int = 100, request: _Request = None)
             ep = getattr(pe, "event_panel", None) if pe else None
             if ep is not None:
                 events = ep.get_events()[-limit:]
-                return {"success": True, "pool": name, "count": len(events), "events": events}
+                return {"success": True, "pool": name, "count": len(events), "events": [format_event(_event_to_dict(ev)) for ev in events]}
             return {"success": True, "events": []}
         ep = getattr(engine, "event_panel", None)
         if ep is None:
             return {"success": True, "events": []}
         events = ep.get_events()[-limit:]
-        return {"success": True, "pool": name, "count": len(events), "events": events}
+        return {"success": True, "pool": name, "count": len(events), "events": [format_event(_event_to_dict(ev)) for ev in events]}
     except Exception as ex:
         return {"success": False, "error": str(ex)}
 
