@@ -1,6 +1,32 @@
 {
   "version": "1.0",
   "description": "右键菜单配置表 - 按 target_type 动态渲染右键菜单",
+  "node_type_map": {
+    "stock_state_pool": "state_pool",
+    "special_pool": "state_pool",
+    "tdx_state_pool": "state_pool",
+    "statepool": "state_pool",
+    "state_pool": "state_pool",
+    "condition_filter": "condition",
+    "tdx_condition": "condition",
+    "condition_node": "condition",
+    "transfer_condition": "condition",
+    "condition": "condition",
+    "candidate_provider": "candidate",
+    "tdx_candidate": "candidate",
+    "market_source": "candidate",
+    "candidate_dzh": "candidate",
+    "candidate": "candidate",
+    "text_label": "label",
+    "tdx_text_label": "label",
+    "tdx_deco_text": "label",
+    "tdx_decorative": "label",
+    "label": "label",
+    "flow_edge": "edge",
+    "tdx_flow_edge": "edge",
+    "edge": "edge",
+    "canvas": "canvas"
+  },
   "menus": {
     "node": [
       {
