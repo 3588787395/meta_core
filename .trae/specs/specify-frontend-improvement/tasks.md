@@ -31,11 +31,11 @@
   - [x] SubTask 5.3: 删除未使用的变量、函数、DOM 元素引用和 CSS 类
   - [x] SubTask 5.4: 确保同一功能只有唯一调用路径，例如事件接收只通过 SSE，状态获取只通过后端 API
 
-- [ ] Task 6: 设计文档更新与最终集成
-  - [ ] SubTask 6.1: 更新 `DESIGN.md`，明确前端仅作为展示层、后端持有真值源、表驱动与事件驱动的唯一路径
-  - [ ] SubTask 6.2: 更新 `docs/` 下相关文档（如 `SYSTEM_REFERENCE.md`、`SPEC.md`）中关于前端架构的描述
-  - [ ] SubTask 6.3: 运行前端静态检查与现有测试，确保无回归
-  - [ ] SubTask 6.4: 每个 Task 完成后提交并 push 到远程；Task 6 完成后最终 push 并汇总变更日志
+- [x] Task 6: 设计文档更新与最终集成
+  - [x] SubTask 6.1: 更新 `DESIGN.md`，明确前端仅作为展示层、后端持有真值源、表驱动与事件驱动的唯一路径
+  - [x] SubTask 6.2: 更新 `docs/` 下相关文档（如 `SYSTEM_REFERENCE.md`、`SPEC.md`）中关于前端架构的描述
+  - [x] SubTask 6.3: 运行前端静态检查与现有测试，确保无回归
+  - [x] SubTask 6.4: 每个 Task 完成后提交并 push 到远程；Task 6 完成后最终 push 并汇总变更日志
 
 # Task Dependencies
 

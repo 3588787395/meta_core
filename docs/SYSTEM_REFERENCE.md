@@ -617,6 +617,15 @@ tick 后处理: MetaEngine._post_tick()
 
 ## 九、UI/Web 层
 
+前端（`web/` 目录）仅作为**展示层**，不参与业务真值计算。浏览器端负责：
+
+1. 按 `config/ui/*.json` 配置表渲染节点、边、属性面板、工具栏、右键菜单；
+2. 将用户操作转发到后端 API；
+3. 通过 `EventSource('/api/events/stream')` 订阅后端 SSE 事件流；
+4. 维护少量纯界面状态（面板折叠、画布缩放、选中项、滚动位置）。
+
+后端持有全部业务真值源：股票池节点、运行时状态、事件队列、计时器队列、模式状态。
+
 | 类 | 职责 |
 |----|------|
 | `UIRenderer` | 订阅EventBus→格式化→推送WebSocketPublisher |
@@ -631,6 +640,11 @@ tick 后处理: MetaEngine._post_tick()
 | DomainEvent | `"domain"` |
 | Signal | `"signal"` |
 | DataChanged | `"data_changed"` |
+
+**唯一路径约束**：
+- 表驱动 UI 唯一路径：`config/ui/*.json`；
+- 事件驱动唯一路径：`EventSource('/api/events/stream')` + `core/event_bus.py` 事件契约；
+- 设计/仿真/回放/实盘四种模式共享同一条执行路径，仅数据源与时间推进机制不同（`runtime_modes.json` + `time_sources.json`）。
 
 ---
 

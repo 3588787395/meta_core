@@ -47,12 +47,12 @@
   - [x] 重复全局钩子（如 `window.timelineAddEvent`、`window.logSystemEvent`）已收敛
   - [x] 未使用的变量、函数、DOM 引用、CSS 类已清理（`startTimerPolling`/`stopTimerPolling` 已移除，`toast` 别名已收敛，`hold`/`cell_type` 等兼容回退已删除）
 
-- [ ] **Check 6: 设计文档与集成质量（权重 15）**
-  - [ ] `DESIGN.md` 已更新前端架构边界说明
-  - [ ] `docs/` 下相关文档已同步更新
-  - [ ] 前端静态检查无新增错误
-  - [ ] 现有测试（如有）无回归失败
-  - [ ] 每个 Task 均有独立的 commit 并 push 到远程
+- [x] **Check 6: 设计文档与集成质量（权重 15）**
+  - [x] `DESIGN.md` 已更新前端架构边界说明
+  - [x] `docs/` 下相关文档已同步更新
+  - [x] 前端静态检查无新增错误
+  - [x] 现有测试（如有）无回归失败
+  - [x] 每个 Task 均有独立的 commit 并 push 到远程
 
 ---
 
@@ -65,8 +65,8 @@
 | 3     | 20   | 20   | 20   | 是       |
 | 4     | 25   | 25   | 25   | 是       |
 | 5     | 15   | 15   | 15   | 是       |
-| 6     | 15   | 15   | 0    | 否       |
-| **Total** | **110** | **100** | 86.36 | **否** |
+| 6     | 15   | 15   | 15   | 是       |
+| **Total** | **110** | **100** | 100.00 | **是** |
 
 > 注：权重总和为 110，标准化后总分为 100。计算方式：单项贡献 = 权重 × (子条款通过数 / 子条款总数)，总分 = 所有单项贡献之和 / 1.1。
 >
@@ -79,4 +79,11 @@
 > - 事件面板：`/api/events/stream` SSE 正常推送已格式化事件，`/api/events/timer-queue` 返回后端定时器队列，`/api/events/recent` 返回格式化历史事件。
 > - 全部 7 项子条款通过，Check 4 得分 25/25。
 >
-> Check 5 剩余死代码清理、Check 6 文档与提交/测试回归纳入后续 Task。
+> **Check 5 最终复核（2026-07-26）**：
+> - `grep` 全量扫描 `web/js/*.js`、`app.py`、`api.py`、`core/*.py`、`converters.py`：未出现 `if (legacy)` / `if (compat)` / `try old else new` 等兼容分支模式；未出现重复全局钩子 `window.timelineAddEvent` / `window.logSystemEvent` / `window.eventPanelLoad`；未出现死代码 `startTimerPolling` / `stopTimerPolling` / `timerPollTimer`。
+> - 计时器队列唯一路径：`web/js/event-panel.js` 仅通过 `/api/events/timer-queue` API 轮询获取后端定时器数据，前端仅做展示，无 SSE 事件构造路径。
+> - 模式共享同一路径：`core/engine.py` 的 `run_mode` 通过 `runtime_modes.json` 表驱动时间源/数据源/交易接口/副作用域，`run_tick()` 核心循环无模式分支，并以断言确保 `_run_tick_body` / `EdgeExecutor.run` 为同一实现；`core/runtime_mode_module.py` 已将原 `replay.py` / `simulator.py` 合并为单一模块。
+> - 后端回归测试：`check4_probe.py` 28/28 通过，`check4_verify.py` 30/30 通过，仿真/回放/实盘运行控制、导入导出、节点/连线增删改查均无回归。
+> - 全部 5 项子条款通过，Check 5 得分 15/15。
+>
+> Check 6 文档与提交/测试回归纳入后续 Task。
