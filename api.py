@@ -5803,9 +5803,13 @@ def create_dzh_router() -> APIRouter:
         removed_edges = []
         new_edges = []
         for edge in edges:
-            src = edge.get("from", "") or edge.get("source", {}).get("node_id", "")
-            tgt = edge.get("to", "") or edge.get("target", {}).get("node_id", "")
-            if src == cell_id or tgt == cell_id:
+            if not isinstance(edge, dict):
+                continue
+            src = edge.get("source", {})
+            tgt = edge.get("target", {})
+            src_id = src.get("node_id", "") if isinstance(src, dict) else str(src)
+            tgt_id = tgt.get("node_id", "") if isinstance(tgt, dict) else str(tgt)
+            if src_id == cell_id or tgt_id == cell_id:
                 removed_edges.append(edge)
             else:
                 new_edges.append(edge)
@@ -5831,10 +5835,18 @@ def create_dzh_router() -> APIRouter:
         pool = _store.pool
         flows = []
         for edge in pool.get("edges", []):
+            if not isinstance(edge, dict):
+                continue
+            src = edge.get("source", {})
+            tgt = edge.get("target", {})
+            if isinstance(src, str):
+                src = {"node_id": src}
+            if isinstance(tgt, str):
+                tgt = {"node_id": tgt}
             flow_data = {
                 "id": edge.get("id"),
-                "from": edge.get("source", {}).get("node_id", ""),
-                "to": edge.get("target", {}).get("node_id", ""),
+                "source": src,
+                "target": tgt,
                 "params": edge.get("params", {}),
             }
             flows.append(flow_data)
@@ -5850,30 +5862,32 @@ def create_dzh_router() -> APIRouter:
         except Exception as e:
             return {"success": False, "error": f"请求解析失败: {e}"}
 
-        src_id = body.get("from")
-        tgt_id = body.get("to")
+        src_id = body.get("source", {}).get("node_id") if isinstance(body.get("source"), dict) else body.get("source")
+        tgt_id = body.get("target", {}).get("node_id") if isinstance(body.get("target"), dict) else body.get("target")
         params = body.get("params", {})
 
         if not src_id or not tgt_id:
-            return {"success": False, "error": "缺少 from 或 to 参数"}
+            return {"success": False, "error": "缺少 source 或 target 参数"}
 
         pool = _store.pool
-        node_ids = {n["id"] for n in pool.get("nodes", [])}
+        node_ids = {n["id"] for n in pool.get("nodes", []) if isinstance(n, dict)}
         if src_id not in node_ids:
             return {"success": False, "error": f"源节点不存在: {src_id}"}
         if tgt_id not in node_ids:
             return {"success": False, "error": f"目标节点不存在: {tgt_id}"}
 
         for edge in pool.get("edges", []):
-            existing_src = edge.get("from", "") or edge.get("source", {}).get("node_id", "")
-            existing_tgt = edge.get("to", "") or edge.get("target", {}).get("node_id", "")
+            if not isinstance(edge, dict):
+                continue
+            existing_src = edge.get("source", {}).get("node_id", "") if isinstance(edge.get("source"), dict) else edge.get("source", "")
+            existing_tgt = edge.get("target", {}).get("node_id", "") if isinstance(edge.get("target"), dict) else edge.get("target", "")
             if existing_src == src_id and existing_tgt == tgt_id:
                 return {"success": False, "error": f"Flow 已存在: {src_id} -> {tgt_id}"}
 
         new_edge = {
             "id": f"e_{uuid.uuid4().hex[:8]}",
-            "from": src_id,
-            "to": tgt_id,
+            "source": {"node_id": src_id},
+            "target": {"node_id": tgt_id},
             "params": {
                 "dzh_attr": 0,
                 "delete_source": False,
@@ -5949,10 +5963,10 @@ def create_dzh_router() -> APIRouter:
             if k not in handled:
                 params[k] = v
 
-        if "from" in body:
-            target["from"] = body["from"]
-        if "to" in body:
-            target["to"] = body["to"]
+        if "source" in body:
+            target["source"] = body["source"] if isinstance(body["source"], dict) else {"node_id": body["source"]}
+        if "target" in body:
+            target["target"] = body["target"] if isinstance(body["target"], dict) else {"node_id": body["target"]}
 
         return {"success": True, "data": target}
 

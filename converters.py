@@ -529,14 +529,9 @@ def decode_attr_flags(attr_int, type_key):
         result = {k: bool(attr_int & v) for k, v in masks.items()}
     else:
         _model_name = cfg["model"]
-        try:
-            from .core.schemas import Cell201AttrBitsModel, FlowAttrBitsModel
-            _model_cls = {"Cell201AttrBitsModel": Cell201AttrBitsModel,
-                          "FlowAttrBitsModel": FlowAttrBitsModel}[_model_name]
-        except ImportError:
-            from schemas import Cell201AttrBitsModel, FlowAttrBitsModel
-            _model_cls = {"Cell201AttrBitsModel": Cell201AttrBitsModel,
-                          "FlowAttrBitsModel": FlowAttrBitsModel}[_model_name]
+        from core.schemas import Cell201AttrBitsModel, FlowAttrBitsModel
+        _model_cls = {"Cell201AttrBitsModel": Cell201AttrBitsModel,
+                      "FlowAttrBitsModel": FlowAttrBitsModel}[_model_name]
         result = _model_cls.from_int(attr_int).model_dump(exclude={"raw_attr"})
     result["raw"] = attr_int
     return result
@@ -1251,9 +1246,9 @@ def _parse_cell_condition(ct, rc, entry, ctx):
     indi_raw = rc.get("indi")
     formula_decoded = ""
     if indi_raw and indi_raw != "0;":
+        # SubTask 27.8: 从 core.import_export_module 导入（_common.py 已合并至此）
+        from core.import_export_module import _decode_formula as _decode_indi
         try:
-            # SubTask 27.8: 从 core.import_export_module 导入（_common.py 已合并至此）
-            from .core.import_export_module import _decode_formula as _decode_indi
             formula_decoded = _decode_indi(indi_raw, ctx.get("ency", 0))
         except Exception:
             pass
@@ -1573,7 +1568,7 @@ def _lookup_cell_entry_by_node_type(node_type):
 
 def _build_cell_model(node):
     """通用 CellModel 工厂：按 schema 分派实例化。无 if/elif ct 分支。"""
-    from .core import schemas as models
+    from core import schemas as models
     schema = _load_dzh_cell_schema()
     cell_types = schema.get("cell_types", {})
     dzh_ct = node.get("dzh_cell_type", 0)
@@ -2748,11 +2743,14 @@ def _extract_dzh_id(node_id):
 
 
 def _get_dzh_cell_id(node):
+    if not isinstance(node, dict):
+        return ""
     params = node.get("params", {})
     dzh_cell_id = params.get("dzh_cell_id")
     if dzh_cell_id is not None:
         return str(dzh_cell_id)
-    return _extract_dzh_id(node["id"])
+    node_id = node.get("id", "")
+    return _extract_dzh_id(node_id) if node_id else ""
 
 
 def _make_pos(x, y, cell_type, width=None, height=None):
@@ -3293,7 +3291,9 @@ def _build_flow_arrow_cell(cell_elem, node):
 
 def _find_node_by_id(nodes, node_id):
     for n in nodes:
-        if n["id"] == node_id:
+        if not isinstance(n, dict):
+            continue
+        if n.get("id") == node_id:
             return n
     return None
 
@@ -3398,11 +3398,18 @@ def export_dzh_xml(config):
         else:
             logger.warning("DZH导出: 未匹配的节点类型 node_type=%s dzh_cell_type=%s", node_type, dzh_cell_type)
 
-    sorted_edges = sorted(edges, key=lambda e: e.get("params", {}).get("_order", e.get("params", {}).get("exec_order", 999)))
+    sorted_edges = sorted(
+        [e for e in edges if isinstance(e, dict)],
+        key=lambda e: e.get("params", {}).get("_order", e.get("params", {}).get("exec_order", 999)),
+    )
 
     for edge in sorted_edges:
-        source_node_id = edge.get("source", {}).get("node_id", "")
-        target_node_id = edge.get("target", {}).get("node_id", "")
+        if not isinstance(edge, dict):
+            continue
+        src_raw = edge.get("source", "")
+        tgt_raw = edge.get("target", "")
+        source_node_id = src_raw.get("node_id", "") if isinstance(src_raw, dict) else str(src_raw)
+        target_node_id = tgt_raw.get("node_id", "") if isinstance(tgt_raw, dict) else str(tgt_raw)
         source_dzh_id = _find_node_dzh_id(nodes, source_node_id)
         target_dzh_id = _find_node_dzh_id(nodes, target_node_id)
         edge_params = edge.get("params", {})

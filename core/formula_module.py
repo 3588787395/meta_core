@@ -2611,6 +2611,54 @@ class FormulaModule:
         except Exception as ex:
             logger.warning("FormulaModule._detect_crossover 异常: %s", ex)
 
+    async def eval_outvars(
+        self,
+        formula: str,
+        symbol: str,
+        period: str = "1d",
+        args: Optional[dict] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """对外暴露 FormulaRouter.eval_outvars，供 /api/indicator/values 调用。"""
+        return await self._formula_router.eval_outvars(formula, symbol, period, args)
+
+    async def eval_indicator_series(
+        self,
+        formula: str,
+        bars: pd.DataFrame,
+        args: Optional[dict] = None,
+    ) -> Optional[Dict[str, List[Any]]]:
+        """对提供的 bars 求值，返回全部输出变量的完整序列（指标面板折线图）。"""
+        try:
+            compiled = self._formula_router._python_engine._compile(formula)
+            outputs = compiled._eval_core(bars, args)
+            if outputs is None:
+                return None
+            result: Dict[str, List[Any]] = {}
+            for name, val in outputs.items():
+                key = "XG" if name is None else name
+                if isinstance(val, pd.Series):
+                    result[key] = [
+                        float(x) if not (isinstance(x, float) and np.isnan(x)) else None
+                        for x in val.values
+                    ]
+                elif isinstance(val, np.ndarray):
+                    result[key] = [
+                        float(x) if not (isinstance(x, float) and np.isnan(x)) else None
+                        for x in val
+                    ]
+                elif isinstance(val, (list, tuple)):
+                    result[key] = [
+                        float(x) if x is not None and not (isinstance(x, float) and np.isnan(x)) else None
+                        for x in val
+                    ]
+                else:
+                    v = compiled._last_value(val)
+                    result[key] = [v] * len(bars) if v is not None else [None] * len(bars)
+            return result
+        except Exception as e:
+            logger.warning("指标序列求值失败 %s: %s", formula, e)
+            return None
+
 
 # ===========================================================================
 # === 公式缓存层（自 services/formula_cache.py 合并）===
