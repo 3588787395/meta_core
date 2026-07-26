@@ -12175,13 +12175,27 @@ var TableDrivenPanel = window.TableDrivenPanel;
 
   function startSimAutoStep() {
     if (_simAutoStepping) return;
+    _simAutoStepping = true;
+    updateSimBtnState(true);
     _callSimControl('resume', function (data) {
       if (data.code === 0) {
-        updateSimBtnState(true);
+        // 后端事件将最终确认 AppState.simulationState
       } else if (data.code === 102) {
         // 仿真器仍在初始化，稍后重试一次
-        setTimeout(startSimAutoStep, 500);
+        setTimeout(function () {
+          _callSimControl('resume', function (retryData) {
+            if (retryData.code !== 0) {
+              _simAutoStepping = false;
+              updateSimBtnState(false);
+              if (retryData.code !== 102) {
+                console.error('[SimControl] resume failed:', retryData.msg);
+              }
+            }
+          });
+        }, 500);
       } else {
+        _simAutoStepping = false;
+        updateSimBtnState(false);
         console.error('[SimControl] resume failed:', data.msg);
       }
     });
