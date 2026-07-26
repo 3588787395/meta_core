@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Meta Core 股票池平台</title>
-<link rel="stylesheet" href="css/styles.css?v=4">
+<link rel="stylesheet" href="css/styles.css?v=20">
 </head>
 <body>
 
@@ -35,7 +35,7 @@
     <span class="tb-sep"></span>
 
     <button class="tb-btn" id="btnNew" title="新建空白池">🆕 新建</button>
-    <button class="tb-btn" id="btnLoadDemo" title="加载示例池 target_pool_100">📊 加载示例池</button>
+    <button class="tb-btn" id="btnLoadDemo" title="加载示例池 sim_test_pool_100">📊 加载示例池</button>
 
     <div class="tb-dropdown-wrapper">
       <button class="tb-btn tb-btn-dropdown" id="btnAddNode" title="添加节点">➕ 添加 <span class="tb-dropdown-arrow">▼</span></button>
@@ -522,57 +522,75 @@
 <!-- ===== Hidden File Input ===== -->
 <input type="file" id="fileInput" accept=".xml" style="display:none">
 
-<!-- ===== Event Panel (事件浮窗) ===== -->
-<div id="eventPanel" class="event-panel">
-  <div class="event-panel-header">
-    <span class="ep-title">📋 事件流 <span id="eventCount" class="ep-badge">0</span> 步数 <span id="stepCount" class="ep-badge" style="background:#2196F3">0</span></span>
-    <div class="ep-controls">
-      <button id="btnPauseScroll" class="ep-btn" title="暂停滚动">⏸ 滚动</button>
-      <button id="btnClearEvents" class="ep-btn" title="清空">🗑</button>
-      <button id="btnToggleEvents" class="ep-btn" title="折叠/展开">▲</button>
+<!-- ===== Event Panel (事件监控浮窗 - 列表版) ===== -->
+<div id="eventPanel" class="event-timeline-panel">
+  <div class="etp-drag-handle" id="epDragHandle"></div>
+  <div class="etp-header" id="epHeader">
+    <div class="etp-title">
+      <span class="etp-title-icon">⏱</span>
+      <span>事件监控</span>
+      <span id="etpEventCount" class="etp-badge">0</span>
     </div>
-  </div>
-  <div class="ep-filter-bar">
-    <button class="ep-filter-btn active" data-filter="all" title="全部">📋 全部</button>
-    <button class="ep-filter-btn active" data-filter="tick" title="Tick/DataChanged">📊 Tick</button>
-    <button class="ep-filter-btn active" data-filter="bar" title="Bar/BarComposed">📈 Bar</button>
-    <button class="ep-filter-btn active" data-filter="formula" title="Formula/StockFiltered">🧮 公式</button>
-    <button class="ep-filter-btn active" data-filter="edge" title="Edge/EdgeFired">⚡ 边</button>
-    <button class="ep-filter-btn active" data-filter="transfer" title="Transfer">🔄 转移</button>
-    <button class="ep-filter-btn active" data-filter="signal" title="Signal/BUY/SELL">💰 信号</button>
-    <button class="ep-filter-btn active" data-filter="order" title="Order/Position">📋 订单</button>
-    <button class="ep-filter-btn active" data-filter="ttl" title="TTL/Timeout">⏰ TTL</button>
-    <button class="ep-filter-btn active" data-filter="system" title="Mode/Time">🔧 系统</button>
+    <div class="etp-controls">
+      <button id="btnPauseResume" class="etp-btn" title="暂停/继续">
+        <span id="btnPauseIcon">⏸</span>
+      </button>
+      <button id="btnClearEvents" class="etp-btn" title="清空事件">
+        <span>🗑</span>
+      </button>
+      <button id="btnToggleEvents" class="etp-btn" title="折叠/展开">
+        <span id="epToggleSym">−</span>
+      </button>
+      <button id="btnCloseEvents" class="etp-btn etp-btn-close" title="关闭">
+        <span>✕</span>
+      </button>
+    </div>
   </div>
 
-  <div id="epTimelineSection" class="ep-timeline-section">
-    <div class="ep-timeline-header" id="epTimelineToggle">
-      <span class="ep-timeline-title">⏱ 时间轴</span>
-      <div class="ep-timeline-controls">
-        <button id="btnTimelineAutoScroll" class="ep-timeline-btn active" title="暂停/继续自动滚动">⏸ 跟随</button>
-        <button id="btnTimelineZoomIn" class="ep-timeline-btn" title="放大">+</button>
-        <button id="btnTimelineZoomOut" class="ep-timeline-btn" title="缩小">-</button>
-        <button id="btnTimelineReset" class="ep-timeline-btn" title="重置视图">⟲</button>
-        <span class="ep-timeline-collapse">▼</span>
+  <!-- 事件可视化区域：分类多行 / 散点分布 -->
+  <div class="etp-viz" id="eventViz">
+    <div class="etp-viz-header">
+      <div class="etp-viz-tabs">
+        <button class="etp-viz-tab active" data-viz="matrix">📑 矩阵</button>
+        <button class="etp-viz-tab" data-viz="scatter">⏱ 散点</button>
+        <button class="etp-viz-layout-toggle" id="btnScatterLayout" title="切换散点排列方式" style="display:none;">📊 分类</button>
+        <span class="legend-item" title="已发生事件"><i class="dot existed"></i></span>
+        <span class="legend-item" title="排队中事件"><i class="dot pending"></i></span>
       </div>
     </div>
-    <div id="epTimelineContainer" class="ep-timeline-container">
-      <canvas id="epTimelineCanvas" class="ep-timeline-canvas"></canvas>
-      <div id="epTimelineTooltip" class="ep-timeline-tooltip" style="display:none;"></div>
+    <div class="etp-viz-body" id="eventVizBody">
+      <div class="event-matrix" id="eventMatrix">
+        <canvas class="event-matrix-canvas" id="eventMatrixCanvas"></canvas>
+      </div>
+      <canvas class="event-scatter" id="eventScatterCanvas" style="display:none"></canvas>
     </div>
   </div>
-  <div id="eventPanelBody" class="event-panel-body">
-    <div class="ep-section-header">
-      <span>✅ 已处理事件</span>
-      <span class="ep-section-count" id="processedCount">0</span>
+
+  <!-- 定时器队列：显示排队中的事件 -->
+  <div class="etp-timer-queue" id="eventTimerQueue">
+    <div class="etp-timer-queue-header">
+      <span class="etp-timer-queue-title">⏰ 定时器队列</span>
+      <span class="etp-timer-queue-count" id="timerQueueCount">0</span>
     </div>
-    <div id="processedEventList" class="event-list ep-section-body"></div>
-    <div class="ep-section-header">
-      <span>⏳ 待处理/未排队事件</span>
-      <span class="ep-section-count" id="pendingCount">0</span>
-    </div>
-    <div id="pendingEventList" class="event-list ep-section-body pending"></div>
+    <canvas class="event-timer-queue-canvas" id="timerQueueCanvas"></canvas>
+    <div class="etp-timer-queue-body" id="timerQueueBody"></div>
   </div>
+
+  <!-- 事件文本详情区域 -->
+  <div class="etp-detail collapsed" id="eventDetail">
+    <div class="etp-detail-header">
+      <span id="eventDetailTitle">事件记录</span>
+      <div class="etp-detail-controls">
+        <button class="etp-detail-toggle" id="btnToggleDetail" title="展开/折叠详情">▲</button>
+        <button class="etp-detail-close" id="btnCloseDetail">✕</button>
+      </div>
+    </div>
+    <div class="etp-detail-body" id="eventDetailBody">
+      <div class="etp-detail-empty">点击上方图标或分类查看事件详情</div>
+    </div>
+  </div>
+
+  <div class="etp-resize-handle" id="epResizeHandle"></div>
 </div>
 
 <!-- ===== Chart Panel (K线 & 公式) ===== -->
@@ -817,9 +835,10 @@
 </div>
 
 <!-- ===== 合并后的 JS 引用（按依赖顺序：canvas.js → ui.js → app.js） ===== -->
-<script src="js/canvas.js?v=4"></script>
-<script src="js/ui.js?v=4"></script>
-<script src="js/app.js?v=4"></script>
+<script src="js/canvas.js?v=9"></script>
+<script src="js/ui.js?v=7"></script>
+<script src="js/event-panel.js?v=20"></script>
+<script src="js/app.js?v=16"></script>
 <script>
   // Hash 路由监听器
   function route() {
