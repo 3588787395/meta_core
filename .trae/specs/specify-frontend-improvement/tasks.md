@@ -25,11 +25,11 @@
   - [x] SubTask 4.4: 对齐设计/仿真/回放/实盘四种模式，确保仿真/回放仅替换数据源与时间推进，不引入特殊执行分支
   - [x] SubTask 4.5: 验证事件面板、计时器队列、K线/公式面板能够正确展示后端事件，无前端私自推断的状态
 
-- [ ] Task 5: 清理多路径与兼容代码
-  - [ ] SubTask 5.1: 扫描并删除 `try old else new`、`if (legacy)`、`if (compat)`、重复实现的函数路径
-  - [ ] SubTask 5.2: 收敛重复的事件处理入口（如 `window.timelineAddEvent`、`window.logSystemEvent`、`window.eventPanelLoad` 等全局钩子）到统一 API
-  - [ ] SubTask 5.3: 删除未使用的变量、函数、DOM 元素引用和 CSS 类
-  - [ ] SubTask 5.4: 确保同一功能只有唯一调用路径，例如事件接收只通过 SSE，状态获取只通过后端 API
+- [x] Task 5: 清理多路径与兼容代码
+  - [x] SubTask 5.1: 扫描并删除 `try old else new`、`if (legacy)`、`if (compat)`、重复实现的函数路径
+  - [x] SubTask 5.2: 收敛重复的事件处理入口（如 `window.timelineAddEvent`、`window.logSystemEvent`、`window.eventPanelLoad` 等全局钩子）到统一 API
+  - [x] SubTask 5.3: 删除未使用的变量、函数、DOM 元素引用和 CSS 类
+  - [x] SubTask 5.4: 确保同一功能只有唯一调用路径，例如事件接收只通过 SSE，状态获取只通过后端 API
 
 - [ ] Task 6: 设计文档更新与最终集成
   - [ ] SubTask 6.1: 更新 `DESIGN.md`，明确前端仅作为展示层、后端持有真值源、表驱动与事件驱动的唯一路径

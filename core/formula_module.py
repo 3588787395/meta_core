@@ -2749,21 +2749,7 @@ class FormulaCache:
         新键格式：
         - 含分钟标签：``{symbol}:{minute}:{period}:{formula_hash}:{args_hash}``
         - 不含分钟标签：``{symbol}:{period}:{formula_hash}:{args_hash}``
-
-        为兼容历史调用，也支持旧签名 ``make_key(formula, symbol, period, context)``，
-        此时会对 ``formula`` 与 ``context`` 分别哈希后生成新格式键。
         """
-        # 兼容旧调用：make_key(formula, symbol, period, context)
-        if isinstance(args_hash, dict) and formula_hash in _ALL_PERIODS:
-            legacy_formula = symbol
-            legacy_symbol = period
-            legacy_period = formula_hash
-            legacy_context = args_hash
-            formula_hash = _hash_object(legacy_formula)
-            args_hash = _hash_object(legacy_context)
-            symbol = legacy_symbol
-            period = legacy_period
-
         fh = formula_hash if formula_hash is not None else ''
         ah = args_hash if args_hash is not None else ''
         if minute is not None:

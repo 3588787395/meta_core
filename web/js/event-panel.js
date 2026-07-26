@@ -1845,8 +1845,6 @@
   }
 
   // ===== 计时器队列轮询：仅作为展示 =====
-  let timerPollTimer = null;
-
   async function syncTimerQueue() {
     try {
       var sid = sessionId || '';
@@ -1885,20 +1883,6 @@
       }).filter(function (t) { return t != null; });
       scheduleRender();
     } catch (e) { /* ignore */ }
-  }
-
-  function startTimerPolling() {
-    if (timerPollTimer) return;
-    syncTimerQueue();
-    timerPollTimer = setInterval(syncTimerQueue, 1000);
-  }
-
-  function stopTimerPolling() {
-    if (timerPollTimer) {
-      clearInterval(timerPollTimer);
-      timerPollTimer = null;
-    }
-    timerQueue = [];
   }
 
   function setSession(sid) {
@@ -1970,7 +1954,8 @@
 
     loadRecentEvents();
     initSSE();
-    startTimerPolling();
+    syncTimerQueue();
+    setInterval(syncTimerQueue, 1000);
   }
 
   if (document.readyState === 'loading') {

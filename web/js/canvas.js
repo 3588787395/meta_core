@@ -475,7 +475,7 @@ function _formatEdgeInterval(seconds) {
 
 function _buildEdgeConditionSummary(params) {
   params = params || {};
-  var func = params.func || {};
+  var func = params.tdx_func || {};
   var filterSpec = params.filter_spec || {};
   var evaluatorType = String(filterSpec.evaluator_type || '').toLowerCase();
   var ct = String(params.condition_type || '').toUpperCase();
@@ -2278,7 +2278,7 @@ class FlowCanvas {
     else if (indiName) iconText = 'ƒ';
 
     // 公式简述：nperiod/noperate（如 "5m/金叉"）
-    var func = params.func || {};
+    var func = params.tdx_func || {};
     var funcSummary = '';
     if (func.nperiod !== undefined && func.nperiod !== null && func.nperiod !== '' && evaluatorType !== 'intersection') {
       var periodMap = { 0: '分笔', 1: '1m', 2: '5m', 3: '15m', 4: '30m', 5: '60m', 6: '日', 7: '周', 8: '月' };

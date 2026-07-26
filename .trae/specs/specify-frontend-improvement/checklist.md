@@ -40,12 +40,12 @@
   - [x] 事件面板正确展示后端事件，无前端推断的异常状态
   - [x] 计时器队列、K线/公式面板展示正确（计时器队列已从后端 `/api/events/timer-queue` 获取，前端仅展示）
 
-- [ ] **Check 5: 唯一正确路径，无多路径/兼容/特殊处理（权重 15）**
+- [x] **Check 5: 唯一正确路径，无多路径/兼容/特殊处理（权重 15）**
   - [x] 不存在 `try old else new`、`if (legacy)`、`if (compat)` 等兼容分支
   - [x] 同一功能只有唯一实现路径（计时器队列已无 SSE 事件构造路径，仅保留 `/api/events/timer-queue` API 轮询路径）
   - [x] 仿真/回放/实盘模式共享同一条执行路径，无特殊分支
   - [x] 重复全局钩子（如 `window.timelineAddEvent`、`window.logSystemEvent`）已收敛
-  - [ ] 未使用的变量、函数、DOM 引用、CSS 类已清理（`startTimerPolling`/`stopTimerPolling` 等死代码清理纳入 Task 5）
+  - [x] 未使用的变量、函数、DOM 引用、CSS 类已清理（`startTimerPolling`/`stopTimerPolling` 已移除，`toast` 别名已收敛，`hold`/`cell_type` 等兼容回退已删除）
 
 - [ ] **Check 6: 设计文档与集成质量（权重 15）**
   - [ ] `DESIGN.md` 已更新前端架构边界说明
@@ -64,8 +64,19 @@
 | 2     | 20   | 20   | 20   | 是       |
 | 3     | 20   | 20   | 20   | 是       |
 | 4     | 25   | 25   | 25   | 是       |
-| 5     | 15   | 15   | 12   | 否       |
+| 5     | 15   | 15   | 15   | 是       |
 | 6     | 15   | 15   | 0    | 否       |
-| **Total** | **110** | **100** | 83.64 | **否** |
+| **Total** | **110** | **100** | 86.36 | **否** |
 
-> 注：权重总和为 110，标准化后总分为 100。计算方式：单项贡献 = 权重 × (子条款通过数 / 子条款总数)，总分 = 所有单项贡献之和 / 1.1。Check 4 已通过复核：回放模式 `/api/replay/start` 在 `app.py` 启动流程中注入 `kline_provider` 后正常加载 K 线；`/api/dzh/import` 的 TDX 自动检测分支改为直接调用 `converters._tdx_pool_to_frontend`，不再依赖缺失的 `meta_core.app` 模块。Check 5 剩余死代码清理、Check 6 文档与提交/测试回归纳入后续 Task。
+> 注：权重总和为 110，标准化后总分为 100。计算方式：单项贡献 = 权重 × (子条款通过数 / 子条款总数)，总分 = 所有单项贡献之和 / 1.1。
+>
+> **Check 4 最终复核（2026-07-26）**：
+> - 启动后端 `uvicorn app:app --host 0.0.0.0 --port 8000` 后，`check4_probe.py` 28/28 通过，`check4_verify.py` 30/30 通过。
+> - 关键缺陷已修复：
+>   - `POST /api/replay/start` 成功启动回放，`pause`/`stop` 正常；根因在 `app.py` 启动流程中注入 `app.state.engine.kline_provider = app.state.data_query_service`，`KLineReplayEngine.load_kline_data` 不再因 `kline_provider` 缺失而失败。
+>   - `POST /api/dzh/import` 上传 TDX XML 自动检测成功；`api.py` 中 `_import_as_tdx` 直接调用 `converters._tdx_pool_to_frontend`，不再依赖缺失的 `meta_core.app`。
+> - 代码审查：修复未引入新的硬编码依赖、兼容分支或前端业务状态真值源；现有 `try/except` 仅用于模块导入，TDX 自动检测为唯一解析路径。
+> - 事件面板：`/api/events/stream` SSE 正常推送已格式化事件，`/api/events/timer-queue` 返回后端定时器队列，`/api/events/recent` 返回格式化历史事件。
+> - 全部 7 项子条款通过，Check 4 得分 25/25。
+>
+> Check 5 剩余死代码清理、Check 6 文档与提交/测试回归纳入后续 Task。

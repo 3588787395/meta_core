@@ -684,15 +684,6 @@ class PoolDataManager {
       });
       delete data.flows;
     }
-    // Normalize cell_type to dzh_cell_type for renderer compatibility
-    (data.nodes || []).forEach(function(n) {
-      if (n.cell_type !== undefined && n.dzh_cell_type === undefined) {
-        n.dzh_cell_type = n.cell_type;
-      }
-      if (!n.label && n.text !== undefined) {
-        n.label = n.text;
-      }
-    });
     // Ensure pool_meta is set for TDX pools
     if (!data.pool_meta) {
       data.pool_meta = { type: 'tdx', ver: '1.0', mode: '1', nextid: 100, backcolor: 16777216 };
@@ -801,7 +792,10 @@ class PoolDataManager {
         if (n.position.height < 20) n.position.height = 40;
       }
       if (!n.params) n.params = {};
-      // 如果 type 是数字（cell_type），先保存到 dzh_cell_type 再映射为字符串
+      // 统一数字/字符串 cell_type 到 dzh_cell_type，作为渲染唯一类型源
+      if (n.cell_type !== undefined && n.dzh_cell_type === undefined) {
+        n.dzh_cell_type = n.cell_type;
+      }
       if (typeof n.type === 'number' && n.dzh_cell_type === undefined) {
         n.dzh_cell_type = n.type;
       }
@@ -887,10 +881,6 @@ class PoolDataManager {
             n.params[field] = n[field];
           }
         }
-        // Create aliases for UI layout data_path compatibility
-        if (n.params.tdx_psatt) n.params.psatt = n.params.tdx_psatt;
-        if (n.params.tdx_spinfo) n.params.spinfo = n.params.tdx_spinfo;
-        if (n.params.tdx_func) n.params.func = n.params.tdx_func;
         // Ensure label is set
         if (!n.label && n.text) {
           n.label = n.text;
@@ -5260,8 +5250,8 @@ window.ruleEditor = new RuleEditor();
     var lines = [];
     var p = node.params || {};
 
-    // 进入后保持时间 - 兼容 hold 和 hold_sec 两种字段名
-    var holdSec = p.hold_sec !== undefined ? p.hold_sec : p.hold;
+    // 进入后保持时间（统一使用 hold_sec）
+    var holdSec = p.hold_sec;
     if (holdSec !== undefined && holdSec !== '') {
       lines.push('进入后保持:' + formatHoldTime(holdSec));
     }
@@ -7709,8 +7699,6 @@ window.ruleEditor = new RuleEditor();
     c.appendChild(el);
     setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 3000);
   }
-  var toast = showToast; // backward-compatible alias
-
   // ═══════════════════════════════════════════════════════════
   //  Render: Sidebar Categories
   // ═══════════════════════════════════════════════════════════
@@ -7821,7 +7809,7 @@ window.ruleEditor = new RuleEditor();
         updateSaveBtn();
       })
       .catch(function (err) {
-        toast('加载失败: ' + err.message, 'error');
+        showToast('加载失败: ' + err.message, 'error');
       });
 
     // Load history in parallel (Task 10)
@@ -8265,7 +8253,7 @@ window.ruleEditor = new RuleEditor();
   }
 
   function validateAll() {
-    toast('正在校验所有配置...', 'info');
+    showToast('正在校验所有配置...', 'info');
     api('POST', '/validate-all')
       .then(function (result) {
         var summary = result.summary || {};
@@ -8289,13 +8277,13 @@ window.ruleEditor = new RuleEditor();
         var vv = document.getElementById('valView');
         if (vv) vv.innerHTML = html;
         if (failed === 0) {
-          toast('全部校验通过 (' + passed + '张表)', 'success');
+          showToast('全部校验通过 (' + passed + '张表)', 'success');
         } else {
-          toast(failed + '张表校验失败', 'error');
+          showToast(failed + '张表校验失败', 'error');
         }
       })
       .catch(function (err) {
-        toast('校验失败: ' + err.message, 'error');
+        showToast('校验失败: ' + err.message, 'error');
       });
   }
 
@@ -8304,7 +8292,7 @@ window.ruleEditor = new RuleEditor();
   // ═══════════════════════════════════════════════════════════
 
   function exportAll() {
-    toast('正在导出...', 'info');
+    showToast('正在导出...', 'info');
     api('GET', '/export').then(function (data) {
       var blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
       var url = URL.createObjectURL(blob);
@@ -8315,9 +8303,9 @@ window.ruleEditor = new RuleEditor();
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      toast('导出成功', 'success');
+      showToast('导出成功', 'success');
     }).catch(function (err) {
-      toast('导出失败: ' + (err.message || err), 'error');
+      showToast('导出失败: ' + (err.message || err), 'error');
     });
   }
 
@@ -8334,17 +8322,17 @@ window.ruleEditor = new RuleEditor();
         try {
           var payload = JSON.parse(ev.target.result);
           api('POST', '/import', payload).then(function (result) {
-            toast('导入成功: ' + (result.tables_written || 0) + ' 张表', 'success');
+            showToast('导入成功: ' + (result.tables_written || 0) + ' 张表', 'success');
             loadCategories().then(function () {
               renderCategories();
               renderTableList();
               if (state.activeTable) loadTable(state.activeTable);
             });
           }).catch(function (err) {
-            toast('导入失败: ' + (err.message || err), 'error');
+            showToast('导入失败: ' + (err.message || err), 'error');
           });
         } catch (ex) {
-          toast('文件解析失败: ' + ex.message, 'error');
+          showToast('文件解析失败: ' + ex.message, 'error');
         }
       };
       reader.readAsText(file);
@@ -8365,40 +8353,40 @@ window.ruleEditor = new RuleEditor();
     try {
       content = JSON.parse(ta.value);
     } catch (e) {
-      toast('JSON格式错误: ' + e.message, 'error');
+      showToast('JSON格式错误: ' + e.message, 'error');
       return;
     }
 
-    toast('正在保存...', 'info');
+    showToast('正在保存...', 'info');
     api('PUT', '/tables/' + name, { content: content })
       .then(function (result) {
         state.modified = false;
         state.tableData[name] = content;
         state.originalJson = ta.value;
         updateSaveBtn();
-        toast('保存成功' + (result.changed && result.changed.length ? '，已热加载: ' + result.changed.join(', ') : ''), 'success');
+        showToast('保存成功' + (result.changed && result.changed.length ? '，已热加载: ' + result.changed.join(', ') : ''), 'success');
         loadTableMeta();
         renderEditor();
       })
       .catch(function (err) {
-        toast('保存失败: ' + err.message, 'error');
+        showToast('保存失败: ' + err.message, 'error');
       });
   }
 
   function hotReload() {
-    toast('正在热加载...', 'info');
+    showToast('正在热加载...', 'info');
     api('POST', '/reload')
       .then(function (result) {
         var changed = result.changed || [];
         if (changed.length) {
-          toast('热加载完成: ' + changed.join(', '), 'success');
+          showToast('热加载完成: ' + changed.join(', '), 'success');
         } else {
-          toast('配置无变更', 'info');
+          showToast('配置无变更', 'info');
         }
         loadTableMeta();
       })
       .catch(function (err) {
-        toast('热加载失败: ' + err.message, 'error');
+        showToast('热加载失败: ' + err.message, 'error');
       });
   }
 
@@ -8483,7 +8471,7 @@ window.ruleEditor = new RuleEditor();
     }
     api('POST', '/rollback/' + versionId)
       .then(function () {
-        toast('回滚成功', 'success');
+        showToast('回滚成功', 'success');
         // Reload table data and history
         loadTable(state.activeTable);
         loadHistory(state.activeTable).then(function () {
@@ -8491,7 +8479,7 @@ window.ruleEditor = new RuleEditor();
         });
       })
       .catch(function (err) {
-        toast('回滚失败: ' + (err.message || err), 'error');
+        showToast('回滚失败: ' + (err.message || err), 'error');
       });
   }
 
@@ -8502,7 +8490,7 @@ window.ruleEditor = new RuleEditor();
   function showDiff(tableName, fromVersion, toVersion) {
     if (!tableName) tableName = state.activeTable;
     if (!tableName) {
-      toast('请先选择配置表', 'error');
+      showToast('请先选择配置表', 'error');
       return;
     }
     var params = '?from_version=' + encodeURIComponent(fromVersion || 'current') +
@@ -8541,11 +8529,11 @@ window.ruleEditor = new RuleEditor();
           histPanel.innerHTML = html;
           histPanel.style.display = 'block';
         } else {
-          toast('Diff: ' + (diff.added ? diff.added.length : 0) + ' added, ' + (diff.removed ? diff.removed.length : 0) + ' removed', 'info');
+          showToast('Diff: ' + (diff.added ? diff.added.length : 0) + ' added, ' + (diff.removed ? diff.removed.length : 0) + ' removed', 'info');
         }
       })
       .catch(function (err) {
-        toast('Diff 加载失败: ' + (err.message || err), 'error');
+        showToast('Diff 加载失败: ' + (err.message || err), 'error');
       });
   }
 
@@ -8564,10 +8552,10 @@ window.ruleEditor = new RuleEditor();
           if (info) info.locked = false;
           renderEditor();
           renderTableList();
-          toast('已解锁', 'success');
+          showToast('已解锁', 'success');
         })
         .catch(function (err) {
-          toast('解锁失败: ' + (err.message || err), 'error');
+          showToast('解锁失败: ' + (err.message || err), 'error');
         });
     } else {
       var reason = prompt('加锁原因（可选）:', '');
@@ -8578,10 +8566,10 @@ window.ruleEditor = new RuleEditor();
           if (info) info.locked = true;
           renderEditor();
           renderTableList();
-          toast('已加锁', 'success');
+          showToast('已加锁', 'success');
         })
         .catch(function (err) {
-          toast('加锁失败: ' + (err.message || err), 'error');
+          showToast('加锁失败: ' + (err.message || err), 'error');
         });
     }
   }
@@ -8685,7 +8673,7 @@ window.ruleEditor = new RuleEditor();
         if (tList) tList.innerHTML = html;
       })
       .catch(function (err) {
-        toast('搜索失败: ' + err.message, 'error');
+        showToast('搜索失败: ' + err.message, 'error');
       });
   }
 
@@ -8780,7 +8768,7 @@ window.ruleEditor = new RuleEditor();
       document.getElementById('btnCopy').addEventListener('click', function () {
         var ta = document.getElementById('jsonEd');
         navigator.clipboard.writeText(ta.value).then(function () {
-          toast('已复制到剪贴板', 'success');
+          showToast('已复制到剪贴板', 'success');
         });
       });
       document.getElementById('configBtnUndo').addEventListener('click', function () {
