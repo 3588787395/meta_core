@@ -1,0 +1,205 @@
+{
+  "passed": 17,
+  "total": 22,
+  "results": [
+    {
+      "name": "DZH XML import-and-save",
+      "ok": true,
+      "detail": "status=200, nodes=33, edges=30",
+      "data_keys": [
+        "success",
+        "pool_id",
+        "meta"
+      ]
+    },
+    {
+      "name": "DZH export",
+      "ok": false,
+      "detail": "status=200, content-type=None, bytes=16471",
+      "data_keys": null
+    },
+    {
+      "name": "DZH export-meta",
+      "ok": true,
+      "detail": "status=200, content-type=None, bytes=136",
+      "data_keys": null
+    },
+    {
+      "name": "TDX XML import (via /api/dzh/import)",
+      "ok": false,
+      "detail": "status=200, nodes=None, edges=None, keys=['success', 'error']",
+      "data_keys": [
+        "success",
+        "error"
+      ]
+    },
+    {
+      "name": "JSON import",
+      "ok": false,
+      "detail": "status=200, has_nodes=False, has_data=False, top_keys=['success', 'error']",
+      "data_keys": [
+        "success",
+        "error"
+      ]
+    },
+    {
+      "name": "JSON export",
+      "ok": false,
+      "detail": "无可用配置",
+      "data_keys": null
+    },
+    {
+      "name": "Indicator values (MA(C,5))",
+      "ok": true,
+      "detail": "status=200, code=0, count=200",
+      "data_keys": [
+        "code",
+        "stock_code",
+        "period"
+      ]
+    },
+    {
+      "name": "K-line",
+      "ok": true,
+      "detail": "status=200, code=0, count=50",
+      "data_keys": [
+        "code",
+        "stock_code",
+        "period",
+        "count"
+      ]
+    },
+    {
+      "name": "DZH flows source/target",
+      "ok": true,
+      "detail": "status=200, count=30, source/target_ok=True",
+      "data_keys": [
+        "total"
+      ]
+    },
+    {
+      "name": "Events timer-queue",
+      "ok": true,
+      "detail": "status=200, count=20, timers=20",
+      "data_keys": [
+        "success",
+        "now_ms",
+        "now_time",
+        "now_time_ms",
+        "count",
+        "timers"
+      ]
+    },
+    {
+      "name": "Sim start",
+      "ok": true,
+      "detail": "status=200, code=0, session_id=a8e41374a84a41f18abb8c957d8cb5f8",
+      "data_keys": [
+        "code"
+      ]
+    },
+    {
+      "name": "Sim pause",
+      "ok": false,
+      "detail": "status=200, msg=仿真器正在后台初始化，请稍后再试",
+      "data_keys": [
+        "code",
+        "status",
+        "msg"
+      ]
+    },
+    {
+      "name": "Sim resume",
+      "ok": true,
+      "detail": "status=200, msg=None",
+      "data_keys": [
+        "code"
+      ]
+    },
+    {
+      "name": "Sim bars",
+      "ok": true,
+      "detail": "status=200, bars=200",
+      "data_keys": [
+        "code"
+      ]
+    },
+    {
+      "name": "Sim stop",
+      "ok": true,
+      "detail": "status=200, msg=None",
+      "data_keys": [
+        "code"
+      ]
+    },
+    {
+      "name": "Cell create",
+      "ok": true,
+      "detail": "status=200, id=m_4445af0a",
+      "data_keys": [
+        "success"
+      ]
+    },
+    {
+      "name": "Cell update",
+      "ok": true,
+      "detail": "status=200",
+      "data_keys": [
+        "success"
+      ]
+    },
+    {
+      "name": "Cell create (candidate)",
+      "ok": true,
+      "detail": "id=m_276c640c",
+      "data_keys": [
+        "success"
+      ]
+    },
+    {
+      "name": "Flow create",
+      "ok": true,
+      "detail": "status=200, id=e_62faaf0c",
+      "data_keys": [
+        "success",
+        "topology_mode"
+      ]
+    },
+    {
+      "name": "Flow update",
+      "ok": true,
+      "detail": "status=200",
+      "data_keys": [
+        "date",
+        "server",
+        "content-length",
+        "content-type",
+        "connection"
+      ]
+    },
+    {
+      "name": "Flow delete",
+      "ok": true,
+      "detail": "status=200",
+      "data_keys": [
+        "date",
+        "server",
+        "content-length",
+        "content-type",
+        "connection"
+      ]
+    },
+    {
+      "name": "Cell delete",
+      "ok": true,
+      "detail": "status=200",
+      "data_keys": [
+        "date",
+        "server",
+        "content-length",
+        "content-type",
+        "connection"
+      ]
+    }
+  ]
+}
