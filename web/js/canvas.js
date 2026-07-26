@@ -2352,9 +2352,11 @@ class FlowCanvas {
     var params = edge.params || {};
     var modeInfo = this._getEdgeModeInfo(params, tgtId);
     var midVal = parseFloat(params.mid) || 0;
+    var lineType = (params.line_type && ['bezier', 'orthogonal', 'straight'].indexOf(params.line_type) !== -1)
+      ? params.line_type : this.edgeLineType;
     var ns = 'http://www.w3.org/2000/svg';
     var self = this;
-    var d = this._buildEdgePath(sp, tp, midVal);
+    var d = this._buildEdgePath(sp, tp, midVal, lineType);
 
     // Hit area
     var hitPath = document.createElementNS(ns, 'path');
@@ -2468,7 +2470,7 @@ class FlowCanvas {
       labelText = intervalLabel + (condSummary ? ' / ' + condSummary : '');
     } else {
       // 无条件边：只显示线宽（来自 params.size 或 modeInfo.width）
-      var edgeWidth = params.size ? parseInt(params.size) : modeInfo.width;
+      var edgeWidth = params.size ? parseInt(params.size) : parseInt(modeInfo.width) || 1;
       labelText = 'w=' + edgeWidth;
     }
 

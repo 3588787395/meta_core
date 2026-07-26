@@ -1876,7 +1876,7 @@
             state: spec.state || 'waiting',
             trigger_type: spec.trigger_type || '定时器',
             remaining_text: spec.remaining_text || '',
-            details: spec.details || { fire_at: fireMs < 1e12 ? fireMs / 1000 : fireMs, kind: spec.kind || 'ttl' },
+            details: spec.details || {},
             raw: spec,
             pending: false
           },

@@ -322,6 +322,7 @@ class PoolDataManager {
     this._fieldDefs = null;         // 从 API 加载的 field_definitions（attr 位掩码单一真相源）
     this._isTDX = false;            // 当前是否为TDX池
     this._tdxFilename = null;       // TDX池文件名
+    this._defaultEdgeLineType = 'bezier'; // 新增边默认线形（与画布全局默认一致）
   }
 
   /** 从后端 API 加载所有配置表 */
@@ -1195,7 +1196,8 @@ class PoolDataManager {
         interval_sec: 60,
         mid: 0,
         clr: '',
-        dzh_attr: 0
+        dzh_attr: 0,
+        line_type: this._defaultEdgeLineType
       }
     };
 
@@ -10719,7 +10721,15 @@ var TableDrivenPanel = window.TableDrivenPanel;
         e.stopPropagation();
         var lt = item.getAttribute('data-linetype');
         ltDropdown.classList.add('hidden');
-        canvas.setEdgeLineType(lt);
+        // 优先作用于选中边，否则更新全局默认线形
+        var selectedEdgeId = canvas.getSelectedEdgeId ? canvas.getSelectedEdgeId() : null;
+        if (selectedEdgeId && poolData.updateEdge) {
+          poolData.updateEdge(selectedEdgeId, { line_type: lt });
+          canvas.render(poolData.data);
+        } else {
+          canvas.setEdgeLineType(lt);
+          poolData._defaultEdgeLineType = lt;
+        }
         btnEdgeLineType.innerHTML = { bezier: '〰 贝兹', orthogonal: '├ 横竖', straight: '─ 直线' }[lt] + ' <span class="tb-dropdown-arrow">▼</span>';
         showToast('线形: ' + { bezier: '贝兹曲线', orthogonal: '横竖折线', straight: '直线' }[lt]);
       });
@@ -11439,9 +11449,10 @@ var TableDrivenPanel = window.TableDrivenPanel;
         if (item.submenu) cls += ' ctx-has-sub';
         if (item.checkable && _getCtxCheckedState(targetData, item.checked_when)) cls += ' ctx-checked';
         var label = item.label || '';
-        // 动态标签替换：线宽显示当前值
-        if (item.action === 'editLineWidth' && ctxParams && ctxParams.size !== undefined) {
-          label = '线条宽度 (' + ctxParams.size + ')';
+        // 动态标签替换：线宽显示当前值（size 未设置时回退到 1）
+        if (item.action === 'editLineWidth' && ctxParams) {
+          var currentSize = parseInt(ctxParams.size) || 1;
+          label = '线条宽度 (' + currentSize + ')';
         }
         html += '<div class="' + cls + '" data-action="' + item.action + '">' + (item.icon || '') + ' ' + label;
         if (item.submenu) {
