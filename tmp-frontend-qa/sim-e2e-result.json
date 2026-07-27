@@ -1,0 +1,251 @@
+{
+  "timestamp": "2026-07-27T02:57:27.559Z",
+  "poolCreated": true,
+  "poolId": "ae7d30b7-fb44-4517-a153-7c70b63fa515",
+  "sessionId": "fa5d7213cc7844d08b9ebb7929915f0a",
+  "simInitialized": true,
+  "steps": [
+    {
+      "step": 1,
+      "clock": 34560,
+      "event_count": 0,
+      "changed_codes": [],
+      "events_preview": []
+    },
+    {
+      "step": 2,
+      "clock": 34620,
+      "event_count": 0,
+      "events_this_step": 0,
+      "events_preview": [],
+      "cumulative_total": 1168,
+      "cumulative_types": {
+        "BarComposed": 271,
+        "DataChanged": 204,
+        "TimeAdvanced": 9,
+        "TickDue": 8,
+        "TickReceived": 8
+      }
+    },
+    {
+      "step": 3,
+      "clock": 34680,
+      "event_count": 0,
+      "events_this_step": 0,
+      "events_preview": [],
+      "cumulative_total": 2336,
+      "cumulative_types": {
+        "BarComposed": 271,
+        "DataChanged": 204,
+        "TimeAdvanced": 9,
+        "TickDue": 8,
+        "TickReceived": 8
+      }
+    },
+    {
+      "step": 4,
+      "clock": 34740,
+      "event_count": 0,
+      "events_this_step": 0,
+      "events_preview": [],
+      "cumulative_total": 3504,
+      "cumulative_types": {
+        "BarComposed": 271,
+        "DataChanged": 204,
+        "TimeAdvanced": 9,
+        "TickDue": 8,
+        "TickReceived": 8
+      }
+    },
+    {
+      "step": 5,
+      "clock": 34800,
+      "event_count": 0,
+      "events_this_step": 0,
+      "events_preview": [],
+      "cumulative_total": 4672,
+      "cumulative_types": {
+        "BarComposed": 271,
+        "DataChanged": 204,
+        "TimeAdvanced": 9,
+        "TickDue": 8,
+        "TickReceived": 8
+      }
+    },
+    {
+      "step": 6,
+      "clock": 34860,
+      "event_count": 0,
+      "events_this_step": 0,
+      "events_preview": [],
+      "cumulative_total": 5840,
+      "cumulative_types": {
+        "BarComposed": 271,
+        "DataChanged": 204,
+        "TimeAdvanced": 9,
+        "TickDue": 8,
+        "TickReceived": 8
+      }
+    },
+    {
+      "step": 7,
+      "clock": 34920,
+      "event_count": 0,
+      "events_this_step": 0,
+      "events_preview": [],
+      "cumulative_total": 7008,
+      "cumulative_types": {
+        "BarComposed": 271,
+        "DataChanged": 204,
+        "TimeAdvanced": 9,
+        "TickDue": 8,
+        "TickReceived": 8
+      }
+    },
+    {
+      "step": 8,
+      "clock": 34980,
+      "event_count": 0,
+      "events_this_step": 0,
+      "events_preview": [],
+      "cumulative_total": 8176,
+      "cumulative_types": {
+        "BarComposed": 271,
+        "DataChanged": 204,
+        "TimeAdvanced": 9,
+        "TickDue": 8,
+        "TickReceived": 8
+      }
+    },
+    {
+      "step": 9,
+      "clock": 35040,
+      "event_count": 0,
+      "events_this_step": 0,
+      "events_preview": [],
+      "cumulative_total": 9344,
+      "cumulative_types": {
+        "BarComposed": 271,
+        "DataChanged": 204,
+        "TimeAdvanced": 9,
+        "TickDue": 8,
+        "TickReceived": 8
+      }
+    },
+    {
+      "step": 10,
+      "clock": 35100,
+      "event_count": 0,
+      "events_this_step": 0,
+      "events_preview": [],
+      "cumulative_total": 10512,
+      "cumulative_types": {
+        "BarComposed": 271,
+        "DataChanged": 204,
+        "TimeAdvanced": 9,
+        "TickDue": 8,
+        "TickReceived": 8
+      }
+    },
+    {
+      "step": 11,
+      "clock": 35160,
+      "event_count": 0,
+      "events_this_step": 0,
+      "events_preview": [],
+      "cumulative_total": 11680,
+      "cumulative_types": {
+        "BarComposed": 271,
+        "DataChanged": 204,
+        "TimeAdvanced": 9,
+        "TickDue": 8,
+        "TickReceived": 8
+      }
+    }
+  ],
+  "eventTypes": {
+    "BarComposed": 2710,
+    "DataChanged": 2040,
+    "TimeAdvanced": 90,
+    "TickDue": 80,
+    "TickReceived": 80
+  },
+  "eventTotal": 11680,
+  "finalClock": 35160,
+  "finalState": {
+    "clock": 35160,
+    "clock_str": "09:46:00",
+    "pools": {
+      "e2e_candidate": {
+        "count": 3,
+        "hold_seconds": 432000,
+        "stocks": [
+          {
+            "code": "fz600000",
+            "name": "浦发银行",
+            "price": 0,
+            "change_pct": 0
+          },
+          {
+            "code": "fz000001",
+            "name": "平安银行",
+            "price": 0,
+            "change_pct": 0
+          },
+          {
+            "code": "fz600519",
+            "name": "贵州茅台",
+            "price": 0,
+            "change_pct": 0
+          }
+        ],
+        "total_count": 3
+      },
+      "e2e_state_a": {
+        "count": 0,
+        "hold_seconds": 432000,
+        "stocks": [],
+        "total_count": 0
+      },
+      "e2e_state_b": {
+        "count": 0,
+        "hold_seconds": 432000,
+        "stocks": [],
+        "total_count": 0
+      }
+    },
+    "node_stocks": {
+      "e2e_candidate": [
+        {
+          "code": "fz600000",
+          "label": "浦发银行"
+        },
+        {
+          "code": "fz000001",
+          "label": "平安银行"
+        },
+        {
+          "code": "fz600519",
+          "label": "贵州茅台"
+        }
+      ],
+      "e2e_state_a": [],
+      "e2e_state_b": []
+    },
+    "total_events": 0,
+    "feedback_loops": 0,
+    "is_running": true,
+    "current_index": 35160,
+    "total_bars": 19800,
+    "progress": 1
+  },
+  "poolDeleted": true,
+  "errors": [],
+  "passed": true,
+  "mockDsSelected": true,
+  "poolCreateStatus": 200,
+  "simStartStatus": 200,
+  "simPauseOk": true,
+  "simResumeOk": true,
+  "simStopOk": true
+}

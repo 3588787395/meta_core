@@ -1,0 +1,130 @@
+{
+  "timestamp": "2026-07-27T03:39:34.603Z",
+  "errors": [],
+  "passed": true,
+  "poolId": "3c977ff2-201e-4249-81bd-eb09edfe7667",
+  "poolCreated": true,
+  "sessionId": "b505ab8dd649410db851ccb81129a70f",
+  "firstStepClock": 34560,
+  "firstStepEvents": 0,
+  "simInitialized": true,
+  "totalEventsApi": 0,
+  "lastClock": 34680,
+  "eventTypesApi": {
+    "BarComposed": 271,
+    "DataChanged": 204,
+    "TimeAdvanced": 9,
+    "TickDue": 8,
+    "TickReceived": 8
+  },
+  "eventTotalApi": 1168,
+  "stateSnapshotApi": {
+    "clock": 34680,
+    "clock_str": "09:38:00",
+    "pools": {
+      "e2e_candidate": {
+        "count": 2,
+        "hold_seconds": 432000,
+        "stocks": [
+          {
+            "code": "fz600000",
+            "name": "浦发银行",
+            "price": 0,
+            "change_pct": 0
+          },
+          {
+            "code": "fz000001",
+            "name": "平安银行",
+            "price": 0,
+            "change_pct": 0
+          }
+        ],
+        "total_count": 2
+      },
+      "e2e_state_a": {
+        "count": 0,
+        "hold_seconds": 432000,
+        "stocks": [],
+        "total_count": 0
+      }
+    },
+    "node_stocks": {
+      "e2e_candidate": [
+        {
+          "code": "fz600000",
+          "label": "浦发银行"
+        },
+        {
+          "code": "fz000001",
+          "label": "平安银行"
+        }
+      ],
+      "e2e_state_a": []
+    },
+    "total_events": 0,
+    "feedback_loops": 0,
+    "is_running": true,
+    "current_index": 34680,
+    "total_bars": 19800,
+    "progress": 1
+  },
+  "statePoolDetailApi": [
+    {
+      "node": "e2e_candidate",
+      "stockCount": 2,
+      "total_count": 2
+    },
+    {
+      "node": "e2e_state_a",
+      "stockCount": 0,
+      "total_count": 0
+    }
+  ],
+  "frontendLoadPool": true,
+  "nodeLabels": [
+    {
+      "id": "e2e_candidate",
+      "type": "7",
+      "text": "候选池"
+    },
+    {
+      "id": "e2e_state_a",
+      "type": "8",
+      "text": "状态池A"
+    }
+  ],
+  "simModeSwitched": true,
+  "sessionSetInFrontend": {
+    "sid": "b505ab8dd649410db851ccb81129a70f",
+    "hasEventPanelSetSession": true
+  },
+  "eventPanelInfo": {
+    "eventCountText": "100",
+    "eventCountViaApi": 100,
+    "eventPanelVisible": true,
+    "eventPanelText": "⏱\n事件监控\n100\n⏸\n🗑\n−\n✕\n📑 矩阵\n⏱ 散点\n☑\n📡\nTick\n100\n☑\n📈\nBar\n0\n☑\n🧮\nFormula\n0\n☑\n🔀\nEdge\n0\n☑\n🔄\nTransfer\n0\n☑\n🔔\nSignal\n0\n☑\n📋\nOrder\n0\n☑\n⏰\nTTL\n0\n☑\n⚙\nSystem\n0\nNOW\n⏰ 定时器队列\n21\n触发时间\n触发类型\n事件类型\n股票\n详情\n剩余\n9:38:01.000\nTick定时器\nTimerQueued\nfz000001\nfire_at:34681 | queue:0\n1.0s后触发\n9:38:01.000\nTick定时器\nTimerQueued\nfz00000"
+  },
+  "eventPanelShowsEvents": true,
+  "simDisplay": {
+    "clock": "--",
+    "stepCount": "步数: 0",
+    "status": "就绪"
+  },
+  "selectedStateNode": {
+    "id": "e2e_state_a",
+    "text": "状态池A"
+  },
+  "statePanelText": "TDX状态池属性TDX\n⚠\nTDX池不支持部分属性编辑，已自动隐藏\n基本属性\nID\ne2e_state_a\n类型\n8\n名称\n填充色\n文字颜色\n填充样式\n空心\n实心\nPSATT 状态池参数\n▼\n自动删除(入池超时淘汰)\n否\n是\n时间数量(N)\n时间单位\n天 (days)\n小时 (hours)\n分钟 (minutes)\n秒 (seconds)\n股票入池N天后自动删除（×86400秒），适合长期持仓策略\n设置为目标池\n否\n是\n发出预警提示声\n否\n是\n声音类型\n系统声音\n自定义文件\n系统声音编号\n自定义声音文件\n右下角弹出股票入池提示框\n否\n是\n池内股票自动加入以下板块\n否\n是\n目标板块名称\n写入模式\n追加模式\n覆盖模式\n将当前池股票追加到目标板块已有股票之后\n保存历史数据\n查看\n导出\n入池日志\n股票列表 (STK 子元素)\n▼\n状态池股票\n共 0 只\n代码\t名称\t现价\t涨幅\t收益\t成交量\t入池价",
+  "statePanelShowsStocks": false,
+  "statePanelFieldCount": 20,
+  "selectedCandNode": {
+    "id": "e2e_candidate",
+    "text": "候选池"
+  },
+  "candPanelText": "TDX候选池属性TDX\n⚠\nTDX池不支持部分属性编辑，已自动隐藏\n基本属性\nID\ne2e_candidate\n类型\n7\n名称\n填充色\n文字颜色\n填充样式\n空心\n实心\nSPINFO 候选池信息\n▼\n候选池类型(spinfo.type)\n全市场/自动选股\n全部A股\n自选股\n自定义板块\n从全市场自动筛选股票，配合公式条件使用\n自定义板块名\n候选池容量\n板块选择\n选择板块...\n🔄",
+  "candPanelShowsStocks": false,
+  "relevantErrors": [],
+  "pageErrors": [],
+  "simStopped": true,
+  "poolDeleted": true
+}
