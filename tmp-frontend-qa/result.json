@@ -1,0 +1,13 @@
+{
+  "url": "http://127.0.0.1:8000/index.html",
+  "title": "Meta Core 股票池平台",
+  "hasAppContent": true,
+  "frameworkOverlay": false,
+  "menuVisible": true,
+  "menuTextPreview": "◆\nMetaCore\n📡 Mock 模拟 ▼\n🆕 新建\n📊 加载示例池\n💾 保存\n↩ 撤销\n↪ 重做\n➕ 添加 ▼\n📥 导入 ▼\n📤 导出 ▼\n⊡ 适应\n◀ 列表\n🔢 顺序\n🔗 连线\n📐 线形 ▼\n▶ 开始\n⏸ 暂停\n⏹ 停止\n🎨 设计模式\n▶ 实盘\n⏪ 回放\n🔬 仿真\n⚙ 规则\n⚙ 综合设置\n📐 公式\n⚙ 配置中心\n115%\n设计模式\n股票池列表\n◀\n通达信\n大智慧\n实例\n已保存\n📄 2019游资榜-百里光耀.xml\nXML\n156.5KB\n📄 2_资金分析系统.xml\nXML\n77.5KB\n📄 api_test_create_044403cb.xml\nXML\n131B\n📄 api_test_create_2afb30cb.xml\nXML\n131B\n📄 api_test_create_4fcd7e4d.xml\nXML\n131B\n📄 api_test_create_72179ad2.xml\nXML\n131B\n📄 api_test_create_73f205d3.xml\nXML\n131B\n📄 api_test_create_910892dc.xml",
+  "startBefore": true,
+  "startAfter": true,
+  "relevantErrors": [],
+  "pageErrors": [],
+  "passed": true
+}
