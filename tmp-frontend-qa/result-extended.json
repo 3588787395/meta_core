@@ -1,0 +1,80 @@
+{
+  "url": "http://127.0.0.1:8000/index.html",
+  "title": "Meta Core 股票池平台",
+  "hasAppContent": true,
+  "frameworkOverlay": false,
+  "loadPoolFromSidebar": true,
+  "nodeSelected": true,
+  "nodeSelectedDebug": "游资计算\n▶\nTDX候选池属性TDX\n⚠\nTDX池不支持部分属性编辑，已自动隐藏\n基本属性\nID\n1\n类型\ntdx_candidate\n名称\n填充色\n文字颜色\n填充样式\n空心\n实心\nSPINFO 候选池信息\n▼\n候选池类型(spinfo.type)\n全市场/自动选股\n全部A股\n自选股\n自定义板块\n自定义板块名\n候选池容量\n板块选择\n选择板块...\n🔄",
+  "nodeContextMenu": true,
+  "runStart": true,
+  "runPause": false,
+  "runStop": false,
+  "modeSwitchRun": true,
+  "modeSwitchReplay": true,
+  "modeSwitchSimulation": true,
+  "modeSwitchDesign": true,
+  "eventPanelToggle": true,
+  "edgeSelected": true,
+  "edgeSelectedFieldCount": 14,
+  "importJsonOk": true,
+  "exportJsonOk": true,
+  "mobileOk": true,
+  "relevantErrors": [],
+  "pageErrors": [],
+  "passed": true,
+  "selectedNode": {
+    "id": "1",
+    "type": "tdx_candidate",
+    "label": "游资计算"
+  },
+  "propPanelInfo": {
+    "containerId": "panelBody",
+    "containerTag": "DIV",
+    "titleId": "panelTitle",
+    "currentNodeId": "1"
+  },
+  "nodeSelectedFieldCount": 10,
+  "panelBodyPreview": "<div class=\"td-panel\" data-layout=\"tdx_candidate\"><div class=\"td-panel-header\"><span class=\"td-panel-title\">TDX候选池属性</span><span class=\"td-pool-tag td-pool-tag-tdx\">TDX</span></div><div class=\"td-blocked-notice\"><span class=\"td-blocked-icon\">⚠</span><span class=\"td-blocked-text\">TDX池不支持部分属性编辑，已自动隐藏</span></div><div class=\"td-section\" data-section=\"0\"><div class=\"td-section-header\"><span class=\"td-",
+  "panelError": "",
+  "panelNetwork": [
+    {
+      "url": "http://127.0.0.1:8000/api/v1/table/panel?_t=1785118906756",
+      "status": 200,
+      "preview": "{\"layout_id\":\"tdx_candidate\",\"name\":\"TDX候选池属性\",\"pool_type\":\"tdx\",\"node_type\":\"tdx_candidate\",\"blocked_attrs\":[\"url\",\"hold\",\"col\",\"histana\",\"wizd\",\"deltype\",\"endtime\",\"delstocktype\",\"staattr\",\"enter\",\"exit\",\"stocknum\",\"tmpl\",\"sorttype\",\"inditype\",\"crc\",\"indi\",\"indiparam\",\"attrtext\",\"reload\",\"lastload"
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/v1/table/panel?_t=1785118939175",
+      "status": 200,
+      "preview": "{\"layout_id\":\"tdx_flow_edge\",\"name\":\"TDX流程线属性\",\"pool_type\":\"tdx\",\"node_type\":\"flow\",\"blocked_attrs\":[\"url\",\"hold\",\"col\",\"histana\",\"wizd\",\"deltype\",\"endtime\",\"delstocktype\",\"staattr\",\"enter\",\"exit\",\"stocknum\",\"tmpl\",\"sorttype\",\"inditype\",\"crc\",\"indi\",\"indiparam\",\"attrtext\",\"reload\",\"lastload\",\"tradea"
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/json/export",
+      "status": 200,
+      "preview": ""
+    },
+    {
+      "url": "http://127.0.0.1:8000/api/json/import",
+      "status": 200,
+      "preview": "{\"success\":true,\"data\":{\"name\":\"QA Import Test\",\"pool_type\":\"dzh\",\"nodes\":[{\"id\":\"qa_src\",\"type\":\"market_source\",\"label\":\"QA Source\",\"x\":100,\"y\":100,\"params\":{}},{\"id\":\"qa_state\",\"type\":\"state_pool\",\"label\":\"QA State\",\"x\":300,\"y\":100,\"params\":{}}],\"edges\":[{\"id\":\"qa_edge\",\"source\":\"qa_src\",\"target\":"
+    }
+  ],
+  "ctxTriggerInfo": {
+    "ok": true,
+    "cx": 303.7569885253906,
+    "cy": 239.64246368408203,
+    "nid": "1"
+  },
+  "nodeContextMenuText": "🔧 属性\n⚙ 综合设置\n✏ 修改说明文字",
+  "selectedEdge": {
+    "id": "2_12",
+    "type": "",
+    "label": ""
+  },
+  "edgePanelPreview": "<div class=\"td-panel\" data-layout=\"tdx_flow_edge\"><div class=\"td-panel-header\"><span class=\"td-panel-title\">TDX流程线属性</span><span class=\"td-pool-tag td-pool-tag-tdx\">TDX</span></div><div class=\"td-blocked-notice\"><span class=\"td-blocked-icon\">⚠</span><span class=\"td-blocked-text\">TDX池不支持部分属性编辑，已自动隐藏</span></div><div class=\"td-section\" data-section=\"0\"><div class=\"td-section-header\"><span class=\"td-",
+  "exportResponseStatus": 200,
+  "exportStatusText": "已导出",
+  "importResponseStatus": 200,
+  "importBodyHint": "◆\nMetaCore\n📡 Mock 模拟 ▼\n🆕 新建\n📊 加载示例池\n💾 保存\n↩ 撤销\n↪ 重做\n➕ 添加 ▼\n📥 导入 ▼\n📤 导出 ▼\n⊡ 适应\n◀ 列表\n🔢 顺序\n🔗 连线\n📐 线形 ▼\n▶ 开始\n⏸ 暂停\n⏹ 停止\n🎨 设计模式\n▶ 实盘\n⏪ 回放\n🔬 仿真\n⚙ 规则\n⚙ 综合设置\n📐 公式\n⚙ 配置中心\n200%\n设计模式\n股票池列表\n◀\n通达信\n大智慧\n实例\n已保存\n📄 12【勇哥帥】.xml\nXML\n261.6KB\n📄 1超赢7号.xml\nXML\n14.9KB\n📄 1超赢8号.xml\nXML\n102.8KB\n📄 1超赢短线王1.xml\nXML\n",
+  "importStatusText": "就绪"
+}

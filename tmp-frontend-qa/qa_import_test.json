@@ -1,0 +1,37 @@
+{
+  "version": 2,
+  "name": "QA Import Test",
+  "pool_type": "dzh",
+  "pool_meta": {
+    "name": "QA Import Test",
+    "pool_type": "dzh",
+    "type": "dzh"
+  },
+  "nodes": [
+    {
+      "id": "qa_src",
+      "type": "market_source",
+      "label": "QA Source",
+      "x": 100,
+      "y": 100,
+      "params": {}
+    },
+    {
+      "id": "qa_state",
+      "type": "state_pool",
+      "label": "QA State",
+      "x": 300,
+      "y": 100,
+      "params": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "qa_edge",
+      "source": "qa_src",
+      "target": "qa_state",
+      "type": "flow_edge",
+      "params": {}
+    }
+  ]
+}

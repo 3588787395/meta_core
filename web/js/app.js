@@ -122,7 +122,9 @@
       if (ev.event_type === 'SimulationStateChanged' && ev.details && ev.details.state) {
         var newState = ev.details.state;
         AppState.setSimulationState(newState);
-        updateSimBtnState(newState === 'running');
+        if (typeof updateSimBtnState === 'function') {
+          updateSimBtnState(newState === 'running');
+        }
       }
     });
   }
@@ -9328,6 +9330,7 @@ var TableDrivenPanel = window.TableDrivenPanel;
     });
 
     propPanel = new TableDrivenPanel($('panelBody'), $('panelTitle'), poolData);
+    window.propPanel = propPanel;
     propPanel.onPropertyChange = function (item, field, value) {
       if (item && item.id) {
         var node = poolData.getNodeById(item.id);
