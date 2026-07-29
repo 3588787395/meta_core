@@ -1914,28 +1914,29 @@ def _gate_elapsed(spec: "TimingSpec", state: PoolState, eid: str, now_unix: floa
     return now_unix - float(start_ts) >= _offset_seconds(spec, cfg)
 
 
-def _gate_before_open(spec: "TimingSpec", state: PoolState, eid: str, now_unix: float, now_sec: int, cfg: Dict[str, Any]) -> bool:
-    open_sec, _close_sec = _market_seconds(cfg)
-    offset = _offset_seconds(spec, cfg)
-    return open_sec - offset <= now_sec <= open_sec
+# 市场时间门控表驱动（Code = Data + Dispatcher）：
+# 4 个 before/after × open/close wrapper 共享 ``_market_seconds(cfg)[anchor_idx]
+# ± offset_fn(spec, cfg)`` 同构骨架，差异仅 ``anchor_idx``（0=open / 1=close）、
+# ``is_window``（before=True 双侧 / after=False 单侧）、``offset_fn``（_offset_seconds
+# 或 ``spec.starttime * 60``）。表查询 + 单分派函数收敛，消除 4 个 wrapper 的重复骨架。
+# anchor_idx 0=open_sec, 1=close_sec；is_window=True: ``anchor-offset <= now <= anchor``，
+# False: ``now >= anchor+offset``。
+_GATE_WINDOW_SPECS: Dict[int, Tuple[int, bool, Callable[["TimingSpec", Dict[str, Any]], int]]] = {
+    2: (0, True,  lambda spec, cfg: _offset_seconds(spec, cfg)),   # before_open
+    3: (0, False, lambda spec, cfg: _offset_seconds(spec, cfg)),   # after_open
+    4: (1, True,  lambda spec, cfg: spec.starttime * 60),          # before_close
+    5: (1, False, lambda spec, cfg: spec.starttime * 60),          # after_close
+}
 
 
-def _gate_after_open(spec: "TimingSpec", state: PoolState, eid: str, now_unix: float, now_sec: int, cfg: Dict[str, Any]) -> bool:
-    open_sec, _close_sec = _market_seconds(cfg)
-    offset = _offset_seconds(spec, cfg)
-    return now_sec >= open_sec + offset
-
-
-def _gate_before_close(spec: "TimingSpec", state: PoolState, eid: str, now_unix: float, now_sec: int, cfg: Dict[str, Any]) -> bool:
-    _open_sec, close_sec = _market_seconds(cfg)
-    offset = spec.starttime * 60
-    return close_sec - offset <= now_sec <= close_sec
-
-
-def _gate_after_close(spec: "TimingSpec", state: PoolState, eid: str, now_unix: float, now_sec: int, cfg: Dict[str, Any]) -> bool:
-    _open_sec, close_sec = _market_seconds(cfg)
-    offset = spec.starttime * 60
-    return now_sec >= close_sec + offset
+def _gate_window_dispatch(spec: "TimingSpec", state: PoolState, eid: str, now_unix: float, now_sec: int, cfg: Dict[str, Any]) -> bool:
+    """市场时间门控通用分派（before/after × open/close 4 模式统一入口）。"""
+    anchor_idx, is_window, offset_fn = _GATE_WINDOW_SPECS[spec.starttype]
+    anchor = _market_seconds(cfg)[anchor_idx]
+    offset = offset_fn(spec, cfg)
+    if is_window:
+        return anchor - offset <= now_sec <= anchor
+    return now_sec >= anchor + offset
 
 
 def _gate_hhmmss(spec: "TimingSpec", state: PoolState, eid: str, now_unix: float, now_sec: int, cfg: Dict[str, Any]) -> bool:
@@ -1949,10 +1950,10 @@ def _gate_hhmmss(spec: "TimingSpec", state: PoolState, eid: str, now_unix: float
 _STARTTYPE_GATE_HANDLERS: Dict[int, Callable[["TimingSpec", PoolState, str, float, int, Dict[str, Any]], bool]] = {
     0: _gate_always,
     1: _gate_elapsed,
-    2: _gate_before_open,
-    3: _gate_after_open,
-    4: _gate_before_close,
-    5: _gate_after_close,
+    2: _gate_window_dispatch,
+    3: _gate_window_dispatch,
+    4: _gate_window_dispatch,
+    5: _gate_window_dispatch,
     6: _gate_hhmmss,
     7: _gate_hhmmss,
 }
@@ -3518,91 +3519,78 @@ def build_timed_event_specs(
 # ===========================================================================
 
 
+def _should_remove_for_ttl(stock: Any, ttl_spec: "TTLSpec", now_unix: float) -> bool:
+    """按 ``ttl_spec.check_type`` 判定单股是否应被 TTL 淘汰。
+
+    底层运行逻辑洞察：interval/endtime 两模式的差异仅是"判定阈值"的取值
+    （``ttl_sec`` vs ``hold_for_ttl``），表驱动查阈值后单分支收敛；
+    ``hold_for_ttl == 0`` 表示到点即淘汰全部，由 ``threshold == 0`` 自然落到
+    ``return True``，无需特判 ``check_type``。
+
+      - interval: ``entry_ts`` 存在且 ``(now - entry) >= ttl_sec`` → 淘汰
+      - endtime + hold_for_ttl > 0: ``entry_ts`` 存在且 ``>= hold_for_ttl`` → 淘汰
+      - endtime + hold_for_ttl == 0: 无条件淘汰（编译期已确认 endtime 到点）
+    """
+    entry_ts = _stock_entry_time(stock)
+    threshold = (
+        ttl_spec.ttl_sec
+        if ttl_spec.check_type == "interval"
+        else ttl_spec.hold_for_ttl
+    )
+    if threshold > 0:
+        return entry_ts is not None and (now_unix - entry_ts) >= threshold
+    return True
+
+
 def _do_ttl_check(state: PoolState, ttl_spec: Any, tgt: str, bus: Any = None, eid: str = "") -> List[str]:
-    """TTL 检查（兼容入口）：按 check_type 分派，删除超时股票，发布 SELL Signal + TIMEOUT。
+    """TTL 检查（兼容入口）：按 check_type 分派，删除超时股票，发布 TIMEOUT DomainEvent。
 
     从 ``core/ttl_helper.py`` 迁移至 ``execution_module.py``（SubTask 27.1）。
     SubTask 27.4：``_now_ts`` / ``_current_seconds_of_day`` / ``time_at`` /
     ``_stock_entry_time`` / ``_stock_code`` 已随 ``edge_executor.py`` /
     ``time_util.py`` 一并迁移至本模块，直接使用本地名称。
-    
-    修复：添加 SELL Signal 发布，价格从 latest_tick 获取。
+
+    底层运行逻辑洞察（Code = Data + Dispatcher）：interval/endtime 两模式共享
+    "提前退出守卫 → 遍历 → 判定 → 删除 → 发布"五步骨架，差异仅是阈值 Data 与
+    endtime 提前退出守卫。``_should_remove_for_ttl`` 表驱动判定收敛判定分支，
+    单循环取代双分支，消除 ~30 行同构重复及死状态 ``removed_prices`` / ``kept``
+    （两者仅被写入从不被读取——SELL Signal 实际未发布，价格收集为悬空逻辑）。
     """
     if ttl_spec.bdel != 1:
         return []
 
-    now_unix = _now_ts(state)
-    now_sec_of_day = _current_seconds_of_day(time_at(state=state))
-
-    removed: List[str] = []
-    removed_prices: Dict[str, float] = {}
-    kept: List[Any] = []
-    latest_tick = getattr(state, "latest_tick", {}) or {}
-
-    if ttl_spec.check_type == "interval" and ttl_spec.ttl_sec > 0:
-        for stock in state.get_pool(tgt).get_stocks():
-            entry_ts = _stock_entry_time(stock)
-            if entry_ts is not None and (now_unix - entry_ts) >= ttl_spec.ttl_sec:
-                code = _stock_code(stock)
-                removed.append(code)
-                tick_data = latest_tick.get(code, {})
-                tick_price = 0.0
-                if isinstance(tick_data, dict):
-                    tick_price = float(tick_data.get("close", tick_data.get("price", 0.0)) or 0.0)
-                if tick_price > 0:
-                    removed_prices[code] = tick_price
-                else:
-                    tr = stock.get("_tracker") if isinstance(stock, dict) else None
-                    if isinstance(tr, dict):
-                        removed_prices[code] = float(
-                            tr.get("current_price", tr.get("entry_price", 0))
-                        )
-                continue
-            kept.append(stock)
-    elif ttl_spec.check_type == "endtime":
-        if now_sec_of_day < ttl_spec.endtime_sec:
+    # 模式守卫：差异 Data 显于表查询，无 if/elif 分支
+    if ttl_spec.check_type == "endtime":
+        if _current_seconds_of_day(time_at(state=state)) < ttl_spec.endtime_sec:
             return []
-        for stock in state.get_pool(tgt).get_stocks():
-            should_remove = False
-            if ttl_spec.hold_for_ttl > 0:
-                entry_ts = _stock_entry_time(stock)
-                if entry_ts is not None and (now_unix - entry_ts) >= ttl_spec.hold_for_ttl:
-                    should_remove = True
-            else:
-                should_remove = True
-            if should_remove:
-                code = _stock_code(stock)
-                removed.append(code)
-                tick_data = latest_tick.get(code, {})
-                tick_price = 0.0
-                if isinstance(tick_data, dict):
-                    tick_price = float(tick_data.get("close", tick_data.get("price", 0.0)) or 0.0)
-                if tick_price > 0:
-                    removed_prices[code] = tick_price
-                else:
-                    tr = stock.get("_tracker") if isinstance(stock, dict) else None
-                    if isinstance(tr, dict):
-                        removed_prices[code] = float(
-                            tr.get("current_price", tr.get("entry_price", 0))
-                        )
-            else:
-                kept.append(stock)
+    elif ttl_spec.check_type == "interval":
+        if ttl_spec.ttl_sec <= 0:
+            return []
     else:
         return []
 
-    if removed:
-        state.get_pool(tgt).remove_stocks(removed)
-        state.mark_node_dirty(tgt)
-        logger.info("TTL expire: removed %s from %s (check=%s)",
-                    removed, tgt, ttl_spec.check_type)
-        if bus is not None:
-            for code in removed:
-                bus.publish(DomainEvent(
-                    event_type="TIMEOUT",
-                    code=code,
-                    pool_id=tgt,
-                    details={"reason": "TTL_EXPIRED", "flow_id": eid, "ttl_sec": ttl_spec.ttl_sec, "timestamp": now_unix},
-                ))
+    now_unix = _now_ts(state)
+    removed: List[str] = [
+        _stock_code(stock)
+        for stock in state.get_pool(tgt).get_stocks()
+        if _should_remove_for_ttl(stock, ttl_spec, now_unix)
+    ]
+    if not removed:
+        return removed
+
+    state.get_pool(tgt).remove_stocks(removed)
+    state.mark_node_dirty(tgt)
+    logger.info("TTL expire: removed %s from %s (check=%s)",
+                removed, tgt, ttl_spec.check_type)
+    if bus is not None:
+        for code in removed:
+            bus.publish(DomainEvent(
+                event_type="TIMEOUT",
+                code=code,
+                pool_id=tgt,
+                details={"reason": "TTL_EXPIRED", "flow_id": eid,
+                         "ttl_sec": ttl_spec.ttl_sec, "timestamp": now_unix},
+            ))
     return removed
 
 

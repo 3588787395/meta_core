@@ -32,6 +32,7 @@ try:
     from ..core.table_engine import get_global_config_store
 except ImportError:
     from core.table_engine import get_global_config_store
+from converters_common import safe_int as _safe_int
 
 logger = logging.getLogger(__name__)
 
@@ -2177,15 +2178,6 @@ class TableLoader:
 
 def _now_dt() -> datetime:
     return datetime.now()
-
-
-def _safe_int(val, default=0):
-    if val is None or val == "":
-        return default
-    try:
-        return int(val)
-    except (ValueError, TypeError):
-        return default
 
 
 def _time_to_seconds(t: time) -> int:

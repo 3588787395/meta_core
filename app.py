@@ -95,9 +95,11 @@ except ImportError:
     from core.runtime_mode_module import KLineReplayEngine
 
 try:
-    from .converters import _build_tdx_xml, _tdx_pool_to_frontend, _load_tdx_pool_config
+    from .converters import _tdx_pool_to_frontend, _load_tdx_pool_config
+    from .core.import_export_module import _call_converter
 except ImportError:
-    from converters import _build_tdx_xml, _tdx_pool_to_frontend, _load_tdx_pool_config
+    from converters import _tdx_pool_to_frontend, _load_tdx_pool_config
+    from core.import_export_module import _call_converter
 
 try:
     from .api import _enrich_tdx_node_data
@@ -697,11 +699,10 @@ def _tdx_path_guard(name: str) -> Path:
 
 async def _tdx_load(name: str, request: _Request) -> Dict[str, Any]:
     try:
-        from converters import parse_tdx_xml
         xml_path = _tdx_path_guard(name)
         if not xml_path.is_file():
             raise _HTTPException(status_code=404, detail=f"文件未找到: {name}.xml")
-        pool = parse_tdx_xml(str(xml_path))
+        pool = _call_converter(str(xml_path), "tdx", "import")
         return {"success": True, "data": _tdx_pool_to_frontend(pool, name), "stats": {"cells": len(pool.cells), "flows": len(pool.flows), "name": name}}
     except _HTTPException:
         raise
@@ -738,7 +739,7 @@ async def _tdx_save(name: str, request: _Request) -> Dict[str, Any]:
             return {"success": False, "error": "无效的 pool_data"}
         xml_path = _tdx_path_guard(name)
         xml_path.parent.mkdir(parents=True, exist_ok=True)
-        _build_tdx_xml(pool_data, str(xml_path))
+        _call_converter(str(xml_path), "tdx", "export", config=pool_data)
         storage = request.app.state.storage
         pm = pool_data.get("pool_meta", {})
         pool_id = pool_data.get("pool_id") or pool_data.get("id") or f"tdx_{name}"
@@ -798,7 +799,7 @@ async def tdx_export_xml(request: _Request):
         _body = await request.json()
         pool_data = _body.get("pool_data", _body) if isinstance(_body, dict) else {}
         with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp: tmp_path = tmp.name
-        _build_tdx_xml(pool_data, tmp_path)
+        _call_converter(tmp_path, "tdx", "export", config=pool_data)
         return FileResponse(tmp_path, media_type="application/xml", filename=pool_data.get("name", "tdx_pool") + ".xml", background=BackgroundTask(os.remove, tmp_path))
     except Exception as ex: return {"success": False, "error": f"TDX导出失败: {str(ex)}"}
 
@@ -1062,12 +1063,9 @@ async def events_stream(request: Request):
     bus = request.app.state.bus
     from datetime import datetime
     import time as _time
-    import queue as thread_queue
     
     async def event_generator():
-        loop = asyncio.get_running_loop()
-        sync_queue = thread_queue.Queue(maxsize=10000)
-        pending_events = []
+        queue: asyncio.Queue = asyncio.Queue(maxsize=10000)
         
         def event_callback(event):
             try:
@@ -1156,8 +1154,8 @@ async def events_stream(request: Request):
                     "timestamp": float(ts_val)
                 }
                 try:
-                    sync_queue.put_nowait(format_event(event_data))
-                except thread_queue.Full:
+                    queue.put_nowait(format_event(event_data))
+                except asyncio.QueueFull:
                     pass
             except Exception:
                 import traceback
@@ -1168,30 +1166,16 @@ async def events_stream(request: Request):
         else:
             unsubscribe = None
         
-        def drain_sync_queue():
-            drained = []
-            while True:
-                try:
-                    drained.append(sync_queue.get_nowait())
-                except thread_queue.Empty:
-                    break
-            return drained
-        
         try:
             yield f": connected\n\n"
-            heartbeat_interval = 1.0
-            last_heartbeat = _time.time()
             while True:
                 if await request.is_disconnected():
                     break
-                new_events = await loop.run_in_executor(None, drain_sync_queue)
-                for event_data in new_events:
+                try:
+                    event_data = await asyncio.wait_for(queue.get(), timeout=15.0)
                     yield f"data: {json.dumps(event_data, ensure_ascii=False)}\n\n"
-                now = _time.time()
-                if now - last_heartbeat >= heartbeat_interval:
+                except asyncio.TimeoutError:
                     yield f": heartbeat\n\n"
-                    last_heartbeat = now
-                await asyncio.sleep(0.05)
         finally:
             if unsubscribe is not None:
                 try:
@@ -2325,8 +2309,7 @@ def _resolve_pool_config(name: str) -> dict | None:
     except ValueError:
         pass
     if xml_path and os.path.isfile(xml_path):
-        from converters import parse_tdx_xml
-        pool = parse_tdx_xml(xml_path)
+        pool = _call_converter(xml_path, "tdx", "import")
         return _tdx_pool_to_frontend(pool, name) if hasattr(pool, 'cells') else pool
 
     config_dir = os.path.join(os.path.dirname(__file__), 'config')
@@ -2518,16 +2501,9 @@ async def get_tables_defaults():
     return _DEFAULT_TABLES_DEFAULTS
 
 
-@app.get("/api/highlight-events", tags=["highlight"])
-async def get_highlight_events(since: str = "", limit: int = 50):
-    """返回高亮事件列表（当前无事件源，返回空列表）。"""
-    return {"code": 0, "events": []}
-
-
 @app.post("/api/dzh/tdx/import", tags=["tdx"], dependencies=[Depends(verify_api_key)])
 async def tdx_import_file(request: _Request):
     try:
-        from converters import parse_tdx_xml
         content, filename = None, "upload.xml"
         form = await request.form(); uf = form.get("file")
         if uf and hasattr(uf, "filename") and uf.filename:
@@ -2539,12 +2515,8 @@ async def tdx_import_file(request: _Request):
                     content, filename = body["xml_content"].encode("utf-8"), body.get("filename", "upload.xml")
             except Exception: pass
         if content is None: return {"success": False, "error": "请上传文件或提供 xml_content"}
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp: tmp.write(content); tmp_path = tmp.name
-        try:
-            pool = parse_tdx_xml(tmp_path)
-            return {"success": True, "data": _tdx_pool_to_frontend(pool, filename.rsplit(".", 1)[0] if "." in filename else filename)}
-        finally: os.unlink(tmp_path)
+        pool = _call_converter(content, "tdx", "import")
+        return {"success": True, "data": _tdx_pool_to_frontend(pool, filename.rsplit(".", 1)[0] if "." in filename else filename)}
     except Exception as ex: return {"success": False, "error": f"TDX导入失败: {str(ex)}"}
 
 @app.get("/api/files/{dir_name}", tags=["files"])
@@ -2566,10 +2538,9 @@ async def load_dzhpool_file(filename: str):
     if not resolved.startswith(os.path.realpath(base_dir)):
         raise _HTTPException(status_code=400, detail="Invalid filename")
     try:
-        from converters import parse_dzh_xml
         xml_path = resolved
         if not os.path.isfile(xml_path): return {"success": False, "error": "文件不存在"}
-        with open(xml_path, 'rb') as f: pool = parse_dzh_xml(f.read(), filename)
+        pool = _call_converter(xml_path, "dzh", "import", name=filename)
         return {"success": True, "data": pool, "name": filename.rsplit(".", 1)[0] if "." in filename else filename}
     except _HTTPException: raise
     except Exception as ex: return {"success": False, "error": f"DZH加载失败: {str(ex)}"}

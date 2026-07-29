@@ -20,6 +20,7 @@ import operator
 import os
 import random
 import re
+from abc import ABC
 import sys
 import tempfile
 import threading
@@ -45,17 +46,13 @@ from core.schemas import (
     TdxFlowModel,
     TdxPoolMetaModel,
     StockSnapshotModel,
-    TDX_TO_DZH_CELL_TYPE,
     Cell201AttrBitsModel,
     FlowAttrBitsModel,
     FlowModel,
 )
 from native.validators import should_fire
-from core.import_export_module import (
-    _safe_int as safe_int,
-    _safe_float as safe_float,
-    _hms_to_seconds,
-)
+from converters_common import safe_int, safe_float
+from core.import_export_module import _hms_to_seconds
 from core.domain import (
     _eval_op,
     _build_op_ctx,
@@ -67,6 +64,285 @@ from core.table_engine import get_global_config_store
 
 logger = logging.getLogger(__name__)
 
+
+# ======================================================================
+# BasePoolConverter / DzhPoolConverter / TdxPoolConverter
+# 合并 DZH/TDX 同构解析与序列化逻辑（Task 1: 变更 P1 — meta-pattern convergence）
+# ======================================================================
+
+class _StkIO:
+    """股票子元素解析混入：合并 _parse_stk_children(DZH) 与 _parse_stk_elements(TDX)。"""
+
+    @staticmethod
+    def parse_stks(cell_elem, *, fmt="dzh"):
+        stks = []
+        for stk_elem in cell_elem.findall("stk"):
+            if fmt == "tdx":
+                d = {}
+                for k, v in stk_elem.attrib.items():
+                    d[k] = safe_int(v, 0) if k == "setcode" else v
+                stks.append(d)
+            else:
+                s = {"label": stk_elem.get("label", ""),
+                     "t": stk_elem.get("t", ""),
+                     "p": stk_elem.get("p", "")}
+                tid = stk_elem.get("tid")
+                if tid:
+                    s["tid"] = tid
+                hist = stk_elem.find("hist")
+                if hist is not None:
+                    s["hist"] = {"t": hist.get("t", ""), "p": hist.get("p", "")}
+                ana = stk_elem.find("ana")
+                if ana is not None:
+                    s["ana"] = {"label": ana.get("label", ""),
+                                "t": ana.get("t", ""),
+                                "p": ana.get("p", "")}
+                stks.append(s)
+        return stks
+
+
+class _StkWriter:
+    """股票子元素写入混入：合并 _export_field_stocks(DZH) 与 _add_stks(TDX)。"""
+
+    _TDX_STK_RUNTIME_FIELDS = ("indate", "intime", "inprice", "income", "now",
+                               "rise", "volume", "maxrate", "maxperiod",
+                               "maxtime", "maxprice", "idaynum")
+
+    @classmethod
+    def write_stks(cls, cell_elem, source, *, fmt="dzh"):
+        if fmt == "tdx":
+            stocks = (getattr(source, "tdx_stocks", None)
+                      or getattr(source, "stocks", None)
+                      or getattr(source, "stk_list", None))
+            if not stocks or not isinstance(stocks, list):
+                return
+            for s in stocks:
+                el = ET.SubElement(cell_elem, "stk")
+                setcode_val = getattr(s, "setcode", None)
+                code_val = getattr(s, "code", None)
+                if setcode_val is not None and code_val is not None:
+                    el.set("setcode", str(setcode_val))
+                    el.set("code", str(code_val))
+                    for f in cls._TDX_STK_RUNTIME_FIELDS:
+                        fv = getattr(s, f, None)
+                        if fv is not None and str(fv) not in ("", "0", "0.00"):
+                            el.set(f, str(fv))
+                else:
+                    code = getattr(s, "tid", None) or getattr(s, "label", None) or ""
+                    el.set("setcode", str(_stock_setcode(code)))
+                    el.set("code", code)
+        else:
+            _orig = source.get("_orig_stks")
+            stocks = _orig if _orig is not None else source.get("stocks")
+            if not stocks or not isinstance(stocks, list):
+                return
+            for s in stocks:
+                stk = ET.SubElement(cell_elem, "stk")
+                stk.text = None
+                stk.tail = None
+                stk.set("label", s.get("label", ""))
+                stk.set("t", s.get("t", ""))
+                stk.set("p", s.get("p", ""))
+                tid = s.get("tid")
+                if tid is not None:
+                    stk.set("tid", str(tid))
+                hists = s.get("hist")
+                if hists and isinstance(hists, list):
+                    for h in hists:
+                        he = ET.SubElement(stk, "hist")
+                        he.text = None
+                        he.tail = None
+                        for hk, hv in h.items():
+                            if hv is not None:
+                                he.set(hk, str(hv))
+                ana_data = s.get("ana")
+                if ana_data and isinstance(ana_data, dict):
+                    ae = ET.SubElement(stk, "ana")
+                    ae.text = None
+                    ae.tail = None
+                    for ak, av in ana_data.items():
+                        if av is not None:
+                            ae.set(ak, str(av))
+
+
+class BasePoolConverter(ABC):
+    """DZH/TDX 股票池转换器基类：合并 4 组同构逻辑。
+
+    子类只覆盖差异（int_fields 表、post_hooks、encoding_priority、cell 包络参数）。
+    """
+
+    encoding_priority: tuple = ("utf-8",)
+
+    # ---- 1. 通用元素解析器（合并 _parse_func/psatt/spinfo_element）----
+    def _parse_element(self, elem, schema_key, int_fields, post_hook=None):
+        data: Dict[str, Any] = {}
+        for k, v in elem.attrib.items():
+            if k in int_fields:
+                data[k] = safe_int(v, 0)
+            else:
+                data[k] = v
+        if post_hook is not None:
+            data = post_hook(data)
+        return data
+
+    # ---- 2. 通用元素序列化器（合并 _add_func/psatt/spinfo）----
+    def _add_element(self, cell_elem, cell, attr_name, model_class, element_name):
+        obj = getattr(cell, attr_name, None)
+        if obj is None or not isinstance(obj, model_class):
+            return
+        el = ET.SubElement(cell_elem, element_name)
+        for k, v in obj.to_xml_attrs().items():
+            el.set(k, v)
+
+    # ---- 3. 通用 pos 解码器（合并 _parse_pos / _parse_tdx_pos）----
+    def _decode_pos(self, pos_str, *, as_dict=True):
+        zero_dict = {"x": 0, "y": 0, "width": 0, "height": 0}
+        zero_tup = (0, 0, 0, 0)
+        if not pos_str:
+            return zero_dict if as_dict else zero_tup
+        try:
+            parts = [int(x.strip()) for x in pos_str.split(",")]
+            if len(parts) == 4:
+                x1, y1, x2, y2 = parts
+                if as_dict:
+                    return {"x": x1, "y": y1, "width": x2 - x1, "height": y2 - y1}
+                return (x1, y1, x2 - x1, y2 - y1)
+        except (ValueError, TypeError):
+            pass
+        return zero_dict if as_dict else zero_tup
+
+    # ---- 4. 通用 XML 字节解码器（合并 _decode_xml_content / _decode_tdx_xml）----
+    def _decode_xml_bytes(self, raw, encoding_priority, post_process_fn=None):
+        if isinstance(raw, bytes):
+            text = None
+            for enc in encoding_priority:
+                try:
+                    text = raw.decode(enc)
+                    break
+                except (UnicodeDecodeError, LookupError):
+                    continue
+            if text is None:
+                text = raw.decode("utf-8", errors="replace")
+        else:
+            text = raw
+        if post_process_fn is not None:
+            text = post_process_fn(text)
+        return text
+
+
+class DzhPoolConverter(BasePoolConverter):
+    """DZH 股票池转换器：GB18030 优先解码 + DZH pos(dict) + 编码声明清洗。"""
+
+    encoding_priority = ("gb18030", "gbk")
+
+    @staticmethod
+    def _post_process_xml(text):
+        text = re.sub(r'<\?xml\s+[^?]*encoding=["\'][^"\']*["\'][^?]*\?>',
+                      '<?xml version="1.0"?>', text, count=1)
+        text = text.replace("\t", "__DZH_TAB__")
+        return text
+
+    def decode_xml_content(self, xml_content):
+        return self._decode_xml_bytes(xml_content, self.encoding_priority,
+                                      self._post_process_xml)
+
+    def parse_pos(self, pos_str):
+        return self._decode_pos(pos_str, as_dict=True)
+
+
+class TdxPoolConverter(BasePoolConverter):
+    """TDX 股票池转换器：GB2312 优先解码 + TDX pos(tuple) + 元素 schema 表驱动。"""
+
+    encoding_priority = ("gb2312", "gbk", "gb18030", "utf-8")
+
+    # 元素序列化 3 行表（替代 _add_func/_add_psatt/_add_spinfo）
+    _ELEMENT_SERIALIZERS = (
+        ("tdx_func", TdxFuncModel, "func"),
+        ("tdx_psatt", TdxPsattModel, "psatt"),
+        ("tdx_spinfo", TdxSpinfoModel, "spinfo"),
+    )
+
+    # ---- 元素解析 post_hooks（替代 _parse_func/psatt/spinfo_element 的差异分支）----
+    @staticmethod
+    def _func_post_hook(data):
+        if "fsecond" in data:
+            data["fsecond"] = safe_float(data["fsecond"], 0.0)
+        return data
+
+    @staticmethod
+    def _psatt_post_hook(data):
+        if "bsavehis" not in data:
+            data["bsavehis"] = 0
+        return data
+
+    @staticmethod
+    def _spinfo_post_hook(data):
+        spinfo_type = data.get("type", 0)
+        type_info = SPINFO_TYPE_MAP.get(spinfo_type, {"label": "未知类型", "market": ""})
+        data["type_label"] = type_info["label"]
+        if "market" not in data:
+            data["market"] = type_info["market"]
+        if spinfo_type == 4:
+            data["market"] = ""
+        customblockname = data.get("customblockname", "")
+        sector_type_map = _get_element_sector_type_map("spinfo")
+        data["sector_type"] = sector_type_map.get(customblockname, 0)
+        return data
+
+    def parse_func_element(self, elem):
+        return self._parse_element(elem, "func", _get_element_int_fields("func"),
+                                   self._func_post_hook)
+
+    def parse_psatt_element(self, elem):
+        return self._parse_element(elem, "psatt", _get_element_int_fields("psatt"),
+                                   self._psatt_post_hook)
+
+    def parse_spinfo_element(self, elem):
+        return self._parse_element(elem, "spinfo", _get_element_int_fields("spinfo"),
+                                   self._spinfo_post_hook)
+
+    def add_func(self, cell_elem, cell):
+        self._add_element(cell_elem, cell, "tdx_func", TdxFuncModel, "func")
+
+    def add_psatt(self, cell_elem, cell):
+        self._add_element(cell_elem, cell, "tdx_psatt", TdxPsattModel, "psatt")
+
+    def add_spinfo(self, cell_elem, cell):
+        self._add_element(cell_elem, cell, "tdx_spinfo", TdxSpinfoModel, "spinfo")
+
+    def add_stks(self, cell_elem, cell):
+        _StkWriter.write_stks(cell_elem, cell, fmt="tdx")
+
+    def decode_tdx_xml(self, raw_bytes):
+        return self._decode_xml_bytes(raw_bytes, self.encoding_priority)
+
+    def parse_tdx_pos(self, pos_str):
+        return self._decode_pos(pos_str, as_dict=False)
+
+
+# 模块级单例
+_DZH_CONVERTER = DzhPoolConverter()
+_TDX_CONVERTER = TdxPoolConverter()
+
+# 向后兼容：原模块级函数委托到转换器单例（消除重复 def 定义）。
+# 原签名 _decode_xml_content(xml_content) / _parse_pos(pos_str) /
+# _decode_tdx_xml(raw_bytes) / _parse_tdx_pos(pos_str) /
+# _parse_func_element(elem) / _parse_psatt_element(elem) /
+# _parse_spinfo_element(elem) / _parse_stk_children(cell_elem) /
+# _parse_stk_elements(cell_elem) 全部保留可调用。
+_decode_xml_content = _DZH_CONVERTER.decode_xml_content
+_parse_pos = _DZH_CONVERTER.parse_pos
+_parse_stk_children = _StkIO.parse_stks
+_decode_tdx_xml = _TDX_CONVERTER.decode_tdx_xml
+_parse_tdx_pos = _TDX_CONVERTER.parse_tdx_pos
+_parse_func_element = _TDX_CONVERTER.parse_func_element
+_parse_psatt_element = _TDX_CONVERTER.parse_psatt_element
+_parse_spinfo_element = _TDX_CONVERTER.parse_spinfo_element
+
+
+def _parse_stk_elements(cell_elem: ET.Element) -> List[Dict[str, Any]]:
+    """解析 <cell> 内的所有 <stk> 子元素（TDX 格式）。"""
+    return _StkIO.parse_stks(cell_elem, fmt="tdx")
 
 
 # ======================================================================
@@ -374,25 +650,6 @@ _formula_patterns_cache = None
 
 
 
-def _decode_xml_content(xml_content):
-    if isinstance(xml_content, bytes):
-        try:
-            text = xml_content.decode("gb18030")
-        except Exception:
-            try:
-                text = xml_content.decode("gbk")
-            except Exception:
-                text = xml_content.decode("utf-8", errors="replace")
-    else:
-        text = xml_content
-    # Remove encoding declaration to prevent ET.fromstring from re-encoding
-    # (the string is already decoded; keeping the declaration causes mojibake)
-    import re as _re
-    text = _re.sub(r'<\?xml\s+[^?]*encoding=["\'][^"\']*["\'][^?]*\?>', '<?xml version="1.0"?>', text, count=1)
-    text = text.replace("\t", "__DZH_TAB__")
-    return text
-
-
 def is_tdx_format(xml_content):
     """检测 XML 内容是否为通达信 (TDX) 股票池格式。
 
@@ -436,23 +693,6 @@ def is_tdx_format(xml_content):
         return True
 
     return False
-
-
-def _parse_pos(pos_str):
-    if not pos_str:
-        return {"x": 0, "y": 0, "width": 0, "height": 0}
-    try:
-        parts = [int(x.strip()) for x in pos_str.split(",")]
-        if len(parts) == 4:
-            return {
-                "x": parts[0],
-                "y": parts[1],
-                "width": parts[2] - parts[0],
-                "height": parts[3] - parts[1],
-            }
-    except (ValueError, TypeError):
-        pass
-    return {"x": 0, "y": 0, "width": 0, "height": 0}
 
 
 # attr 解码分派表（type_key → 解码器配置：mask_table 走 attr_flag_map.json，model 走 schemas）
@@ -858,37 +1098,6 @@ def _parse_col_list(col_str):
         return [2, -1, -2, -3, 7, 14, 8, 10, 17, 45]
 
 
-def _parse_stk_children(cell_elem):
-    stocks = []
-    for stk in cell_elem.findall("stk"):
-        s = {
-            "label": stk.get("label", ""),
-            "t": stk.get("t", ""),
-            "p": stk.get("p", ""),
-        }
-        tid = stk.get("tid")
-        if tid:
-            s["tid"] = tid
-
-        hist_elem = stk.find("hist")
-        if hist_elem is not None:
-            s["hist"] = {
-                "t": hist_elem.get("t", ""),
-                "p": hist_elem.get("p", ""),
-            }
-
-        ana_elem = stk.find("ana")
-        if ana_elem is not None:
-            s["ana"] = {
-                "label": ana_elem.get("label", ""),
-                "t": ana_elem.get("t", ""),
-                "p": ana_elem.get("p", ""),
-            }
-
-        stocks.append(s)
-    return stocks
-
-
 def _parse_ana_children(cell_elem):
     anas = []
     for ana in cell_elem.findall("ana"):
@@ -1192,8 +1401,8 @@ def _parse_cell_condition(ct, rc, entry, ctx):
     indi_raw = rc.get("indi")
     formula_decoded = ""
     if indi_raw and indi_raw != "0;":
-        # SubTask 27.8: 从 core.import_export_module 导入（_common.py 已合并至此）
-        from core.import_export_module import _decode_formula as _decode_indi
+        # 变更 P4: 从 converters_common 导入（_decode_formula 单一来源）
+        from converters_common import decode_formula as _decode_indi
         try:
             formula_decoded = _decode_indi(indi_raw, ctx.get("ency", 0))
         except Exception:
@@ -1340,12 +1549,18 @@ def _parse_cell_element(ct, rc, cid, new_id, pos, label, attr_int, ency=0):
 
 # ---- CellModel 工厂（_convert_node_to_cell 用：node → CellModel）----
 
-def _build_cell_default(node, entry, models):
-    """默认 CellModel 工厂：按 schema 的 param_mapping 实例化。"""
+def _build_cell_base(node, models):
+    """提取 node 的 params 与 PositionModel（_build_cell_default/pool/market 共享）。"""
     params = node.get("params", {})
     pos_data = node.get("position", {})
     position = models.PositionModel(**{k: safe_int(v, 0) for k, v in pos_data.items()
                                        if k in models.PositionModel.model_fields})
+    return params, position
+
+
+def _build_cell_default(node, entry, models):
+    """默认 CellModel 工厂：按 schema 的 param_mapping 实例化。"""
+    params, position = _build_cell_base(node, models)
     ctx = {
         "cell_id": node.get("id", ""),
         "label": node.get("label", ""),
@@ -1361,10 +1576,7 @@ def _build_cell_default(node, entry, models):
 
 def _build_cell_pool(node, entry, models):
     """200/203 pool CellModel 工厂：共享复杂构建逻辑。"""
-    params = node.get("params", {})
-    pos_data = node.get("position", {})
-    position = models.PositionModel(**{k: safe_int(v, 0) for k, v in pos_data.items()
-                                       if k in models.PositionModel.model_fields})
+    params, position = _build_cell_base(node, models)
     label = node.get("label", "")
     cell_id = node.get("id", "")
     dzh_ct = node.get("dzh_cell_type", 0)
@@ -1457,10 +1669,7 @@ def _build_cell_pool(node, entry, models):
 
 def _build_cell_market(node, entry, models):
     """202 market_source CellModel 工厂：含 reload_mode/selections 解析。"""
-    params = node.get("params", {})
-    pos_data = node.get("position", {})
-    position = models.PositionModel(**{k: safe_int(v, 0) for k, v in pos_data.items()
-                                       if k in models.PositionModel.model_fields})
+    params, position = _build_cell_base(node, models)
     label = node.get("label", "")
     cell_id = node.get("id", "")
 
@@ -1531,6 +1740,30 @@ def _build_cell_model(node):
     builder_name = entry.get("builder", "_build_cell_default")
     builder = _DZH_CELL_BUILDERS.get(builder_name, _build_cell_default)
     return builder(node, entry, models)
+
+
+def _assemble_pool_result(cells, flows, *, pool_meta=None, propagated=None, **extras):
+    """合并 convert_tdx_to_config + parse_dzh_xml final-assembly 骨架（含 _meta 统计）。"""
+    result = {"nodes": cells, "edges": flows}
+    if pool_meta is not None:
+        result["pool_meta"] = pool_meta
+    result.update(extras)
+    breakdown = {}
+    for n in cells:
+        t = n.get("type", "unknown")
+        breakdown[t] = breakdown.get(t, 0) + 1
+    result["_meta"] = {
+        "cell_count": len(cells),
+        "flow_count": len(flows),
+        "stock_count": sum(len(n.get("params", {}).get("stocks", [])) for n in cells),
+        "cell_type_breakdown": breakdown,
+        "topology_mode": _detect_topology_mode(cells, flows),
+    }
+    if pool_meta is not None:
+        result["_meta"]["has_ency"] = pool_meta.get("ency") is not None
+    if propagated is not None:
+        result["_meta"]["_propagated_stocks"] = list(propagated)
+    return result
 
 
 def parse_dzh_xml(xml_content, filename=None):
@@ -1740,29 +1973,27 @@ def parse_dzh_xml(xml_content, filename=None):
             "params": edge_params,
         })
 
-    raw_trades = []
-    for trade_elem in root.findall(".//trades/trade"):
-        td = {}
-        for attr_name in ["code", "name", "market", "price", "volume",
-                          "buyprice", "sellprice", "direction", "tradetime",
-                          "accountno", "tradetype", "rate", "fee"]:
-            val = trade_elem.get(attr_name)
-            if val is not None:
-                td[attr_name] = val
-        if td:
-            raw_trades.append(td)
+    # trades / opentrades：合并双重解析循环为单一采集器
+    def _collect_trades(xpath, attr_names):
+        out = []
+        for el in root.findall(xpath):
+            d = {}
+            for attr_name in attr_names:
+                val = el.get(attr_name)
+                if val is not None:
+                    d[attr_name] = val
+            if d:
+                out.append(d)
+        return out
 
-    raw_opentrades = []
-    for ot_elem in root.findall(".//opentrades/trade"):
-        od = {}
-        for attr_name in ["code", "name", "market", "targetprice",
-                          "orderprice", "volume", "direction",
-                          "tradetype", "accountno", "condition"]:
-            val = ot_elem.get(attr_name)
-            if val is not None:
-                od[attr_name] = val
-        if od:
-            raw_opentrades.append(od)
+    raw_trades = _collect_trades(".//trades/trade", [
+        "code", "name", "market", "price", "volume",
+        "buyprice", "sellprice", "direction", "tradetime",
+        "accountno", "tradetype", "rate", "fee"])
+    raw_opentrades = _collect_trades(".//opentrades/trade", [
+        "code", "name", "market", "targetprice",
+        "orderprice", "volume", "direction",
+        "tradetype", "accountno", "condition"])
 
     _STOCK_HOLDER_TYPES = {"stock_state_pool", "result_pool"}
     for n in nodes:
@@ -1772,33 +2003,12 @@ def parse_dzh_xml(xml_content, filename=None):
 
     propagated = _propagate_stocks_to_downstream_pools(nodes, edges)
 
-    result = {
-        "name": name,
-        "nodes": nodes,
-        "edges": edges,
-        "schedules": schedules,
-        "pool_meta": pool_meta,
-        "trades": raw_trades,
-        "opentrades": raw_opentrades,
-    }
-    cell_type_breakdown = {}
-    for n in nodes:
-        t = n.get("type", "unknown")
-        cell_type_breakdown[t] = cell_type_breakdown.get(t, 0) + 1
-    result["_meta"] = {
-        "cell_count": len(nodes),
-        "flow_count": len(edges),
-        "stock_count": sum(len(n.get("params", {}).get("stocks", [])) for n in nodes),
-        "cell_type_breakdown": cell_type_breakdown,
-        "has_ency": pool_meta.get("ency") is not None,
-        "topology_mode": _detect_topology_mode(nodes, edges),
-        "_propagated_stocks": list(propagated),
-    }
     # Task 23.4: 注入 DZH 全局配置（market_mappings / reload_schedule）到 pool_config，
     # 供下游 services/candidate_pool.py 通过 PoolLoaded 事件订阅获取，消除跨层 import
-    result["market_mappings"] = load_dzh_market_mappings()
-    result["reload_schedule"] = _DZH_RELOAD_SCHEDULE
-    return result
+    return _assemble_pool_result(
+        nodes, edges, pool_meta=pool_meta, propagated=propagated, name=name,
+        schedules=schedules, trades=raw_trades, opentrades=raw_opentrades,
+        market_mappings=load_dzh_market_mappings(), reload_schedule=_DZH_RELOAD_SCHEDULE)
 
 
 _CELL_TYPE_MAP = {
@@ -2636,19 +2846,6 @@ def _load_export_defaults():
 
 _EXPORT_DEFAULTS = _load_export_defaults()
 
-# 表驱动：延迟加载 dzh_type_map.json
-_DZH_TYPE_MAP_CACHE = None
-def _load_dzh_type_map():
-    global _DZH_TYPE_MAP_CACHE
-    if _DZH_TYPE_MAP_CACHE is None:
-        try:
-            cfg_path = Path(__file__).parent / "config" / "architecture" / "dzh_type_map.json"
-            with open(cfg_path, encoding="utf-8") as f:
-                _DZH_TYPE_MAP_CACHE = json.load(f)
-        except Exception:
-            _DZH_TYPE_MAP_CACHE = {}
-    return _DZH_TYPE_MAP_CACHE
-
 MARKET_ID_TO_DZH = {
     "sh_a": "SH#上证A股",
     "sh_b": "SH#上证B股",
@@ -3015,35 +3212,37 @@ def _export_field_lastload(cell_elem, params, field, cell_type=None):
             cell_elem.set("lastload", str(lastload))
 
 
-def _export_field_hold(cell_elem, params, field, cell_type=None):
-    if _should_export_attr(params, "hold"):
-        hold = params.get("hold_sec")
-        if hold is not None:
-            cell_elem.set("hold", str(hold))
+# 简单字段导出表（合并 _export_field_hold/col/width/wizd）：
+# (source_key, transform, guard) — guard: "not_none" / "truthy_list" / "truthy"
+def _join_csv(v):
+    return ",".join(str(x) for x in v) if isinstance(v, list) else str(v)
 
 
-def _export_field_col(cell_elem, params, field, cell_type=None):
-    if _should_export_attr(params, "col"):
-        col_list = params.get("col_list")
-        if col_list is not None:
-            if isinstance(col_list, list):
-                cell_elem.set("col", ",".join(str(c) for c in col_list))
-            else:
-                cell_elem.set("col", str(col_list))
+_EXPORT_FIELD_TABLE = {
+    "hold":  ("hold_sec", str, "not_none"),
+    "col":   ("col_list", _join_csv, "not_none"),
+    "width": ("width_list", lambda v: ",".join(str(w) for w in v), "truthy_list"),
+    "wizd":  ("wizd", lambda v: str(v).replace("\n", "__DZH_NEWLINE__"), "truthy"),
+}
 
 
-def _export_field_width(cell_elem, params, field, cell_type=None):
-    if _should_export_attr(params, "width"):
-        width_list = params.get("width_list")
-        if width_list and isinstance(width_list, list):
-            cell_elem.set("width", ",".join(str(w) for w in width_list))
-
-
-def _export_field_wizd(cell_elem, params, field, cell_type=None):
-    if _should_export_attr(params, "wizd"):
-        wizd = params.get("wizd")
-        if wizd:
-            cell_elem.set("wizd", str(wizd).replace("\n", "__DZH_NEWLINE__"))
+def _export_field_simple_table(cell_elem, params, field, cell_type=None):
+    """表驱动的简单字段导出器（hold/col/width/wizd 共用）。"""
+    spec = _EXPORT_FIELD_TABLE.get(field)
+    if spec is None or not _should_export_attr(params, field):
+        return
+    source_key, transform, guard = spec
+    val = params.get(source_key)
+    if guard == "not_none":
+        if val is None:
+            return
+    elif guard == "truthy_list":
+        if not (val and isinstance(val, list)):
+            return
+    elif guard == "truthy":
+        if not val:
+            return
+    cell_elem.set(field, transform(val))
 
 
 def _export_field_action(cell_elem, params, field, cell_type=None):
@@ -3080,41 +3279,8 @@ def _export_field_action(cell_elem, params, field, cell_type=None):
 
 
 def _export_field_stocks(cell_elem, params, field, cell_type=None):
-    """200 stocks: 导出 stk 子元素（含 hist/ana 子元素）"""
-    _orig = params.get("_orig_stks")
-    stocks = _orig if _orig is not None else params.get("stocks")
-    if stocks and isinstance(stocks, list):
-        for s in stocks:
-            stk = ET.SubElement(cell_elem, "stk")
-            stk.text = None
-            stk.tail = None
-            stk.set("label", s.get("label", ""))
-            stk.set("t", s.get("t", ""))
-            stk.set("p", s.get("p", ""))
-            tid = s.get("tid")
-            if tid is not None:
-                stk.set("tid", str(tid))
-
-            # 导出 hist 子元素
-            hists = s.get("hist")
-            if hists and isinstance(hists, list):
-                for h in hists:
-                    hist_elem = ET.SubElement(stk, "hist")
-                    hist_elem.text = None
-                    hist_elem.tail = None
-                    for hk, hv in h.items():
-                        if hv is not None:
-                            hist_elem.set(hk, str(hv))
-
-            # 导出 ana 子元素（stk 级别）
-            ana_data = s.get("ana")
-            if ana_data and isinstance(ana_data, dict):
-                ana_elem = ET.SubElement(stk, "ana")
-                ana_elem.text = None
-                ana_elem.tail = None
-                for ak, av in ana_data.items():
-                    if av is not None:
-                        ana_elem.set(ak, str(av))
+    """200 stocks: 导出 stk 子元素（含 hist/ana 子元素）—— 委托到 _StkWriter。"""
+    _StkWriter.write_stks(cell_elem, params, fmt="dzh")
 
 
 def _export_field_anas(cell_elem, params, field, cell_type=None):
@@ -3143,10 +3309,10 @@ _FIELD_EXPORTERS = {
     "attrtext": _export_field_attrtext,
     "reload": _export_field_reload,
     "lastload": _export_field_lastload,
-    "hold": _export_field_hold,
-    "col": _export_field_col,
-    "width": _export_field_width,
-    "wizd": _export_field_wizd,
+    "hold": _export_field_simple_table,
+    "col": _export_field_simple_table,
+    "width": _export_field_simple_table,
+    "wizd": _export_field_simple_table,
     "enter": _export_field_action,
     "exit": _export_field_action,
     "stocks": _export_field_stocks,
@@ -3301,8 +3467,9 @@ def export_dzh_xml(config):
             pass
 
     # 表驱动：从 dzh_type_map.json export_dispatch 加载节点类型→构建函数映射
-    _export_dispatch = _load_dzh_type_map().get('export_dispatch', {})
-    _type_map = _load_dzh_type_map().get('type_map', {})
+    _dzh_tm = get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}
+    _export_dispatch = _dzh_tm.get('export_dispatch', {})
+    _type_map = _dzh_tm.get('type_map', {})
 
     for node in nodes:
         node_type = node.get("type", "")
@@ -3373,37 +3540,19 @@ def export_dzh_xml(config):
             if count is not None:
                 flow.set("count", str(count))
 
-    trades = config.get("trades")
-    has_trades = pool_meta.get("_has_trades", False)
-    if has_trades:
-        trades_elem = ET.SubElement(root, "trades")
-        if trades:
-            for trade in trades:
-                trade_elem = ET.SubElement(trades_elem, "trade")
-                for key, val in trade.items():
-                    trade_elem.set(key, str(val))
-    elif trades:
-        trades_elem = ET.SubElement(root, "trades")
-        for trade in trades:
-            trade_elem = ET.SubElement(trades_elem, "trade")
-            for key, val in trade.items():
-                trade_elem.set(key, str(val))
+    # trades / opentrades：合并双重 if/elif 块为单一容器发射器
+    def _emit_trade_container(tag, items, has_flag):
+        if has_flag or items:
+            container = ET.SubElement(root, tag)
+            for it in (items or []):
+                te = ET.SubElement(container, "trade")
+                for key, val in it.items():
+                    te.set(key, str(val))
 
-    opentrades = config.get("opentrades")
-    has_opentrades = pool_meta.get("_has_opentrades", False)
-    if has_opentrades:
-        opentrades_elem = ET.SubElement(root, "opentrades")
-        if opentrades:
-            for ot in opentrades:
-                ot_elem = ET.SubElement(opentrades_elem, "trade")
-                for key, val in ot.items():
-                    ot_elem.set(key, str(val))
-    elif opentrades:
-        opentrades_elem = ET.SubElement(root, "opentrades")
-        for ot in opentrades:
-            ot_elem = ET.SubElement(opentrades_elem, "trade")
-            for key, val in ot.items():
-                ot_elem.set(key, str(val))
+    _emit_trade_container("trades", config.get("trades"),
+                          pool_meta.get("_has_trades", False))
+    _emit_trade_container("opentrades", config.get("opentrades"),
+                          pool_meta.get("_has_opentrades", False))
 
     max_cell_id = max(all_cell_ids) if all_cell_ids else 0
     original_nextid = pool_meta.get("nextid")
@@ -3537,21 +3686,15 @@ class DzhXmlExporter:
             flow_xml = self._export_flow(edge)
             lines.append(flow_xml)
 
-        trades = graph_data.get("trades", [])
-        if trades:
-            lines.append("<trades>")
-            for trade in trades:
-                trade_xml = self._export_trade(trade)
-                lines.append(trade_xml)
-            lines.append("</trades>")
+        def _emit_trade_section(tag, items, exporter):
+            if items:
+                lines.append(f"<{tag}>")
+                for it in items:
+                    lines.append(exporter(it))
+                lines.append(f"</{tag}>")
 
-        opentrades = graph_data.get("opentrades", [])
-        if opentrades:
-            lines.append("<opentrades>")
-            for ot in opentrades:
-                ot_xml = self._export_opentrade(ot)
-                lines.append(ot_xml)
-            lines.append("</opentrades>")
+        _emit_trade_section("trades", graph_data.get("trades", []), self._export_trade)
+        _emit_trade_section("opentrades", graph_data.get("opentrades", []), self._export_opentrade)
 
         lines.append("</pool>")
         return "\n".join(lines) if self.pretty else "".join(lines)
@@ -3791,21 +3934,20 @@ class DzhXmlExporter:
 
         return f"<flow {' '.join(flow_attrs)}/>"
 
-    def _export_trade(self, trade: Dict) -> str:
-        attrs = []
-        for key in ["code", "name", "market", "price", "volume", "buyprice", "sellprice",
-                    "direction", "tradetime", "accountno", "tradetype", "rate", "fee"]:
-            if trade.get(key):
-                attrs.append(f'{key}="{trade[key]}"')
+    _TRADE_KEYS = ["code", "name", "market", "price", "volume", "buyprice", "sellprice",
+                   "direction", "tradetime", "accountno", "tradetype", "rate", "fee"]
+    _OPENTRADE_KEYS = ["code", "name", "market", "targetprice", "orderprice", "volume",
+                       "direction", "tradetype", "accountno", "condition"]
+
+    def _export_trade_elem(self, d: Dict, keys) -> str:
+        attrs = [f'{k}="{d[k]}"' for k in keys if d.get(k)]
         return f"<trade {' '.join(attrs)}/>"
 
+    def _export_trade(self, trade: Dict) -> str:
+        return self._export_trade_elem(trade, self._TRADE_KEYS)
+
     def _export_opentrade(self, ot: Dict) -> str:
-        attrs = []
-        for key in ["code", "name", "market", "targetprice", "orderprice", "volume",
-                    "direction", "tradetype", "accountno", "condition"]:
-            if ot.get(key):
-                attrs.append(f'{key}="{ot[key]}"')
-        return f"<trade {' '.join(attrs)}/>"
+        return self._export_trade_elem(ot, self._OPENTRADE_KEYS)
 
 
 # ======================================================================
@@ -3834,13 +3976,27 @@ class DzhXmlExporter:
 # 使用 DynamicCellModel 替代已删除的特定模型类。
 # TDX 特有字段（tdx_psatt、tdx_func 等）通过属性注入方式添加到 DynamicCellModel 实例上。
 
-def _make_tdx_cell(cell_type: int, **data) -> DynamicCellModel:
-    """创建携带 TDX 扩展字段的 DynamicCellModel 实例。
-    
+def _make_tdx_cell(internal_type: int, tdx_cell: Any, pos: Any, **extra) -> DynamicCellModel:
+    """创建携带 TDX 扩展字段的 DynamicCellModel 实例（合并 3 分支公共 kwargs）。
+
     TDX 特有字段（如 tdx_func, tdx_psatt, tdx_spinfo, tdx_stocks）作为
-    额外属性附加到模型实例上，透传给后续引擎使用。
+    额外属性附加到模型实例上，透传给后续引擎使用。公共字段（id/attr/position/
+    clr/text/tdx_id/tdx_type/clrtext/solid）由 tdx_cell 统一提取，差异通过 **extra 传入。
     """
-    model = DynamicCellModel.from_dict({**data, 'type': cell_type})
+    data = {
+        "type": internal_type,
+        "id": str(tdx_cell.id),
+        "attr": tdx_cell.attr,
+        "position": pos,
+        "clr": tdx_cell.clr,
+        "text": tdx_cell.text,
+        "tdx_id": tdx_cell.id,
+        "tdx_type": tdx_cell.type,
+        "clrtext": tdx_cell.clrtext,
+        "solid": tdx_cell.solid,
+    }
+    data.update(extra)
+    model = DynamicCellModel.from_dict(data)
     # 附加 TDX 特有字段（不参与序列化）
     for key in ('tdx_func', 'tdx_psatt', 'tdx_spinfo', 'tdx_stocks',
                 'tdx_id', 'tdx_type', 'clrtext', 'solid'):
@@ -3906,41 +4062,6 @@ def detect_xml_version(root: ET.Element) -> str:
             return 'v6'
 
     return 'v7'  # 默认按新版处理
-
-
-# ═══════════════════════════════════════════════════════════════
-# 辅助函数
-# ═══════════════════════════════════════════════════════════════
-
-def _parse_tdx_pos(pos_str):
-    """
-    解析 TDX pos 格式 "x1,y1,x2,y2"。
-    返回 (pos_x, pos_y, width, height)。
-    """
-    if not pos_str:
-        return 0, 0, 0, 0
-    try:
-        parts = [int(x.strip()) for x in pos_str.split(",")]
-        if len(parts) == 4:
-            x1, y1, x2, y2 = parts
-            return x1, y1, x2 - x1, y2 - y1
-    except (ValueError, TypeError):
-        pass
-    return 0, 0, 0, 0
-
-
-def _decode_tdx_xml(raw_bytes: bytes) -> str:
-    """
-    尝试多种中文编码解码 TDX XML 的字节内容。
-    优先尝试 GB2312，然后依次回退到 GBK、GB18030、UTF-8。
-    """
-    for enc in ("gb2312", "gbk", "gb18030", "utf-8"):
-        try:
-            return raw_bytes.decode(enc)
-        except (UnicodeDecodeError, LookupError):
-            continue
-    # 最终回退：强制 UTF-8 替换不可解码字节
-    return raw_bytes.decode("utf-8", errors="replace")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -4016,101 +4137,9 @@ def _get_element_sector_type_map(element: str) -> Dict[str, int]:
     return dict(schema.get("sector_type_map", {}))
 
 
-def _parse_func_element(func_elem: ET.Element) -> Dict[str, Any]:
-    """解析 <func> 子元素为字典。"""
-    func_data: Dict[str, Any] = {}
-    # 表驱动：int_fields 由 config/tdx_element_schemas.json 声明
-    int_fields = _get_element_int_fields("func")
-    for k, v in func_elem.attrib.items():
-        if k in int_fields:
-            func_data[k] = safe_int(v, 0)
-        elif k == "fsecond":
-            func_data[k] = safe_float(v, 0.0)
-        else:
-            func_data[k] = v
-    return func_data
-
-
-def _parse_psatt_element(psatt_elem: ET.Element) -> Dict[str, Any]:
-    """解析 <psatt> 子元素为字典。
-
-    V7.x 新增字段:
-      - bsavehis: 保存历史记录 (默认 0，兼容旧版)
-    V6.x 特有字段:
-      - nsyssound: 系统声音标志 (V7.x 中已被 bsavehis 替代)
-    """
-    psatt_data: Dict[str, Any] = {}
-    # 表驱动：int_fields 由 config/tdx_element_schemas.json 声明
-    int_fields = _get_element_int_fields("psatt")
-    for k, v in psatt_elem.attrib.items():
-        if k in int_fields:
-            psatt_data[k] = safe_int(v, 0)
-        else:
-            psatt_data[k] = v
-
-    # 向后兼容: 如果没有 bsavehis 字段（旧版 V6.x），默认值为 0
-    if "bsavehis" not in psatt_data:
-        psatt_data["bsavehis"] = 0
-
-    # 区分版本: nsyssound 是 V6.x 字段，bsavehis 是 V7.x 字段
-    # 两者可能同时存在或只存在一个，均保留以供后续逻辑判断
-    return psatt_data
-
-
-def _parse_spinfo_element(spinfo_elem: ET.Element) -> Dict[str, Any]:
-    """解析 <spinfo> 子元素为字典，并推导 market、sector_type 和 type_label 字段。
-
-    V7.x spinfo.type 属性:
-      - 0: 全市场自动选股
-      - 2: 全部A股
-      - 3: 自选股
-      - 4: 自定义板块
-
-    存储到节点的 params.spinfo.type 字段。
-    """
-    spinfo_data: Dict[str, Any] = {}
-    # 表驱动：int_fields 由 config/tdx_element_schemas.json 声明
-    int_fields = _get_element_int_fields("spinfo")
-    for k, v in spinfo_elem.attrib.items():
-        if k in int_fields:
-            spinfo_data[k] = safe_int(v, 0)
-        else:
-            spinfo_data[k] = v
-
-    # 使用 SPINFO_TYPE_MAP 推导 type_label 字段
-    spinfo_type = spinfo_data.get("type", 0)
-    type_info = SPINFO_TYPE_MAP.get(spinfo_type,
-                                     {"label": "未知类型", "market": ""})
-    spinfo_data["type_label"] = type_info["label"]
-    # 只在 XML 中没有 market 属性时才使用 SPINFO_TYPE_MAP 的默认值
-    if "market" not in spinfo_data:
-        spinfo_data["market"] = type_info["market"]
-
-    # type=4 自定义板块时，市场取决于板块内容（可能为空）
-    if spinfo_type == 4:
-        spinfo_data["market"] = ""
-
-    # 根据 customblockname 推导 sector_type 字段
-    # 表驱动：sector_type_map 由 config/tdx_element_schemas.json 声明
-    customblockname = spinfo_data.get("customblockname", "")
-    sector_type_map = _get_element_sector_type_map("spinfo")
-    spinfo_data["sector_type"] = sector_type_map.get(customblockname, 0)
-
-    return spinfo_data
-
-
-def _parse_stk_elements(cell_elem: ET.Element) -> List[Dict[str, Any]]:
-    """解析 <cell> 内的所有 <stk> 子元素。"""
-    stks = []
-    for stk_elem in cell_elem.findall("stk"):
-        stk_data: Dict[str, Any] = {}
-        for k, v in stk_elem.attrib.items():
-            if k == "setcode":
-                stk_data[k] = safe_int(v, 0)
-            else:
-                stk_data[k] = v
-        stks.append(stk_data)
-    return stks
+# _parse_func_element / _parse_psatt_element / _parse_spinfo_element /
+# _parse_stk_elements 已合并到 TdxPoolConverter._parse_element + post_hooks
+# 与 _StkIO.parse_stks；模块级名称在文件顶部委托到 _TDX_CONVERTER / _StkIO。
 
 
 def parse_tdx_xml(filepath: str) -> TdxPoolMetaModel:
@@ -4263,8 +4292,9 @@ def tdx_to_internal(tdx_pool: TdxPoolMetaModel) -> PoolMetaModel:
     """
     internal_cells: List[Any] = []
 
+    _tdx_to_dzh = (get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}).get("tdx_to_dzh", {})
     for tdx_cell in tdx_pool.cells:
-        internal_type = TDX_TO_DZH_CELL_TYPE.get(tdx_cell.type, 1)
+        internal_type = int(_tdx_to_dzh.get(str(tdx_cell.type), 1))
 
         pos = PositionModel(
             x=tdx_cell.pos_x,
@@ -4275,19 +4305,7 @@ def tdx_to_internal(tdx_pool: TdxPoolMetaModel) -> PoolMetaModel:
 
         if internal_type == 201:
             # type=3 → 条件单元
-            cell = _make_tdx_cell(
-                201,
-                id=str(tdx_cell.id),
-                attr=tdx_cell.attr,
-                position=pos,
-                clr=tdx_cell.clr,
-                text=tdx_cell.text,
-                tdx_func=tdx_cell.func,
-                tdx_id=tdx_cell.id,
-                tdx_type=tdx_cell.type,
-                clrtext=tdx_cell.clrtext,
-                solid=tdx_cell.solid,
-            )
+            cell = _make_tdx_cell(201, tdx_cell, pos, tdx_func=tdx_cell.func)
 
         elif internal_type == 202:
             # type=7 → 候选池/股票源
@@ -4307,20 +4325,8 @@ def tdx_to_internal(tdx_pool: TdxPoolMetaModel) -> PoolMetaModel:
                     market_parts.append("BJ")
                 inferred_market = ",".join(market_parts) if market_parts else ""
 
-            cell = _make_tdx_cell(
-                202,
-                id=str(tdx_cell.id),
-                attr=tdx_cell.attr,
-                position=pos,
-                clr=tdx_cell.clr,
-                text=tdx_cell.text,
-                tdx_spinfo=spinfo,
-                tdx_stocks=tdx_cell.stks,
-                tdx_id=tdx_cell.id,
-                tdx_type=tdx_cell.type,
-                clrtext=tdx_cell.clrtext,
-                solid=tdx_cell.solid,
-            )
+            cell = _make_tdx_cell(202, tdx_cell, pos,
+                                  tdx_spinfo=spinfo, tdx_stocks=tdx_cell.stks)
             # 运行时推断的 market 信息（不影响导出）
             if inferred_market is not None:
                 cell.inferred_market = inferred_market
@@ -4328,45 +4334,18 @@ def tdx_to_internal(tdx_pool: TdxPoolMetaModel) -> PoolMetaModel:
         elif internal_type == 200:
             # type=8 → 输出/状态池
             stocks: List[StockSnapshotModel] = []
-            stk_entries: List[StockSnapshotModel] = []
             for stk in tdx_cell.stks:
-                snap = StockSnapshotModel(
-                    label=stk.tq_code,
-                    t=stk.indate,
-                    p=stk.inprice,
-                    setcode=stk.setcode,
-                    code=stk.code,
-                    indate=stk.indate,
-                    intime=stk.intime,
-                    inprice=stk.inprice,
-                    income=stk.income,
-                    now=stk.now,
-                    rise=stk.rise,
-                    volume=stk.volume,
-                    maxrate=stk.maxrate,
-                    maxperiod=stk.maxperiod,
-                    maxtime=stk.maxtime,
-                    maxprice=stk.maxprice,
-                    idaynum=stk.idaynum,
-                )
-                stocks.append(snap)
-                stk_entries.append(snap)
-
-            cell = _make_tdx_cell(
-                200,
-                id=str(tdx_cell.id),
-                attr=tdx_cell.attr,
-                position=pos,
-                clr=tdx_cell.clr,
-                text=tdx_cell.text,
-                stocks=stocks,
-                stk_list=stk_entries,
-                tdx_psatt=tdx_cell.psatt,
-                tdx_id=tdx_cell.id,
-                tdx_type=tdx_cell.type,
-                clrtext=tdx_cell.clrtext,
-                solid=tdx_cell.solid,
-            )
+                stocks.append(StockSnapshotModel(
+                    label=stk.tq_code, t=stk.indate, p=stk.inprice,
+                    setcode=stk.setcode, code=stk.code,
+                    indate=stk.indate, intime=stk.intime, inprice=stk.inprice,
+                    income=stk.income, now=stk.now, rise=stk.rise,
+                    volume=stk.volume, maxrate=stk.maxrate, maxperiod=stk.maxperiod,
+                    maxtime=stk.maxtime, maxprice=stk.maxprice, idaynum=stk.idaynum,
+                ))
+            cell = _make_tdx_cell(200, tdx_cell, pos,
+                                  stocks=stocks, stk_list=stocks,
+                                  tdx_psatt=tdx_cell.psatt)
 
         elif internal_type == 2:
             # type=2 → 容器
@@ -4443,24 +4422,6 @@ def tdx_to_internal(tdx_pool: TdxPoolMetaModel) -> PoolMetaModel:
 # ================================================================
 
 # ═══════════════════════════════════════════════════════════════
-# DZH cell_type → TDX type 反向映射
-# (TDX_TO_DZH_CELL_TYPE = {0:1, 1:1, 2:2, 3:201, 7:202, 8:200})
-# ═══════════════════════════════════════════════════════════════
-
-_DZH_TO_TDX_TYPE: Dict[int, int] = {
-    200: 8,   # StatePoolCellModel  → 状态池
-    201: 3,   # ConditionCellModel  → 条件
-    202: 7,   # CandidateCellModel → 备选池
-    1:   0,   # LabelCellModel      → 装饰文字
-    2:   2,   # ContainerCellModel  → 容器
-    3:   0,   # StateColumnModel    → 装饰(无 TDX 对应)
-    4:   0,   # DiscardCellModel    → 装饰(无 TDX 对应)
-    6:   0,   # ArrowCellModel      → 装饰(无 TDX 对应)
-    203: 8,   # Type203CellModel    → 状态池（兜底）
-}
-
-
-# ═══════════════════════════════════════════════════════════════
 # TDX 类型重建
 # ═══════════════════════════════════════════════════════════════
 
@@ -4471,13 +4432,14 @@ _DZH_TO_TDX_TYPE: Dict[int, int] = {
 def _get_dzh_cell_type(cell: Any) -> int:
     """从 cell 模型获取 DZH 内部 cell_type。
 
-    TdxCellModel.type 存储 TDX 原生类型 (0~8)，需通过 TDX_TO_DZH_CELL_TYPE 映射。
+    TdxCellModel.type 存储 TDX 原生类型 (0~8)，需通过 dzh_type_map:tdx_to_dzh 映射。
     DynamicCellModel.type / cell_type 已是 DZH 内部类型 (200/201/202/203)，直接使用。
     """
     ct = getattr(cell, "type", getattr(cell, "cell_type", 0))
-    # 如果 ct 在 TDX_TO_DZH_CELL_TYPE 中，说明是 TDX 原生类型，需要映射
-    if ct in TDX_TO_DZH_CELL_TYPE:
-        return TDX_TO_DZH_CELL_TYPE[ct]
+    # 如果 ct 在 tdx_to_dzh 中，说明是 TDX 原生类型，需要映射
+    _tdx_to_dzh = (get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}).get("tdx_to_dzh", {})
+    if str(ct) in _tdx_to_dzh:
+        return int(_tdx_to_dzh[str(ct)])
     # 否则 ct 已经是 DZH 内部类型（200/201/202/203 等），直接返回
     return ct
 
@@ -4534,88 +4496,85 @@ def _code_to_setcode(code: str) -> int:
 # Cell 转换函数
 # ═══════════════════════════════════════════════════════════════
 
-def _convert_candidate_cell(cell: Any) -> Dict[str, Any]:
-    """
-    转换候选池 cell (cell_type=202) → node type="tdx_candidate"。
+class _CellEnvelope:
+    """TDX cell → node 包络合并基类：合并 _convert_candidate/state_pool/condition/decoration_cell。
 
-    返回字典包含：
-    - id / type / position / label：通用节点属性
-    - clr / clrtext / solid / text：外观与显示属性
-    - params：spinfo 字段 (type, customblockname, size, market, sector_type) + stocks 列表
+    抽取三者共享的子对象提取、外观属性收集与 9-key 返回包络。
     """
-    spinfo = getattr(cell, "spinfo", getattr(cell, "tdx_spinfo", None))
-    params: Dict[str, Any] = {}
-    if spinfo is not None:
-        for field in TdxSpinfoModel.model_fields:
-            params[field] = _safe_get(spinfo, field, 0 if field != "market" and field != "customblockname" else "")
-        # 确保字符串字段默认值正确
-        if "customblockname" not in params or params["customblockname"] is None:
-            params["customblockname"] = ""
-        if "market" not in params or params["market"] is None:
-            params["market"] = ""
-        # 嵌套分组：tdx_spinfo 包含全部 5 个 spinfo 字段
-        params["tdx_spinfo"] = {
-            field: params[field]
-            for field in TdxSpinfoModel.model_fields
+
+    @staticmethod
+    def _visual_params(cell):
+        return {
+            "clr": _safe_get(cell, "clr", -1),
+            "clrtext": _safe_get(cell, "clrtext", 0),
+            "solid": _safe_get(cell, "solid", 0),
         }
-        # 短别名：spinfo → tdx_spinfo，与 ui_layouts.json data_path 一致
-        params["spinfo"] = params["tdx_spinfo"]
 
-    stocks: List[Dict[str, str]] = []
-    tdx_stocks = getattr(cell, "stks", getattr(cell, "tdx_stocks", None)) or []
-    for stk in tdx_stocks:
-        stocks.append({"code": _safe_get(stk, "tq_code", "")})
-    params["stocks"] = stocks
+    @staticmethod
+    def _envelope(cell, node_type, params):
+        return {
+            "id": _safe_get(cell, "id", ""),
+            "type": node_type,
+            "position": _build_position(cell),
+            "clr": _safe_get(cell, "clr", -1),
+            "clrtext": _safe_get(cell, "clrtext", 0),
+            "solid": _safe_get(cell, "solid", 0),
+            "text": _safe_get(cell, "text", ""),
+            "params": params,
+            "label": _safe_get(cell, "text", ""),
+        }
 
-    # 嵌套分组：tdx_stocks 为 TDX 格式 [{setcode, code}, ...]
-    params["tdx_stocks"] = [
-        {"setcode": _code_to_setcode(s["code"]), "code": s["code"]}
-        for s in stocks
-    ]
+    @staticmethod
+    def _extract_subobj(cell, primary_attr, tdx_attr, model_class, default_fn):
+        """提取子对象字段：扁平键 + 嵌套 tdx_<name> 分组 + 短别名 + tdx_<name>_<field> 扁平键。
 
-    # 扁平键：为向后兼容保留 tdx_spinfo_* 前缀的扁平键
+        返回 (params, obj)；obj 为 None 时 params 为空 dict。
+        """
+        obj = getattr(cell, primary_attr, getattr(cell, tdx_attr, None))
+        params: Dict[str, Any] = {}
+        if obj is None:
+            return params, None
+        name = tdx_attr[len("tdx_"):]
+        group = {}
+        for field in model_class.model_fields:
+            d = default_fn(field)
+            val = _safe_get(obj, field, d)
+            params[field] = val
+            group[field] = val
+        params[tdx_attr] = group
+        params[name] = group
+        for field in model_class.model_fields:
+            params[f"{tdx_attr}_{field}"] = _safe_get(obj, field, default_fn(field))
+        return params, obj
+
+    @staticmethod
+    def _tdx_stocks_from(stocks):
+        """统一 tdx_stocks 嵌套分组：[{setcode, code}, ...]。"""
+        return [{"setcode": _code_to_setcode(s["code"]), "code": s["code"]} for s in stocks]
+
+
+def _convert_candidate_cell(cell: Any) -> Dict[str, Any]:
+    """转换候选池 cell (cell_type=202) → node type="tdx_candidate"。"""
+    params, spinfo = _CellEnvelope._extract_subobj(
+        cell, "spinfo", "tdx_spinfo", TdxSpinfoModel,
+        lambda f: "" if f in ("market", "customblockname") else 0)
     if spinfo is not None:
-        for field in TdxSpinfoModel.model_fields:
-            flat_key = f"tdx_spinfo_{field}"
-            params[flat_key] = _safe_get(spinfo, field, 0 if field != "market" and field != "customblockname" else "")
-
-    # 外观属性也放入 params
-    params["clr"] = _safe_get(cell, "clr", -1)
-    params["clrtext"] = _safe_get(cell, "clrtext", 0)
-    params["solid"] = _safe_get(cell, "solid", 0)
-
-    return {
-        "id": _safe_get(cell, "id", ""),
-        "type": "tdx_candidate",
-        "position": _build_position(cell),
-        "clr": _safe_get(cell, "clr", -1),
-        "clrtext": _safe_get(cell, "clrtext", 0),
-        "solid": _safe_get(cell, "solid", 0),
-        "text": _safe_get(cell, "text", ""),
-        "params": params,
-        "label": _safe_get(cell, "text", ""),
-    }
+        if params.get("customblockname") is None:
+            params["customblockname"] = ""
+        if params.get("market") is None:
+            params["market"] = ""
+    stocks = [{"code": _safe_get(stk, "tq_code", "")}
+              for stk in (getattr(cell, "stks", getattr(cell, "tdx_stocks", None)) or [])]
+    params["stocks"] = stocks
+    params["tdx_stocks"] = _CellEnvelope._tdx_stocks_from(stocks)
+    params.update(_CellEnvelope._visual_params(cell))
+    return _CellEnvelope._envelope(cell, "tdx_candidate", params)
 
 
 def _convert_state_pool_cell(cell: Any) -> Dict[str, Any]:
-    """
-    转换状态池 cell (cell_type=200) → node type="tdx_state_pool"。
-
-    params 包含 psatt 字段 (bdel, ndelnum, ndeltype, baimpool,
-    bsound, nsoundtype, nsyssound, soundfile, btip, bsavetoblock,
-    blockfile, bclearblock, bsavehis) 和 stocks 列表。
-    """
-    psatt = getattr(cell, "psatt", getattr(cell, "tdx_psatt", None))
-    params: Dict[str, Any] = {}
-    if psatt is not None:
-        for field in TdxPsattModel.model_fields:
-            params[field] = _safe_get(psatt, field, 0)
-        # 嵌套分组：tdx_psatt 包含全部 psatt 字段
-        params["tdx_psatt"] = {field: params[field] for field in TdxPsattModel.model_fields}
-        # 短别名：psatt → tdx_psatt，与 ui_layouts.json data_path 一致
-        params["psatt"] = params["tdx_psatt"]
-
-    # stocks: 优先从 tdx_stocks 读取（TdxStkModel 列表），否则从 stocks/stk_list 读取
+    """转换状态池 cell (cell_type=200) → node type="tdx_state_pool"。"""
+    params, _psatt = _CellEnvelope._extract_subobj(
+        cell, "psatt", "tdx_psatt", TdxPsattModel, lambda f: 0)
     stocks: List[Dict[str, str]] = []
     tdx_stocks = getattr(cell, "stks", getattr(cell, "tdx_stocks", None)) or []
     if tdx_stocks:
@@ -4624,105 +4583,29 @@ def _convert_state_pool_cell(cell: Any) -> Dict[str, Any]:
     else:
         stk_list = getattr(cell, "stocks", None) or getattr(cell, "stk_list", None) or []
         for stk in stk_list:
-            stocks.append({
-                "code": _safe_get(stk, "label", ""),
-                "t": _safe_get(stk, "t", ""),
-                "p": _safe_get(stk, "p", ""),
-            })
+            stocks.append({"code": _safe_get(stk, "label", ""),
+                           "t": _safe_get(stk, "t", ""),
+                           "p": _safe_get(stk, "p", "")})
     params["stocks"] = stocks
-
-    # 嵌套分组：tdx_stocks 为 TDX 格式 [{setcode, code}, ...]
-    params["tdx_stocks"] = [
-        {"setcode": _code_to_setcode(s["code"]), "code": s["code"]}
-        for s in stocks
-    ]
-
-    # 扁平键：为向后兼容保留 tdx_psatt_* 前缀的扁平键
-    if psatt is not None:
-        for field in TdxPsattModel.model_fields:
-            flat_key = f"tdx_psatt_{field}"
-            params[flat_key] = _safe_get(psatt, field, 0)
-
-    # 外观属性也放入 params
-    params["clr"] = _safe_get(cell, "clr", -1)
-    params["clrtext"] = _safe_get(cell, "clrtext", 0)
-    params["solid"] = _safe_get(cell, "solid", 0)
-
-    return {
-        "id": _safe_get(cell, "id", ""),
-        "type": "tdx_state_pool",
-        "position": _build_position(cell),
-        "clr": _safe_get(cell, "clr", -1),
-        "clrtext": _safe_get(cell, "clrtext", 0),
-        "solid": _safe_get(cell, "solid", 0),
-        "text": _safe_get(cell, "text", ""),
-        "params": params,
-        "label": _safe_get(cell, "text", ""),
-    }
+    params["tdx_stocks"] = _CellEnvelope._tdx_stocks_from(stocks)
+    params.update(_CellEnvelope._visual_params(cell))
+    return _CellEnvelope._envelope(cell, "tdx_state_pool", params)
 
 
 def _convert_condition_cell(cell: Any) -> Dict[str, Any]:
-    """
-    转换条件 cell (cell_type=201) → node type="tdx_condition"。
-
-    params 包含 func 字段 (nset, ntjindexno, accode, nperiod,
-    nfirst, cfirst, noperate, nsecond, csecond, fsecond,
-    nbeginday, nendday, bnost, bnotp, bnotq, nperiodnum)。
-    """
-    func = getattr(cell, "func", getattr(cell, "tdx_func", None))
-    params: Dict[str, Any] = {}
-    if func is not None:
-        for field in TdxFuncModel.model_fields:
-            params[field] = _safe_get(func, field, 0)
-        # 嵌套分组：tdx_func 包含全部 16 个 func 字段
-        params["tdx_func"] = {field: params[field] for field in TdxFuncModel.model_fields}
-        # 短别名：func → tdx_func，与 ui_layouts.json data_path 一致
-        params["func"] = params["tdx_func"]
-
-    # 外观属性也放入 params
-    params["clr"] = _safe_get(cell, "clr", -1)
-    params["clrtext"] = _safe_get(cell, "clrtext", 0)
-    params["solid"] = _safe_get(cell, "solid", 0)
-
-    return {
-        "id": _safe_get(cell, "id", ""),
-        "type": "tdx_condition",
-        "position": _build_position(cell),
-        "clr": _safe_get(cell, "clr", -1),
-        "clrtext": _safe_get(cell, "clrtext", 0),
-        "solid": _safe_get(cell, "solid", 0),
-        "text": _safe_get(cell, "text", ""),
-        "params": params,
-        "label": _safe_get(cell, "text", ""),
-    }
+    """转换条件 cell (cell_type=201) → node type="tdx_condition"。"""
+    params, _func = _CellEnvelope._extract_subobj(
+        cell, "func", "tdx_func", TdxFuncModel, lambda f: 0)
+    params.update(_CellEnvelope._visual_params(cell))
+    return _CellEnvelope._envelope(cell, "tdx_condition", params)
 
 
 def _convert_decoration_cell(cell: Any) -> Dict[str, Any]:
-    """
-    转换装饰性 cell (cell_type=1,2,3,4,6) → node type="decoration"。
-
-    params 包含 _visual_only=True 和 dzh_cell_type。
-    dzh_cell_type 使用内部 type，该值已是通过
-    TDX_TO_DZH_CELL_TYPE 从原始 TDX 类型映射的结果。
-    """
-    ct = _get_dzh_cell_type(cell)
-    return {
-        "id": _safe_get(cell, "id", ""),
-        "type": "decoration",
-        "position": _build_position(cell),
-        "clr": _safe_get(cell, "clr", -1),
-        "clrtext": _safe_get(cell, "clrtext", 0),
-        "solid": _safe_get(cell, "solid", 0),
-        "text": _safe_get(cell, "text", ""),
-        "params": {
-            "_visual_only": True,
-            "dzh_cell_type": ct,
-            "clr": _safe_get(cell, "clr", -1),
-            "clrtext": _safe_get(cell, "clrtext", 0),
-            "solid": _safe_get(cell, "solid", 0),
-        },
-        "label": _safe_get(cell, "text", ""),
-    }
+    """转换装饰性 cell (cell_type=1,2,3,4,6) → node type="decoration"。"""
+    params: Dict[str, Any] = {"_visual_only": True,
+                              "dzh_cell_type": _get_dzh_cell_type(cell)}
+    params.update(_CellEnvelope._visual_params(cell))
+    return _CellEnvelope._envelope(cell, "decoration", params)
 
 
 # Cell 类型 → 转换函数分发表
@@ -4738,89 +4621,44 @@ _CELL_CONVERTERS: Dict[int, callable] = {
 # Flow 转换函数
 # ═══════════════════════════════════════════════════════════════
 
+# 表驱动：TDX flow 字段提取（合并 11 个 getattr 重复块）。
+# 每行 = (key, default, with_tdx_prefix)；均带 tdx_<key> 回退，None → default。
+_FLOW_ATTR_FIELDS = (
+    ("tran", 0, True),
+    ("size", 1, True),
+    ("emptyps", 0, False),
+    ("starttype", 0, False),
+    ("starttime", 0, False),
+    ("starttimetype", 0, False),
+    ("starttimehms", 0, False),
+    ("cxtype", 0, False),
+    ("cxtime", 0, False),
+    ("cxtimetype", 0, False),
+    ("jgtime", 60, False),
+)
+
+
 def _convert_flow(flow: Any) -> Dict[str, Any]:
-    """
-    转换 FlowModel 为 edge dict。
-
-    edge 结构:
-      {
-        "source": {"node_id": flow.startid},
-        "target": {"node_id": flow.endid},
-        "params": {mode, clr, size, tran, emptyps, starttype, jgtime}
-      }
-    """
-    tdx_tran = getattr(flow, "tran", getattr(flow, "tdx_tran", 0))
-    if tdx_tran is None:
-        tdx_tran = 0
-    mode = "move" if tdx_tran == 1 else "copy"
-
+    """转换 FlowModel 为 edge dict（表驱动，合并 11 个 getattr 重复块）。"""
+    params: Dict[str, Any] = {}
+    for key, default, with_prefix in _FLOW_ATTR_FIELDS:
+        val = getattr(flow, key, getattr(flow, "tdx_" + key, default))
+        if val is None:
+            val = default
+        params[key] = val
+        if with_prefix:
+            params["tdx_" + key] = val
+    # clr: 无 tdx_ 回退、不强制 None→default（与原实现一致）
     tdx_clr = getattr(flow, "clr", -1)
-
-    tdx_size = getattr(flow, "size", getattr(flow, "tdx_size", 1))
-    if tdx_size is None:
-        tdx_size = 1
-
-    # TDX 时间调度参数
-    tdx_emptyps = getattr(flow, "emptyps", getattr(flow, "tdx_emptyps", 0))
-    if tdx_emptyps is None:
-        tdx_emptyps = 0
-
-    tdx_starttype = getattr(flow, "starttype", getattr(flow, "tdx_starttype", 0))
-    if tdx_starttype is None:
-        tdx_starttype = 0
-
-    tdx_starttime = getattr(flow, "starttime", getattr(flow, "tdx_starttime", 0))
-    if tdx_starttime is None:
-        tdx_starttime = 0
-
-    tdx_starttimetype = getattr(flow, "starttimetype", getattr(flow, "tdx_starttimetype", 0))
-    if tdx_starttimetype is None:
-        tdx_starttimetype = 0
-
-    tdx_starttimehms = getattr(flow, "starttimehms", getattr(flow, "tdx_starttimehms", 0))
-    if tdx_starttimehms is None:
-        tdx_starttimehms = 0
-
-    tdx_cxtype = getattr(flow, "cxtype", getattr(flow, "tdx_cxtype", 0))
-    if tdx_cxtype is None:
-        tdx_cxtype = 0
-
-    tdx_cxtime = getattr(flow, "cxtime", getattr(flow, "tdx_cxtime", 0))
-    if tdx_cxtime is None:
-        tdx_cxtime = 0
-
-    tdx_cxtimetype = getattr(flow, "cxtimetype", getattr(flow, "tdx_cxtimetype", 0))
-    if tdx_cxtimetype is None:
-        tdx_cxtimetype = 0
-
-    tdx_jgtime = getattr(flow, "jgtime", getattr(flow, "tdx_jgtime", 60))
-    if tdx_jgtime is None:
-        tdx_jgtime = 60
-
+    params["tdx_clr"] = tdx_clr
+    params["clr"] = tdx_clr
+    params["mode"] = "move" if params["tran"] == 1 else "copy"
     source_id = str(getattr(flow, "startid", getattr(flow, "from_cell_id", "")))
     target_id = str(getattr(flow, "endid", getattr(flow, "to_cell_id", "")))
-
     return {
         "source": {"node_id": source_id},
         "target": {"node_id": target_id},
-        "params": {
-            "mode": mode,
-            "tdx_clr": tdx_clr,
-            "tdx_size": tdx_size,
-            "tdx_tran": tdx_tran,
-            "clr": tdx_clr,
-            "size": tdx_size,
-            "tran": tdx_tran,
-            "emptyps": tdx_emptyps,
-            "starttype": tdx_starttype,
-            "starttime": tdx_starttime,
-            "starttimetype": tdx_starttimetype,
-            "starttimehms": tdx_starttimehms,
-            "cxtype": tdx_cxtype,
-            "cxtime": tdx_cxtime,
-            "cxtimetype": tdx_cxtimetype,
-            "jgtime": tdx_jgtime,
-        },
+        "params": params,
     }
 
 
@@ -4852,15 +4690,11 @@ def convert_tdx_to_config(pool_meta: PoolMetaModel) -> Dict[str, Any]:
 
     edges: List[Dict[str, Any]] = [_convert_flow(f) for f in pool_meta.flows]
 
-    return {
-        "pool_meta": {
-            "type": "tdx",
-            "backcolor": _safe_get(pool_meta, "backcolor", 16777216),
-            "nextid": _safe_get(pool_meta, "nextid", 0),
-        },
-        "nodes": nodes,
-        "edges": edges,
-    }
+    return _assemble_pool_result(
+        nodes, edges,
+        pool_meta={"type": "tdx",
+                   "backcolor": _safe_get(pool_meta, "backcolor", 16777216),
+                   "nextid": _safe_get(pool_meta, "nextid", 0)})
 
 
 
@@ -4878,19 +4712,7 @@ _PREFIX_TO_SETCODE = {"0": 0, "3": 0, "6": 1, "8": 2, "4": 2}
 # 导出器（原 tdx_exporter.py）
 # ================================================================
 
-# ── DZH cell_type → TDX type mapping ──────────────────────────────────────────
-_DZH_TO_TDX_TYPE_EXPORT: Dict[int, int] = {
-    200: 8,   # StatePoolCellModel  → 状态池
-    201: 3,   # ConditionCellModel  → 条件
-    202: 7,   # CandidateCellModel → 备选池
-    1:   0,   # LabelCellModel      → 装饰文字
-    2:   2,   # ContainerCellModel  → 容器
-    3:   3,   # StateColumnModel    → 条件列
-    4:   2,   # DiscardCellModel    → 容器（兜底）
-    5:   0,   # ArrowCellModel      → 装饰
-    6:   0,   # ArrowCellModel (dup)→ 装饰
-    203: 8,   # Type203CellModel    → 状态池（兜底）
-}
+# DZH cell_type → TDX type 映射统一由 dzh_type_map.json:dzh_to_tdx 提供（ConfigStore）。
 
 # ── Default TDX colors per type ───────────────────────────────────────────────
 _TDX_DEFAULT_CLR: Dict[int, int] = {
@@ -4927,7 +4749,8 @@ def _get_tdx_type_export(cell: Any) -> int:
     if tdx_type is not None:
         return int(tdx_type)
     ct = getattr(cell, 'cell_type', 0)
-    return _DZH_TO_TDX_TYPE_EXPORT.get(ct, ct)
+    _dzh_to_tdx = (get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}).get("dzh_to_tdx", {})
+    return int(_dzh_to_tdx.get(str(ct), ct))
 
 
 def _pos_to_str(pos: Any) -> str:
@@ -4968,89 +4791,22 @@ def _stock_setcode(code: str) -> int:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Child-element builders (func / psatt / spinfo / stk)
+# 已合并到 TdxPoolConverter._add_element + _StkWriter.write_stks；
+# _add_func/_add_psatt/_add_spinfo/_add_stks 模块级名称委托到 _TDX_CONVERTER。
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _add_func(cell_elem: ET.Element, cell: Any) -> None:
-    """<func> for type=3 cells.  Only emitted when func is not None."""
-    func = getattr(cell, 'tdx_func', None)
-    if func is None:
-        return
-    if isinstance(func, TdxFuncModel):
-        attrs = func.to_xml_attrs()
-    else:
-        return
-    el = ET.SubElement(cell_elem, 'func')
-    for k, v in attrs.items():
-        el.set(k, v)
-
-
-def _add_psatt(cell_elem: ET.Element, cell: Any) -> None:
-    """<psatt> for type=8 cells.  Only emitted when psatt is not None."""
-    psatt = getattr(cell, 'tdx_psatt', None)
-    if psatt is None:
-        return
-    if isinstance(psatt, TdxPsattModel):
-        attrs = psatt.to_xml_attrs()
-    else:
-        return
-    el = ET.SubElement(cell_elem, 'psatt')
-    for k, v in attrs.items():
-        el.set(k, v)
-
-
-def _add_spinfo(cell_elem: ET.Element, cell: Any) -> None:
-    """<spinfo> for type=7 cells. Only emitted when tdx_spinfo is present."""
-    spinfo = getattr(cell, 'tdx_spinfo', None)
-    if spinfo is None:
-        return
-    if isinstance(spinfo, TdxSpinfoModel):
-        attrs = spinfo.to_xml_attrs()
-    else:
-        return
-    el = ET.SubElement(cell_elem, 'spinfo')
-    for k, v in attrs.items():
-        el.set(k, v)
-
-
-def _add_stks(cell_elem: ET.Element, cell: Any) -> None:
-    """<stk> elements for type=7 cells – derive setcode from code prefix."""
-    # stocks or stk_list may be present on candidate / state-pool cells
-    stocks = getattr(cell, 'tdx_stocks', None) or getattr(cell, 'stocks', None) or getattr(cell, 'stk_list', None)
-    if not stocks or not isinstance(stocks, list):
-        return
-    for s in stocks:
-        el = ET.SubElement(cell_elem, 'stk')
-        # 优先使用 TDX 扩展字段
-        setcode_val = getattr(s, 'setcode', None)
-        code_val = getattr(s, 'code', None)
-
-        if setcode_val is not None and code_val is not None:
-            # 有完整的 TDX stk 数据
-            el.set('setcode', str(setcode_val))
-            el.set('code', str(code_val))
-            # 输出运行时字段（如果有值）
-            for field_name in ['indate', 'intime', 'inprice', 'income', 'now', 'rise', 'volume', 'maxrate', 'maxperiod', 'maxtime', 'maxprice', 'idaynum']:
-                field_val = getattr(s, field_name, None)
-                if field_val is not None and str(field_val) != '' and str(field_val) != '0' and str(field_val) != '0.00':
-                    el.set(field_name, str(field_val))
-        else:
-            # 回退到推断逻辑
-            if hasattr(s, 'tid') and s.tid:
-                code = s.tid
-            elif hasattr(s, 'label') and s.label:
-                code = s.label
-            else:
-                code = ""
-            el.set('setcode', str(_stock_setcode(code)))
-            el.set('code', code)
-
-
-# tdx_type → 子元素构造函数列表（替代原 if/elif 链）
+# tdx_type → 子元素构造方法列表（表驱动，替代原 if/elif 链与重复 def）
 _TYPE_CHILD_BUILDERS = {
-    3: [_add_func],
-    8: [_add_psatt, _add_stks],
-    7: [_add_spinfo, _add_stks],
+    3: [_TDX_CONVERTER.add_func],
+    8: [_TDX_CONVERTER.add_psatt, _TDX_CONVERTER.add_stks],
+    7: [_TDX_CONVERTER.add_spinfo, _TDX_CONVERTER.add_stks],
 }
+
+# 向后兼容：保留模块级名称委托到转换器单例
+_add_func = _TDX_CONVERTER.add_func
+_add_psatt = _TDX_CONVERTER.add_psatt
+_add_spinfo = _TDX_CONVERTER.add_spinfo
+_add_stks = _TDX_CONVERTER.add_stks
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -5934,9 +5690,10 @@ def _build_tdx_xml(pool_data: dict, filepath: str) -> None:
     """
     mapping = _get_xml_mapping()
     pool_cfg, cell_cfg, flow_cfg = mapping['pool'], mapping['cell'], mapping['flow']
-    dzh_to_tdx = {int(k): v for k, v in mapping['dzh_to_tdx_type'].items()}
+    _type_map = get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}
+    dzh_to_tdx = {int(k): v for k, v in _type_map.get("dzh_to_tdx", {}).items()}
     # 表驱动：前端类型名 → TDX数字类型
-    frontend_to_tdx = mapping.get('frontend_to_tdx_type', {})
+    frontend_to_tdx = _type_map.get("frontend_to_tdx", {})
     root = ET.Element(pool_cfg['root_element'])
     pool_el = ET.SubElement(root, pool_cfg['pool_element'])
     for ad in pool_cfg['pool_attributes']:
@@ -6035,7 +5792,8 @@ _TRANSFORMS = {
 def _tdx_pool_to_frontend(tdx_pool, name: str) -> dict:
     mapping = _get_xml_mapping()
     node_cfg, edge_cfg = mapping['frontend_node'], mapping['frontend_edge']
-    tdx_type_map = {int(k): v for k, v in mapping['tdx_to_frontend_type'].items()}
+    _type_map = get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}
+    tdx_type_map = {int(k): v for k, v in _type_map.get("tdx_to_frontend", {}).items()}
     pos_cfg = node_cfg['position']
     nodes = []
     for cell in tdx_pool.cells:

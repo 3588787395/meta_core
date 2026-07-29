@@ -90,28 +90,6 @@ def _load_defaults() -> Dict[str, Any]:
     return _defaults_cache
 
 
-_dzh_type_map_cache: Optional[Dict[str, Any]] = None
-
-
-def _load_dzh_type_map() -> Dict[str, Any]:
-    """加载 config/dzh_type_map.json 并缓存结果。
-
-    fail-fast：配置缺失或解析失败时抛出 ConfigLoadError，禁止静默回退硬编码值。
-    """
-    global _dzh_type_map_cache
-    if _dzh_type_map_cache is not None:
-        return _dzh_type_map_cache
-    path = Path(__file__).parent.parent / "config" / "architecture" / "dzh_type_map.json"
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            _dzh_type_map_cache = json.load(f)
-    except (OSError, json.JSONDecodeError) as ex:
-        raise ConfigLoadError(
-            f"无法加载配置表 {path}: {ex}（fail-fast：禁止静默回退硬编码值）"
-        ) from ex
-    return _dzh_type_map_cache
-
-
 def _parse_attr_bits(type_key, attr_int: int) -> Dict[str, bool]:
     """Parse attr int into boolean sub-properties based on bit_fields entries.
 
@@ -149,10 +127,109 @@ def _compose_attr_int(type_key, data: dict) -> int:
 
 
 # ═══════════════════════════════════════════════════
+# _DualDictAccessMixin — DynamicCellModel/FlowModel 共享的 dict/attr 访问原语
+# ═══════════════════════════════════════════════════
+# 底层运行逻辑洞察（Code = Data + Dispatcher）：两个 Dynamic*Model 共享
+# ``_data + _extra + _present_attrs`` 三字段存储 + 7 个 dunder 访问器 +
+# ``to_dict`` 序列化骨架（``_extra/_data merge + _compose_attr_int + pop bit_fields``）。
+# 提升至 mixin 后子类仅声明 ``_attr_key``（"cell_type" / "flow"）与
+# ``_internal_pop_keys``（序列化需剔除的内部字段），重复行收敛至单一实现。
+
+
+class _DualDictAccessMixin:
+    """dict/attr 双访问 + to_dict 序列化骨架的共享 mixin。
+
+    子类约定：
+      - ``self._data`` / ``self._extra`` / ``self._present_attrs`` 在 __init__ 中初始化
+      - ``self._attr_key``：用于 ``_compose_attr_int`` 的类型 key
+                          （"cell_type" 取 data 值，"flow" 固定字符串）
+      - ``self._internal_pop_keys``：to_dict 末尾需 pop 的内部字段元组
+    """
+
+    # ── dict-style access ──────────────────────────────────────
+
+    def __getitem__(self, key):
+        if key in self._data:
+            return self._data[key]
+        if key in self._extra:
+            return self._extra[key]
+        raise KeyError(key)
+
+    def __setitem__(self, key, value):
+        self._data[key] = value
+
+    def __contains__(self, key):
+        return key in self._data or key in self._extra
+
+    def get(self, key, default=None):
+        if key in self._data:
+            return self._data[key]
+        if key in self._extra:
+            return self._extra[key]
+        return default
+
+    def keys(self):
+        return set(self._data.keys()) | set(self._extra.keys())
+
+    # ── attribute-style access ─────────────────────────────────
+
+    def __getattr__(self, name):
+        if name.startswith('_'):
+            raise AttributeError(name)
+        if name in self._data:
+            return self._data[name]
+        if name in self._extra:
+            return self._extra[name]
+        raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
+
+    def __setattr__(self, name, value):
+        if name.startswith('_'):
+            super().__setattr__(name, value)
+        else:
+            self._data[name] = value
+
+    # ── serialization skeleton ─────────────────────────────────
+
+    def _base_to_dict(self) -> Dict[str, Any]:
+        """to_dict 骨架：merge _extra/_data + 重组 attr + pop bit_fields + pop 内部键。
+
+        ``_attr_key`` 为 ``"cell_type"`` 时从 ``_data`` 取动态类型并额外处理 position；
+        为 ``"flow"`` 时使用固定字符串。``_internal_pop_keys`` 列出每个子类需剔除的
+        内部兼容字段。
+        """
+        result: Dict[str, Any] = {}
+        result.update(self._extra)
+        result.update(self._data)
+
+        attr_key = self._attr_key
+        if attr_key == "cell_type":
+            type_val = self._data.get("cell_type", self._data.get("type", 0))
+            attr_int = _compose_attr_int(type_val, self._data)
+            result["attr"] = attr_int
+            pos = self._data.get("position")
+            if isinstance(pos, PositionModel):
+                result["pos"] = pos.to_pos_str()
+        else:
+            attr_int = _compose_attr_int(attr_key, self._data)
+            result["attr"] = attr_int
+
+        _load_field_defs()
+        bit_fields = _bit_fields_cache.get(
+            str(type_val) if attr_key == "cell_type" else attr_key, {}
+        )
+        for name in bit_fields:
+            result.pop(name, None)
+
+        for key in self._internal_pop_keys:
+            result.pop(key, None)
+        return result
+
+
+# ═══════════════════════════════════════════════════
 # DynamicCellModel — 通用 Cell 模型
 # ═══════════════════════════════════════════════════
 
-class DynamicCellModel:
+class DynamicCellModel(_DualDictAccessMixin):
     """通用 Cell 模型，根据 field_definitions.json 动态加载字段定义。
 
     支持 dict 风格访问 (model['key'], model.get('key')) 和属性访问 (model.key)。
@@ -161,6 +238,8 @@ class DynamicCellModel:
     """
 
     _COMMON_KEYS = {"id", "type", "pos", "clr", "text", "attr"}
+    _attr_key = "cell_type"
+    _internal_pop_keys = ("cell_type",)
 
     def __init__(self):
         self._data: Dict[str, Any] = {}
@@ -254,79 +333,11 @@ class DynamicCellModel:
 
         return obj
 
-    # ── dict-style access ──────────────────────────────────────
-
-    def __getitem__(self, key):
-        if key in self._data:
-            return self._data[key]
-        if key in self._extra:
-            return self._extra[key]
-        raise KeyError(key)
-
-    def __setitem__(self, key, value):
-        self._data[key] = value
-
-    def __contains__(self, key):
-        return key in self._data or key in self._extra
-
-    def get(self, key, default=None):
-        """dict-style get，支持默认值。"""
-        if key in self._data:
-            return self._data[key]
-        if key in self._extra:
-            return self._extra[key]
-        return default
-
-    def keys(self):
-        """返回所有数据键的视图。"""
-        return set(self._data.keys()) | set(self._extra.keys())
-
-    # ── attribute-style access ─────────────────────────────────
-
-    def __getattr__(self, name):
-        if name.startswith('_'):
-            raise AttributeError(name)
-        if name in self._data:
-            return self._data[name]
-        if name in self._extra:
-            return self._extra[name]
-        raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
-
-    def __setattr__(self, name, value):
-        if name.startswith('_'):
-            super().__setattr__(name, value)
-        else:
-            self._data[name] = value
-
     # ── serialization ──────────────────────────────────────────
 
     def to_dict(self) -> Dict[str, Any]:
-        """序列化回字典，将 bit fields 重新组合成 attr int。"""
-        result = {}
-        result.update(self._extra)
-        result.update(self._data)
-
-        cell_type = self._data.get("cell_type", self._data.get("type", 0))
-
-        # 重新组合 attr
-        attr_int = _compose_attr_int(cell_type, self._data)
-        result["attr"] = attr_int
-
-        # 转换 position 回 pos 字符串
-        pos = self._data.get("position")
-        if isinstance(pos, PositionModel):
-            result["pos"] = pos.to_pos_str()
-
-        # 移除展开的 bit fields（已组合到 attr 中）
-        _load_field_defs()
-        bit_fields = _bit_fields_cache.get(str(cell_type), {})
-        for name in bit_fields:
-            result.pop(name, None)
-
-        # 移除内部字段
-        result.pop("cell_type", None)
-
-        return result
+        """序列化回字典，将 bit fields 重新组合成 attr int。委托 mixin 骨架。"""
+        return self._base_to_dict()
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         """兼容 Pydantic model_dump() 接口，委托 to_dict()。"""
@@ -443,7 +454,7 @@ _FIELD_ALIASES: Dict[str, List[tuple]] = {
 }
 
 
-class DynamicFlowModel:
+class DynamicFlowModel(_DualDictAccessMixin):
     """通用 Flow 模型，根据 field_definitions.json 的 flow_fields 动态加载字段定义。
 
     支持 dict 风格访问和属性访问。
@@ -452,6 +463,9 @@ class DynamicFlowModel:
 
     _FLOW_KEYS = {"from", "to", "attr", "begin", "begint", "end", "endt",
                   "interval", "clr", "mid", "count"}
+    _attr_key = "flow"
+    _internal_pop_keys = ("from_cell_id", "to_cell_id", "begin_type", "begin_param",
+                          "end_type", "end_param", "interval_sec", "raw_attr")
 
     def __init__(self):
         self._data: Dict[str, Any] = {}
@@ -558,72 +572,13 @@ class DynamicFlowModel:
         """是否为出流（非直通模式）。"""
         return self.mode_name != "pass_through"
 
-    # ── dict-style access ──────────────────────────────────────
-
-    def __getitem__(self, key):
-        if key in self._data:
-            return self._data[key]
-        if key in self._extra:
-            return self._extra[key]
-        raise KeyError(key)
-
-    def __setitem__(self, key, value):
-        self._data[key] = value
-
-    def __contains__(self, key):
-        return key in self._data or key in self._extra
-
-    def get(self, key, default=None):
-        if key in self._data:
-            return self._data[key]
-        if key in self._extra:
-            return self._extra[key]
-        return default
-
-    def keys(self):
-        return set(self._data.keys()) | set(self._extra.keys())
-
-    # ── attribute-style access ─────────────────────────────────
-
-    def __getattr__(self, name):
-        if name.startswith('_'):
-            raise AttributeError(name)
-        if name in self._data:
-            return self._data[name]
-        if name in self._extra:
-            return self._extra[name]
-        raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
-
-    def __setattr__(self, name, value):
-        if name.startswith('_'):
-            super().__setattr__(name, value)
-        else:
-            self._data[name] = value
-
-    # ── serialization ──────────────────────────────────────────
+    # ── dict-style access / attribute-style access / serialization ──
+    # 全部由 _DualDictAccessMixin 提供：__getitem__/__setitem__/__contains__/
+    # get/keys/__getattr__/__setattr__ + _base_to_dict() 骨架。
 
     def to_dict(self) -> Dict[str, Any]:
-        """序列化回字典，将 bit fields 重新组合成 attr int。"""
-        result = {}
-        result.update(self._extra)
-        result.update(self._data)
-
-        # 重新组合 attr
-        attr_int = _compose_attr_int("flow", self._data)
-        result["attr"] = attr_int
-
-        # 移除展开的 bit fields
-        _load_field_defs()
-        bit_fields = _bit_fields_cache.get("flow", {})
-        for name in bit_fields:
-            result.pop(name, None)
-
-        # 移除内部兼容字段
-        for key in ("from_cell_id", "to_cell_id", "begin_type", "begin_param",
-                     "end_type", "end_param", "interval_sec", "raw_attr"):
-            result.pop(key, None)
-
-        return result
+        """序列化回字典，将 bit fields 重新组合成 attr int。委托 mixin 骨架。"""
+        return self._base_to_dict()
 
     def __repr__(self):
         fid = self._data.get("from", "?")
@@ -951,49 +906,8 @@ def _get_setcode_map():
 SETCODE_MAP = _get_setcode_map()
 SETCODE_REVERSE = {v: k for k, v in SETCODE_MAP.items()}
 
-def _get_tdx_cell_type_map():
-    ttm = _load_dzh_type_map().get("tdx_type_map", {})
-    return {int(k): v for k, v in ttm.items()}
-
-def _get_tdx_to_dzh_map():
-    ttd = _load_dzh_type_map().get("tdx_to_dzh", {})
-    return {int(k): v for k, v in ttd.items()}
-
-
-def _build_tdx_maps_from_registry() -> tuple:
-    """从注册表读取 tdx_types 和 tdx_to_dzh 映射。返回 (tdx_type_map, tdx_to_dzh_map)。"""
-    registry = _load_registry()
-    tdx_type_map: Dict[int, str] = {}
-    tdx_to_dzh_map: Dict[int, int] = {}
-
-    for k, v in registry.get("tdx_types", {}).items():
-        tdx_type_map[int(k)] = v
-    for k, v in registry.get("tdx_to_dzh", {}).items():
-        tdx_to_dzh_map[int(k)] = v
-
-    return tdx_type_map, tdx_to_dzh_map
-
-
-def _init_tdx_maps() -> tuple:
-    """初始化 TDX 映射：优先从注册表，兜底使用硬编码。"""
-    reg_type_map, reg_to_dzh_map = _build_tdx_maps_from_registry()
-
-    if reg_type_map:
-        tdx_type_map = _get_tdx_cell_type_map()
-        tdx_type_map.update(reg_type_map)
-    else:
-        tdx_type_map = _get_tdx_cell_type_map()
-
-    if reg_to_dzh_map:
-        tdx_to_dzh_map = _get_tdx_to_dzh_map()
-        tdx_to_dzh_map.update(reg_to_dzh_map)
-    else:
-        tdx_to_dzh_map = _get_tdx_to_dzh_map()
-
-    return tdx_type_map, tdx_to_dzh_map
-
-
-TDX_CELL_TYPE_MAP, TDX_TO_DZH_CELL_TYPE = _init_tdx_maps()
+# TDX↔DZH 类型映射单一真相源：config/architecture/dzh_type_map.json
+# 读取统一通过 ConfigStore.get_table("dzh_type_map")（见 converters.py 等调用方）。
 
 
 # ═══════════════════════════════════════════════════
@@ -1015,6 +929,18 @@ class _XmlAttrMixin:
             else:
                 result[field] = str(val)
         return result
+
+    @classmethod
+    def from_dict(cls, data: Dict) -> "_XmlAttrMixin":
+        """通用 ``from_dict``：按 ``model_fields`` 过滤未知键后构造实例。
+
+        底层运行逻辑洞察（Code = Data + Dispatcher）：5 个 TDX 叶子模型
+        （Func/Psatt/Spinfo/Stk/Flow）的 ``from_dict`` 逐字相同，仅返回类型注解不同。
+        提升至 mixin 后子类零实现 ``from_dict``，新增模型自动获得该能力。
+        ``TdxCellModel`` / ``TdxPoolMetaModel`` 含嵌套解析，保留各自 ``from_dict``。
+        """
+        known = set(cls.model_fields.keys())
+        return cls(**{k: v for k, v in data.items() if k in known})
 
 
 class TdxFuncModel(_XmlAttrMixin, BaseModel):
@@ -1042,11 +968,6 @@ class TdxFuncModel(_XmlAttrMixin, BaseModel):
     _XML_FIELDS: ClassVar[List[str]] = ["nset", "ntjindexno", "accode", "nperiod", "nfirst", "cfirst",
                    "noperate", "nsecond", "csecond", "fsecond", "nbeginday", "nendday",
                    "bnost", "bnotp", "bnotq", "nperiodnum"]
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> TdxFuncModel:
-        known = set(cls.model_fields.keys())
-        return cls(**{k: v for k, v in data.items() if k in known})
 
 
 class TdxPsattModel(_XmlAttrMixin, BaseModel):
@@ -1081,11 +1002,6 @@ class TdxPsattModel(_XmlAttrMixin, BaseModel):
         if v not in (0, 1, 2, 3, 4):
             raise ValueError(f'ndeltype must be 0(days)/1(hours)/2(minutes)/3(seconds)/4(seconds_DZH), got {v}')
         return v
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> TdxPsattModel:
-        known = set(cls.model_fields.keys())
-        return cls(**{k: v for k, v in data.items() if k in known})
 
     _XML_FIELDS: ClassVar[List[str]] = ["bdel", "ndelnum", "ndeltype", "baimpool", "bsound", "nsoundtype",
                    "nsyssound", "soundfile", "btip", "bsavetoblock", "blockfile",
@@ -1129,11 +1045,6 @@ class TdxSpinfoModel(_XmlAttrMixin, BaseModel):
             raise ValueError(f"spinfo.type 必须为 {sorted(allowed)} 之一，实际值为 {v}")
         return v
 
-    @classmethod
-    def from_dict(cls, data: Dict) -> TdxSpinfoModel:
-        known = set(cls.model_fields.keys())
-        return cls(**{k: v for k, v in data.items() if k in known})
-
     _XML_FIELDS: ClassVar[List[str]] = ["type", "customblockname", "size", "market", "sector_type"]
 
 
@@ -1170,11 +1081,6 @@ class TdxStkModel(_XmlAttrMixin, BaseModel):
             else:
                 suffix = "SZ"  # default
         return f"{self.code}.{suffix}"
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> TdxStkModel:
-        known = set(cls.model_fields.keys())
-        return cls(**{k: v for k, v in data.items() if k in known})
 
     _XML_FIELDS: ClassVar[List[str]] = ["setcode", "code", "indate", "intime", "inprice", "income", "now",
                    "rise", "volume", "maxrate", "maxperiod", "maxtime", "maxprice", "idaynum"]
@@ -1246,11 +1152,6 @@ class TdxFlowModel(_XmlAttrMixin, BaseModel):
     @property
     def mode_name(self) -> str:
         return "move" if self.tran == 1 else "copy"
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> TdxFlowModel:
-        known = set(cls.model_fields.keys())
-        return cls(**{k: v for k, v in data.items() if k in known})
 
     _XML_FIELDS: ClassVar[List[str]] = ["startid", "endid", "clr", "size", "tran", "emptyps", "starttype",
                    "starttime", "starttimetype", "starttimehms", "cxtype", "cxtime",

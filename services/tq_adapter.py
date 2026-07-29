@@ -23,8 +23,8 @@ from typing import Any, Dict, List, Optional
 
 # ── 重新导出 provider 内部工具 ──────────────────────────────────────
 from .providers import DataSourceManager, DataSourceProvider
+from converters_common import decode_formula
 from .providers import (
-    decode_formula,
     map_period,
     normalize_code,
     to_dzh_code,

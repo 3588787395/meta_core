@@ -342,7 +342,7 @@ class TestNodeTypes:
                 f"BUG: type=999 节点 text 期望='未知类型', 实际={unknown_cell.text!r}"
 
             # tdx_to_internal 将未知类型映射为 type=1 (装饰) via
-            # TDX_TO_DZH_CELL_TYPE.get(type, 1)
+            # dzh_type_map:tdx_to_dzh 查表（ConfigStore.get_table）
             internal_pool = tdx_to_internal(pool)
             assert len(internal_pool.cells) == 1, \
                 "BUG: 未知类型节点应在内部模型中被处理(映射为装饰或丢弃)"

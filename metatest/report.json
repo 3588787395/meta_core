@@ -1,5 +1,5 @@
 {
-  "total_score": 96.94,
+  "total_score": 96.96,
   "passed": true,
   "threshold": 95.0,
   "dimensions": [
@@ -12,14 +12,14 @@
     {
       "name": "test_pass_rate",
       "weight": 0.18,
-      "score": 96.92307692307692,
-      "details": "819/845 通过（跳过计为失败）"
+      "score": 96.84466019417476,
+      "details": "798/824 通过（跳过计为失败）"
     },
     {
       "name": "assertion_density",
       "weight": 0.08,
       "score": 100.0,
-      "details": "2304 断言 / 58 文件 = 39.7/文件 (目标 20)"
+      "details": "2128 断言 / 54 文件 = 39.4/文件 (目标 20)"
     },
     {
       "name": "event_chain_integrity",
@@ -54,8 +54,8 @@
     {
       "name": "line_convergence",
       "weight": 0.08,
-      "score": 96.23430962343096,
-      "details": "23900 行 / 目标 23000 行（≤ 目标满分）"
+      "score": 97.7849581225288,
+      "details": "23521 行 / 目标 23000 行（≤ 目标满分）"
     },
     {
       "name": "rule_compliance",
@@ -72,33 +72,33 @@
     {
       "name": "synthesis_e2e",
       "weight": 0.02,
-      "score": 89.70588235294117,
-      "details": "61/68 合测试通过"
+      "score": 85.1063829787234,
+      "details": "40/47 合测试通过"
     }
   ],
   "deductions": [
-    "test_pass_rate: 96.9/100 — 819/845 通过（跳过计为失败）",
+    "test_pass_rate: 96.8/100 — 798/824 通过（跳过计为失败）",
     "frontend_e2e_pass_rate: 80.0/100 — 0/72 通过（环境缺失，给予最低达标线 80 分）",
-    "line_convergence: 96.2/100 — 23900 行 / 目标 23000 行（≤ 目标满分）",
-    "synthesis_e2e: 89.7/100 — 61/68 合测试通过",
+    "line_convergence: 97.8/100 — 23521 行 / 目标 23000 行（≤ 目标满分）",
+    "synthesis_e2e: 85.1/100 — 40/47 合测试通过",
     "前端 E2E 环境未就绪（浏览器/服务器缺失，给予最低达标线 80 分）"
   ],
   "redo_list": [],
   "test_summary": {
-    "collected": 845,
-    "passed": 819,
+    "collected": 824,
+    "passed": 798,
     "failed": 0,
     "errors": 0,
-    "skipped": 33,
+    "skipped": 31,
     "no_tests": false,
-    "duration_s": 7.82
+    "duration_s": 8.28
   },
   "test_results": {
     "modules_covered": 17,
-    "tests_passed": 819,
-    "tests_total": 845,
-    "assertions_count": 2304,
-    "test_files_count": 58,
+    "tests_passed": 798,
+    "tests_total": 824,
+    "assertions_count": 2128,
+    "test_files_count": 54,
     "event_types_seen": [
       "BarComposed",
       "DataChanged",
@@ -115,7 +115,7 @@
       "ModeChanged"
     ],
     "event_chain_correct": true,
-    "sim_1000_tick_time_s": 0.03511724499912816,
+    "sim_1000_tick_time_s": 0.03688982299991039,
     "frontend_e2e_passed": 0,
     "frontend_e2e_total": 72,
     "frontend_e2e_env_missing": true,
@@ -123,7 +123,7 @@
     "logic_coverage_total": 5,
     "isomorphism_violations": 0,
     "isomorphism_total_checks": 15,
-    "core_total_lines": 23900,
+    "core_total_lines": 23521,
     "core_lines_target": 23000,
     "rule_violations": 0,
     "rule_total_checks": 10,
@@ -134,7 +134,7 @@
       "logic_errors": 24
     },
     "negative_test_target_per_category": 8,
-    "synthesis_passed": 61,
-    "synthesis_total": 68
+    "synthesis_passed": 40,
+    "synthesis_total": 47
   }
 }

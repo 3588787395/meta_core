@@ -1905,22 +1905,44 @@ class FormulaRouter:
             engine, "eval_outvars", formula, symbol, period, args
         )
 
+    # ── 单股求值共享原语（合并 6 处 ``_data_query is None`` 守卫 + 4 处 K 线获取骨架）──
+
+    def _require_data_query(self, engine_name: str) -> None:
+        """统一 ``_data_query is None`` 守卫 + RuntimeError 抛出。
+
+        底层运行逻辑洞察（Code = Data + Dispatcher）：6 个 ``_eval_*`` 方法共享
+        ``if self._data_query is None: raise RuntimeError("data_query is required
+        for X engine ...")`` 同构守卫，差异仅 engine_name（"Python" / "HQChart"）。
+        提升至单一入口后，新增 engine 零守卫代码。
+        """
+        if self._data_query is None:
+            raise RuntimeError(
+                f"data_query is required for {engine_name} engine evaluation"
+            )
+
+    async def _fetch_kline_df(self, symbol: str, period: str) -> "Optional[pd.DataFrame]":
+        """合并 4 处单股 K 线获取骨架：``loop.run_in_executor(get_kline_series)``。
+
+        Python 引擎方法直接返回 df（由调用方判 None/empty）；HQChart 引擎方法
+        由调用方 ``df.to_dict("records")`` 转 bars dict。
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, self._data_query.get_kline_series, symbol, period
+        )
+
     async def _eval_hqchart_outvars(
         self, formula: str, symbol: str, period: str, args: Optional[dict] = None,
     ) -> Optional[Dict[str, Any]]:
         """使用 HQChart 引擎对单股求值，返回全部输出变量。"""
-        if self._data_query is None:
-            raise RuntimeError("data_query is required for HQChart engine evaluation")
+        self._require_data_query("HQChart")
         if self._hqchart_provider is None:
             raise RuntimeError("HQChart provider is not available")
 
         # 注入公式参数（HQChart 不支持 SetArgs，与 _eval_hqchart_batch 一致通过脚本前置赋值）
         script = self._inject_args_into_script(formula, args)
 
-        loop = asyncio.get_event_loop()
-        df = await loop.run_in_executor(
-            None, self._data_query.get_kline_series, symbol, period
-        )
+        df = await self._fetch_kline_df(symbol, period)
         bars = df.to_dict("records") if df is not None else []
         kline_data = {symbol: bars}
 
@@ -1952,48 +1974,38 @@ class FormulaRouter:
         与 ``_eval_python`` 不同，本方法始终返回 ``{outvar_name: last_value}`` 字典
         （由 ``PythonFormulaEngine.eval_outvars`` 保证形状契约），适用于公式测试端点。
         """
-        if self._data_query is None:
-            raise RuntimeError("data_query is required for Python engine evaluation")
+        self._require_data_query("Python")
 
-        loop = asyncio.get_event_loop()
-        df = await loop.run_in_executor(
-            None, self._data_query.get_kline_series, symbol, period
-        )
+        df = await self._fetch_kline_df(symbol, period)
         if df is None or df.empty:
             return None
+        loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, self._python_engine.eval_outvars, formula, df, args
         )
 
     async def _eval_python(self, formula: str, symbol: str, period: str, args: Optional[dict] = None) -> Any:
         """使用 Python 公式引擎对单股求值。"""
-        if self._data_query is None:
-            raise RuntimeError("data_query is required for Python engine evaluation")
+        self._require_data_query("Python")
 
-        loop = asyncio.get_event_loop()
-        df = await loop.run_in_executor(
-            None, self._data_query.get_kline_series, symbol, period
-        )
+        df = await self._fetch_kline_df(symbol, period)
         if df is None or df.empty:
             return None
+        loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, self._python_engine.eval, formula, df, args
         )
 
     async def _eval_hqchart(self, formula: str, symbol: str, period: str, args: Optional[dict] = None) -> Any:
         """使用 HQChart 引擎对单股求值。"""
-        if self._data_query is None:
-            raise RuntimeError("data_query is required for HQChart engine evaluation")
+        self._require_data_query("HQChart")
         if self._hqchart_provider is None:
             raise RuntimeError("HQChart provider is not available")
 
         # 注入公式参数（HQChart 不支持 SetArgs，与 _eval_hqchart_outvars/_eval_hqchart_batch 一致）
         script = self._inject_args_into_script(formula, args)
 
-        loop = asyncio.get_event_loop()
-        df = await loop.run_in_executor(
-            None, self._data_query.get_kline_series, symbol, period
-        )
+        df = await self._fetch_kline_df(symbol, period)
         bars = df.to_dict("records") if df is not None else []
         kline_data = {symbol: bars}
 
@@ -2066,8 +2078,7 @@ class FormulaRouter:
         context: Optional[dict] = None,
     ) -> Dict[str, Any]:
         """使用 Python 公式引擎批量求值。"""
-        if self._data_query is None:
-            raise RuntimeError("data_query is required for Python engine batch evaluation")
+        self._require_data_query("Python")
         loop = asyncio.get_event_loop()
 
         def fetcher(s: str, p: str) -> Any:
@@ -2082,20 +2093,16 @@ class FormulaRouter:
         args: Optional[dict] = None, context: Optional[dict] = None,
     ) -> Dict[str, Any]:
         """使用 HQChart 引擎批量求值。"""
-        if self._data_query is None:
-            raise RuntimeError("data_query is required for HQChart engine batch evaluation")
+        self._require_data_query("HQChart")
         if self._hqchart_provider is None:
             raise RuntimeError("HQChart provider is not available")
 
         # 注入公式参数（HQChart 不支持 SetArgs，通过脚本前置赋值实现）
         script = self._inject_args_into_script(formula, args)
 
-        loop = asyncio.get_event_loop()
         kline_data: Dict[str, List[Dict]] = {}
         for symbol in symbols:
-            df = await loop.run_in_executor(
-                None, self._data_query.get_kline_series, symbol, period
-            )
+            df = await self._fetch_kline_df(symbol, period)
             kline_data[symbol] = df.to_dict("records") if df is not None else []
 
         # 优先使用批量接口；若不存在则逐只调用

@@ -109,53 +109,44 @@ except ImportError:
 try:
     from converters import (
         DZHPoolExecutor,
-        _tdx_pool_to_frontend,
         build_attrtext_from_selections,
         decode_action,
         decode_reload_mode,
         encode_reload_mode,
-        export_meta_to_dzh_xml_bytes,
         export_pool_to_json,
         get_all_cell_types,
         get_cell_type_info,
         import_pool_from_json,
-        is_tdx_format,
         load_dzh_market_mappings,
         parse_attrtext_selections,
-        parse_dzh_xml,
-        parse_tdx_xml,
         tdx_to_internal,
         _decode_flow_attr,
         _decode_type200_attr,
         _decode_type201_attr,
         _detect_topology_mode,
     )
+    from core.import_export_module import _call_converter
     from services.storage import DatabaseSyncService, safe_path_join
 except ImportError:
     from ..converters import (
         DZHPoolExecutor,
-        _tdx_pool_to_frontend,
         build_attrtext_from_selections,
         decode_action,
         decode_reload_mode,
         encode_reload_mode,
-        export_meta_to_dzh_xml_bytes,
         export_pool_to_json,
         get_all_cell_types,
         get_cell_type_info,
         import_pool_from_json,
-        is_tdx_format,
         load_dzh_market_mappings,
         parse_attrtext_selections,
-        parse_dzh_xml,
-        parse_tdx_xml,
         tdx_to_internal,
         _decode_flow_attr,
         _decode_type200_attr,
         _decode_type201_attr,
         _detect_topology_mode,
     )
-    from ..services.storage import DatabaseSyncService, safe_path_join
+    from ..core.import_export_module import _call_converter
 
 
 # 延迟导入（保留在原位置——在函数内按需导入，避免循环依赖）
@@ -5096,7 +5087,6 @@ def create_formula_router() -> APIRouter:
 
 try:
     from converters import (
-        parse_dzh_xml,
         get_all_cell_types,
         get_cell_type_info,
         load_dzh_market_mappings,
@@ -5106,14 +5096,12 @@ try:
         _decode_flow_attr,
         decode_action,
     )
-    from converters import export_meta_to_dzh_xml_bytes
     from converters import import_pool_from_json, export_pool_to_json
     from services.tq_adapter import DZH_COL_MAP, TqAdapter
     from core.runtime_mode_module import KLineReplayEngine
     from services.storage import safe_path_join
 except ImportError:
     from converters import (
-        parse_dzh_xml,
         get_all_cell_types,
         get_cell_type_info,
         load_dzh_market_mappings,
@@ -5123,7 +5111,6 @@ except ImportError:
         _decode_flow_attr,
         decode_action,
     )
-    from converters import export_meta_to_dzh_xml_bytes
     from converters import import_pool_from_json, export_pool_to_json
     from services.tq_adapter import DZH_COL_MAP, TqAdapter
     from runtime_mode_module import KLineReplayEngine
@@ -5301,22 +5288,61 @@ def _find_xml_file_fuzzy(base_dir: str, filename: str):
     return None
 
 
-def _import_as_tdx(content: bytes, filename: str) -> dict:
-    """将 TDX 格式的 XML 内容解析并转换为前端兼容格式。
+async def _load_xml_content_from_request(request, form, xml_content=None):
+    """从请求加载 XML 内容：form 文件 > xml_content 表单字段 > JSON body（含 dzhpool filename 回退）。
 
-    当 is_tdx_format() 检测到 TDX 格式时，由 /api/dzh/import 和
-    /api/dzh/import-and-save 端点调用，替代 parse_dzh_xml() 路径。
+    合并 dzh_import / dzh_import_and_save 共享的内容加载骨架（含多编码解码循环，
+    仅在此处出现一次）。返回 (content_bytes, filename, error_msg)；error_msg 非空
+    表示应直接返回给客户端的错误。
     """
-    import tempfile, os
-    with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as tmp:
-        tmp.write(content)
-        tmp_path = tmp.name
-    try:
-        tdx_pool = parse_tdx_xml(tmp_path)
-        pool_name = filename.rsplit(".", 1)[0] if "." in filename else filename
-        return _tdx_pool_to_frontend(tdx_pool, pool_name)
-    finally:
-        os.unlink(tmp_path)
+    content = None
+    filename = "upload.xml"
+    uploaded_file = form.get("file")
+    if uploaded_file and hasattr(uploaded_file, "filename") and uploaded_file.filename:
+        content = await uploaded_file.read()
+        if len(content) > MAX_UPLOAD_SIZE:
+            return None, filename, f"文件大小超过限制 ({MAX_UPLOAD_SIZE // 1024 // 1024}MB)"
+        filename = uploaded_file.filename
+    elif xml_content:
+        content = xml_content.encode("utf-8")
+    else:
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+        if body and isinstance(body, dict):
+            raw = body.get("xml_content", "")
+            if isinstance(raw, str) and raw.strip():
+                if raw.startswith("<"):
+                    content = raw.encode("utf-8")
+                elif len(raw) > 100:
+                    try:
+                        import base64 as b64
+                        content = b64.b64decode(raw)
+                    except Exception:
+                        content = raw.encode("utf-8")
+                else:
+                    content = raw.encode("utf-8")
+                filename = body.get("filename", "upload.xml")
+            # 如果提供了 filename，从 dzhpool 目录读取
+            if content is None:
+                fn = body.get('filename', '') if body else ''
+                if fn:
+                    try:
+                        xml_path = safe_path_join(os.path.join(os.path.dirname(__file__), 'dzhpool'), fn)
+                    except ValueError as e:
+                        return None, filename, str(e)
+                    if os.path.isfile(xml_path):
+                        # DZH XML 通常是 GBK 编码，回退到 UTF-8
+                        raw = open(xml_path, 'rb').read()
+                        for enc in ('gbk', 'gb2312', 'utf-8', 'latin-1'):
+                            try:
+                                content = raw.decode(enc).encode('utf-8')
+                                break
+                            except (UnicodeDecodeError, UnicodeEncodeError):
+                                continue
+                        filename = fn
+    return content, filename, None
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -5335,74 +5361,16 @@ def create_dzh_router() -> APIRouter:
         xml_content: str | None = Form(None),
         execute: bool = Form(False),
     ):
-        content = None
-        filename = "upload.xml"
-
         form = await request.form()
-
-        uploaded_file = form.get("file")
-        if uploaded_file and hasattr(uploaded_file, "filename") and uploaded_file.filename:
-            content = await uploaded_file.read()
-            if len(content) > MAX_UPLOAD_SIZE:
-                return {"success": False, "error": f"文件大小超过限制 ({MAX_UPLOAD_SIZE // 1024 // 1024}MB)"}
-            filename = uploaded_file.filename
-
-        elif xml_content:
-            content = xml_content.encode("utf-8")
-
-        else:
-            try:
-                body = await request.json()
-            except Exception:
-                body = None
-
-            if body and isinstance(body, dict):
-                raw = body.get("xml_content", "")
-                if isinstance(raw, str) and raw.strip():
-                    if raw.startswith("<"):
-                        content = raw.encode("utf-8")
-                    elif len(raw) > 100:
-                        try:
-                            import base64 as b64
-                            content = b64.b64decode(raw)
-                        except Exception:
-                            content = raw.encode("utf-8")
-                    else:
-                        content = raw.encode("utf-8")
-                    filename = body.get("filename", "upload.xml")
-
-                # 如果提供了 filename，从 dzhpool 目录读取
-                if content is None:
-                    fn = body.get('filename', '') if body else ''
-                    if fn:
-                        try:
-                            xml_path = safe_path_join(os.path.join(os.path.dirname(__file__), 'dzhpool'), fn)
-                        except ValueError as e:
-                            return {"success": False, "error": str(e)}
-                        if os.path.isfile(xml_path):
-                            # DZH XML 通常是 GBK 编码，回退到 UTF-8
-                            raw = open(xml_path, 'rb').read()
-                            for enc in ('gbk', 'gb2312', 'utf-8', 'latin-1'):
-                                try:
-                                    content = raw.decode(enc).encode('utf-8')
-                                    break
-                                except (UnicodeDecodeError, UnicodeEncodeError):
-                                    continue
-                            filename = fn
-
+        content, filename, err = await _load_xml_content_from_request(request, form, xml_content)
+        if err:
+            return {"success": False, "error": err}
         if content is None:
             return {"success": False, "error": "请上传文件或提供 xml_content 或 filename"}
 
         try:
-            # ── 自动检测 TDX 格式并路由到正确的解析器 ──
-            try:
-                from converters import is_tdx_format
-            except ImportError:
-                from converters import is_tdx_format
-            if is_tdx_format(content):
-                parsed = _import_as_tdx(content, filename)
-            else:
-                parsed = parse_dzh_xml(content, filename=filename)
+            # fmt=None 时由 _call_converter 自动探测 dzh/tdx 格式
+            parsed = _call_converter(content, fmt=None, direction="import", name=filename)
         except Exception as e:
             return {"success": False, "error": f"XML解析失败: {e}"}
 
@@ -5448,74 +5416,16 @@ def create_dzh_router() -> APIRouter:
         xml_content: str | None = Form(None),
         execute: bool = Form(False),
     ):
-        content = None
-        filename = "upload.xml"
-
         form = await request.form()
-
-        uploaded_file = form.get("file")
-        if uploaded_file and hasattr(uploaded_file, "filename") and uploaded_file.filename:
-            content = await uploaded_file.read()
-            if len(content) > MAX_UPLOAD_SIZE:
-                return {"success": False, "error": f"文件大小超过限制 ({MAX_UPLOAD_SIZE // 1024 // 1024}MB)"}
-            filename = uploaded_file.filename
-
-        elif xml_content:
-            content = xml_content.encode("utf-8")
-
-        else:
-            try:
-                body = await request.json()
-            except Exception:
-                body = None
-
-            if body and isinstance(body, dict):
-                raw = body.get("xml_content", "")
-                if isinstance(raw, str) and raw.strip():
-                    if raw.startswith("<"):
-                        content = raw.encode("utf-8")
-                    elif len(raw) > 100:
-                        try:
-                            import base64 as b64
-                            content = b64.b64decode(raw)
-                        except Exception:
-                            content = raw.encode("utf-8")
-                    else:
-                        content = raw.encode("utf-8")
-                    filename = body.get("filename", "upload.xml")
-
-                # 如果提供了 filename，从 dzhpool 目录读取
-                if content is None:
-                    fn = body.get('filename', '') if body else ''
-                    if fn:
-                        try:
-                            xml_path = safe_path_join(os.path.join(os.path.dirname(__file__), 'dzhpool'), fn)
-                        except ValueError as e:
-                            return {"success": False, "error": str(e)}
-                        if os.path.isfile(xml_path):
-                            # DZH XML 通常是 GBK 编码，回退到 UTF-8
-                            raw = open(xml_path, 'rb').read()
-                            for enc in ('gbk', 'gb2312', 'utf-8', 'latin-1'):
-                                try:
-                                    content = raw.decode(enc).encode('utf-8')
-                                    break
-                                except (UnicodeDecodeError, UnicodeEncodeError):
-                                    continue
-                            filename = fn
-
+        content, filename, err = await _load_xml_content_from_request(request, form, xml_content)
+        if err:
+            return {"success": False, "error": err}
         if content is None:
             return {"success": False, "error": "请上传文件或提供 xml_content 或 filename"}
 
         try:
-            # ── 自动检测 TDX 格式并路由到正确的解析器 ──
-            try:
-                from converters import is_tdx_format
-            except ImportError:
-                from converters import is_tdx_format
-            if is_tdx_format(content):
-                parsed = _import_as_tdx(content, filename)
-            else:
-                parsed = parse_dzh_xml(content, filename=filename)
+            # fmt=None 时由 _call_converter 自动探测 dzh/tdx 格式
+            parsed = _call_converter(content, fmt=None, direction="import", name=filename)
         except Exception as e:
             return {"success": False, "error": f"XML解析失败: {e}"}
 
@@ -5582,7 +5492,7 @@ def create_dzh_router() -> APIRouter:
             return {"success": False, "error": "配置无效，缺少 nodes"}
 
         try:
-            xml_bytes = export_meta_to_dzh_xml_bytes(config)
+            xml_bytes = _call_converter(None, "dzh", "export", config=config)
             fname = config.get("name", "pool") + ".xml"
             ascii_fname = quote(fname)
             return Response(
@@ -6057,14 +5967,14 @@ def create_dzh_router() -> APIRouter:
                     content = f.read()
 
             try:
-                config = parse_dzh_xml(content, filename=filename)
+                config = _call_converter(content, "dzh", "import", name=filename)
             except Exception as e:
                 return {"success": False, "error": f"首次解析失败: {e}", "diffs": [], "stats": {}}
 
         original_json = json.dumps(config, ensure_ascii=False, sort_keys=True, default=str)
 
         try:
-            xml_bytes = export_meta_to_dzh_xml_bytes(config)
+            xml_bytes = _call_converter(None, "dzh", "export", config=config)
         except Exception as e:
             return {
                 "success": False,
@@ -6074,7 +5984,7 @@ def create_dzh_router() -> APIRouter:
             }
 
         try:
-            re_parsed = parse_dzh_xml(xml_bytes, filename="roundtrip_reparse.xml")
+            re_parsed = _call_converter(xml_bytes, "dzh", "import", name="roundtrip_reparse.xml")
         except Exception as e:
             return {
                 "success": False,
@@ -6373,7 +6283,7 @@ def create_dzh_router() -> APIRouter:
         if len(content) > MAX_UPLOAD_SIZE:
             return {"code": 1, "msg": f"文件大小超过限制 ({MAX_UPLOAD_SIZE // 1024 // 1024}MB)", "data": None}
         try:
-            meta_config = parse_dzh_xml(content, file.filename)
+            meta_config = _call_converter(content, "dzh", "import", name=file.filename)
         except Exception as e:
             return {"code": 1, "msg": f"转换失败: {e}", "data": None}
         return {"code": 0, "msg": "ok", "data": meta_config}
@@ -6384,11 +6294,11 @@ def create_dzh_router() -> APIRouter:
         if len(content) > MAX_UPLOAD_SIZE:
             return {"code": 1, "msg": f"文件大小超过限制 ({MAX_UPLOAD_SIZE // 1024 // 1024}MB)", "data": None}
         try:
-            meta_config = parse_dzh_xml(content, file.filename)
+            meta_config = _call_converter(content, "dzh", "import", name=file.filename)
         except Exception as e:
             return {"code": 1, "msg": f"导入失败: {e}", "data": None}
         try:
-            xml_bytes = export_meta_to_dzh_xml_bytes(meta_config)
+            xml_bytes = _call_converter(None, "dzh", "export", config=meta_config)
             fname = file.filename or 'pool.xml'
             ascii_fname = quote(fname)
             return Response(
@@ -6406,7 +6316,7 @@ def create_dzh_router() -> APIRouter:
         except Exception as e:
             return {"code": 1, "msg": f"请求解析失败: {e}", "data": None}
         try:
-            xml_bytes = export_meta_to_dzh_xml_bytes(body)
+            xml_bytes = _call_converter(None, "dzh", "export", config=body)
             return Response(
                 content=xml_bytes,
                 media_type="application/xml",
@@ -6429,7 +6339,7 @@ def create_dzh_router() -> APIRouter:
         with open(path, "rb") as f:
             content = f.read()
         try:
-            meta_config = parse_dzh_xml(content, filename)
+            meta_config = _call_converter(content, "dzh", "import", name=filename)
         except Exception as e:
             return {"code": 1, "msg": f"XML解析失败: {e}", "data": None}
         bus_nodes = [n for n in meta_config["nodes"] if n["type"] not in ("text_label", "flow_arrow")]
@@ -6598,8 +6508,8 @@ def create_dzh_router() -> APIRouter:
                 tdxpool_dir = os.path.join(os.path.dirname(__file__), 'tdxpool')
                 xml_path = os.path.join(tdxpool_dir, f"{pool_id}.xml")
                 if os.path.isfile(xml_path):
-                    from converters import parse_tdx_xml, tdx_to_internal
-                    tdx_pool = parse_tdx_xml(xml_path)
+                    from converters import tdx_to_internal
+                    tdx_pool = _call_converter(xml_path, "tdx", "import")
                     pool_model = tdx_to_internal(tdx_pool, filename=f"{pool_id}.xml")
             if not pool_model:
                 return {"success": False, "error": f"池不存在: {pool_id}"}
@@ -6652,8 +6562,8 @@ def create_dzh_router() -> APIRouter:
                             import os as _os
                             xml_path = pool_row["xml_source"]
                             if _os.path.isfile(xml_path):
-                                from converters import parse_tdx_xml, tdx_to_internal
-                                tdx_pool = parse_tdx_xml(xml_path)
+                                from converters import tdx_to_internal
+                                tdx_pool = _call_converter(xml_path, "tdx", "import")
                                 internal = tdx_to_internal(tdx_pool, filename=_os.path.basename(xml_path))
                                 pool_model = {
                                     "nodes": [c.to_dict() if hasattr(c, 'to_dict') else c for c in internal.cells],
@@ -6673,8 +6583,8 @@ def create_dzh_router() -> APIRouter:
                 except ValueError as e:
                     return {"code": -1, "error": str(e), "data": None}
                 if _os.path.isfile(xml_path):
-                    from converters import parse_tdx_xml, tdx_to_internal
-                    tdx_pool = parse_tdx_xml(xml_path)
+                    from converters import tdx_to_internal
+                    tdx_pool = _call_converter(xml_path, "tdx", "import")
                     internal = tdx_to_internal(tdx_pool, filename=filename)
                     # Convert PoolMetaModel to dict with nodes/edges keys
                     pool_model = {
@@ -6812,25 +6722,10 @@ def create_dzh_router() -> APIRouter:
         if not xml_path or not os.path.isfile(xml_path):
             return {"success": False, "error": f"找不到文件: {name}.xml"}
 
-        # DZH XML 通常是 GBK 编码，回退到 UTF-8
+        # fmt=None 时由 _call_converter 自动探测 dzh/tdx（parse_dzh_xml 内部处理 GBK 解码）
         raw = open(xml_path, 'rb').read()
-        content = None
-        for enc in ('gbk', 'gb2312', 'utf-8', 'latin-1'):
-            try:
-                content = raw.decode(enc).encode('utf-8')
-                break
-            except (UnicodeDecodeError, UnicodeEncodeError):
-                continue
-
-        if content is None:
-            return {"success": False, "error": "文件编码无法识别"}
-
         try:
-            from converters import is_tdx_format
-            if is_tdx_format(content):
-                parsed = _import_as_tdx(content, os.path.basename(xml_path))
-            else:
-                parsed = parse_dzh_xml(content, filename=os.path.basename(xml_path))
+            parsed = _call_converter(raw, fmt=None, direction="import", name=os.path.basename(xml_path))
         except Exception as e:
             return {"success": False, "error": f"XML解析失败: {e}"}
 

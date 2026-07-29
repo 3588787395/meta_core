@@ -1879,6 +1879,10 @@
           const ev = JSON.parse(e.data);
           _notifyEventSubscribers(ev);
           addEvent(ev);
+          // 定时器队列：收到 TimerQueued/TimerFired/TTLExpired/EdgeTimer 事件时刷新（推送驱动，非轮询）
+          if (ev && (ev.event_type === 'TimerQueued' || ev.event_type === 'TimerFired' || ev.event_type === 'TTLExpired' || ev.event_type === 'EdgeTimer')) {
+            syncTimerQueue();
+          }
         } catch (err) { console.error('[EventPanel] Parse SSE event failed:', err); }
       };
       eventSource.onerror = function () {
@@ -2007,8 +2011,7 @@
 
     loadRecentEvents();
     initSSE();
-    syncTimerQueue();
-    setInterval(syncTimerQueue, 1000);
+    syncTimerQueue(); // 一次性拉取初始队列；后续由 SSE 推送事件驱动刷新（见 initSSE）
   }
 
   if (document.readyState === 'loading') {
