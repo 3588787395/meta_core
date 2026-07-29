@@ -9,10 +9,11 @@ import statistics
 import time
 from typing import Any, Dict, Optional
 
+from converters_common import decode_formula
 try:
-    from ..services.tq_adapter import decode_formula, map_period
+    from ..services.tq_adapter import map_period
 except ImportError:
-    from services.tq_adapter import decode_formula, map_period
+    from services.tq_adapter import map_period
 
 try:
     from ..core.schemas import ConfigLoadError
@@ -60,7 +61,7 @@ def _get_table(filename, *, required=False):
 def _decode_formula_base64(indi_b64, ency=0):
     """解码 DZH indi Base64 字段为 (公式文本, 原始字节数)。
 
-    使用 _common.decode_formula 的二进制解析器提取公式文本，
+    使用 converters_common.decode_formula 的二进制解析器提取公式文本，
     而非简单的 UTF-8/GBK 文本解码。
     """
     if not indi_b64 or indi_b64 == "0;":

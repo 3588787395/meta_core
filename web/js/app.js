@@ -63,29 +63,30 @@
     }
   };
 
-  // ─── Runtime State：业务真值源，通过 /api/state/runtime 与 SSE 保持同步 ─────
+  // ─── Runtime State：业务真值源，一次性拉取初始态 + SSE 事件驱动更新 ────────
   window.RuntimeState = {
     mode: 'live',
     displayNowMs: 0,
     displayNowTime: '',
     activeSessionId: null,
     _subscribers: [],
-    _pollTimer: null,
 
     init: function () {
-      this._poll();
-      this._pollTimer = setInterval(function () { window.RuntimeState._poll(); }, 1000);
+      // 一次性拉取初始态（非轮询）；后续由 SSE 事件推送更新
+      fetch('/api/state/runtime')
+        .then(function (r) { return r.json(); })
+        .then(function (data) { if (data && data.success) window.RuntimeState.update(data); })
+        .catch(function () {});
     },
 
-    _poll: function () {
-      try {
-        fetch('/api/state/runtime')
-          .then(function (r) { return r.json(); })
-          .then(function (data) {
-            if (data && data.success) window.RuntimeState.update(data);
-          })
-          .catch(function () {});
-      } catch (e) { /* ignore */ }
+    // SSE 事件回调：由 EventPanelBus 统一订阅派发（见文件底部）
+    onSseEvent: function (ev) {
+      if (!ev || !ev.event_type) return;
+      if (ev.event_type === 'ModeChanged' && ev.details && ev.details.mode_id) {
+        this.update({ mode: ev.details.mode_id, active_session_id: ev.details.active_session_id || this.activeSessionId });
+      } else if (ev.event_type === 'SnapshotUpdated' && ev.timestamp) {
+        this.update({ display_now_ms: Number(ev.timestamp) * 1000 || this.displayNowMs });
+      }
     },
 
     update: function (data) {
@@ -115,10 +116,11 @@
 
   window.RuntimeState.init();
 
-  // ─── 事件驱动运行控制状态：统一订阅后端 SSE 事件更新 AppState.simulationState ──
+  // ─── 统一 SSE 事件订阅：RuntimeState（模式/时间）+ AppState（仿真运行态）────
   if (window.EventPanelBus && window.EventPanelBus.subscribe) {
     window.EventPanelBus.subscribe(function (ev) {
       if (!ev || !ev.event_type) return;
+      window.RuntimeState.onSseEvent(ev);
       if (ev.event_type === 'SimulationStateChanged' && ev.details && ev.details.state) {
         var newState = ev.details.state;
         AppState.setSimulationState(newState);

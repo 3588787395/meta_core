@@ -1697,28 +1697,6 @@ class HotReloadManager:
             logger.error(f"回滚配置版本 {version_id} 异常: {e}")
             return False
 
-    # ─── 定时轮询模式 ────────────────────────────────────────
-
-    async def start_polling(self, interval: float = 2.0) -> None:
-        """启动定时轮询热加载"""
-        self._watch_enabled = True
-        self._watch_interval = interval
-        logger.info(f"热加载轮询已启动 (间隔={interval}s)")
-
-        while self._watch_enabled:
-            try:
-                changed = self.check_and_reload()
-                if changed:
-                    await self._broadcast_changes(changed)
-            except Exception as e:
-                logger.error(f"热加载轮询异常: {e}")
-            await asyncio.sleep(interval)
-
-    def stop_polling(self) -> None:
-        """停止定时轮询"""
-        self._watch_enabled = False
-        logger.info("热加载轮询已停止")
-
     # ─── Watchdog 模式 ───────────────────────────────────────
 
     def start_watchdog(self) -> bool:

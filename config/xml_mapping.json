@@ -1,17 +1,6 @@
 {
   "version": "1.0",
-  "description": "TDX XML import/export mapping table",
-  "dzh_to_tdx_type": {
-    "200": 8, "201": 3, "202": 7, "1": 1, "2": 2, "3": 3, "4": 2, "5": 0, "6": 0, "203": 8, "7": 7, "8": 8
-  },
-  "tdx_to_frontend_type": {
-    "0": "tdx_text_label", "1": "tdx_text_label", "2": "tdx_container",
-    "3": "tdx_condition", "7": "tdx_candidate", "8": "tdx_state_pool"
-  },
-  "frontend_to_tdx_type": {
-    "tdx_text_label": 0, "tdx_container": 2,
-    "tdx_condition": 3, "tdx_candidate": 7, "tdx_state_pool": 8
-  },
+  "description": "TDX XML import/export mapping table (类型映射已统一至 dzh_type_map.json)",
   "pool": {
     "root_element": "root",
     "pool_element": "pool",
@@ -26,7 +15,7 @@
   },
   "cell": {
     "element": "cell",
-    "type_source": {"field": "dzh_cell_type", "lookup": "dzh_to_tdx_type", "fallback": "raw"},
+    "type_source": {"field": "dzh_cell_type", "lookup": "dzh_to_tdx", "fallback": "raw"},
     "attributes": [
       {"field": "id", "attr": "id", "default": "0"},
       {"field": "_tdx_type", "attr": "type", "compute": "_tdx_type"},
@@ -101,11 +90,11 @@
     ]
   },
   "frontend_node": {
-    "type_lookup": "tdx_to_frontend_type",
+    "type_lookup": "tdx_to_frontend",
     "type_default": "tdx_text_label",
     "fields": [
       {"source": "id", "target": "id", "transform": "str"},
-      {"source": "type", "target": "type", "lookup": "tdx_to_frontend_type", "default": "tdx_text_label"},
+      {"source": "type", "target": "type", "lookup": "tdx_to_frontend", "default": "tdx_text_label"},
       {"source": "type", "target": "dzh_cell_type"},
       {"source": "text", "target": "label", "default": ""},
       {"source": "text", "target": "text", "default": ""}

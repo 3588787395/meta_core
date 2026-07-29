@@ -5446,10 +5446,10 @@ class CandidatePoolRefreshManager:
         # DZH reload 模式执行状态跟踪
         self._startup_loaded: set = set()          # 已执行过 on_startup 的节点
         self._file_load_loaded: set = set()        # 已执行过 on_file_load 的节点
-        # Task 6: 文件监视器相关属性
+        # 文件监视器：watchdog 事件驱动（替代 mtime 轮询）
         self._refresh_callback = refresh_callback  # 刷新回调（WebSocket 推送等）
-        self._file_watcher_task: Optional[asyncio.Task] = None  # 文件监视器异步任务
-        self._watched_files: Dict[str, Optional[float]] = {}    # {逻辑名: last_mtime}
+        self._observer = None                      # watchdog Observer 实例
+        self._loop: Optional[asyncio.AbstractEventLoop] = None  # 主事件循环（供 watchdog 线程回调）
         self._watched_paths: Dict[str, Optional[str]] = {}      # {逻辑名: 实际文件路径}
 
     async def start(self):
@@ -5459,9 +5459,10 @@ class CandidatePoolRefreshManager:
             return
 
         self._running = True
+        self._loop = asyncio.get_event_loop()
         logger.info("CandidatePoolRefreshManager 已启动")
 
-        # 启动文件监视器（Task 6）
+        # 启动文件监视器（watchdog 事件驱动）
         await self._start_file_watcher()
 
     async def stop(self):
@@ -5471,113 +5472,50 @@ class CandidatePoolRefreshManager:
 
         self._running = False
 
-        # 停止文件监视器（Task 6）
-        if self._file_watcher_task is not None and not self._file_watcher_task.done():
-            self._file_watcher_task.cancel()
-            try:
-                await self._file_watcher_task
-            except asyncio.CancelledError:
-                logger.debug("文件监视器已停止")
-            except Exception as e:
-                logger.warning("停止文件监视器时出错: %s", e)
-            self._file_watcher_task = None
+        # 停止 watchdog 文件监视器
+        if self._observer is not None:
+            self._observer.stop()
+            self._observer.join(timeout=5)
+            self._observer = None
 
-        # 取消所有正在运行的任务
-        for task_name, task in self._tasks.items():
-            if not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    logger.debug("已取消刷新任务: %s", task_name)
-                except Exception as e:
-                    logger.warning("取消刷新任务 %s 时出错: %s", task_name, e)
-
+        # 取消所有定时器（TimerHandle）
+        for handle in self._tasks.values():
+            handle.cancel()
         self._tasks.clear()
         logger.info("CandidatePoolRefreshManager 已停止，共取消 %d 个任务", len(self._tasks))
 
     async def refresh_favorites(self, interval: int = 30) -> None:
-        """
-        后台定时刷新自选股（type=3）
-
-        默认30秒间隔，使用 asyncio.create_task() 创建后台任务。
-
-        流程：
-        1. 循环执行直到 _running=False
-        2. 调用 resolver.resolve_type_3(force_refresh=True)
-        3. 使用 Copy-on-Write 策略更新 _latest_data['favorites']
-        4. 触发变更回调
-        5. await asyncio.sleep(interval)
-        6. 异常处理：失败时指数退避（最小10秒）
-        """
+        """后台定时刷新自选股（loop.call_later 自重排，无 while+sleep 轮询）。"""
         if not self._running:
             logger.warning("刷新管理器未启动，无法开始刷新自选股")
             return
 
-        task_name = 'favorites'
-
-        # 如果已有任务在运行，先取消
-        if task_name in self._tasks and not self._tasks[task_name].done():
-            self._tasks[task_name].cancel()
-            try:
-                await self._tasks[task_name]
-            except asyncio.CancelledError:
-                pass
-
-        # 创建后台任务
-        task = asyncio.create_task(
-            self._refresh_with_backoff(
-                refresh_fn=lambda: self.resolver.resolve(3, force_refresh=True),
-                key='favorites',
-                normal_interval=interval,
-                min_interval=10,
-                max_interval=300
-            ),
-            name=f'refresh_{task_name}'
-        )
-        self._tasks[task_name] = task
+        if 'favorites' in self._tasks:
+            self._tasks['favorites'].cancel()
+        self._schedule_periodic_refresh(
+            refresh_fn=lambda: self.resolver.resolve(3, force_refresh=True),
+            task_name='favorites', key='favorites',
+            normal_interval=interval, min_interval=10, max_interval=300)
         logger.info("已启动自选股定时刷新任务，间隔=%d秒", interval)
 
     async def refresh_custom_block(self, block_code: str,
                                     interval: int = None) -> None:
-        """
-        刷新指定的自定义板块（type=4）
-
-        Args:
-            block_code: 板块代码（如 'CSBK_TEST'）
-            interval: 刷新间隔（秒），None 表示仅手动触发一次
-        """
+        """刷新指定的自定义板块（type=4）。interval=None 时仅手动触发一次。"""
         if not self._running and interval is not None:
             logger.warning("刷新管理器未启动，无法开始定时刷新板块")
             return
 
         task_key = f'block_{block_code}'
 
-        # 如果提供了 interval，则启动后台定时任务
         if interval is not None:
-            # 如果已有任务在运行，先取消
-            if task_key in self._tasks and not self._tasks[task_key].done():
+            if task_key in self._tasks:
                 self._tasks[task_key].cancel()
-                try:
-                    await self._tasks[task_key]
-                except asyncio.CancelledError:
-                    pass
-
-            # 创建后台任务
-            task = asyncio.create_task(
-                self._refresh_with_backoff(
-                    refresh_fn=lambda: self.resolver.resolve(4, customblockname=block_code, force_refresh=True),
-                    key=task_key,
-                    normal_interval=interval,
-                    min_interval=10,
-                    max_interval=300
-                ),
-                name=f'refresh_{task_key}'
-            )
-            self._tasks[task_key] = task
+            self._schedule_periodic_refresh(
+                refresh_fn=lambda: self.resolver.resolve(4, customblockname=block_code, force_refresh=True),
+                task_name=task_key, key=task_key,
+                normal_interval=interval, min_interval=10, max_interval=300)
             logger.info("已启动自定义板块 '%s' 定时刷新任务，间隔=%d秒", block_code, interval)
         else:
-            # 仅执行一次刷新
             try:
                 data = await self.resolver.resolve(4, customblockname=block_code, force_refresh=True)
                 self._update_snapshot_cow(task_key, data)
@@ -5686,7 +5624,7 @@ class CandidatePoolRefreshManager:
                                  interval: Union[str, int, None],
                                  refresh_fn: Callable,
                                  key: str) -> None:
-        """interval：每隔 interval 秒加载。"""
+        """interval：每隔 interval 秒加载（loop.call_later 自重排，无 while+sleep）。"""
         try:
             seconds = int(interval) if interval is not None else 0
         except (ValueError, TypeError):
@@ -5696,74 +5634,53 @@ class CandidatePoolRefreshManager:
             return
 
         task_name = f"interval_{node_id}"
-        if task_name in self._tasks and not self._tasks[task_name].done():
+        if task_name in self._tasks:
             self._tasks[task_name].cancel()
-            try:
-                await self._tasks[task_name]
-            except asyncio.CancelledError:
-                pass
-
-        task = asyncio.create_task(
-            self._refresh_with_backoff(
-                refresh_fn=refresh_fn,
-                key=key,
-                normal_interval=seconds,
-                min_interval=max(1, seconds // 10),
-                max_interval=max(seconds, 300)
-            ),
-            name=f"reload_{task_name}"
-        )
-        self._tasks[task_name] = task
+        self._schedule_periodic_refresh(
+            refresh_fn=refresh_fn, task_name=task_name, key=key,
+            normal_interval=seconds,
+            min_interval=max(1, seconds // 10),
+            max_interval=max(seconds, 300))
         logger.info("节点 %s interval 任务已创建，间隔=%d秒", node_id, seconds)
 
     async def _schedule_daily_time(self, node_id: str,
                                    hhmmss: Union[str, int, None],
                                    refresh_fn: Callable,
                                    key: str) -> None:
-        """daily_time：每天指定 HHMMSS 检查并加载。"""
+        """daily_time：每天指定 HHMMSS 检查并加载（loop.call_later 自重排，无 while+sleep）。"""
         target_time = _parse_hhmmss(hhmmss)
         if target_time is None:
             logger.warning("节点 %s daily_time 参数无效(%s)，不创建任务", node_id, hhmmss)
             return
 
         task_name = f"daily_{node_id}"
-        if task_name in self._tasks and not self._tasks[task_name].done():
+        if task_name in self._tasks:
             self._tasks[task_name].cancel()
+
+        def _next_delay() -> float:
+            now = datetime.now()
+            target = datetime.combine(now.date(), target_time)
+            if target <= now:
+                target += timedelta(days=1)
+            return (target - now).total_seconds()
+
+        async def _fire():
+            if not self._running:
+                return
             try:
-                await self._tasks[task_name]
-            except asyncio.CancelledError:
-                pass
+                data = await refresh_fn()
+                self._update_snapshot_cow(key, data if data is not None else [])
+                self._notify_change(key, data if data is not None else [])
+                logger.info("节点 %s daily_time 刷新完成，%d 条记录", node_id,
+                            len(data) if data else 0)
+            except Exception as e:
+                logger.error("节点 %s daily_time 刷新失败: %s", node_id, e)
+            if self._running:
+                self._tasks[task_name] = self._loop.call_later(
+                    _next_delay(), lambda: asyncio.ensure_future(_fire()))
 
-        async def _daily_loop():
-            logger.info("节点 %s daily_time 任务启动，目标时间=%s", node_id, target_time)
-            while self._running:
-                now = datetime.now()
-                target = datetime.combine(now.date(), target_time)
-                if target <= now:
-                    target += timedelta(days=1)
-                wait_seconds = (target - now).total_seconds()
-                logger.debug("节点 %s 下次 daily_time 刷新在 %s (等待 %.0f 秒)",
-                             node_id, target.isoformat(), wait_seconds)
-                try:
-                    await asyncio.sleep(wait_seconds)
-                except asyncio.CancelledError:
-                    logger.debug("节点 %s daily_time 任务被取消", node_id)
-                    raise
-                if not self._running:
-                    break
-                try:
-                    data = await refresh_fn()
-                    self._update_snapshot_cow(key, data if data is not None else [])
-                    self._notify_change(key, data if data is not None else [])
-                    logger.info("节点 %s daily_time 刷新完成，%d 条记录", node_id,
-                                len(data) if data else 0)
-                except Exception as e:
-                    logger.error("节点 %s daily_time 刷新失败: %s", node_id, e)
-                # 完成后等待 1 天再进入下一次计算
-                await asyncio.sleep(1)
-
-        task = asyncio.create_task(_daily_loop(), name=f"reload_{task_name}")
-        self._tasks[task_name] = task
+        self._tasks[task_name] = self._loop.call_later(
+            _next_delay(), lambda: asyncio.ensure_future(_fire()))
         logger.info("节点 %s daily_time 任务已创建，目标时间=%s", node_id, target_time)
 
     def _update_snapshot_cow(self, key: str, new_data: List[Dict]) -> None:
@@ -5782,64 +5699,38 @@ class CandidatePoolRefreshManager:
         self._latest_data[key] = snapshot
         logger.debug("_update_snapshot_cow: 已更新快照 '%s'，%d 条记录", key, len(snapshot))
 
-    async def _refresh_with_backoff(self, refresh_fn: Callable,
-                                      key: str,
-                                      normal_interval: int = 30,
-                                      min_interval: int = 10,
-                                      max_interval: int = 300) -> None:
+    def _schedule_periodic_refresh(self, refresh_fn: Callable, task_name: str,
+                                    key: str, normal_interval: int,
+                                    min_interval: int = 10, max_interval: int = 300) -> None:
+        """调度周期刷新（loop.call_later 自重排，无 while+sleep 轮询）。
+
+        回调执行刷新后单次检查 _running 标志决定是否重排（非循环）。
+        失败时指数退避（min_interval → max_interval），成功后重置。
         """
-        带指数退避的刷新循环
+        backoff = [min_interval]
 
-        - 首次失败：等待 min_interval 秒
-        - 后续失败：等待时间翻倍（不超过 max_interval）
-        - 成功后：重置为正常间隔
-        """
-        backoff_interval = min_interval
-        consecutive_failures = 0
+        def _reschedule(delay: float) -> None:
+            if self._running:
+                self._tasks[task_name] = self._loop.call_later(
+                    delay, lambda: asyncio.ensure_future(_fire()))
 
-        logger.info("_refresh_with_backoff: 开始刷新循环 key='%s', 正常间隔=%ds", key, normal_interval)
+        async def _fire() -> None:
+            if not self._running:
+                return
+            try:
+                data = await refresh_fn()
+                if data is not None:
+                    self._update_snapshot_cow(key, data)
+                    self._notify_change(key, data)
+                backoff[0] = min_interval
+                _reschedule(normal_interval)
+            except Exception as e:
+                logger.warning("刷新 key='%s' 失败: %s", key, e)
+                delay = backoff[0]
+                backoff[0] = min(backoff[0] * 2, max_interval)
+                _reschedule(delay)
 
-        try:
-            while self._running:
-                try:
-                    # 执行刷新
-                    data = await refresh_fn()
-
-                    if data is not None:
-                        # 成功：使用 Copy-on-Write 更新快照
-                        self._update_snapshot_cow(key, data)
-                        # 触发变更回调
-                        self._notify_change(key, data)
-                        # 重置退避计数器和间隔
-                        consecutive_failures = 0
-                        backoff_interval = min_interval
-                        logger.debug("_refresh_with_backoff: key='%s' 刷新成功，%d 条记录", key, len(data))
-
-                    # 使用正常间隔等待
-                    await asyncio.sleep(normal_interval)
-
-                except asyncio.CancelledError:
-                    logger.debug("_refresh_with_backoff: key='%s' 任务被取消", key)
-                    raise
-                except Exception as e:
-                    consecutive_failures += 1
-                    logger.warning(
-                        "_refresh_with_backoff: key='%s' 刷新失败 (第%d次连续失败): %s",
-                        key,
-                        consecutive_failures,
-                        e
-                    )
-
-                    # 指数退避：等待时间翻倍（不超过 max_interval）
-                    await asyncio.sleep(backoff_interval)
-                    backoff_interval = min(backoff_interval * 2, max_interval)
-
-        except asyncio.CancelledError:
-            logger.debug("_refresh_with_backoff: key='%s' 刷新循环已取消", key)
-        except Exception as e:
-            logger.error("_refresh_with_backoff: key='%s' 刷新循环异常退出: %s", key, e)
-        finally:
-            logger.info("_refresh_with_backoff: key='%s' 刷新循环已结束", key)
+        _reschedule(normal_interval)
 
     def register_callback(self, callback: Callable[[str, List[Dict]], None]) -> None:
         """
@@ -5884,11 +5775,8 @@ class CandidatePoolRefreshManager:
         return list(data)
 
     def get_running_tasks(self) -> Dict[str, bool]:
-        """获取当前正在运行的刷新任务状态"""
-        status = {}
-        for task_name, task in self._tasks.items():
-            status[task_name] = not task.done()
-        return status
+        """获取当前正在运行的刷新任务状态（TimerHandle.cancelled）"""
+        return {name: not h.cancelled for name, h in self._tasks.items()}
 
     def is_running(self) -> bool:
         """检查管理器是否正在运行"""
@@ -5928,16 +5816,6 @@ class CandidatePoolRefreshManager:
                 continue
         return None
 
-    @staticmethod
-    def _get_file_mtime(path: Optional[str]) -> Optional[float]:
-        """获取文件修改时间，文件不存在或无法访问时返回 None。"""
-        if not path:
-            return None
-        try:
-            return os.path.getmtime(str(path))
-        except OSError:
-            return None
-
     def _resolve_watch_paths(self) -> None:
         """通过 LocalFileProvider 解析要监视的文件路径。
 
@@ -5967,77 +5845,45 @@ class CandidatePoolRefreshManager:
         self._watched_paths['blocknew.cfg'] = custom_blocks_path
 
     async def _start_file_watcher(self) -> None:
-        """启动文件监视器，每 3 秒轮询文件修改时间。
+        """启动 watchdog 文件监视器（事件驱动，无 mtime 轮询）。
 
-        通过 LocalFileProvider 解析 zxg.cfg 和 blocknew.cfg 的完整路径，
-        记录初始修改时间，然后启动后台轮询任务。
+        watchdog.Observer 的 on_modified 回调经 run_coroutine_threadsafe 在主事件循环
+        触发 _refresh_favorites / _refresh_custom_blocks，无需 mtime 比较与 sleep 轮询。
         """
-        # 解析要监视的文件路径
         self._resolve_watch_paths()
-
-        # 初始化文件修改时间
-        for logical_name, path in self._watched_paths.items():
-            self._watched_files[logical_name] = self._get_file_mtime(path)
-
         watched = {k: v for k, v in self._watched_paths.items() if v}
-        if watched:
-            logger.info("文件监视器：开始监视 %s", watched)
-        else:
-            logger.info("文件监视器：未找到可监视的文件，监视器将空转等待文件出现")
-
-        # 启动轮询任务
-        self._file_watcher_task = asyncio.create_task(
-            self._file_watcher_loop(),
-            name='file_watcher'
-        )
-
-    async def _file_watcher_loop(self) -> None:
-        """文件监视器轮询循环，每 3 秒检查一次文件修改时间。"""
+        if not watched:
+            logger.info("文件监视器：未找到可监视的文件")
+            return
         try:
-            while self._running:
-                try:
-                    await self._check_file_changes()
-                except Exception as e:
-                    logger.warning("文件监视器检查异常: %s", e)
-                await asyncio.sleep(3)
-        except asyncio.CancelledError:
-            logger.debug("文件监视器轮询循环已取消")
-            raise
+            from watchdog.observers import Observer
+            from watchdog.events import FileSystemEventHandler
+        except ImportError:
+            logger.warning("watchdog 未安装，文件监视器不可用")
+            return
 
-    async def _check_file_changes(self) -> None:
-        """检查文件修改时间是否变化，变化时触发对应的刷新。
+        manager = self
+        path_map = {str(Path(v).resolve()): k for k, v in watched.items() if v}
 
-        - 'zxg.cfg' 变更 → 调用 _refresh_favorites()
-        - 'blocknew.cfg' 变更 → 调用 _refresh_custom_blocks()
-        """
-        for logical_name, path in list(self._watched_paths.items()):
-            if not path:
-                continue
-
-            current_mtime = self._get_file_mtime(path)
-            last_mtime = self._watched_files.get(logical_name)
-
-            if current_mtime is None:
-                # 文件不存在或无法访问，跳过
-                continue
-
-            if last_mtime is None:
-                # 首次记录修改时间
-                self._watched_files[logical_name] = current_mtime
-                continue
-
-            if current_mtime != last_mtime:
-                logger.info(
-                    "文件监视器：检测到 %s (%s) 已变更 (mtime %s → %s)",
-                    logical_name, path, last_mtime, current_mtime,
-                )
-                self._watched_files[logical_name] = current_mtime
-
-                # 触发对应的刷新
+        class _Handler(FileSystemEventHandler):
+            def on_modified(self, event):
+                if event.is_directory:
+                    return
+                logical_name = path_map.get(str(Path(event.src_path).resolve()))
+                if not logical_name:
+                    return
+                logger.info("文件监视器：检测到 %s 变更", logical_name)
                 if logical_name == 'zxg.cfg':
-                    await self._refresh_favorites()
+                    asyncio.run_coroutine_threadsafe(manager._refresh_favorites(), manager._loop)
                 elif logical_name == 'blocknew.cfg':
-                    await self._refresh_custom_blocks()
+                    asyncio.run_coroutine_threadsafe(manager._refresh_custom_blocks(), manager._loop)
+
+        self._observer = Observer()
+        for watched_dir in {str(Path(p).parent) for p in watched.values() if p}:
+            self._observer.schedule(_Handler(), watched_dir, recursive=False)
+        self._observer.daemon = True
+        self._observer.start()
+        logger.info("文件监视器：watchdog 已启动，监视 %s", watched)
 
     # ------------------------------------------------------------------
     # 文件变更触发的刷新方法（Task 6）

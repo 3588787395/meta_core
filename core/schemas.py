@@ -90,28 +90,6 @@ def _load_defaults() -> Dict[str, Any]:
     return _defaults_cache
 
 
-_dzh_type_map_cache: Optional[Dict[str, Any]] = None
-
-
-def _load_dzh_type_map() -> Dict[str, Any]:
-    """加载 config/dzh_type_map.json 并缓存结果。
-
-    fail-fast：配置缺失或解析失败时抛出 ConfigLoadError，禁止静默回退硬编码值。
-    """
-    global _dzh_type_map_cache
-    if _dzh_type_map_cache is not None:
-        return _dzh_type_map_cache
-    path = Path(__file__).parent.parent / "config" / "architecture" / "dzh_type_map.json"
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            _dzh_type_map_cache = json.load(f)
-    except (OSError, json.JSONDecodeError) as ex:
-        raise ConfigLoadError(
-            f"无法加载配置表 {path}: {ex}（fail-fast：禁止静默回退硬编码值）"
-        ) from ex
-    return _dzh_type_map_cache
-
-
 def _parse_attr_bits(type_key, attr_int: int) -> Dict[str, bool]:
     """Parse attr int into boolean sub-properties based on bit_fields entries.
 
@@ -951,49 +929,8 @@ def _get_setcode_map():
 SETCODE_MAP = _get_setcode_map()
 SETCODE_REVERSE = {v: k for k, v in SETCODE_MAP.items()}
 
-def _get_tdx_cell_type_map():
-    ttm = _load_dzh_type_map().get("tdx_type_map", {})
-    return {int(k): v for k, v in ttm.items()}
-
-def _get_tdx_to_dzh_map():
-    ttd = _load_dzh_type_map().get("tdx_to_dzh", {})
-    return {int(k): v for k, v in ttd.items()}
-
-
-def _build_tdx_maps_from_registry() -> tuple:
-    """从注册表读取 tdx_types 和 tdx_to_dzh 映射。返回 (tdx_type_map, tdx_to_dzh_map)。"""
-    registry = _load_registry()
-    tdx_type_map: Dict[int, str] = {}
-    tdx_to_dzh_map: Dict[int, int] = {}
-
-    for k, v in registry.get("tdx_types", {}).items():
-        tdx_type_map[int(k)] = v
-    for k, v in registry.get("tdx_to_dzh", {}).items():
-        tdx_to_dzh_map[int(k)] = v
-
-    return tdx_type_map, tdx_to_dzh_map
-
-
-def _init_tdx_maps() -> tuple:
-    """初始化 TDX 映射：优先从注册表，兜底使用硬编码。"""
-    reg_type_map, reg_to_dzh_map = _build_tdx_maps_from_registry()
-
-    if reg_type_map:
-        tdx_type_map = _get_tdx_cell_type_map()
-        tdx_type_map.update(reg_type_map)
-    else:
-        tdx_type_map = _get_tdx_cell_type_map()
-
-    if reg_to_dzh_map:
-        tdx_to_dzh_map = _get_tdx_to_dzh_map()
-        tdx_to_dzh_map.update(reg_to_dzh_map)
-    else:
-        tdx_to_dzh_map = _get_tdx_to_dzh_map()
-
-    return tdx_type_map, tdx_to_dzh_map
-
-
-TDX_CELL_TYPE_MAP, TDX_TO_DZH_CELL_TYPE = _init_tdx_maps()
+# TDX↔DZH 类型映射单一真相源：config/architecture/dzh_type_map.json
+# 读取统一通过 ConfigStore.get_table("dzh_type_map")（见 converters.py 等调用方）。
 
 
 # ═══════════════════════════════════════════════════

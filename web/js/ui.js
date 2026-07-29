@@ -1120,8 +1120,6 @@
       this._nodeType = '';
       this._poolType = 'dzh';
       this._changeListeners = [];
-      this._reloadTimer = null;
-      this._hotReloadInterval = 0;
       this._readOnly = false;
       // 当前编辑的节点/边信息（用于数据写回）
       this._currentNodeId = null;
@@ -1347,10 +1345,6 @@
 
     // 销毁面板
     destroy() {
-      if (this._reloadTimer) {
-        clearInterval(this._reloadTimer);
-        this._reloadTimer = null;
-      }
       if (this._encodeTimer) {
         clearTimeout(this._encodeTimer);
         this._encodeTimer = null;
@@ -4243,23 +4237,8 @@
       }, 3000);
     }
 
-    // 热加载
-    _startHotReload() {
-      var self = this;
-      this._reloadTimer = setInterval(function () {
-        self._ajax('POST', self.apiBase + '/reload', {}, function (resp) {
-          if (resp && resp.changed && resp.changed.length > 0) {
-            // 配置变更，重新渲染面板
-            self._layoutCache.clear();
-            if (self._currentNodeId) {
-              self.showForNode(self._currentNodeId);
-            } else if (self._currentEdgeId) {
-              self.showForEdge(self._currentEdgeId);
-            }
-          }
-        });
-      }, this._hotReloadInterval);
-    }
+    // 热加载：由 app.js ConfigSync（WebSocket /api/config/ws）派发的 'configChanged'
+    // CustomEvent 统一驱动，通过 propPanel._reRenderCurrentPanel() 刷新（见 app.js init）。
 
     // Toast提示
     _showToast(msg, type) {
@@ -4615,31 +4594,20 @@ class HighlightManager {
     this.canvas = canvas;
     this.activeHighlights = new Map();
     this.ws = null;
-    this.pollingInterval = null;
     this.lastEventTime = null;
     this.autoHidePaused = false;
     this.isReplayMode = false;
     this._animationFrameId = null;
     this._config = null;
     this._configLoading = null;
-    this._fallbackTimer = null;
+    this._reconnectTimer = null;
   }
 
   init() {
     if (!this._config && !this._configLoading) {
       this._configLoading = this._loadConfig();
     }
-
     this.connectWebSocket();
-
-    if (this._fallbackTimer) clearTimeout(this._fallbackTimer);
-    this._fallbackTimer = setTimeout(() => {
-      this._fallbackTimer = null;
-      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-        console.warn('[HighlightManager] WebSocket连接失败,降级为轮询模式');
-        this.startPolling();
-      }
-    }, 3000);
   }
 
   async _loadConfig() {
@@ -4685,14 +4653,6 @@ class HighlightManager {
     return 4000;
   }
 
-  _getPollingInterval() {
-    var rules = this._config && this._config.highlightRules;
-    if (rules && rules.polling_interval_ms) {
-      return Math.max(1000, rules.polling_interval_ms);
-    }
-    return 1500;
-  }
-
   _getWsUrl() {
     var defaults = this._config && this._config.defaults;
     var ws = defaults && defaults.highlight && defaults.highlight.ws;
@@ -4724,38 +4684,13 @@ class HighlightManager {
       };
 
       this.ws.onclose = () => {
-        if (!this.pollingInterval) {
-          this.startPolling();
-        }
+        this.ws = null;
+        // 自动重连（替代原轮询降级，3 秒后重试）
+        if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
+        this._reconnectTimer = setTimeout(() => { this._reconnectTimer = null; this.connectWebSocket(); }, 3000);
       };
     } catch (e) {
       console.warn('[HighlightManager] WebSocket不可用:', e);
-    }
-  }
-
-  startPolling() {
-    if (this.pollingInterval) return;
-
-    this.pollingInterval = setInterval(async () => {
-      try {
-        var url = '/api/highlight-events?since=' + (this.lastEventTime || '') + '&limit=50';
-        var response = await fetch(url);
-        var result = await response.json();
-
-        if (result.code === 0 && result.events && result.events.length > 0) {
-          result.events.forEach(event => this.handleHighlightEvent(event));
-          this.lastEventTime = result.events[result.events.length - 1].timestamp;
-        }
-      } catch (error) {
-        console.error('[HighlightManager] 轮询高亮事件失败:', error);
-      }
-    }, this._getPollingInterval());
-  }
-
-  stopPolling() {
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
     }
   }
 
@@ -4885,11 +4820,9 @@ class HighlightManager {
       }
     });
 
-    this.stopPolling();
-
-    if (this._fallbackTimer) {
-      clearTimeout(this._fallbackTimer);
-      this._fallbackTimer = null;
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
     }
 
     if (this.ws) {
