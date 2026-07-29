@@ -1,5 +1,5 @@
 {
-  "total_score": 100.0,
+  "total_score": 99.57,
   "passed": true,
   "threshold": 95.0,
   "dimensions": [
@@ -12,8 +12,8 @@
     {
       "name": "test_pass_rate",
       "weight": 0.2,
-      "score": 100.0,
-      "details": "796/796 通过（跳过计为失败）"
+      "score": 97.8643216080402,
+      "details": "779/796 通过（跳过计为失败）"
     },
     {
       "name": "assertion_density",
@@ -25,13 +25,13 @@
       "name": "event_chain_integrity",
       "weight": 0.15,
       "score": 100.0,
-      "details": "12/10 类事件出现，链顺序正确"
+      "details": "11/10 类事件出现，链顺序正确"
     },
     {
       "name": "performance_benchmark",
       "weight": 0.1,
       "score": 100.0,
-      "details": "0.05s / 1000 tick (门槛 10.0s)"
+      "details": "0.03s / 1000 tick (门槛 10.0s)"
     },
     {
       "name": "frontend_e2e_pass_rate",
@@ -52,20 +52,22 @@
       "details": "0 处违规 / 6 项检查（0 违规满分）"
     }
   ],
-  "deductions": [],
+  "deductions": [
+    "test_pass_rate: 97.9/100 — 779/796 通过（跳过计为失败）"
+  ],
   "redo_list": [],
   "test_summary": {
     "collected": 796,
-    "passed": 796,
-    "failed": 0,
+    "passed": 779,
+    "failed": 17,
     "errors": 0,
     "skipped": 0,
     "no_tests": false,
-    "duration_s": 85.37
+    "duration_s": 112.53
   },
   "test_results": {
     "modules_covered": 17,
-    "tests_passed": 796,
+    "tests_passed": 779,
     "tests_total": 796,
     "assertions_count": 1788,
     "test_files_count": 54,
@@ -80,11 +82,10 @@
       "StockFiltered",
       "TickReceived",
       "TransferExecuted",
-      "ExportCompleted",
       "ModeChanged"
     ],
     "event_chain_correct": true,
-    "sim_1000_tick_time_s": 0.054229100001975894,
+    "sim_1000_tick_time_s": 0.029545699988375418,
     "frontend_e2e_passed": 5,
     "frontend_e2e_total": 5,
     "frontend_e2e_env_missing": false,
