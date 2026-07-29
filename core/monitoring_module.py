@@ -26,6 +26,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from core.event_bus import (
+    _event_handler,
     BarComposed,
     DataChanged,
     DomainEvent,
@@ -108,13 +109,11 @@ class _EventPanel:
         self.bus.subscribe_any(self._on_any_event)
         self._enabled = True
 
+    @_event_handler("_on_any_event")
     def _on_any_event(self, event) -> None:
         """统一事件处理：查表转换 + 加入事件列表。"""
-        try:
-            record = event_to_record(event)
-            self._append(record)
-        except Exception as ex:
-            logger.warning("_EventPanel _on_any_event failed: %s", ex)
+        record = event_to_record(event)
+        self._append(record)
 
     def _append(self, record: Dict[str, Any]) -> None:
         # 统一记录格式：顶层包含 event_type / code / node_id / timestamp / details
@@ -791,14 +790,12 @@ class MonitoringModule:
             return
         bus.subscribe_any(self._on_any_event)
 
+    @_event_handler("_on_any_event")
     def _on_any_event(self, event) -> None:
         """统一事件处理：查表转换 + 加入事件列表。"""
-        try:
-            record = event_to_record(event)
-            if record:
-                self._add_to_event_list(record)
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_any_event failed: %s", ex)
+        record = event_to_record(event)
+        if record:
+            self._add_to_event_list(record)
 
     # === 浮窗事件列表管理 ===
 
@@ -895,22 +892,34 @@ class MonitoringModule:
 # === 统计模块层（自 core/statistics_module.py 合并）===
 
 
-# 5 种收益分析类型 → 计算方法名（表驱动，无 if/elif 链）
-# key 与 analysis_config.json 的 analysis_types 对齐
+# 5 种收益分析类型 → 统一入口 _compute_pnl_metric(metric_name)（表驱动，无 if/elif 链）
+# key 与 analysis_config.json 的 analysis_types 对齐，metric_name 即 _PNL_METRIC_SPECS 的 key
 _ANALYSIS_HANDLERS: Dict[str, str] = {
-    "intraday": "_compute_intraday_pnl",
-    "market_impact": "_compute_market_impact_pnl",
-    "historical": "_compute_historical_pnl",
-    "distribution": "_compute_distribution_pnl",
-    "positioning": "_compute_positioning_pnl",
+    "intraday": "_compute_pnl_metric",
+    "market_impact": "_compute_pnl_metric",
+    "historical": "_compute_pnl_metric",
+    "distribution": "_compute_pnl_metric",
+    "positioning": "_compute_pnl_metric",
 }
 
-# 多分析角度维度 → 排序键提取方法名（表驱动，无 if/elif 链）
+# 5 种收益分析指标 spec（filter/extract/agg/key，统一由 _compute_pnl_metric 分派）
+# filter(t): 筛选 tracker；extract(t): 提取值（market_impact 返回 (sector, pnl) 元组）；
+# agg(self, values): 聚合（historical 读 self._stats，无需 tracker）；key: 单一返回键，None 表示 agg 已返回完整 dict。
+_PNL_METRIC_SPECS: Dict[str, Dict[str, Any]] = {
+    "intraday": {"filter": lambda t: int(t.get("qty", 0) or 0) > 0, "extract": lambda t: float(t.get("pnl", 0.0) or 0.0), "agg": lambda self, v: sum(v), "key": "unrealized_pnl"},
+    "market_impact": {"filter": lambda t: int(t.get("qty", 0) or 0) > 0, "extract": lambda t: (str(t.get("market", "") or t.get("sector", "") or "default"), float(t.get("pnl", 0.0) or 0.0)), "agg": lambda self, v: {k: sum(p for kk, p in v if kk == k) for k, _ in v}, "key": "by_sector"},
+    "historical": {"filter": lambda t: False, "extract": lambda t: 0.0, "agg": lambda self, v: float(self._stats["total_pnl"]), "key": "total_realized_pnl"},
+    "distribution": {"filter": lambda t: True, "extract": lambda t: float(t.get("pnl", 0.0) or 0.0), "agg": lambda self, v: {"max": max(v) if v else 0.0, "min": min(v) if v else 0.0, "avg": sum(v) / len(v) if v else 0.0}, "key": None},
+    "positioning": {"filter": lambda t: int(t.get("qty", 0) or 0) > 0, "extract": lambda t: int(t.get("qty", 0) or 0) * float(t.get("cur_price", 0.0) or 0.0), "agg": lambda self, v: {"active_positions": len(v), "total_market_value": sum(v)}, "key": None},
+}
+
+# 多分析角度维度 → 排序键 lambda（表驱动，无 if/elif 链）
 # key 与 analysis_config.json 的 angles 对齐（动量/趋势/价值）
-_ANGLE_SORT_KEYS: Dict[str, str] = {
-    "momentum": "_momentum_key",
-    "trend": "_trend_key",
-    "value": "_value_key",
+# item = ((node_id, code), tracker_dict)；3 个角度仅字段提取与变换不同。
+_ANGLE_SORT_KEYS: Dict[str, Callable[[Tuple[Tuple[str, str], Dict[str, Any]]], float]] = {
+    "momentum": lambda item: 0.0 if (entry := float(item[1].get("entry_price", 0.0) or 0.0)) <= 0 else float(item[1].get("pnl", 0.0) or 0.0) / entry,
+    "trend": lambda item: float(item[1].get("pnl", 0.0) or 0.0),
+    "value": lambda item: -float(item[1].get("entry_price", 0.0) or 0.0),
 }
 
 
@@ -968,6 +977,7 @@ class StatisticsModule:
         # SubTask 19.6: StatisticsUpdated → publish_rankings → RankingChanged
         self._bus.subscribe(StatisticsUpdated, self._on_statistics_updated)
 
+    @_event_handler("_on_statistics_updated")
     def _on_statistics_updated(self, event: StatisticsUpdated) -> None:
         """统计更新触发排名发布（SubTask 19.6）。
 
@@ -975,63 +985,56 @@ class StatisticsModule:
         ``StatisticsUpdated``，本 handler 订阅该事件并调用 ``publish_rankings``
         发布 ``RankingChanged``（PK 排名 + 多分析角度），补全事件驱动链路。
         """
-        try:
-            self.publish_rankings(ts=event.ts)
-        except Exception as ex:
-            logger.warning("StatisticsModule _on_statistics_updated failed: %s", ex)
+        self.publish_rankings(ts=event.ts)
 
     # Task 9.8: _load_json 已删除，统一改用模块级 _get_table()（通过 ConfigStore.get_table）
 
     # === SubTask 10.2: 订阅事件计算交易统计 + 5 种收益分析 ===
 
+    @_event_handler("_on_position_updated")
     def _on_position_updated(self, event: PositionUpdated) -> None:
         """持仓更新触发统计计算。"""
-        try:
-            tracker = event.tracker or {}
-            key = (tracker.get("node_id", ""), tracker.get("code", ""))
-            self._trackers[key] = tracker
-            # 首次更新时记录起始时间戳（用于运行天数计算）
-            if not self._stats["start_ts"]:
-                self._stats["start_ts"] = float(event.ts or time.time())
-            # 累计统计
-            self._stats["trade_count"] += 1
-            pnl = float(tracker.get("pnl", 0.0) or 0.0)
-            self._stats["total_pnl"] += pnl
-            qty = int(tracker.get("qty", 0) or 0)
-            if qty > 0:
-                invested = qty * float(tracker.get("entry_price", 0.0) or 0.0)
-                self._stats["total_invested"] += invested
-                self._stats["max_invested"] = max(self._stats["max_invested"], invested)
-            if pnl > 0:
-                self._stats["win_count"] += 1
-            elif pnl < 0:
-                self._stats["loss_count"] += 1
-            # 发布 StatisticsUpdated 事件
-            self._bus.publish(StatisticsUpdated(stats=self._compute_full_stats(), ts=event.ts))
-        except Exception as ex:
-            logger.warning("StatisticsModule _on_position_updated failed: %s", ex)
+        tracker = event.tracker or {}
+        key = (tracker.get("node_id", ""), tracker.get("code", ""))
+        self._trackers[key] = tracker
+        # 首次更新时记录起始时间戳（用于运行天数计算）
+        if not self._stats["start_ts"]:
+            self._stats["start_ts"] = float(event.ts or time.time())
+        # 累计统计
+        self._stats["trade_count"] += 1
+        pnl = float(tracker.get("pnl", 0.0) or 0.0)
+        self._stats["total_pnl"] += pnl
+        qty = int(tracker.get("qty", 0) or 0)
+        if qty > 0:
+            invested = qty * float(tracker.get("entry_price", 0.0) or 0.0)
+            self._stats["total_invested"] += invested
+            self._stats["max_invested"] = max(self._stats["max_invested"], invested)
+        if pnl > 0:
+            self._stats["win_count"] += 1
+        elif pnl < 0:
+            self._stats["loss_count"] += 1
+        # 发布 StatisticsUpdated 事件
+        self._bus.publish(StatisticsUpdated(stats=self._compute_full_stats(), ts=event.ts))
 
+    @_event_handler("_on_bar_composed")
     def _on_bar_composed(self, event: BarComposed) -> None:
         """K 线合成触发未实现盈亏更新。"""
-        try:
-            code = event.code
-            close = float((event.bar or {}).get("close", 0.0) or 0.0)
-            if not code or close <= 0:
-                return
-            # 更新持仓的 cur_price 与 pnl
-            for key, tracker in self._trackers.items():
-                if tracker.get("code") != code:
-                    continue
-                if int(tracker.get("qty", 0) or 0) <= 0:
-                    continue
-                entry = float(tracker.get("entry_price", 0.0) or 0.0)
-                tracker["cur_price"] = close
-                if entry > 0:
-                    tracker["pnl"] = (close - entry) * int(tracker.get("qty", 0) or 0)
-            # 重新计算并发布统计
-            self._bus.publish(StatisticsUpdated(stats=self._compute_full_stats(), ts=event.ts))
-        except Exception as ex:
-            logger.warning("StatisticsModule _on_bar_composed failed: %s", ex)
+        code = event.code
+        close = float((event.bar or {}).get("close", 0.0) or 0.0)
+        if not code or close <= 0:
+            return
+        # 更新持仓的 cur_price 与 pnl
+        for key, tracker in self._trackers.items():
+            if tracker.get("code") != code:
+                continue
+            if int(tracker.get("qty", 0) or 0) <= 0:
+                continue
+            entry = float(tracker.get("entry_price", 0.0) or 0.0)
+            tracker["cur_price"] = close
+            if entry > 0:
+                tracker["pnl"] = (close - entry) * int(tracker.get("qty", 0) or 0)
+        # 重新计算并发布统计
+        self._bus.publish(StatisticsUpdated(stats=self._compute_full_stats(), ts=event.ts))
 
     def _compute_full_stats(self) -> Dict[str, Any]:
         """计算完整统计指标 + 5 种收益分析。"""
@@ -1053,7 +1056,7 @@ class StatisticsModule:
                 analyses[name] = {}
                 continue
             try:
-                analyses[name] = handler()
+                analyses[name] = handler(name)
             except Exception as ex:
                 logger.warning("StatisticsModule %s failed: %s", method_name, ex)
                 analyses[name] = {}
@@ -1078,53 +1081,14 @@ class StatisticsModule:
             "positioning_pnl": analyses.get("positioning", {}),
         }
 
-    # === 5 种收益分析实现 ===
+    # === 收益分析指标计算（表驱动，见模块级 _PNL_METRIC_SPECS）===
 
-    def _compute_intraday_pnl(self) -> Dict[str, Any]:
-        """日内收益分析：当前持仓的未实现盈亏。"""
-        unrealized = sum(
-            float(t.get("pnl", 0.0) or 0.0)
-            for t in self._trackers.values()
-            if int(t.get("qty", 0) or 0) > 0
-        )
-        return {"unrealized_pnl": unrealized}
-
-    def _compute_market_impact_pnl(self) -> Dict[str, Any]:
-        """市场冲击收益分析：按板块/市场分组的收益。"""
-        by_sector: Dict[str, float] = {}
-        for t in self._trackers.values():
-            if int(t.get("qty", 0) or 0) <= 0:
-                continue
-            sector = str(t.get("market", "") or t.get("sector", "") or "default")
-            by_sector[sector] = by_sector.get(sector, 0.0) + float(t.get("pnl", 0.0) or 0.0)
-        return {"by_sector": by_sector}
-
-    def _compute_historical_pnl(self) -> Dict[str, Any]:
-        """历史收益分析：累计已实现盈亏。"""
-        return {"total_realized_pnl": float(self._stats["total_pnl"])}
-
-    def _compute_distribution_pnl(self) -> Dict[str, Any]:
-        """收益分布分析：最大/最小/平均盈亏。"""
-        pnls = [float(t.get("pnl", 0.0) or 0.0) for t in self._trackers.values()]
-        if not pnls:
-            return {"max": 0.0, "min": 0.0, "avg": 0.0}
-        return {
-            "max": max(pnls),
-            "min": min(pnls),
-            "avg": sum(pnls) / len(pnls),
-        }
-
-    def _compute_positioning_pnl(self) -> Dict[str, Any]:
-        """持仓定位分析：活跃持仓数 + 总市值。"""
-        active = [
-            t for t in self._trackers.values()
-            if int(t.get("qty", 0) or 0) > 0
-        ]
-        total_mv = sum(
-            int(t.get("qty", 0) or 0) * float(t.get("cur_price", 0.0) or 0.0)
-            for t in active
-        )
-        return {"active_positions": len(active), "total_market_value": total_mv}
+    def _compute_pnl_metric(self, metric_name: str) -> Dict[str, Any]:
+        """统一收益分析指标计算：查表 → filter trackers → extract → agg → return {key: result}。"""
+        spec = _PNL_METRIC_SPECS[metric_name]
+        values = [spec["extract"](t) for t in self._trackers.values() if spec["filter"](t)]
+        result = spec["agg"](self, values)
+        return result if spec["key"] is None else {spec["key"]: result}
 
     # === SubTask 10.3: PK 排名 + 多分析角度 ===
 
@@ -1173,10 +1137,7 @@ class StatisticsModule:
                 (k, t) for k, t in self._trackers.items()
                 if int(t.get("qty", 0) or 0) > 0
             ]
-            for angle_name, key_method in _ANGLE_SORT_KEYS.items():
-                key_fn = getattr(self, key_method, None)
-                if not callable(key_fn):
-                    continue
+            for angle_name, key_fn in _ANGLE_SORT_KEYS.items():
                 ordered = sorted(candidates, key=key_fn, reverse=True)
                 results[angle_name] = [
                     {"code": k[1], "node_id": k[0], "rank": i + 1}
@@ -1187,27 +1148,6 @@ class StatisticsModule:
         except Exception as ex:
             logger.warning("StatisticsModule compute_analysis_angles failed: %s", ex)
             return {}
-
-    # === 多分析角度排序键（表驱动分派的目标方法） ===
-
-    @staticmethod
-    def _momentum_key(item: Tuple[Tuple[str, str], Dict[str, Any]]) -> float:
-        """动量排序键：收益率（pnl / 成本）。"""
-        _k, t = item
-        entry = float(t.get("entry_price", 0.0) or 0.0)
-        if entry <= 0:
-            return 0.0
-        return float(t.get("pnl", 0.0) or 0.0) / entry
-
-    @staticmethod
-    def _trend_key(item: Tuple[Tuple[str, str], Dict[str, Any]]) -> float:
-        """趋势排序键：当前盈亏。"""
-        return float(item[1].get("pnl", 0.0) or 0.0)
-
-    @staticmethod
-    def _value_key(item: Tuple[Tuple[str, str], Dict[str, Any]]) -> float:
-        """价值排序键：成本价越低价值越高（升序 → 取负值与 desc 统一）。"""
-        return -float(item[1].get("entry_price", 0.0) or 0.0)
 
     def publish_rankings(self, ts: float = 0.0) -> None:
         """发布排名变化事件（PK 排名 + 多分析角度）。

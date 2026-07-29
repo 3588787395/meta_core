@@ -547,3 +547,58 @@ class TestPublishTickBatch:
         # code_b 非 dict 跳过，空 code 跳过，只发 code_a
         assert len(captured) == 1
         assert captured[0].code == "code_a"
+
+
+# ============================================================================
+# 变更 I：_BASE_PERIOD_TARGETS 表合并 if self._base_period == 链回归断言
+# ============================================================================
+
+
+class TestChangeIBasePeriodTargetsTable:
+    """变更 I：_BASE_PERIOD_TARGETS 表含 1min/5min/day，消除 if self._base_period == 链。"""
+
+    def test_base_period_targets_table_exists(self):
+        """_BASE_PERIOD_TARGETS 表存在。"""
+        from core.runtime_mode_module import _BASE_PERIOD_TARGETS
+        assert isinstance(_BASE_PERIOD_TARGETS, dict), \
+            "_BASE_PERIOD_TARGETS 应为 dict"
+
+    def test_base_period_targets_contains_three_keys(self):
+        """_BASE_PERIOD_TARGETS 表含 1min/5min/day 三键。"""
+        from core.runtime_mode_module import _BASE_PERIOD_TARGETS
+        assert "1min" in _BASE_PERIOD_TARGETS, \
+            "_BASE_PERIOD_TARGETS 应含 1min 键"
+        assert "5min" in _BASE_PERIOD_TARGETS, \
+            "_BASE_PERIOD_TARGETS 应含 5min 键"
+        assert "day" in _BASE_PERIOD_TARGETS, \
+            "_BASE_PERIOD_TARGETS 应含 day 键"
+
+    def test_base_period_targets_values_are_lists(self):
+        """_BASE_PERIOD_TARGETS 每个键映射到 list（合成目标周期列表）。"""
+        from core.runtime_mode_module import _BASE_PERIOD_TARGETS
+        for key in ("1min", "5min", "day"):
+            val = _BASE_PERIOD_TARGETS[key]
+            assert isinstance(val, list), \
+                f"_BASE_PERIOD_TARGETS[{key}] 应为 list，实际 {type(val)}"
+
+    def test_no_if_self_base_period_chain_in_runtime_module(self):
+        """Grep 验证：runtime_mode_module.py 中 if self._base_period == = 0。"""
+        import re
+        from pathlib import Path
+        rt_path = Path(__file__).resolve().parent.parent / "core" / "runtime_mode_module.py"
+        src = rt_path.read_text(encoding="utf-8")
+        legacy_pattern = r"if self\._base_period =="
+        matches = re.findall(legacy_pattern, src)
+        assert len(matches) == 0, (
+            f"runtime_mode_module 不应含 if self._base_period == 硬编码分支"
+            f"（变更 I 已表驱动化），实际 {len(matches)} 处"
+        )
+
+    def test_base_period_targets_used_for_synthesis(self):
+        """runtime_mode_module 引用 _BASE_PERIOD_TARGETS 作为合成目标源。"""
+        import re
+        from pathlib import Path
+        rt_path = Path(__file__).resolve().parent.parent / "core" / "runtime_mode_module.py"
+        src = rt_path.read_text(encoding="utf-8")
+        assert "_BASE_PERIOD_TARGETS" in src, \
+            "runtime_mode_module 应引用 _BASE_PERIOD_TARGETS 表（变更 I 表驱动）"

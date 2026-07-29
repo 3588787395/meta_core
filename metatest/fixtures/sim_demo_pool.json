@@ -1,0 +1,146 @@
+{
+  "id": "sim_demo",
+  "name": "仿真演示池",
+  "nodes": [
+    {
+      "id": "source",
+      "type": "market_source",
+      "name": "备选池",
+      "position": {
+        "x": 100,
+        "y": 200,
+        "width": 70,
+        "height": 80
+      },
+      "params": {
+        "markets": [
+          "fz_a"
+        ],
+        "market_count": 100
+      }
+    },
+    {
+      "id": "pool_A",
+      "type": "statepool",
+      "name": "A池-KDJ金叉",
+      "position": {
+        "x": 350,
+        "y": 100,
+        "width": 150,
+        "height": 80
+      },
+      "config": {
+        "pool_role": "target_pool"
+      },
+      "params": {
+        "hold_seconds": 6000,
+        "psatt": {}
+      }
+    },
+    {
+      "id": "pool_B",
+      "type": "statepool",
+      "name": "B池-MACD金叉",
+      "position": {
+        "x": 350,
+        "y": 280,
+        "width": 150,
+        "height": 80
+      },
+      "config": {
+        "pool_role": "target_pool"
+      },
+      "params": {
+        "hold_seconds": 12000,
+        "psatt": {}
+      }
+    },
+    {
+      "id": "pool_C",
+      "type": "statepool",
+      "name": "C池-交集买入",
+      "position": {
+        "x": 600,
+        "y": 190,
+        "width": 150,
+        "height": 80
+      },
+      "config": {
+        "pool_role": "target_pool"
+      },
+      "params": {
+        "hold_seconds": 1200,
+        "psatt": {
+          "baimpool": 1,
+          "bsavehis": 1
+        },
+        "enter_action": {
+          "type": 2,
+          "params": 100
+        },
+        "exit_action": {
+          "type": 3,
+          "params": 0
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_source_A",
+      "source": "source",
+      "target": "pool_A",
+      "type": "conditional",
+      "params": {
+        "condition_type": "INDICATOR",
+        "formula_ref": "KDJ_5MIN_CROSS",
+        "time_gate_interval": 60,
+        "ttl_hold_seconds": 6000,
+        "ttl_mode": "interval",
+        "_order": 10
+      }
+    },
+    {
+      "id": "e_source_B",
+      "source": "source",
+      "target": "pool_B",
+      "type": "conditional",
+      "params": {
+        "condition_type": "INDICATOR",
+        "formula_ref": "MACD_1MIN_CROSS",
+        "time_gate_interval": 10,
+        "ttl_hold_seconds": 12000,
+        "ttl_mode": "interval",
+        "_order": 20
+      }
+    },
+    {
+      "id": "e_A_C",
+      "source": "pool_A",
+      "target": "pool_C",
+      "type": "conditional",
+      "params": {
+        "condition_type": "INTERSECTION",
+        "intersection_source": "pool_B",
+        "time_gate_interval": 5,
+        "ttl_hold_seconds": 1200,
+        "ttl_mode": "interval",
+        "_order": 30
+      }
+    },
+    {
+      "id": "e_B_C",
+      "source": "pool_B",
+      "target": "pool_C",
+      "type": "conditional",
+      "params": {
+        "condition_type": "INTERSECTION",
+        "intersection_source": "pool_A",
+        "time_gate_interval": 5,
+        "ttl_hold_seconds": 1200,
+        "ttl_mode": "interval",
+        "_order": 31
+      }
+    }
+  ]
+}

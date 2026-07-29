@@ -255,3 +255,88 @@ def test_set_schema_validator(config_store):
     sentinel = object()
     config_store.set_schema_validator(sentinel)
     assert config_store._schema_validator is sentinel
+
+
+# ============================================================================
+# 变更 G：公式模块配置加载经 ConfigStore 统一入口回归断言
+# ============================================================================
+
+
+class TestChangeGFormulaConfigStore:
+    """变更 G：formula_module._load_simple_functions 经 ConfigStore 统一入口，禁止 json.load(open(。"""
+
+    def test_load_simple_functions_uses_config_store_entry(self):
+        """formula_module._load_simple_functions 经统一配置入口加载 data_pipeline 表。
+
+        接受 load_config_table("data_pipeline")（ConfigStore 统一入口）或
+        get_global_config_store().get_table("data_pipeline") 两种等价写法。
+        """
+        import inspect
+        import core.formula_module as fm
+        # FormulaRouter 类含 _load_simple_functions 静态方法
+        router_cls = getattr(fm, "FormulaRouter", None)
+        assert router_cls is not None, "formula_module 应含 FormulaRouter 类"
+        method = getattr(router_cls, "_load_simple_functions", None)
+        assert method is not None, "FormulaRouter 应含 _load_simple_functions 方法"
+        src = inspect.getsource(method)
+        # 必须引用 data_pipeline 配置表（经 ConfigStore 统一入口）
+        assert "data_pipeline" in src, \
+            "_load_simple_functions 应加载 data_pipeline 配置表"
+        # 经 ConfigStore 统一入口：load_config_table 或 get_global_config_store().get_table
+        uses_store_entry = (
+            "load_config_table" in src
+            or "get_global_config_store" in src
+            or "get_table" in src
+        )
+        assert uses_store_entry, \
+            "_load_simple_functions 应经 ConfigStore 统一入口加载（变更 G）"
+
+    def test_no_json_load_open_in_core_except_table_engine(self):
+        """Grep 验证：core/*.py 中 json.load(open( = 0（ConfigStore 内部 table_engine.py 除外）。"""
+        import re
+        core_dir = Path(__file__).resolve().parent.parent / "core"
+        legacy_pattern = r"json\.load\(open\("
+        violations = []
+        for py_file in core_dir.glob("*.py"):
+            if py_file.name == "table_engine.py":
+                continue  # ConfigStore 基础设施层合法使用
+            try:
+                src = py_file.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            matches = re.findall(legacy_pattern, src)
+            if matches:
+                violations.append(f"{py_file.name}: {len(matches)} 处")
+        assert len(violations) == 0, (
+            f"core/*.py 不应含 json.load(open(（变更 G，ConfigStore 内部除外），"
+            f"违规：{violations}"
+        )
+
+    def test_formula_module_loads_config_table_helper(self):
+        """formula_module 从 table_engine 导入 load_config_table 统一入口。"""
+        import inspect
+        import core.formula_module as fm
+        src = inspect.getsource(fm)
+        assert "load_config_table" in src, \
+            "formula_module 应导入/使用 load_config_table 统一配置入口（变更 G）"
+
+    def test_table_engine_load_config_table_uses_global_store(self):
+        """load_config_table 优先走 get_global_config_store().get_table（热加载友好）。"""
+        import inspect
+        from core import table_engine as te
+        src = inspect.getsource(te.load_config_table)
+        assert "get_global_config_store" in src, \
+            "load_config_table 应优先走 get_global_config_store().get_table（变更 G）"
+        assert "get_table" in src, \
+            "load_config_table 应调用 store.get_table(name)"
+
+    def test_no_legacy_load_json_in_table_engine(self):
+        """table_engine 不再含 _load_json / _load_config 旧函数（已表驱动化）。"""
+        from core import table_engine as te
+        public_names = dir(te)
+        assert "_load_json" not in public_names, \
+            "table_engine 不应含 _load_json 旧函数（变更 G 已移除）"
+        assert "_load_config" not in public_names, \
+            "table_engine 不应含 _load_config 旧函数（变更 G 已移除）"
+        assert hasattr(te, "load_config_table"), \
+            "table_engine 应提供 load_config_table 统一入口"

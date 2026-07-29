@@ -514,3 +514,82 @@ class TestRuntimeEventUnordered:
         """EventDriver 不应包含运行时拓扑排序字段 execution_order。"""
         src = inspect.getsource(EventDriver)
         assert "execution_order" not in src, "EventDriver 不应包含 execution_order（G6 运行时无序）"
+
+
+# ---------------------------------------------------------------------------
+# 变更 N：@_event_handler 装饰器表驱动事件注册回归断言
+# ---------------------------------------------------------------------------
+
+
+class TestChangeNEventHandlerDecorator:
+    """变更 N：@_event_handler 装饰器在 event_bus.py 定义，5 模块共 ≥28 次应用。"""
+
+    def test_event_handler_decorator_defined_in_event_bus(self):
+        """_event_handler 装饰器函数在 core/event_bus.py 定义。"""
+        import re
+        from pathlib import Path
+        eb_path = Path(__file__).resolve().parent.parent / "core" / "event_bus.py"
+        src = eb_path.read_text(encoding="utf-8")
+        assert re.search(r"^def _event_handler\b", src, re.MULTILINE), \
+            "event_bus.py 应定义模块级 _event_handler 装饰器（变更 N 表驱动注册）"
+
+    def test_event_handler_importable_and_callable(self):
+        """_event_handler 可从 core.event_bus 导入且可调用。"""
+        from core.event_bus import _event_handler
+        assert callable(_event_handler), \
+            "_event_handler 应为可调用装饰器工厂"
+
+    def test_event_handler_decorator_applied_at_least_28_times(self):
+        """Grep 验证：5 模块共 ≥28 次 @_event_handler 装饰器应用。"""
+        import re
+        from pathlib import Path
+        core_dir = Path(__file__).resolve().parent.parent / "core"
+        # 采样 5 模块（与 runner.py RULE 99 一致）
+        handler_modules = [
+            "trade_module.py",
+            "execution_module.py",
+            "monitoring_module.py",
+            "tick_bar_module.py",
+            "screening_module.py",
+        ]
+        total = 0
+        per_module = {}
+        for mod_name in handler_modules:
+            mod_path = core_dir / mod_name
+            try:
+                src = mod_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            count = len(re.findall(r"@_event_handler\b", src))
+            per_module[mod_name] = count
+            total += count
+        assert total >= 28, (
+            f"5 模块 @_event_handler 应用总数应 ≥ 28（变更 N），"
+            f"实际 {total}（{per_module}）"
+        )
+
+    def test_each_sampled_module_uses_event_handler(self):
+        """5 模块每个都至少应用 1 次 @_event_handler。"""
+        import re
+        from pathlib import Path
+        core_dir = Path(__file__).resolve().parent.parent / "core"
+        handler_modules = [
+            "trade_module.py",
+            "execution_module.py",
+            "monitoring_module.py",
+            "tick_bar_module.py",
+            "screening_module.py",
+        ]
+        for mod_name in handler_modules:
+            mod_path = core_dir / mod_name
+            src = mod_path.read_text(encoding="utf-8")
+            count = len(re.findall(r"@_event_handler\b", src))
+            assert count >= 1, \
+                f"{mod_name} 应至少应用 1 次 @_event_handler（变更 N），实际 {count}"
+
+    def test_event_handler_returns_callable(self):
+        """_event_handler(name) 返回可调用装饰器。"""
+        from core.event_bus import _event_handler
+        decorator = _event_handler("TestEvent")
+        assert callable(decorator), \
+            "_event_handler(name) 应返回可调用装饰器"

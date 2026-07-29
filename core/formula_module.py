@@ -1318,49 +1318,53 @@ class FormulaEngine:
     def _eval_formula(
         self, spec: FilterSpec, codes: List[str], ctx: EvalContext
     ) -> Dict[str, Any]:
-        """调用底层 Python 公式引擎逐只求值。"""
+        """调用底层 Python 公式引擎逐只求值（薄包装，委托 _eval_formula_core）。"""
         formula_ref = spec.formula_ref if spec else ""
+        return self._eval_formula_core(formula_ref, codes, ctx, spec, series=False)
+
+    def _eval_formula_core(self, formula_ref: str, codes: List[str], ctx: EvalContext,
+                          spec: Optional[FilterSpec] = None, lookback: Optional[int] = None,
+                          series: bool = False) -> Dict[str, Any]:
+        """统一公式求值核心：7 步同构骨架（标量/序列共用），仅步骤 6（eval_batch vs
+        eval_series_batch）与步骤 7（{code: scalar} vs batch）随 series 分派。"""
+        # 步骤 1：提取 formula_ref
         formula = formula_ref or ""
         if not formula:
             return {code: None for code in codes}
 
+        # 步骤 2：查 builtin（取 script / eval_field）
         builtin_info = _lookup_builtin_formula_info(formula)
         builtin_script = builtin_info.get("script", "") if builtin_info else ""
         eval_field = builtin_info.get("eval_field", "") if builtin_info else ""
         if builtin_script:
             formula = builtin_script
 
+        # 步骤 3：解析 period（spec.formula_period 优先，其次 builtin 默认）
         period = getattr(ctx, 'period', '1d') or '1d'
-        if builtin_info and builtin_info.get("period"):
+        if spec is not None and spec.formula_period:
+            period = spec.formula_period
+        elif builtin_info and builtin_info.get("period"):
             period = builtin_info["period"]
 
-        # 合并公式参数：spec.formula_args 覆盖 builtin 默认值
+        # 步骤 4：合并公式参数（spec.formula_args 覆盖 builtin 默认值）
         formula_args: Dict[str, Any] = {}
         if builtin_info and builtin_info.get("args"):
             for arg in builtin_info["args"]:
                 name = arg.get("name")
                 if name:
                     formula_args[name] = arg.get("value")
-        if spec and getattr(spec, "formula_args", None):
+        if spec is not None and getattr(spec, "formula_args", None):
             formula_args.update(spec.formula_args)
 
+        # 步骤 5：定义 fetcher（_data_query 优先，否则从 ctx.bars/latest_tick 取）
         if self._data_query is not None:
             def fetcher(symbol: str, p: str) -> pd.DataFrame | None:
-                df = self._data_query.get_kline_series(symbol, p or period)
-                if len(codes) <= 3 and symbol == codes[0]:
-                    import logging
-                    logging.getLogger("formula_debug").warning(
-                        "FETCHER symbol=%s period=%s rows=%d cols=%s df=%s",
-                        symbol, p or period, len(df) if df is not None else 0,
-                        list(df.columns) if df is not None and not df.empty else [],
-                        df.head(3).to_string() if df is not None and not df.empty else "EMPTY"
-                    )
-                return df
+                return self._data_query.get_kline_series(symbol, p or period)
         else:
             def fetcher(symbol: str, p: str) -> pd.DataFrame | None:
-                bar = ctx.bars.get(symbol)
+                bar = ctx.bars.get(symbol) if hasattr(ctx, 'bars') and isinstance(ctx.bars, dict) else None
                 if bar is None:
-                    tick = ctx.latest_tick.get(symbol)
+                    tick = ctx.latest_tick.get(symbol) if hasattr(ctx, 'latest_tick') and isinstance(ctx.latest_tick, dict) else None
                     if isinstance(tick, dict):
                         bar = tick
                 if isinstance(bar, pd.DataFrame):
@@ -1371,14 +1375,21 @@ class FormulaEngine:
                     return pd.DataFrame(bar)
                 return None
 
+        # 步骤 6：调用 engine（series → eval_series_batch，标量 → eval_batch）
         try:
+            if series:
+                return self._python_engine.eval_series_batch(
+                    formula, codes, period=period, data_fetcher=fetcher,
+                    args=formula_args or None, lookback=lookback,
+                )
             batch = self._python_engine.eval_batch(
-                formula, codes, period=period, data_fetcher=fetcher, args=formula_args or None
+                formula, codes, period=period, data_fetcher=fetcher, args=formula_args or None,
             )
         except Exception as exc:
             self._logger.debug("公式求值异常: %s", exc)
             return {code: None for code in codes}
 
+        # 步骤 7：转换结果（标量提取 eval_field 返回 {code: scalar}；序列已在步骤 6 返回 batch）
         result = {}
         for code in codes:
             val = batch.get(code)
@@ -1402,59 +1413,8 @@ class FormulaEngine:
     def _eval_formula_series(
         self, formula_ref: str, codes: List[str], ctx: EvalContext, spec: Optional[FilterSpec] = None, lookback: int = 5
     ) -> Dict[str, Any]:
-        """调用底层 Python 公式引擎逐只求值，返回序列数据。"""
-        formula = formula_ref or ""
-        if not formula:
-            return {code: None for code in codes}
-
-        builtin_info = _lookup_builtin_formula_info(formula)
-        builtin_script = builtin_info.get("script", "") if builtin_info else ""
-        if builtin_script:
-            formula = builtin_script
-
-        period = getattr(ctx, 'period', '1d') or '1d'
-        if spec is not None and spec.formula_period:
-            period = spec.formula_period
-        elif builtin_info and builtin_info.get("period"):
-            period = builtin_info["period"]
-
-        # 合并公式参数：spec.formula_args 覆盖 builtin 默认值
-        formula_args: Dict[str, Any] = {}
-        if builtin_info and builtin_info.get("args"):
-            for arg in builtin_info["args"]:
-                name = arg.get("name")
-                if name:
-                    formula_args[name] = arg.get("value")
-        if spec is not None and getattr(spec, "formula_args", None):
-            formula_args.update(spec.formula_args)
-
-        if self._data_query is not None:
-            def fetcher(symbol: str, p: str) -> pd.DataFrame | None:
-                return self._data_query.get_kline_series(symbol, p or period)
-        else:
-            def fetcher(symbol: str, p: str) -> pd.DataFrame | None:
-                bar = ctx.bars.get(symbol) if hasattr(ctx, 'bars') and isinstance(ctx.bars, dict) else None
-                if bar is None:
-                    tick = ctx.latest_tick.get(symbol) if hasattr(ctx, 'latest_tick') and isinstance(ctx.latest_tick, dict) else None
-                    if isinstance(tick, dict):
-                        bar = tick
-                if isinstance(bar, pd.DataFrame):
-                    return bar
-                if isinstance(bar, dict):
-                    return pd.DataFrame([bar])
-                if isinstance(bar, list):
-                    return pd.DataFrame(bar)
-                return None
-
-        try:
-            batch = self._python_engine.eval_series_batch(
-                formula, codes, period=period, data_fetcher=fetcher, args=formula_args, lookback=lookback
-            )
-        except Exception as exc:
-            self._logger.debug("公式序列求值异常: %s", exc)
-            return {code: None for code in codes}
-
-        return batch
+        """调用底层 Python 公式引擎逐只求值，返回序列数据（薄包装，委托 _eval_formula_core）。"""
+        return self._eval_formula_core(formula_ref, codes, ctx, spec, lookback=lookback, series=True)
 
 
 # ===========================================================================
@@ -1704,15 +1664,9 @@ class FormulaRouter:
     @staticmethod
     def _load_simple_functions() -> frozenset:
         """从 config/data_pipeline.json 加载 simple_functions 列表。"""
-        try:
-            if _CONFIG_PATH.exists():
-                with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-                funcs = cfg.get("formula", {}).get("simple_functions", [])
-                return frozenset(str(fn).upper() for fn in funcs)
-        except Exception as e:
-            logger.warning("读取 simple_functions 配置失败: %s", e)
-        return frozenset()
+        cfg = load_config_table("data_pipeline")
+        funcs = cfg.get("formula", {}).get("simple_functions", [])
+        return frozenset(str(fn).upper() for fn in funcs)
 
     @staticmethod
     def _load_routing_config(key: str, default: Any) -> Any:
@@ -1721,14 +1675,8 @@ class FormulaRouter:
         engine_routing / engine_methods 等同构配置项共用此加载逻辑，
         仅 key 与默认值不同，消除重复的 try/open/get 样板。
         """
-        try:
-            if _ROUTING_CONFIG_PATH.exists():
-                with open(_ROUTING_CONFIG_PATH, "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-                return cfg.get(key, default)
-        except Exception as e:
-            logger.warning("读取 formula_routing.json %s 失败: %s", key, e)
-        return default
+        cfg = load_config_table("formula_routing")
+        return cfg.get(key, default)
 
     @staticmethod
     def _load_routing_rules() -> list:

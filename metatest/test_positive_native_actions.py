@@ -313,3 +313,127 @@ class TestScoringFunctions:
         assert "score_weighted_sort" in builtins._RESULT_ACTION_FUNCS
         assert "score_per_group_sort" in builtins._RESULT_ACTION_FUNCS
         assert "aggregate_panels" in builtins._RESULT_ACTION_FUNCS
+
+
+# ============================================================================
+# 变更 B：_PNL_METRIC_SPECS 表 + _compute_pnl_metric 合并 5 个 _compute_xxx_pnl 同构方法
+# ============================================================================
+
+
+class TestChangeBPnlMetricSpecs:
+    """变更 B：_PNL_METRIC_SPECS 表含 5 条 spec + _compute_pnl_metric 统一入口。"""
+
+    def test_pnl_metric_specs_table_exists(self):
+        """_PNL_METRIC_SPECS 表存在。"""
+        from core.monitoring_module import _PNL_METRIC_SPECS
+        assert isinstance(_PNL_METRIC_SPECS, dict), \
+            "_PNL_METRIC_SPECS 应为 dict"
+
+    def test_pnl_metric_specs_has_five_entries(self):
+        """_PNL_METRIC_SPECS 表含 5 条 spec。"""
+        from core.monitoring_module import _PNL_METRIC_SPECS
+        expected_keys = {
+            "intraday", "market_impact", "historical", "distribution", "positioning",
+        }
+        assert set(_PNL_METRIC_SPECS.keys()) >= expected_keys, \
+            f"_PNL_METRIC_SPECS 应含 5 条 spec，实际 {set(_PNL_METRIC_SPECS.keys())}"
+        assert len(_PNL_METRIC_SPECS) >= 5, \
+            f"_PNL_METRIC_SPECS 应 ≥5 条，实际 {len(_PNL_METRIC_SPECS)}"
+
+    def test_pnl_metric_specs_each_has_filter_extract_agg_key(self):
+        """每条 spec 含 filter/extract/agg/key 四字段。"""
+        from core.monitoring_module import _PNL_METRIC_SPECS
+        for name, spec in _PNL_METRIC_SPECS.items():
+            assert isinstance(spec, dict), f"spec {name} 应为 dict"
+            assert "filter" in spec, f"spec {name} 应含 filter"
+            assert "extract" in spec, f"spec {name} 应含 extract"
+            assert "agg" in spec, f"spec {name} 应含 agg"
+            assert "key" in spec, f"spec {name} 应含 key"
+
+    def test_compute_pnl_metric_method_exists(self):
+        """_compute_pnl_metric 方法存在（统一入口，分派 _PNL_METRIC_SPECS）。"""
+        from core.monitoring_module import StatisticsModule
+        assert hasattr(StatisticsModule, "_compute_pnl_metric"), \
+            "StatisticsModule 应含 _compute_pnl_metric 方法（变更 B 合并入口）"
+        assert callable(getattr(StatisticsModule, "_compute_pnl_metric")), \
+            "_compute_pnl_metric 应为可调用方法"
+
+    def test_no_legacy_compute_xxx_pnl_methods(self):
+        """Grep 验证：monitoring_module 5 个旧 _compute_xxx_pnl 方法 = 0。"""
+        import re
+        from pathlib import Path
+        mon_path = Path(__file__).resolve().parent.parent / "core" / "monitoring_module.py"
+        src = mon_path.read_text(encoding="utf-8")
+        legacy_pattern = (
+            r"def _compute_intraday_pnl|def _compute_market_impact_pnl|"
+            r"def _compute_historical_pnl|def _compute_distribution_pnl|"
+            r"def _compute_positioning_pnl"
+        )
+        matches = re.findall(legacy_pattern, src)
+        assert len(matches) == 0, (
+            f"monitoring_module 不应含旧 _compute_xxx_pnl 方法（变更 B 已合并），"
+            f"实际 {matches}"
+        )
+
+    def test_no_generic_compute_word_pnl_pattern(self):
+        """Grep 验证：monitoring_module 中 def _compute_\\w+_pnl 通用模式 = 0。"""
+        import re
+        from pathlib import Path
+        mon_path = Path(__file__).resolve().parent.parent / "core" / "monitoring_module.py"
+        src = mon_path.read_text(encoding="utf-8")
+        matches = re.findall(r"def _compute_\w+_pnl", src)
+        assert len(matches) == 0, (
+            f"monitoring_module 不应含 _compute_*_pnl 同构方法模式（变更 B），"
+            f"实际 {matches}"
+        )
+
+
+# ============================================================================
+# 变更 L：_ANGLE_SORT_KEYS lambda dict 合并 3 个 _xxx_key 排序键方法
+# ============================================================================
+
+
+class TestChangeLAngleSortKeys:
+    """变更 L：_ANGLE_SORT_KEYS lambda dict 含 momentum/trend/value，消除 3 个 _xxx_key 方法。"""
+
+    def test_angle_sort_keys_table_exists(self):
+        """_ANGLE_SORT_KEYS 表存在。"""
+        from core.monitoring_module import _ANGLE_SORT_KEYS
+        assert isinstance(_ANGLE_SORT_KEYS, dict), \
+            "_ANGLE_SORT_KEYS 应为 dict"
+
+    def test_angle_sort_keys_has_three_angles(self):
+        """_ANGLE_SORT_KEYS 表含 momentum/trend/value 三键。"""
+        from core.monitoring_module import _ANGLE_SORT_KEYS
+        assert "momentum" in _ANGLE_SORT_KEYS, "_ANGLE_SORT_KEYS 应含 momentum"
+        assert "trend" in _ANGLE_SORT_KEYS, "_ANGLE_SORT_KEYS 应含 trend"
+        assert "value" in _ANGLE_SORT_KEYS, "_ANGLE_SORT_KEYS 应含 value"
+
+    def test_angle_sort_keys_values_are_callables(self):
+        """_ANGLE_SORT_KEYS 每个键映射到可调用 lambda 排序键。"""
+        from core.monitoring_module import _ANGLE_SORT_KEYS
+        for angle_name in ("momentum", "trend", "value"):
+            assert callable(_ANGLE_SORT_KEYS[angle_name]), \
+                f"_ANGLE_SORT_KEYS[{angle_name}] 应为可调用 lambda 排序键"
+
+    def test_no_legacy_xxx_key_methods(self):
+        """Grep 验证：monitoring_module 3 个旧 _xxx_key 排序键方法 = 0。"""
+        import re
+        from pathlib import Path
+        mon_path = Path(__file__).resolve().parent.parent / "core" / "monitoring_module.py"
+        src = mon_path.read_text(encoding="utf-8")
+        legacy_pattern = r"def _momentum_key|def _trend_key|def _value_key"
+        matches = re.findall(legacy_pattern, src)
+        assert len(matches) == 0, (
+            f"monitoring_module 不应含旧 _xxx_key 排序键方法（变更 L 已合并），"
+            f"实际 {matches}"
+        )
+
+    def test_angle_sort_keys_used_in_module(self):
+        """monitoring_module 引用 _ANGLE_SORT_KEYS 作为排序键源。"""
+        import re
+        from pathlib import Path
+        mon_path = Path(__file__).resolve().parent.parent / "core" / "monitoring_module.py"
+        src = mon_path.read_text(encoding="utf-8")
+        assert "_ANGLE_SORT_KEYS" in src, \
+            "monitoring_module 应引用 _ANGLE_SORT_KEYS 表（变更 L 表驱动）"

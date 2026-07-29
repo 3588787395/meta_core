@@ -94,7 +94,7 @@ try:
     from ..core.domain import (
         TickSource, RealTickSource, MockDataSource,
         _stock_code, _normalize_stock_code, _MARKET_PREFIXES, _MARKET_SUFFIXES,
-        time_at, _safe_timestamp, is_offset_of_day, anchor_to_today,
+        time_at, _safe_timestamp, is_offset_of_day, anchor_to_today, _build_adjacency,
     )
 except ImportError:
     try:
@@ -119,7 +119,7 @@ except ImportError:
         from .domain import (
             TickSource, RealTickSource, MockDataSource,
             _stock_code, _normalize_stock_code, _MARKET_PREFIXES, _MARKET_SUFFIXES,
-            time_at, _safe_timestamp, is_offset_of_day, anchor_to_today,
+            time_at, _safe_timestamp, is_offset_of_day, anchor_to_today, _build_adjacency,
         )
     except ImportError:
         from execution_module import (
@@ -143,7 +143,7 @@ except ImportError:
         from domain import (
             TickSource, RealTickSource, MockDataSource,
             _stock_code, _normalize_stock_code, _MARKET_PREFIXES, _MARKET_SUFFIXES,
-            time_at, _safe_timestamp, is_offset_of_day, anchor_to_today,
+            time_at, _safe_timestamp, is_offset_of_day, anchor_to_today, _build_adjacency,
         )
 
 
@@ -391,10 +391,7 @@ class PoolEngineMixin:
     # 内部辅助
     # ------------------------------------------------------------------
     def _build_topology(self) -> Dict[str, List[str]]:
-        adj: Dict[str, List[str]] = {nid: [] for nid in self.nodes}
-        for ec in self._components["schedule"].edge_ctx.values():
-            adj.setdefault(ec.sid, []).append(ec.eid)
-        return adj
+        return _build_adjacency(self.nodes, self._components["schedule"].edge_ctx.values(), lambda ec: ec.sid, lambda ec: ec.eid)
 
     @staticmethod
     def _snapshot_stocks(stocks: List[Any]) -> frozenset:
@@ -2165,13 +2162,13 @@ class PoolEngine(PoolEngineMixin):
         # SubTask 27.14: 配置文件分类到子目录后需递归扫描；与 ConfigStore._iter_config_files
         # 保持一致：跳过 _archived/ 与 .locks.json，避免重复加载。
         _excluded_stems = {"api_routes", "ui_layouts", "field_definitions"}
-        self.tables = {
-            p.stem: json.load(open(p, encoding="utf-8"))
-            for p in path.rglob("*.json")
-            if p.stem not in _excluded_stems
-            and "_archived" not in p.parts
-            and p.name != ".locks.json"
-        }
+        # RULES.md rule 87：通过 ConfigStore 统一加载，消除直接 open+json.load 绕过热加载。
+        try:
+            from .table_engine import ConfigStore, get_global_config_store
+        except ImportError:
+            from core.table_engine import ConfigStore, get_global_config_store
+        _cs = ConfigStore(str(path)) if config_dir else (get_global_config_store() or ConfigStore(str(path)))
+        self.tables = {k: v for k, v in _cs.tables.items() if k not in _excluded_stems}
         # I92：消除 defaults.json 双重加载——已在 self.tables（ConfigStore glob）中，
         # 原 _load_defaults() 重复加载创建类内双重真相源 + 独立 _defaults_cache。
         self._defaults = self.tables.get("defaults", {})

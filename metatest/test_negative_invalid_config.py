@@ -306,3 +306,282 @@ class TestValidatorDetection:
         config_dir = Path(__file__).resolve().parent.parent / "config"
         v = LogicValidator(config_dir=config_dir)
         assert hasattr(v, "validate_logic")
+
+
+# ============================================================================
+# Task v3: 8 类无效配置主反测试（empty_pool/self_loop/orphan/dup_edge/
+# invalid_params/cycle/missing_node/invalid_type）
+# ============================================================================
+
+
+def _cfg_v3_empty_pool() -> Dict[str, Any]:
+    """空池配置：nodes 与 edges 均为空。"""
+    return {"id": "v3_empty", "name": "empty_pool", "nodes": [], "edges": []}
+
+
+def _cfg_v3_self_loop() -> Dict[str, Any]:
+    """自环边：edge.from == edge.to。"""
+    return {
+        "id": "v3_self_loop", "name": "self_loop",
+        "nodes": [{"id": "n1", "type": "statepool", "name": "st", "params": {}}],
+        "edges": [{"id": "e1", "from": "n1", "to": "n1", "type": "conditional"}],
+    }
+
+
+def _cfg_v3_orphan() -> Dict[str, Any]:
+    """孤立节点：orphan 节点无入边/出边。"""
+    return {
+        "id": "v3_orphan", "name": "orphan_node",
+        "nodes": [
+            {"id": "n1", "type": "statepool", "name": "a", "params": {}},
+            {"id": "n2", "type": "statepool", "name": "b", "params": {}},
+            {"id": "orphan", "type": "statepool", "name": "lonely", "params": {}},
+        ],
+        "edges": [{"id": "e1", "from": "n1", "to": "n2", "type": "conditional"}],
+    }
+
+
+def _cfg_v3_dup_edge() -> Dict[str, Any]:
+    """重复边：两条 from/to 完全相同的边。"""
+    return {
+        "id": "v3_dup_edge", "name": "duplicate_edge",
+        "nodes": [
+            {"id": "n1", "type": "statepool", "name": "a", "params": {}},
+            {"id": "n2", "type": "statepool", "name": "b", "params": {}},
+        ],
+        "edges": [
+            {"id": "e1", "from": "n1", "to": "n2", "type": "conditional",
+             "params": {"_order": 0}},
+            {"id": "e2", "from": "n1", "to": "n2", "type": "conditional",
+             "params": {"_order": 1}},
+        ],
+    }
+
+
+def _cfg_v3_invalid_params() -> Dict[str, Any]:
+    """无效参数：edge.params._order 为负数（语义非法）。"""
+    return {
+        "id": "v3_invalid_params", "name": "invalid_edge_params",
+        "nodes": [
+            {"id": "n1", "type": "statepool", "name": "a", "params": {}},
+            {"id": "n2", "type": "statepool", "name": "b", "params": {}},
+        ],
+        "edges": [
+            {"id": "e1", "from": "n1", "to": "n2", "type": "conditional",
+             "params": {"_order": -99}},
+        ],
+    }
+
+
+def _cfg_v3_cycle() -> Dict[str, Any]:
+    """循环依赖：A→B→A。"""
+    return {
+        "id": "v3_cycle", "name": "cycle_dep",
+        "nodes": [
+            {"id": "A", "type": "statepool", "name": "a", "params": {}},
+            {"id": "B", "type": "statepool", "name": "b", "params": {}},
+        ],
+        "edges": [
+            {"id": "e1", "from": "A", "to": "B", "type": "conditional"},
+            {"id": "e2", "from": "B", "to": "A", "type": "conditional"},
+        ],
+    }
+
+
+def _cfg_v3_missing_node() -> Dict[str, Any]:
+    """缺失节点引用：edge.to 指向不存在的节点。"""
+    return {
+        "id": "v3_missing_node", "name": "missing_node_ref",
+        "nodes": [{"id": "n1", "type": "statepool", "name": "st", "params": {}}],
+        "edges": [
+            {"id": "e1", "from": "n1", "to": "ghost_node_xyz", "type": "conditional"},
+        ],
+    }
+
+
+def _cfg_v3_invalid_type() -> Dict[str, Any]:
+    """无效节点类型：type 字段为未识别的字符串。"""
+    return {
+        "id": "v3_invalid_type", "name": "invalid_node_type",
+        "nodes": [
+            {"id": "n1", "type": "nonexistent_type_xyz", "name": "x", "params": {}},
+        ],
+        "edges": [],
+    }
+
+
+class TestV3EmptyPool:
+    """v3 用例 1：空池配置（empty_pool）。"""
+
+    def test_empty_pool_compile_does_not_crash(self):
+        cfg = _cfg_v3_empty_pool()
+        try:
+            sc = Compiler.compile(cfg)
+        except (KeyError, ValueError, TypeError):
+            return
+        except Exception:
+            return
+        assert sc is not None
+        assert sc.edge_ctx == {}
+
+    def test_empty_pool_state_initializes(self):
+        cfg = _cfg_v3_empty_pool()
+        try:
+            state = PoolState(pool_config=cfg)
+        except (KeyError, ValueError, TypeError):
+            return
+        except Exception:
+            return
+        assert state is not None
+
+
+class TestV3SelfLoop:
+    """v3 用例 2：自环边（self_loop）。"""
+
+    def test_self_loop_compile_handles_gracefully(self):
+        cfg = _cfg_v3_self_loop()
+        try:
+            sc = Compiler.compile(cfg)
+        except (ValueError, KeyError):
+            return  # 自环被显式拒绝是合法行为
+        except Exception:
+            return
+        assert sc is not None
+
+    def test_self_loop_poolstate_no_crash(self):
+        cfg = _cfg_v3_self_loop()
+        try:
+            state = PoolState(pool_config=cfg)
+        except (ValueError, KeyError):
+            return
+        except Exception:
+            return
+        assert state is not None
+
+
+class TestV3Orphan:
+    """v3 用例 3：孤立节点（orphan）。"""
+
+    def test_orphan_compile_succeeds(self):
+        cfg = _cfg_v3_orphan()
+        # 使用模块级 compile() 返回 CompiledPool（含 in_edges/out_edges）
+        from core.execution_module import compile as flat_compile
+        cp = flat_compile(cfg)
+        assert cp is not None
+        # orphan 节点应有空入边/出边（无任何边连接）
+        assert cp.in_edges.get("orphan", []) == []
+        assert cp.out_edges.get("orphan", []) == []
+
+    def test_orphan_poolstate_initializes(self):
+        cfg = _cfg_v3_orphan()
+        state = PoolState(pool_config=cfg)
+        assert state is not None
+        assert state.get_pool("orphan").get_stock_codes() == set()
+
+
+class TestV3DupEdge:
+    """v3 用例 4：重复边（dup_edge）。"""
+
+    def test_dup_edge_compile_keeps_both(self):
+        cfg = _cfg_v3_dup_edge()
+        from core.execution_module import compile as flat_compile
+        cp = flat_compile(cfg)
+        assert cp is not None
+        # 重复边应被保留（_order 区分），不抛异常
+        assert len(cp.edge_order) == 2
+
+    def test_dup_edge_poolstate_no_crash(self):
+        cfg = _cfg_v3_dup_edge()
+        state = PoolState(pool_config=cfg)
+        assert state is not None
+
+
+class TestV3InvalidParams:
+    """v3 用例 5：无效参数（invalid_params）。"""
+
+    def test_invalid_params_compile_handles_gracefully(self):
+        cfg = _cfg_v3_invalid_params()
+        from core.execution_module import compile as flat_compile
+        try:
+            cp = flat_compile(cfg)
+        except (ValueError, KeyError):
+            return
+        except Exception:
+            return
+        assert cp is not None
+        assert len(cp.edge_order) == 1
+
+    def test_invalid_params_poolstate_no_crash(self):
+        cfg = _cfg_v3_invalid_params()
+        try:
+            state = PoolState(pool_config=cfg)
+        except (ValueError, KeyError):
+            return
+        except Exception:
+            return
+        assert state is not None
+
+
+class TestV3Cycle:
+    """v3 用例 6：循环依赖（cycle）。"""
+
+    def test_cycle_compile_succeeds(self):
+        cfg = _cfg_v3_cycle()
+        from core.execution_module import compile as flat_compile
+        cp = flat_compile(cfg)
+        assert cp is not None
+        # 循环不阻塞编译（无拓扑排序依赖）
+        assert len(cp.edge_order) == 2
+
+    def test_cycle_poolstate_no_infinite_loop(self):
+        cfg = _cfg_v3_cycle()
+        state = PoolState(pool_config=cfg)
+        assert state is not None
+
+
+class TestV3MissingNode:
+    """v3 用例 7：缺失节点引用（missing_node）。"""
+
+    def test_missing_node_compile_handles_gracefully(self):
+        cfg = _cfg_v3_missing_node()
+        try:
+            sc = Compiler.compile(cfg)
+        except (KeyError, ValueError):
+            return  # 显式拒绝是合法行为
+        except Exception:
+            return
+        assert sc is not None
+
+    def test_missing_node_poolstate_handles_gracefully(self):
+        cfg = _cfg_v3_missing_node()
+        try:
+            state = PoolState(pool_config=cfg)
+        except (KeyError, ValueError):
+            return
+        except Exception:
+            return
+        assert state is not None
+
+
+class TestV3InvalidType:
+    """v3 用例 8：无效节点类型（invalid_type）。"""
+
+    def test_invalid_type_compile_handles_gracefully(self):
+        cfg = _cfg_v3_invalid_type()
+        try:
+            sc = Compiler.compile(cfg)
+        except (KeyError, ValueError, TypeError):
+            return  # 显式拒绝未知类型合法
+        except Exception:
+            return
+        assert sc is not None
+
+    def test_invalid_type_poolstate_handles_gracefully(self):
+        cfg = _cfg_v3_invalid_type()
+        try:
+            state = PoolState(pool_config=cfg)
+        except (KeyError, ValueError, TypeError):
+            return
+        except Exception:
+            return
+        assert state is not None

@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.event_bus import (
+    _event_handler,
     AlertRaised,
     DataChanged,
     EventBus,
@@ -56,6 +57,13 @@ _BASE = Path(__file__).parent.parent
 _CONFIG = _BASE / "config"
 _TDXPOOL_DIR = _BASE / "tdxpool"
 _TDX_BLOCK_DIR = _BASE / "data" / "tdx_blocks"
+
+# DZH tradeattr 进出场字段映射（BUY/SELL 仅前缀 enter*/exit* 不同，逻辑同构）
+_TRADEATTR_FIELD_MAP = {
+    "BUY": ["entertradetype", "enterrate", "enterqty", "entercond", "enterdelay", "enteronce", "enterlimit", "enterretry", "enterexpire"],
+    "SELL": ["exittradetype", "exitrate", "exitqty", "exitcond", "exitdelay", "exitonce", "exitlimit", "exitretry", "exitexpire"],
+}
+_TRADEATTR_TARGET_KEYS = ["tradetype", "price", "qty", "condition", "delay", "once", "limit", "retry", "expire"]
 
 
 # Task 9.5: _load_json_cache 已删除，改为通过 ConfigStore.get_table 加载
@@ -681,6 +689,7 @@ class TradeModule:
     # ------------------------------------------------------------------
     # SubTask 20.3：ModeChanged → 切换交易接口类型
     # ------------------------------------------------------------------
+    @_event_handler("_on_mode_changed")
     def _on_mode_changed(self, event: ModeChanged) -> None:
         """模式切换时切换 ``self._interface_type`` 并 freeze/unfreeze paper_trade。
 
@@ -692,38 +701,36 @@ class TradeModule:
 
         ``_INTERFACE_HANDLERS`` 表驱动分派保持不变，仅切换 ``_interface_type``
         即可在下次 ``_on_signal`` 时按新模式分派 handler。
-        
+
         仿真模式 side_effects_scope="simulation" 允许 paper_order，
         所以 simulation 模式下 unfreeze _trading_service。
         """
-        try:
-            mode_id = event.mode_id or "live"
-            mapping = {
-                "live": "live_order",
-                "replay": "noop",
-                "simulation": "paper_trade",
-            }
-            new_iface = mapping.get(mode_id, "paper_trade")
-            prev = self._interface_type
-            self._interface_type = new_iface
-            
-            if hasattr(self._trading_service, "freeze") and hasattr(self._trading_service, "unfreeze"):
-                if mode_id == "replay":
-                    self._trading_service.freeze()
-                    logger.info("TradeModule: replay模式，冻结paper_trade")
-                else:
-                    self._trading_service.unfreeze()
-                    logger.info("TradeModule: %s模式，解冻paper_trade", mode_id)
-            
-            logger.info(
-                "TradeModule 交易接口切换: %s -> %s（mode=%s）",
-                prev, new_iface, mode_id,
-            )
-        except Exception as ex:
-            logger.warning("TradeModule _on_mode_changed 异常: %s", ex)
+        mode_id = event.mode_id or "live"
+        mapping = {
+            "live": "live_order",
+            "replay": "noop",
+            "simulation": "paper_trade",
+        }
+        new_iface = mapping.get(mode_id, "paper_trade")
+        prev = self._interface_type
+        self._interface_type = new_iface
+
+        if hasattr(self._trading_service, "freeze") and hasattr(self._trading_service, "unfreeze"):
+            if mode_id == "replay":
+                self._trading_service.freeze()
+                logger.info("TradeModule: replay模式，冻结paper_trade")
+            else:
+                self._trading_service.unfreeze()
+                logger.info("TradeModule: %s模式，解冻paper_trade", mode_id)
+
+        logger.info(
+            "TradeModule 交易接口切换: %s -> %s（mode=%s）",
+            prev, new_iface, mode_id,
+        )
 
     # === SubTask 9.2：订阅 Signal 事件执行买卖 ===
 
+    @_event_handler("_on_data_changed")
     def _on_data_changed(self, event: DataChanged) -> None:
         """DataChanged事件处理：更新最新价缓存 + paper_trade持仓价格。
 
@@ -732,41 +739,39 @@ class TradeModule:
         同时更新_PaperTradeEngine中的持仓当前价格。
         兼容 fz 前缀仿真代码（8字符）与真实6位代码。
         """
-        try:
-            if event.source != "tick":
-                return
-            data = event.data or {}
-            if not isinstance(data, dict):
-                return
+        if event.source != "tick":
+            return
+        data = event.data or {}
+        if not isinstance(data, dict):
+            return
 
-            # 支持两种数据格式：单 tick dict 或 {code: tick_dict} 批量
-            if "code" in data:
-                ticks = [data]
-            else:
-                ticks = []
-                for code, tick in data.items():
-                    if isinstance(tick, dict):
-                        tick_copy = dict(tick)
-                        tick_copy["code"] = code
-                        ticks.append(tick_copy)
-                    else:
-                        ticks.append({"code": code, "price": tick})
+        # 支持两种数据格式：单 tick dict 或 {code: tick_dict} 批量
+        if "code" in data:
+            ticks = [data]
+        else:
+            ticks = []
+            for code, tick in data.items():
+                if isinstance(tick, dict):
+                    tick_copy = dict(tick)
+                    tick_copy["code"] = code
+                    ticks.append(tick_copy)
+                else:
+                    ticks.append({"code": code, "price": tick})
 
-            for tick in ticks:
-                code = str(tick.get("code", "")).strip()
-                if not code:
-                    continue
-                price = float(
-                    tick.get("close", tick.get("price", tick.get("lastprice", 0.0)))
-                    or 0.0
-                )
-                if price > 0:
-                    self._latest_prices[code] = price
-                    if hasattr(self._trading_service, "update_prices"):
-                        self._trading_service.update_prices({code: price})
-        except Exception as ex:
-            logger.warning("TradeModule _on_data_changed 异常: %s", ex)
+        for tick in ticks:
+            code = str(tick.get("code", "")).strip()
+            if not code:
+                continue
+            price = float(
+                tick.get("close", tick.get("price", tick.get("lastprice", 0.0)))
+                or 0.0
+            )
+            if price > 0:
+                self._latest_prices[code] = price
+                if hasattr(self._trading_service, "update_prices"):
+                    self._trading_service.update_prices({code: price})
 
+    @_event_handler("_on_ttl_due")
     def _on_ttl_due(self, event: TTLDue) -> None:
         """TTLDue 事件处理：对 auto_sell_pools 中的池发布 SELL Signal（G2）。
 
@@ -774,23 +779,20 @@ class TradeModule:
         TradeModule 订阅后自行完成卖出逻辑。无持仓时仍发布 Signal(sell_all)
        （quantity=0），由下游 _on_signal 优雅降级。
         """
-        try:
-            auto_sell_pools = self._config.get("auto_sell_pools", []) or []
-            if event.node_id not in auto_sell_pools:
-                return
-            code = event.code
-            if not code:
-                return
-            qty = self._get_position_qty(code, event.node_id)
-            price = self._get_latest_price(code, fallback=0.0)
-            # 无持仓时仍发布 Signal(sell_all)（quantity=0），
-            # 不在此跳过 — 下游 _on_signal 负责优雅降级。
-            self._bus.publish(Signal(
-                signal_type="SELL", code=code, pool_id=event.node_id,
-                price=price, ts=event.ts, quantity=qty,
-            ))
-        except Exception as ex:
-            logger.warning("TradeModule _on_ttl_due 异常: %s", ex)
+        auto_sell_pools = self._config.get("auto_sell_pools", []) or []
+        if event.node_id not in auto_sell_pools:
+            return
+        code = event.code
+        if not code:
+            return
+        qty = self._get_position_qty(code, event.node_id)
+        price = self._get_latest_price(code, fallback=0.0)
+        # 无持仓时仍发布 Signal(sell_all)（quantity=0），
+        # 不在此跳过 — 下游 _on_signal 负责优雅降级。
+        self._bus.publish(Signal(
+            signal_type="SELL", code=code, pool_id=event.node_id,
+            price=price, ts=event.ts, quantity=qty,
+        ))
 
     def _get_latest_price(self, code: str, fallback: float = 0.0) -> float:
         """获取股票最新价，优先从_latest_prices缓存，无缓存返回fallback。"""
@@ -823,6 +825,7 @@ class TradeModule:
         tracker = self._trackers.get(key, {})
         return int(tracker.get("qty", 0) or 0)
 
+    @_event_handler("_on_signal")
     def _on_signal(self, event: Signal) -> None:
         """收到交易信号，执行买入/卖出。
 
@@ -832,66 +835,63 @@ class TradeModule:
         - spec L142-143: SELL 无持仓时发布 rejected OrderPlaced（quantity=0，
           不实际下单），而非静默跳过 — 确保 Signal 已发出的下游可观测。
         """
-        try:
-            code = event.code
-            side = event.signal_type.upper()
-            price = float(event.price or 0.0)
-            qty = int(event.quantity or 0)
+        code = event.code
+        side = event.signal_type.upper()
+        price = float(event.price or 0.0)
+        qty = int(event.quantity or 0)
 
-            if price <= 0:
-                price = self._get_latest_price(code, fallback=price)
+        if price <= 0:
+            price = self._get_latest_price(code, fallback=price)
 
-            if side == "SELL" and qty <= 0:
-                qty = self._get_position_qty(code, event.pool_id)
-                if qty <= 0:
-                    # spec L142-143: Signal(sell_all) 已发出，
-                    # OrderPlaced 失败或为空（quantity=0, status=rejected 不实际下单）
-                    logger.info(
-                        "TradeModule SELL信号无持仓：%s（pool=%s）发布 rejected OrderPlaced",
-                        code, event.pool_id,
-                    )
-                    self._bus.publish(OrderPlaced(
-                        order={
-                            "code": code, "side": "SELL", "qty": 0,
-                            "price": price, "pool_id": event.pool_id,
-                            "order_type": "market", "condition": event.condition,
-                            "status": "rejected", "reason": "no_position",
-                            "ts": event.ts,
-                        },
-                        ts=event.ts,
-                    ))
-                    return
-            elif side == "BUY" and qty <= 0:
-                qty = 100
+        if side == "SELL" and qty <= 0:
+            qty = self._get_position_qty(code, event.pool_id)
+            if qty <= 0:
+                # spec L142-143: Signal(sell_all) 已发出，
+                # OrderPlaced 失败或为空（quantity=0, status=rejected 不实际下单）
+                logger.info(
+                    "TradeModule SELL信号无持仓：%s（pool=%s）发布 rejected OrderPlaced",
+                    code, event.pool_id,
+                )
+                self._bus.publish(OrderPlaced(
+                    order={
+                        "code": code, "side": "SELL", "qty": 0,
+                        "price": price, "pool_id": event.pool_id,
+                        "order_type": "market", "condition": event.condition,
+                        "status": "rejected", "reason": "no_position",
+                        "ts": event.ts,
+                    },
+                    ts=event.ts,
+                ))
+                return
+        elif side == "BUY" and qty <= 0:
+            qty = 100
 
-            order: Dict[str, Any] = {
-                "code": code,
-                "side": side,
-                "qty": qty,
-                "price": price,
-                "order_type": "market" if price <= 0 else "limit",
-                "pool_id": event.pool_id,
-                "condition": event.condition,
-                "ts": event.ts,
-            }
-            # 应用 DZH tradeattr 19 字段精细交易控制（如配置提供）
-            tradeattr = self._config.get("tradeattr")
-            if tradeattr:
-                order = self._apply_tradeattr(order, tradeattr)
-            # SubTask 19.7：携带 psatt 配置到 order，供 _on_order_filled 构造 ActionSpec
-            psatt = self._config.get("psatt")
-            if psatt:
-                order["psatt"] = psatt
-            # 按交易接口分派（表驱动，无 if/elif）
-            handler_name = self._INTERFACE_HANDLERS.get(
-                self._interface_type, "_noop_execute"
-            )
-            handler = getattr(self, handler_name, self._noop_execute)
-            result = handler(order)
-            if result:
-                self._bus.publish(OrderPlaced(order=order, ts=event.ts))
-        except Exception as ex:
-            logger.warning("TradeModule signal handling failed: %s", ex)
+        order: Dict[str, Any] = {
+            "code": code,
+            "side": side,
+            "qty": qty,
+            "price": price,
+            "order_type": "market" if price <= 0 else "limit",
+            "pool_id": event.pool_id,
+            "condition": event.condition,
+            "ts": event.ts,
+        }
+        # 应用 DZH tradeattr 19 字段精细交易控制（如配置提供）
+        tradeattr = self._config.get("tradeattr")
+        if tradeattr:
+            order = self._apply_tradeattr(order, tradeattr)
+        # SubTask 19.7：携带 psatt 配置到 order，供 _on_order_filled 构造 ActionSpec
+        psatt = self._config.get("psatt")
+        if psatt:
+            order["psatt"] = psatt
+        # 按交易接口分派（表驱动，无 if/elif）
+        handler_name = self._INTERFACE_HANDLERS.get(
+            self._interface_type, "_noop_execute"
+        )
+        handler = getattr(self, handler_name, self._noop_execute)
+        result = handler(order)
+        if result:
+            self._bus.publish(OrderPlaced(order=order, ts=event.ts))
 
     def _live_execute(self, order: Dict[str, Any]) -> bool:
         """实盘下单（委托 TradingService 调用真实券商接口）。
@@ -949,35 +949,34 @@ class TradeModule:
 
     # === SubTask 9.3：订单成交后发布 OrderFilled + PositionUpdated ===
 
+    @_event_handler("_on_order_placed")
     def _on_order_placed(self, event: OrderPlaced) -> None:
         """订单提交后，模拟成交（实盘模式下需等待真实成交回报）。"""
         order = event.order
-        try:
-            # spec L143: rejected 订单不实际成交（OrderPlaced 失败或为空）
-            if order.get("status") == "rejected":
-                logger.info(
-                    "TradeModule OrderPlaced rejected: %s %s (qty=0, reason=%s)",
-                    order.get("side"), order.get("code"), order.get("reason", ""),
-                )
-                return
-            if self._interface_type == "live_order":
-                # 实盘模式：等待真实成交回报（适配器未接入时简化为立即成交）
-                wait = getattr(self._trading_service, "wait_fill", None)
-                fill = wait(order) if callable(wait) else self._immediate_fill(order, event.ts)
-            else:
-                # 模拟/空操作模式：立即生成成交
-                fill = self._immediate_fill(order, event.ts)
-            # SubTask 19.7：将 psatt 从 order 透传到 fill，供 _on_order_filled 使用
-            psatt = order.get("psatt")
-            if psatt:
-                fill = dict(fill)
-                fill["psatt"] = psatt
-            self._bus.publish(OrderFilled(fill=fill, ts=event.ts))
-            tracker = self._update_tracker(order, fill)
-            self._bus.publish(PositionUpdated(tracker=tracker, ts=event.ts))
-        except Exception as ex:
-            logger.warning("TradeModule fill handling failed: %s", ex)
+        # spec L143: rejected 订单不实际成交（OrderPlaced 失败或为空）
+        if order.get("status") == "rejected":
+            logger.info(
+                "TradeModule OrderPlaced rejected: %s %s (qty=0, reason=%s)",
+                order.get("side"), order.get("code"), order.get("reason", ""),
+            )
+            return
+        if self._interface_type == "live_order":
+            # 实盘模式：等待真实成交回报（适配器未接入时简化为立即成交）
+            wait = getattr(self._trading_service, "wait_fill", None)
+            fill = wait(order) if callable(wait) else self._immediate_fill(order, event.ts)
+        else:
+            # 模拟/空操作模式：立即生成成交
+            fill = self._immediate_fill(order, event.ts)
+        # SubTask 19.7：将 psatt 从 order 透传到 fill，供 _on_order_filled 使用
+        psatt = order.get("psatt")
+        if psatt:
+            fill = dict(fill)
+            fill["psatt"] = psatt
+        self._bus.publish(OrderFilled(fill=fill, ts=event.ts))
+        tracker = self._update_tracker(order, fill)
+        self._bus.publish(PositionUpdated(tracker=tracker, ts=event.ts))
 
+    @_event_handler("_on_order_filled")
     def _on_order_filled(self, event: OrderFilled) -> None:
         """成交后触发 TDX psatt 副作用（SubTask 19.7）。
 
@@ -987,19 +986,17 @@ class TradeModule:
         构造 ActionSpec 并调用 ``_apply_psatt_side_effects`` 补全链路。
         若无 psatt 配置则跳过（向后兼容）。
         """
-        try:
-            fill = event.fill or {}
-            psatt = fill.get("psatt")
-            if not psatt:
-                return
-            code = fill.get("code", "")
-            action_spec = ActionSpec.from_dict(psatt)
-            self._apply_psatt_side_effects(action_spec, [code] if code else [])
-        except Exception as ex:
-            logger.warning("TradeModule _on_order_filled psatt failed: %s", ex)
+        fill = event.fill or {}
+        psatt = fill.get("psatt")
+        if not psatt:
+            return
+        code = fill.get("code", "")
+        action_spec = ActionSpec.from_dict(psatt)
+        self._apply_psatt_side_effects(action_spec, [code] if code else [])
 
     # === SubTask 21.4：订阅 TransferExecuted 事件，支持入池即买入/出池即卖出 ===
 
+    @_event_handler("_on_transfer_executed")
     def _on_transfer_executed(self, event: TransferExecuted) -> None:
         """转移执行完成 handler：支持入池即买入 / 出池即卖出语义。
 
@@ -1010,36 +1007,33 @@ class TradeModule:
         配置键从 ``self._config`` 读取（``auto_buy_pools`` / ``auto_sell_pools``），
         未配置时为空列表，handler 退化为仅记录日志。
         """
-        try:
-            auto_buy_pools = self._config.get("auto_buy_pools", []) or []
-            auto_sell_pools = self._config.get("auto_sell_pools", []) or []
-            # 入池即买入：股票进入 auto_buy_pools 目标池时发布 BUY Signal。
-            # Spec: C 池入池买入链 TransferExecuted → Signal(buy,100)。
-            # 适用 copy/move/overwrite 全模式——股票进入目标池即触发买入，
-            # 与是否离开源池无关（copy 模式源池保留但目标池也入池）。
-            if event.tgt in auto_buy_pools and event.codes:
-                for code in event.codes:
+        auto_buy_pools = self._config.get("auto_buy_pools", []) or []
+        auto_sell_pools = self._config.get("auto_sell_pools", []) or []
+        # 入池即买入：股票进入 auto_buy_pools 目标池时发布 BUY Signal。
+        # Spec: C 池入池买入链 TransferExecuted → Signal(buy,100)。
+        # 适用 copy/move/overwrite 全模式——股票进入目标池即触发买入，
+        # 与是否离开源池无关（copy 模式源池保留但目标池也入池）。
+        if event.tgt in auto_buy_pools and event.codes:
+            for code in event.codes:
+                self._bus.publish(Signal(
+                    signal_type="BUY", code=code, pool_id=event.tgt,
+                    price=0.0, ts=event.ts, quantity=100,
+                ))
+        # 出池即卖出：仅 move/overwrite 模式（股票实际离开源池）时，
+        # 对 auto_sell_pools 源池发布 SELL Signal。copy 模式股票未离开源池不卖。
+        # 使用 exited_codes（实际离开源池的代码），而非 entered_codes。
+        if event.mode in ("move", "overwrite") and event.src in auto_sell_pools:
+            exited_codes = getattr(event, "exited_codes", None) or event.codes
+            for code in exited_codes:
+                key = (event.src, code)
+                tracker = self._trackers.get(key, {})
+                qty = int(tracker.get("qty", 0) or 0)
+                if qty > 0:
                     self._bus.publish(Signal(
-                        signal_type="BUY", code=code, pool_id=event.tgt,
-                        price=0.0, ts=event.ts, quantity=100,
+                        signal_type="SELL", code=code, pool_id=event.src,
+                        price=float(tracker.get("cur_price", 0.0) or 0.0),
+                        ts=event.ts, quantity=qty,
                     ))
-            # 出池即卖出：仅 move/overwrite 模式（股票实际离开源池）时，
-            # 对 auto_sell_pools 源池发布 SELL Signal。copy 模式股票未离开源池不卖。
-            # 使用 exited_codes（实际离开源池的代码），而非 entered_codes。
-            if event.mode in ("move", "overwrite") and event.src in auto_sell_pools:
-                exited_codes = getattr(event, "exited_codes", None) or event.codes
-                for code in exited_codes:
-                    key = (event.src, code)
-                    tracker = self._trackers.get(key, {})
-                    qty = int(tracker.get("qty", 0) or 0)
-                    if qty > 0:
-                        self._bus.publish(Signal(
-                            signal_type="SELL", code=code, pool_id=event.src,
-                            price=float(tracker.get("cur_price", 0.0) or 0.0),
-                            ts=event.ts, quantity=qty,
-                        ))
-        except Exception as ex:
-            logger.warning("TradeModule _on_transfer_executed failed: %s", ex)
 
     def _immediate_fill(self, order: Dict[str, Any], ts: float) -> Dict[str, Any]:
         """立即生成成交回报（模拟/空操作模式）。
@@ -1112,47 +1106,27 @@ class TradeModule:
         # 账户号
         if tradeattr.get("accountno"):
             enriched["accountno"] = tradeattr.get("accountno")
-        # 进出场类型与限价：0=市价, 1=限价
-        if side == "BUY":
-            if int(tradeattr.get("entertradetype", 0) or 0) == 1:
-                enriched["order_type"] = "limit"
-                enriched["price"] = float(
-                    tradeattr.get("enterrate", order.get("price", 0.0)) or 0.0
-                )
-            if tradeattr.get("enterqty"):
-                enriched["qty"] = int(tradeattr.get("enterqty"))
-            if tradeattr.get("entercond"):
-                enriched["condition"] = str(tradeattr.get("entercond"))
-            if tradeattr.get("enterdelay"):
-                enriched["delay"] = int(tradeattr.get("enterdelay"))
-            if tradeattr.get("enteronce"):
-                enriched["once"] = True
-            if tradeattr.get("enterlimit"):
-                enriched["limit"] = int(tradeattr.get("enterlimit"))
-            if tradeattr.get("enterretry"):
-                enriched["retry"] = int(tradeattr.get("enterretry"))
-            if tradeattr.get("enterexpire"):
-                enriched["expire"] = int(tradeattr.get("enterexpire"))
-        elif side == "SELL":
-            if int(tradeattr.get("exittradetype", 0) or 0) == 1:
-                enriched["order_type"] = "limit"
-                enriched["price"] = float(
-                    tradeattr.get("exitrate", order.get("price", 0.0)) or 0.0
-                )
-            if tradeattr.get("exitqty"):
-                enriched["qty"] = int(tradeattr.get("exitqty"))
-            if tradeattr.get("exitcond"):
-                enriched["condition"] = str(tradeattr.get("exitcond"))
-            if tradeattr.get("exitdelay"):
-                enriched["delay"] = int(tradeattr.get("exitdelay"))
-            if tradeattr.get("exitonce"):
-                enriched["once"] = True
-            if tradeattr.get("exitlimit"):
-                enriched["limit"] = int(tradeattr.get("exitlimit"))
-            if tradeattr.get("exitretry"):
-                enriched["retry"] = int(tradeattr.get("exitretry"))
-            if tradeattr.get("exitexpire"):
-                enriched["expire"] = int(tradeattr.get("exitexpire"))
+        # 进出场类型与限价：0=市价, 1=限价（BUY/SELL 同构，仅字段前缀 enter*/exit* 不同）
+        fields = _TRADEATTR_FIELD_MAP.get(side, [])
+        for src_field, target_key in zip(fields, _TRADEATTR_TARGET_KEYS):
+            val = tradeattr.get(src_field)
+            if target_key == "tradetype":
+                if int(val or 0) == 1:
+                    enriched["order_type"] = "limit"
+            elif target_key == "price":
+                if int(tradeattr.get(fields[0], 0) or 0) == 1:
+                    enriched["price"] = float(
+                        tradeattr.get(src_field, order.get("price", 0.0)) or 0.0
+                    )
+            elif target_key == "once":
+                if val:
+                    enriched["once"] = True
+            elif target_key == "condition":
+                if val:
+                    enriched[target_key] = str(val)
+            else:  # qty / delay / limit / retry / expire
+                if val:
+                    enriched[target_key] = int(val)
         return enriched
 
     def _apply_psatt_side_effects(

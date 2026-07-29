@@ -3,6 +3,8 @@
 端到端验证 ImportExportModule 的 JSON 格式导入/导出 roundtrip 等价性：
 导出池配置 → 导入回读 → 比较字段完整性、节点角色保持、边顺序保持。
 
+fixture 路径统一使用 ``metatest/fixtures/`` 前缀（旧 ``config/pools/`` 已归档）。
+
 测试用例：
   1. test_export_then_import_equivalence
   2. test_export_includes_all_fields
@@ -10,6 +12,7 @@
   4. test_roundtrip_preserves_node_roles
   5. test_roundtrip_preserves_edge_order
   6. test_export_publishes_event
+  7. test_call_converter_unified_entry
 """
 from __future__ import annotations
 
@@ -22,8 +25,10 @@ from typing import Any, Dict
 import pytest
 
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_SIM_POOL_10 = _PROJECT_ROOT / "config" / "pools" / "sim_test_pool.json"
+_THIS_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _THIS_DIR.parent
+# fixture 路径统一使用 metatest/fixtures/ 前缀（旧 config/pools/ 已归档）
+_SIM_POOL_10 = _THIS_DIR / "fixtures" / "sim_test_pool.json"
 
 
 def _load_pool_config(path: Path) -> Dict[str, Any]:
@@ -52,6 +57,11 @@ class TestImportExportRoundtrip:
             # 导入
             ok = iem.import_pool(out_path, "json")
             assert ok is True, "导入应成功"
+            # 导出文件应为有效 JSON
+            with open(out_path, encoding="utf-8") as f:
+                data = json.load(f)
+            assert "nodes" in data, "导出 JSON 应含 nodes"
+            assert "edges" in data, "导出 JSON 应含 edges"
         modules = report_state.setdefault("modules_covered", [])
         if "core.import_export_module" not in modules:
             modules.append("core.import_export_module")
@@ -73,6 +83,8 @@ class TestImportExportRoundtrip:
         assert len(data["nodes"]) == len(original.get("nodes", []))
         # 边数与原配置一致
         assert len(data["edges"]) == len(original.get("edges", []))
+        # version 字段存在
+        assert "version" in data, "导出 JSON 应含 version 字段"
         modules = report_state.setdefault("modules_covered", [])
         if "converters" not in modules:
             modules.append("converters")
@@ -96,6 +108,9 @@ class TestImportExportRoundtrip:
                 assert ok is False, "非法 JSON 导入应返回 False"
             except (ValueError, Exception):
                 pass  # 抛异常也是可接受的失败行为
+            # 不支持的格式应返回 False
+            ok2 = iem.import_pool(bad_path, "unsupported_fmt")
+            assert ok2 is False, "不支持的格式导入应返回 False"
 
     def test_roundtrip_preserves_node_roles(self, report_state) -> None:
         """roundtrip 保持节点角色映射不变。
@@ -108,6 +123,7 @@ class TestImportExportRoundtrip:
         original = _load_pool_config(_SIM_POOL_10)
         # 原始编译产物的 node_role
         cp_orig = compile(original)
+        assert len(cp_orig.node_role) > 0, "原始 node_role 不应为空"
         # 导出 → 导入
         json_str = export_pool_to_json(original)
         with tempfile.NamedTemporaryFile(
@@ -127,6 +143,8 @@ class TestImportExportRoundtrip:
         for nid in cp_orig.node_role:
             assert cp_orig.node_role[nid] == cp_imp.node_role[nid], \
                 f"节点 {nid} 角色在 roundtrip 后变化"
+        # node_role 非空
+        assert len(cp_imp.node_role) > 0, "导入后 node_role 不应为空"
 
     def test_roundtrip_preserves_edge_order(self, report_state) -> None:
         """roundtrip 保持边 _order 顺序不变。
@@ -138,6 +156,7 @@ class TestImportExportRoundtrip:
 
         original = _load_pool_config(_SIM_POOL_10)
         cp_orig = compile(original)
+        assert len(cp_orig.edge_order) > 0, "原始 edge_order 不应为空"
         # 导出 → 导入
         json_str = export_pool_to_json(original)
         with tempfile.NamedTemporaryFile(
@@ -156,6 +175,9 @@ class TestImportExportRoundtrip:
         # edge_type 应一致
         assert set(cp_orig.edge_type.keys()) == set(cp_imp.edge_type.keys()), \
             "roundtrip 后 edge_type 键不一致"
+        # edge_endpoints 应一致
+        assert set(cp_orig.edge_endpoints.keys()) == set(cp_imp.edge_endpoints.keys()), \
+            "roundtrip 后 edge_endpoints 键不一致"
         modules = report_state.setdefault("modules_covered", [])
         for m in ("core.execution_module", "converters"):
             if m not in modules:
@@ -180,6 +202,9 @@ class TestImportExportRoundtrip:
         event = collected[-1]
         assert isinstance(event, ExportCompleted)
         assert event.format == "json"
+        # event.count 应等于节点数
+        assert event.count == len(original.get("nodes", [])), \
+            "ExportCompleted.count 应等于节点数"
         event_types = report_state.setdefault("event_types_seen", [])
         if "ExportCompleted" not in event_types:
             event_types.append("ExportCompleted")
@@ -187,3 +212,44 @@ class TestImportExportRoundtrip:
         for m in ("core.import_export_module", "core.event_bus"):
             if m not in modules:
                 modules.append(m)
+
+    def test_call_converter_unified_entry(self, report_state) -> None:
+        """_call_converter 统一入口验证（变更 C 验收）。
+
+        验证 _call_converter 作为三格式（dzh/tdx/json）统一入口，
+        查表 → 延迟 import → 调 adapter。
+        """
+        from core.import_export_module import (
+            _call_converter, _CONVERTER_REGISTRY,
+            _IMPORT_RULES, _EXPORT_RULES,
+        )
+        from converters import export_pool_to_json, import_pool_from_json
+
+        # _CONVERTER_REGISTRY 应含 json import/export 条目
+        assert ("json", "import") in _CONVERTER_REGISTRY, \
+            "_CONVERTER_REGISTRY 缺 (json, import)"
+        assert ("json", "export") in _CONVERTER_REGISTRY, \
+            "_CONVERTER_REGISTRY 缺 (json, export)"
+        # _IMPORT_RULES / _EXPORT_RULES 应含 json
+        assert "json" in _IMPORT_RULES, "_IMPORT_RULES 缺 json"
+        assert "json" in _EXPORT_RULES, "_EXPORT_RULES 缺 json"
+        # _call_converter 对未知格式 import 返回 {}
+        result = _call_converter("/nonexistent/path", "unknown_fmt", "import")
+        assert result == {}, "未知格式 import 应返回 {}"
+        # _call_converter 对未知格式 export 返回 None
+        result2 = _call_converter("/nonexistent/path", "unknown_fmt", "export")
+        assert result2 is None, "未知格式 export 应返回 None"
+        # 实际 roundtrip：导出 → 用 _call_converter 导入
+        original = _load_pool_config(_SIM_POOL_10)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_path = os.path.join(tmpdir, "converter_test.json")
+            export_pool_to_json(original, file_path=out_path)
+            assert os.path.exists(out_path)
+            # 通过 _call_converter 统一入口导入
+            imported = _call_converter(out_path, "json", "import")
+            assert isinstance(imported, dict), "_call_converter import 应返回 dict"
+            assert "nodes" in imported, "导入结果应含 nodes"
+            assert "edges" in imported, "导入结果应含 edges"
+        modules = report_state.setdefault("modules_covered", [])
+        if "core.import_export_module" not in modules:
+            modules.append("core.import_export_module")

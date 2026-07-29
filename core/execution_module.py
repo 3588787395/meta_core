@@ -36,6 +36,7 @@ from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Proto
 from pydantic import BaseModel, Field
 
 from .event_bus import (
+    _event_handler,
     ConfigChanged,
     DataChanged,
     DomainEvent,
@@ -64,12 +65,6 @@ from .domain import (
     anchor_to_today,
     _lookup_builtin_formula_info,
     time_now_unix,
-    # noperate 评估工具（已迁移至 domain 白名单）
-    _NOPERATE_RULES,
-    _RANK_MODES,
-    _resolve_rank,
-    _build_op_ctx,
-    _eval_op,
     # TDX nperiod → period 映射（已迁移至 domain 白名单）
     _nperiod_to_period,
     # 交集条件评估器（已迁移至 domain 白名单）
@@ -83,6 +78,9 @@ from .domain import (
 )
 from .schemas import StepResult
 from .table_engine import get_global_config_store, load_config_table
+# Task 3：向量 mode 分派（rank/inflection/compare）下沉至 screening_module，与标量版共用
+# _NOPERATE_RULES + _MODE_HANDLERS_SERIES 真值源，消除本模块 mode 硬编码分支。
+from .screening_module import _apply_noperate_mode_series, _resolve_series_lookback
 
 if TYPE_CHECKING:
     from .runtime_mode_module import PoolState
@@ -856,6 +854,56 @@ def _build_tdx_func_from_panel(params: Dict[str, Any]) -> Optional[Dict[str, Any
     return tdx_func
 
 
+# ===========================================================================
+# 变更 F：build_spec 提取器统一 — 4 个 _build_xxx_spec 共享「提取 edge.params → 查 config → 构造 Spec」骨架
+# ===========================================================================
+
+def _extract_edge_params(edge: Dict[str, Any]) -> Dict[str, Any]:
+    """一次性提取 ``edge.params``（4 个 ``_build_xxx_spec`` 共享的字段提取骨架）。"""
+    return edge.get("params", {}) if isinstance(edge, dict) else {}
+
+
+def _to_bool(v) -> bool:
+    """TDX func 布尔字段归一化（bool 是 int 子类，int/float 分支已覆盖 bool 取值）。"""
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    if isinstance(v, (int, float)):
+        return v != 0
+    return False
+
+
+def _cast_int(v) -> int:
+    return int(v or 0)
+
+
+def _cast_str(v) -> str:
+    return str(v or "").strip()
+
+
+# TimingSpec 直接字段映射；duration_sec/gate_expr 由 timing.json 派生
+_TIMING_SPEC_FIELDS: Dict[str, Callable[[Any], int]] = {
+    f: _cast_int for f in ("starttype", "starttime", "starttimetype", "starttimehms", "cxtype", "cxtime", "cxtimetype")
+}
+
+# PropagateSpec 直接字段映射（tran/emptyps），attr 位域与 mode 由派生计算
+_PROPAGATE_SPEC_FIELDS: Dict[str, Callable[[Any], int]] = {f: _cast_int for f in ("tran", "emptyps")}
+
+# PropagateSpec mode 派发表：(clear_dest_first, is_move) → mode（消除原 if/elif/else 三分支）
+_PROPAGATE_MODE_TABLE: Dict[Tuple[bool, bool], str] = {
+    (True, False): "overwrite_copy", (True, True): "overwrite",
+    (False, True): "move", (False, False): "copy",
+}
+
+# TDX func 参数字段映射（供 _build_filter_spec tdx_func 分支表驱动提取）
+_TDX_FUNC_SPEC_FIELDS: Dict[str, Callable[[Any], Any]] = {
+    "nperiod": _cast_int, "nfirst": _cast_int, "cfirst": _cast_str,
+    "nsecond": lambda v: int(v) if v is not None else -1, "csecond": _cast_str,
+    "nbeginday": _cast_int, "nendday": _cast_int,
+    "bnost": _to_bool, "bnotp": _to_bool, "bnotq": _to_bool,
+    "nperiodnum": _cast_int, "formula_args": lambda v: v or {},
+}
+
+
 class Compiler:
     """股票池配置编译器：输出 ``CompiledSchedule`` 供运行期只读使用。"""
 
@@ -906,40 +954,17 @@ class Compiler:
     @staticmethod
     def _build_timing_spec(edge: Dict[str, Any]) -> TimingSpec:
         """从 edge params 与 timing.json 编译时机规则。"""
-        params = edge.get("params", {}) if isinstance(edge, dict) else {}
+        params = _extract_edge_params(edge)
         timing_cfg = get_global_config_store().get_table("timing") if get_global_config_store() else {}
-
-        starttype = int(params.get("starttype", 0) or 0)
-        cxtype = int(params.get("cxtype", 0) or 0)
-        starttime = int(params.get("starttime", 0) or 0)
-        starttimetype = int(params.get("starttimetype", 0) or 0)
-        starttimehms = int(params.get("starttimehms", 0) or 0)
-        cxtime = int(params.get("cxtime", 0) or 0)
-        jgtime = int(params.get("jgtime", 0) or 0)
-        if not jgtime:
-            jgtime = int(params.get("time_gate_interval", 0) or 0)
-        cxtimetype = int(params.get("cxtimetype", 0) or 0)
-
-        cxtime_units = timing_cfg.get(
-            "cxtime_units", {"0": 1, "1": 60, "2": 3600, "3": 86400}
-        )
-        duration_sec = cxtime * int(cxtime_units.get(str(cxtimetype), 1) or 1)
-
-        st_rule = timing_cfg.get("starttype_rules", {}).get(str(starttype), {})
-        cx_rule = timing_cfg.get("cxtype_rules", {}).get(str(cxtype), {})
+        tfields = {name: cast(params.get(name)) for name, cast in _TIMING_SPEC_FIELDS.items()}
+        jgtime = int(params.get("jgtime", 0) or 0) or int(params.get("time_gate_interval", 0) or 0)
+        cxtime_units = timing_cfg.get("cxtime_units", {"0": 1, "1": 60, "2": 3600, "3": 86400})
+        duration_sec = tfields["cxtime"] * int(cxtime_units.get(str(tfields["cxtimetype"]), 1) or 1)
+        st_rule = timing_cfg.get("starttype_rules", {}).get(str(tfields["starttype"]), {})
+        cx_rule = timing_cfg.get("cxtype_rules", {}).get(str(tfields["cxtype"]), {})
         gate_expr = f"{st_rule.get('name', 'immediate')}/{cx_rule.get('name', 'forever')}"
 
-        return TimingSpec(
-            starttype=starttype,
-            starttime=starttime,
-            starttimetype=starttimetype,
-            starttimehms=starttimehms,
-            cxtype=cxtype,
-            cxtime=cxtime,
-            interval_sec=jgtime,
-            duration_sec=duration_sec,
-            gate_expr=gate_expr,
-        )
+        return TimingSpec(interval_sec=jgtime, duration_sec=duration_sec, gate_expr=gate_expr, **tfields)
 
     # I18：dispatch_key → evaluator_type 编译期映射（消除运行期 dispatch_key/evaluator 双路径）
     _DISPATCH_KEY_TO_EVALUATOR_TYPE: Dict[str, str] = {
@@ -960,223 +985,56 @@ class Compiler:
 
     @staticmethod
     def _build_filter_spec(edge: Dict[str, Any], nodes: Dict[str, Any]) -> FilterSpec:
-        """从 edge params、dispatch.json 编译筛选分派规则。
-
-        I18：编译期解析 dispatch_key → evaluator_type，scalar 路径 nset_cfg
-        转存至 evaluator_params，运行期不再查 dispatch.json / _SCALAR_NSET_CFG。
-        """
-        params = edge.get("params", {}) if isinstance(edge, dict) else {}
+        """从 edge params、dispatch.json 编译筛选分派规则，4 个构造分支查 ``_FILTER_SPEC_BUILDERS`` 表路由。"""
+        params = _extract_edge_params(edge)
         dispatch_cfg = get_global_config_store().get_table("dispatch") if get_global_config_store() else {}
-
         nset_dispatch = dispatch_cfg.get("nset_dispatch", {})
 
+        # 解析 tdx_func：边 params → 面板参数合成 → 条件节点继承（前置预处理，非分派分支）
         tdx_func = params.get("tdx_func")
-
-        # 若边 params 未携带 tdx_func，尝试从通达信指标面板参数合成
         if not isinstance(tdx_func, dict) or not tdx_func:
             tdx_func = _build_tdx_func_from_panel(params)
-
-        # 若边 params 未携带 tdx_func，但目标节点是条件节点，则从条件节点继承公式配置
         if not isinstance(tdx_func, dict) or not tdx_func:
             tid = _extract_edge_endpoint(edge, ("to", "target", "endid"))
             tgt_node = nodes.get(tid, {})
             tgt_type = str(tgt_node.get("type", tgt_node.get("dzh_cell_type", "")))
             if tgt_type in ("3", "201", "transfer_condition", "condition_filter"):
                 tdx_func = tgt_node.get("params", {}).get("tdx_func")
-                # 条件节点也可能使用面板参数
                 if not isinstance(tdx_func, dict) or not tdx_func:
                     tdx_func = _build_tdx_func_from_panel(tgt_node.get("params", {}))
 
-        if isinstance(tdx_func, dict) and tdx_func:
-            nset = int(tdx_func.get("nset", 0) or 0)
-            nset_key = str(nset)
-            nset_entry = nset_dispatch.get(nset_key, {})
-            dispatch_key = nset_entry.get("dispatch_key", "")
-
-            # I18：编译期解析 evaluator_type（dispatch_key → 类型映射）
-            # accode/ntjindexno 均空时退化为 pass_through（保留旧行为：无公式则全通过）
-            # 注意：ntjindexno=0 是合法值（nset=4 字段索引 0=现价），不能用 `or ""` 提取
-            accode_raw = tdx_func.get("accode")
-            accode = str(accode_raw) if accode_raw is not None else ""
-            ntjindexno_raw = tdx_func.get("ntjindexno")
-            ntjindexno = int(ntjindexno_raw) if ntjindexno_raw is not None else 0
-            if not accode and ntjindexno_raw is None:
-                evaluator_type = "pass_through"
-            else:
-                evaluator_type = Compiler._DISPATCH_KEY_TO_EVALUATOR_TYPE.get(
-                    dispatch_key, "formula"
-                )
-
-            # I18：formula_ref 按 evaluator_type 选择
-            # - formula: accode（公式表达式，如 "MACD"）
-            # - scalar: ntjindexno（字段索引，如 "0"、"7"）
-            # - set_operation: ntjindexno（操作码，如 "0"）
-            # 旧代码统一用 accode or ntjindexno，对 scalar 路径误取 accode 标签（如"现价"）
-            if evaluator_type == "formula":
-                formula_ref = accode or str(ntjindexno)
-            else:
-                formula_ref = str(ntjindexno) if ntjindexno_raw is not None else accode
-
-            # I18：scalar 路径 nset_cfg 转存至 evaluator_params（运行期不再查 _SCALAR_NSET_CFG）
-            evaluator_params: Dict[str, Any] = {}
-            if evaluator_type == "scalar":
-                evaluator_params = {
-                    k: v for k, v in nset_entry.items()
-                    if k in Compiler._SCALAR_NSET_CFG_KEYS
-                }
-
-            formula_period = _nperiod_to_period(tdx_func.get("nperiod"))
-
-            # 提取所有16个TDX func参数
-            def _as_bool(v) -> bool:
-                if isinstance(v, bool):
-                    return v
-                if isinstance(v, (int, float)):
-                    return v != 0
-                if isinstance(v, str):
-                    return v.strip().lower() in ("1", "true", "yes", "on")
-                return False
-
-            nperiod_val = int(tdx_func.get("nperiod", 0) or 0)
-            nfirst_val = int(tdx_func.get("nfirst", 0) or 0)
-            cfirst_val = str(tdx_func.get("cfirst", "") or "").strip()
-            nsecond_val = int(tdx_func.get("nsecond", -1)) if tdx_func.get("nsecond") is not None else -1
-            csecond_val = str(tdx_func.get("csecond", "") or "").strip()
-            nbeginday_val = int(tdx_func.get("nbeginday", 0) or 0)
-            nendday_val = int(tdx_func.get("nendday", 0) or 0)
-            bnost_val = _as_bool(tdx_func.get("bnost", False))
-            bnotp_val = _as_bool(tdx_func.get("bnotp", False))
-            bnotq_val = _as_bool(tdx_func.get("bnotq", False))
-            nperiodnum_val = int(tdx_func.get("nperiodnum", 0) or 0)
-            formula_args_val = tdx_func.get("formula_args") or {}
-
-            return FilterSpec(
-                filter_type=dispatch_key or "formula",
-                formula_ref=formula_ref,
-                formula_period=formula_period,
-                threshold=float(tdx_func.get("fsecond") or 0),
-                noperate=int(tdx_func.get("noperate", 0) or 0),
-                sorttype=int(tdx_func.get("sorttype", 0) or 0),
-                compare_mode=str(tdx_func.get("compare_mode") or ""),
-                evaluator_type=evaluator_type,
-                evaluator_params=evaluator_params,
-                nset=nset,
-                accode=accode,
-                ntjindexno=ntjindexno,
-                nperiod=nperiod_val,
-                nfirst=nfirst_val,
-                cfirst=cfirst_val,
-                nsecond=nsecond_val,
-                csecond=csecond_val,
-                nbeginday=nbeginday_val,
-                nendday=nendday_val,
-                bnost=bnost_val,
-                bnotp=bnotp_val,
-                bnotq=bnotq_val,
-                nperiodnum=nperiodnum_val,
-                formula_args=formula_args_val,
-                func=params.get("func") if isinstance(params.get("func"), dict) else {},
-                indi=str(params.get("indi", "")).strip(),
-                indiparam=params.get("indiparam") if isinstance(params.get("indiparam"), list) else [],
-            )
-
-        # 无 tdx_func 时：先检查边 params 是否直接携带 formula_ref
-        formula_ref_direct = params.get("formula_ref", "")
-        if formula_ref_direct:
-            formula_period = params.get("formula_period", "")
-            if not formula_period:
-                builtin_info = _lookup_builtin_formula_info(formula_ref_direct)
-                if builtin_info and builtin_info.get("period"):
-                    formula_period = builtin_info["period"]
-            return FilterSpec(
-                filter_type="formula",
-                formula_ref=formula_ref_direct,
-                formula_period=formula_period,
-                threshold=float(params.get("fsecond") or params.get("threshold") or 0),
-                noperate=int(params.get("noperate", 0) or 0),
-                sorttype=int(params.get("sorttype", 0) or 0),
-                compare_mode=str(params.get("compare_mode") or ""),
-                evaluator_type="formula",
-                evaluator_params={},
-                func=params.get("func") if isinstance(params.get("func"), dict) else {},
-                indi=str(params.get("indi", "")).strip(),
-                indiparam=params.get("indiparam") if isinstance(params.get("indiparam"), list) else [],
-            )
-
-        # 无 formula_ref 也无 tdx_func 时，检查 condition_type（如 INTERSECTION）
-        condition_type = str(params.get("condition_type", "") or "")
-        if condition_type == "INTERSECTION":
-            return FilterSpec(
-                filter_type="INTERSECTION",
-                formula_ref="",
-                threshold=0.0,
-                noperate=0,
-                sorttype=0,
-                compare_mode="",
-                evaluator_type="intersection",
-                evaluator_params={"intersection_source": params.get("intersection_source", "")},
-            )
-
-        # 无 condition_type 时，按源节点类型决定 filter_type（均退化为 pass_through）
-        sid = _extract_edge_endpoint(edge, ("from", "source", "startid"))
-        src_type = _resolve_node_type(nodes.get(sid, {}))
-        edge_type = _resolve_edge_type(src_type)
-        return FilterSpec(
-            filter_type=edge_type,
-            formula_ref="",
-            threshold=0.0,
-            noperate=0,
-            sorttype=0,
-            compare_mode="",
-            evaluator_type="pass_through",
-        )
+        # 三元组特征路由（参数化，无 if/elif 分支）：tdx_func 优先于 formula_ref 优先于 condition_type
+        has_tdx_func = isinstance(tdx_func, dict) and bool(tdx_func)
+        has_formula_ref = bool(params.get("formula_ref", "")) and not has_tdx_func
+        raw_cond = str(params.get("condition_type", "") or "")
+        condition_type = "INTERSECTION" if (raw_cond == "INTERSECTION" and not has_tdx_func and not has_formula_ref) else ""
+        key = (has_tdx_func, has_formula_ref, condition_type)
+        return _FILTER_SPEC_BUILDERS[key](params, tdx_func, nset_dispatch, edge, nodes)
 
     @staticmethod
     def _build_propagate_spec(edge: Dict[str, Any]) -> PropagateSpec:
-        """从 edge params 编译状态流转规则。
-
-        attr 位域与 field_definitions.json 的 bit_fields.flow 对齐：
-          - bit 0 (0x1): delete_source → 移动
-          - bit 1 (0x2): force_move → 与 bit0 组合为 0x3 时强制覆盖
-          - bit 12 (0x1000): keep_source → 复制（保留源）
-          - bit 13 (0x2000): clear_dest_first → 先清空目的状态
-        """
-        params = edge.get("params", {}) if isinstance(edge, dict) else {}
+        """从 edge params 编译状态流转规则（attr 位域对齐 field_definitions.json bit_fields.flow）。"""
+        params = _extract_edge_params(edge)
         attr = edge.get("attr", 0) if isinstance(edge, dict) else 0
         attr_from_params = params.get("attr", 0)
         attr_int = (int(attr) if attr is not None else 0) | (
             int(attr_from_params) if attr_from_params is not None else 0
         )
 
-        tran = int(params.get("tran", 0) or 0)
-        emptyps = int(params.get("emptyps", 0) or 0)
-
-        delete_source = bool(attr_int & 0x1)
-        force_move = bool(attr_int & 0x2)
-        keep_source = bool(attr_int & 0x1000)
+        pfields = {name: cast(params.get(name)) for name, cast in _PROPAGATE_SPEC_FIELDS.items()}
+        delete_source = bool(attr_int & 0x1)        # bit0 移动
+        force_move = bool(attr_int & 0x2)           # bit1 与 bit0 组合 0x3 强制覆盖
+        keep_source = bool(attr_int & 0x1000)       # bit12 复制（保留源）
         clear_dest_first = (
             bool(params.get("clear_dest_first"))
-            or (emptyps == 1)
-            or bool(attr_int & 0x2000)
+            or (pfields["emptyps"] == 1)
+            or bool(attr_int & 0x2000)              # bit13 先清空目的状态
             or (delete_source and force_move)
         )
+        is_move = (pfields["tran"] == 1) or (delete_source and not keep_source)
+        mode: Literal["copy", "move", "overwrite", "overwrite_copy"] = _PROPAGATE_MODE_TABLE[(clear_dest_first, is_move)]
 
-        is_move = (tran == 1) or (delete_source and not keep_source)
-
-        if clear_dest_first:
-            mode: Literal["copy", "move", "overwrite", "overwrite_copy"] = (
-                "overwrite_copy" if not is_move else "overwrite"
-            )
-        elif is_move:
-            mode = "move"
-        else:
-            mode = "copy"
-
-        return PropagateSpec(
-            mode=mode,
-            clear_dest_first=clear_dest_first,
-            preserve_source=not is_move or keep_source,
-        )
+        return PropagateSpec(mode=mode, clear_dest_first=clear_dest_first, preserve_source=not is_move or keep_source)
 
     @classmethod
     def compile(cls, pool_config: Dict[str, Any]) -> CompiledSchedule:
@@ -1250,6 +1108,98 @@ class Compiler:
             edge_index=edge_index,
             steps=steps_cfg,
         )
+
+
+# ===========================================================================
+# 变更 F：_FILTER_SPEC_BUILDERS 表 — 4 个 FilterSpec 构造分支同构合并
+# key 为 (has_tdx_func, has_formula_ref, condition_type) 三元组特征，value 为构造器，统一签名由分派器查表路由
+# ===========================================================================
+
+
+def _build_filter_spec_from_tdx_func(
+    params: Dict[str, Any], tdx_func: Dict[str, Any], nset_dispatch: Dict[str, Any],
+    edge: Dict[str, Any], nodes: Dict[str, Any],
+) -> FilterSpec:
+    """tdx_func 分支：从 tdx_func 参数 + dispatch.json 编译 FilterSpec。"""
+    nset = int(tdx_func.get("nset", 0) or 0)
+    nset_entry = nset_dispatch.get(str(nset), {})
+    dispatch_key = nset_entry.get("dispatch_key", "")
+    # accode/ntjindexno 均空时退化为 pass_through；ntjindexno=0 是合法值（nset=4 现价），不能用 `or ""`
+    accode_raw = tdx_func.get("accode")
+    accode = str(accode_raw) if accode_raw is not None else ""
+    ntjindexno_raw = tdx_func.get("ntjindexno")
+    ntjindexno = int(ntjindexno_raw) if ntjindexno_raw is not None else 0
+    evaluator_type = ("pass_through" if (not accode and ntjindexno_raw is None)
+                      else Compiler._DISPATCH_KEY_TO_EVALUATOR_TYPE.get(dispatch_key, "formula"))
+    # formula_ref 按 evaluator_type 选择：formula→accode，scalar/set_operation→ntjindexno
+    formula_ref = ((accode or str(ntjindexno)) if evaluator_type == "formula"
+                   else (str(ntjindexno) if ntjindexno_raw is not None else accode))
+    evaluator_params = ({k: v for k, v in nset_entry.items() if k in Compiler._SCALAR_NSET_CFG_KEYS}
+                        if evaluator_type == "scalar" else {})
+    tdx_fields = {name: cast(tdx_func.get(name)) for name, cast in _TDX_FUNC_SPEC_FIELDS.items()}
+    return FilterSpec(
+        filter_type=dispatch_key or "formula", formula_ref=formula_ref,
+        formula_period=_nperiod_to_period(tdx_func.get("nperiod")),
+        threshold=float(tdx_func.get("fsecond") or 0), noperate=int(tdx_func.get("noperate", 0) or 0),
+        sorttype=int(tdx_func.get("sorttype", 0) or 0), compare_mode=str(tdx_func.get("compare_mode") or ""),
+        evaluator_type=evaluator_type, evaluator_params=evaluator_params, nset=nset, accode=accode, ntjindexno=ntjindexno,
+        func=params.get("func") if isinstance(params.get("func"), dict) else {},
+        indi=str(params.get("indi", "")).strip(),
+        indiparam=params.get("indiparam") if isinstance(params.get("indiparam"), list) else [],
+        **tdx_fields,
+    )
+
+
+def _build_filter_spec_from_formula_ref(
+    params: Dict[str, Any], tdx_func: Any, nset_dispatch: Dict[str, Any],
+    edge: Dict[str, Any], nodes: Dict[str, Any],
+) -> FilterSpec:
+    """formula_ref 直接分支：边 params 携带 formula_ref，evaluator_type=formula。"""
+    formula_ref = params.get("formula_ref", "")
+    formula_period = params.get("formula_period", "")
+    if not formula_period:
+        builtin = _lookup_builtin_formula_info(formula_ref)
+        if builtin and builtin.get("period"):
+            formula_period = builtin["period"]
+    return FilterSpec(
+        filter_type="formula", formula_ref=formula_ref, formula_period=formula_period,
+        threshold=float(params.get("fsecond") or params.get("threshold") or 0),
+        noperate=int(params.get("noperate", 0) or 0), sorttype=int(params.get("sorttype", 0) or 0),
+        compare_mode=str(params.get("compare_mode") or ""), evaluator_type="formula", evaluator_params={},
+        func=params.get("func") if isinstance(params.get("func"), dict) else {},
+        indi=str(params.get("indi", "")).strip(),
+        indiparam=params.get("indiparam") if isinstance(params.get("indiparam"), list) else [],
+    )
+
+
+def _build_filter_spec_from_intersection(
+    params: Dict[str, Any], tdx_func: Any, nset_dispatch: Dict[str, Any],
+    edge: Dict[str, Any], nodes: Dict[str, Any],
+) -> FilterSpec:
+    """INTERSECTION 分支：condition_type=INTERSECTION，evaluator_type=intersection。"""
+    return FilterSpec(
+        filter_type="INTERSECTION", evaluator_type="intersection",
+        evaluator_params={"intersection_source": params.get("intersection_source", "")},
+    )
+
+
+def _build_filter_spec_passthrough(
+    params: Dict[str, Any], tdx_func: Any, nset_dispatch: Dict[str, Any],
+    edge: Dict[str, Any], nodes: Dict[str, Any],
+) -> FilterSpec:
+    """passthrough 分支：按源节点类型退化为 pass_through（其余字段走 FilterSpec 默认值）。"""
+    sid = _extract_edge_endpoint(edge, ("from", "source", "startid"))
+    edge_type = _resolve_edge_type(_resolve_node_type(nodes.get(sid, {})))
+    return FilterSpec(filter_type=edge_type, evaluator_type="pass_through")
+
+
+# FilterSpec 构造分派表：key 为 (has_tdx_func, has_formula_ref, condition_type) 三元组特征
+_FILTER_SPEC_BUILDERS: Dict[Tuple[bool, bool, str], Callable[..., FilterSpec]] = {
+    (True, False, ""): _build_filter_spec_from_tdx_func,
+    (False, True, ""): _build_filter_spec_from_formula_ref,
+    (False, False, "INTERSECTION"): _build_filter_spec_from_intersection,
+    (False, False, ""): _build_filter_spec_passthrough,
+}
 
 
 # ===========================================================================
@@ -2305,15 +2255,7 @@ def _eval_formula_path(
         ctx = eval_deps.live_ctx_fn(state, period=period)
         ctx.period = period
         noperate = spec.noperate
-        rule = _NOPERATE_RULES.get(str(noperate), {})
-        mode = rule.get("mode", "compare")
-        lookback = 5
-        if mode == "inflection":
-            lookback = 5
-        elif rule.get("compare") == "cross":
-            lookback = 3
-        else:
-            lookback = 3
+        lookback = _resolve_series_lookback(noperate)
         series_results = formula_engine.eval_series(spec, codes, ctx, lookback=lookback)
     except Exception as ex:
         logger.warning("公式序列求值失败 %s: %s", spec.formula_ref, ex)
@@ -2329,9 +2271,6 @@ def _eval_formula_path(
         return []
 
     nset = spec.nset
-    noperate = spec.noperate
-    rule = _NOPERATE_RULES.get(str(noperate), {})
-    mode = rule.get("mode", "compare")
     fsecond = spec.threshold
     cfirst = spec.cfirst
     csecond = spec.csecond
@@ -2368,55 +2307,12 @@ def _eval_formula_path(
                         passed.append(code)
                 except (TypeError, ValueError):
                     pass
-        passed = _apply_stock_filters(passed, spec, state)
         return passed
 
-    if mode == "rank":
-        ranked_pairs: List[Tuple[str, float]] = []
-        for code in codes:
-            sres = series_results.get(code)
-            line1 = _extract_line_from_series(sres, cfirst, nfirst)
-            if line1 and len(line1) > 0 and line1[-1] is not None:
-                try:
-                    val = float(line1[-1])
-                    ranked_pairs.append((code, val))
-                except (TypeError, ValueError):
-                    continue
-        rank_rule = _RANK_MODES.get(str(noperate), {})
-        passed = _resolve_rank(ranked_pairs, fsecond, rank_rule)
-    else:
-        passed = []
-        for code in codes:
-            sres = series_results.get(code)
-            if sres is None:
-                continue
-            line1 = _extract_line_from_series(sres, cfirst, nfirst)
-            if line1 is None or len(line1) == 0:
-                continue
-            if nsecond >= 0 and csecond:
-                line2 = _extract_line_from_series(sres, csecond, nsecond)
-                if line2 is None:
-                    line2 = [fsecond] * len(line1)
-            else:
-                line2 = [fsecond] * len(line1)
-            min_len = min(len(line1), len(line2))
-            if min_len == 0:
-                continue
-            line1 = line1[-min_len:]
-            line2 = line2[-min_len:]
-            op_ctx = _build_op_ctx(line1, line2, rule.get("params", {}))
-            try:
-                result = _eval_op(rule, op_ctx)
-                if result is not None and not isinstance(result, list):
-                    try:
-                        if bool(result):
-                            passed.append(code)
-                    except (TypeError, ValueError):
-                        pass
-            except (IndexError, TypeError, KeyError) as ex:
-                logger.debug("noperate求值异常 code=%s noperate=%d: %s", code, noperate, ex)
-                continue
-    passed = _apply_stock_filters(passed, spec, state)
+    passed = _apply_noperate_mode_series(
+        series_results, codes, noperate, fsecond,
+        cfirst, nfirst, csecond, nsecond, _extract_line_from_series,
+    )
     return passed
 
 
@@ -2473,7 +2369,6 @@ def _eval_scalar_path(
 
     results = formula_engine.eval_scalar(spec, codes, ctx, _evaluator)
     passed = [c for c in codes if results.get(c)]
-    passed = _apply_stock_filters(passed, spec, state)
     return passed
 
 
@@ -2494,7 +2389,6 @@ def _eval_set_op_path(
     """
     op_code = int(spec.ntjindexno) if spec.ntjindexno is not None else 0
     passed, _rejected = _eval_set_operation(state, schedule, eid, codes, op_code)
-    passed = _apply_stock_filters(passed, spec, state)
     return passed
 
 
@@ -2514,11 +2408,26 @@ def _eval_intersection_path(
 
 
 # evaluator_type → handler（表驱动，无 if/elif 分派）
+# formula/scalar/set_operation 在注册时套 _with_stock_filters 后过滤包装器，
+# 统一应用 bnost/bnotp/bnotq 排除（pass_through/intersection 豁免，保留原语义）。
+def _with_stock_filters(handler: Callable[..., List[str]]) -> Callable[..., List[str]]:
+    """后过滤包装器：在 handler 返回的 passed 列表上统一应用股票排除开关。"""
+
+    def _wrapped(state, schedule, formula_engine, tick_table, spec, codes, eid, eval_deps=None):
+        passed = handler(
+            state, schedule, formula_engine, tick_table, spec, codes, eid,
+            eval_deps=eval_deps,
+        )
+        return _apply_stock_filters(passed, spec, state)
+
+    return _wrapped
+
+
 _FILTER_EVALUATORS: Dict[str, Callable[..., List[str]]] = {
     "pass_through": _eval_pass_through,
-    "formula": _eval_formula_path,
-    "scalar": _eval_scalar_path,
-    "set_operation": _eval_set_op_path,
+    "formula": _with_stock_filters(_eval_formula_path),
+    "scalar": _with_stock_filters(_eval_scalar_path),
+    "set_operation": _with_stock_filters(_eval_set_op_path),
     "intersection": _eval_intersection_path,
 }
 
@@ -3813,6 +3722,7 @@ class ExecutionModule:
     # ------------------------------------------------------------------
     # SubTask 20.2：ModeChanged → 切换时间源
     # ------------------------------------------------------------------
+    @_event_handler("_on_mode_changed")
     def _on_mode_changed(self, event: ModeChanged) -> None:
         """模式切换时切换内部时间源。
 
@@ -3827,22 +3737,19 @@ class ExecutionModule:
         payload 携带（``DataChanged.ts`` / ``TimeAdvanced.ts``），模式切换
         仅切换标记，下游读取时按 ``_time_source`` 选择时间基准来源。
         """
-        try:
-            mode_id = event.mode_id or "live"
-            mapping = {
-                "live": "wall_clock",
-                "replay": "sequence",
-                "simulation": "virtual",
-            }
-            new_source = mapping.get(mode_id, "wall_clock")
-            prev = self._time_source
-            self._time_source = new_source
-            logger.info(
-                "ExecutionModule 时间源切换: %s -> %s（mode=%s）",
-                prev, new_source, mode_id,
-            )
-        except Exception as ex:
-            logger.warning("ExecutionModule _on_mode_changed 异常: %s", ex)
+        mode_id = event.mode_id or "live"
+        mapping = {
+            "live": "wall_clock",
+            "replay": "sequence",
+            "simulation": "virtual",
+        }
+        new_source = mapping.get(mode_id, "wall_clock")
+        prev = self._time_source
+        self._time_source = new_source
+        logger.info(
+            "ExecutionModule 时间源切换: %s -> %s（mode=%s）",
+            prev, new_source, mode_id,
+        )
 
     # ------------------------------------------------------------------
     # 组件访问（惰性创建）
@@ -3882,24 +3789,21 @@ class ExecutionModule:
     # ------------------------------------------------------------------
     # 事件 handler
     # ------------------------------------------------------------------
+    @_event_handler("_on_pool_loaded")
     def _on_pool_loaded(self, event: PoolLoaded) -> None:
         """池配置加载触发编译（SubTask 8.4 关联）。"""
-        try:
-            self._pool_config = event.pool_config or {}
-            self._compiled = Compiler.compile(self._pool_config)
-            self._engine = None  # 重置，下次 _ensure_engine 重建
-        except Exception as ex:
-            logger.warning("ExecutionModule 编译失败: %s", ex)
+        self._pool_config = event.pool_config or {}
+        self._compiled = Compiler.compile(self._pool_config)
+        self._engine = None  # 重置，下次 _ensure_engine 重建
 
+    @_event_handler("_on_config_changed")
     def _on_config_changed(self, event: ConfigChanged) -> None:
         """配置变更触发 CompiledSchedule 重建（SubTask 8.4）。"""
-        try:
-            if self._pool_config:
-                self._compiled = Compiler.compile(self._pool_config)
-                self._engine = None  # 配置变更后重建引擎
-        except Exception as ex:
-            logger.warning("ExecutionModule 重建 CompiledSchedule 失败: %s", ex)
+        if self._pool_config:
+            self._compiled = Compiler.compile(self._pool_config)
+            self._engine = None  # 配置变更后重建引擎
 
+    @_event_handler("_on_stock_filtered")
     def _on_stock_filtered(self, event: StockFiltered) -> None:
         """筛选结果写入边 filter_inputs，供边执行读取（SubTask 8.2）。
 
@@ -3912,28 +3816,25 @@ class ExecutionModule:
         driver.fire_due() 统一驱动，此处理器仅缓存筛选结果，不再重新发布
         EdgeFired，避免重复触发和 eid 不一致。
         """
-        try:
-            new_arch = self._is_new_arch_active()
-            pe = None
-            if not new_arch:
-                pe = self._ensure_engine()
-            else:
-                for eng in (self._engine, self._meta_engine):
-                    if eng is not None:
-                        pe = eng
-                        break
-            if pe is not None:
-                pe.state.filter_inputs[event.eid] = frozenset(event.passed)
-                logger.debug(
-                    "ExecutionModule._on_stock_filtered eid=%s passed=%d",
-                    event.eid, len(event.passed),
-                )
-            self._filter_results[event.eid] = (list(event.passed), list(event.rejected))
-            if not new_arch and event.eid not in self._fired_edges:
-                self._fired_edges.add(event.eid)
-                _publish_edge_fired(self._bus, event.eid, event.ts or time.time())
-        except Exception as ex:
-            logger.warning("ExecutionModule 缓存筛选结果失败: %s", ex)
+        new_arch = self._is_new_arch_active()
+        pe = None
+        if not new_arch:
+            pe = self._ensure_engine()
+        else:
+            for eng in (self._engine, self._meta_engine):
+                if eng is not None:
+                    pe = eng
+                    break
+        if pe is not None:
+            pe.state.filter_inputs[event.eid] = frozenset(event.passed)
+            logger.debug(
+                "ExecutionModule._on_stock_filtered eid=%s passed=%d",
+                event.eid, len(event.passed),
+            )
+        self._filter_results[event.eid] = (list(event.passed), list(event.rejected))
+        if not new_arch and event.eid not in self._fired_edges:
+            self._fired_edges.add(event.eid)
+            _publish_edge_fired(self._bus, event.eid, event.ts or time.time())
 
     def _is_new_arch_active(self) -> bool:
         """检测新 EventDriver 架构是否已激活（通过 meta_engine 或 self._engine 判断）。"""
@@ -3944,6 +3845,7 @@ class ExecutionModule:
                     return True
         return False
 
+    @_event_handler("_on_data_changed")
     def _on_data_changed(self, event: DataChanged) -> None:
         """数据变更触发核心 tick 执行（SubTask 8.2）。
 
@@ -3956,18 +3858,14 @@ class ExecutionModule:
             return
         if self._is_new_arch_active():
             return
-        try:
-            self._run_tick(event)
-        except Exception as ex:
-            logger.warning("ExecutionModule tick failed: %s", ex)
+        self._run_tick(event)
 
+    @_event_handler("_on_time_advanced")
     def _on_time_advanced(self, event: TimeAdvanced) -> None:
         """时间推进触发 TTL 检查（SubTask 8.2）。"""
-        try:
-            self._check_ttl_expired(event.ts)
-        except Exception as ex:
-            logger.warning("ExecutionModule TTL 检查失败: %s", ex)
+        self._check_ttl_expired(event.ts)
 
+    @_event_handler("_on_executed")
     def _on_executed(self, event: Executed) -> None:
         """EdgeExecutor 发布 Executed → 转发为 TransferExecuted（SubTask 8.3）。
 
@@ -3975,18 +3873,16 @@ class ExecutionModule:
         在 tick 末尾批量处理 transfer_events，现改为 per-Executed 即时转发，
         由 Statistics/Monitoring 模块订阅 TransferExecuted 处理。
         """
-        try:
-            if event.entered or event.exited:
-                self._bus.publish(TransferExecuted(
-                    src=event.sid,
-                    tgt=event.tid,
-                    codes=list(event.entered),
-                    mode=event.mode,
-                    ts=time.time(),
-                ))
-        except Exception as ex:
-            logger.warning("ExecutionModule TransferExecuted 发布失败: %s", ex)
+        if event.entered or event.exited:
+            self._bus.publish(TransferExecuted(
+                src=event.sid,
+                tgt=event.tid,
+                codes=list(event.entered),
+                mode=event.mode,
+                ts=time.time(),
+            ))
 
+    @_event_handler("_on_domain_event")
     def _on_domain_event(self, event: DomainEvent) -> None:
         """DomainEvent(TIMEOUT) → TTLExpired（SubTask 8.3）。
 
@@ -3997,14 +3893,11 @@ class ExecutionModule:
         """
         if event.event_type != "TIMEOUT":
             return
-        try:
-            self._bus.publish(TTLExpired(
-                node_id=event.pool_id,
-                codes=[event.code],
-                ts=time.time(),
-            ))
-        except Exception as ex:
-            logger.warning("ExecutionModule TTLExpired 发布失败: %s", ex)
+        self._bus.publish(TTLExpired(
+            node_id=event.pool_id,
+            codes=[event.code],
+            ts=time.time(),
+        ))
 
     # ------------------------------------------------------------------
     # 核心循环

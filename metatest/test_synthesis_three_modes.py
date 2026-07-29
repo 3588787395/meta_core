@@ -12,7 +12,8 @@
   3. test_mode_switch_publishes_mode_changed_event
   4. test_same_compile_path_for_all_modes
   5. test_mode_changed_event_has_correct_fields
-  6. test_runtime_mode_module_switch_mode
+  6. test_runtime_mode_module_switch_to_invalid_mode_no_event
+  7. test_kline_replay_engine_initial_state
 """
 from __future__ import annotations
 
@@ -42,6 +43,8 @@ class TestThreeModesSynthesis:
         """
         codes = fz_stocks(10)
         assert len(codes) == 10
+        assert codes[0] == "fz000001"
+        assert codes[-1] == "fz000010"
         for code in codes:
             assert code.startswith("fz"), f"仿真模式代码 {code} 必须以 fz 开头"
         # 验证 domain._normalize_to_fz 函数存在
@@ -50,6 +53,7 @@ class TestThreeModesSynthesis:
         assert _normalize_to_fz("000001") == "fz000001"
         assert is_fz_code("fz600000") is True
         assert is_fz_code("600000") is False
+        assert is_fz_code("fz000001") is True
         modules = report_state.setdefault("modules_covered", [])
         if "core.domain" not in modules:
             modules.append("core.domain")
@@ -64,6 +68,7 @@ class TestThreeModesSynthesis:
         assert "live" in modes, "缺 live 实盘模式"
         assert "replay" in modes, "缺 replay 回放模式"
         assert "simulation" in modes, "缺 simulation 仿真模式"
+        assert len(modes) >= 3, f"至少 3 种模式，实际 {len(modes)}"
         # 每种模式必须含关键字段
         for mode_id, mode_cfg in modes.items():
             assert "time_source_id" in mode_cfg, \
@@ -120,6 +125,11 @@ class TestThreeModesSynthesis:
         assert len(collected) >= 2
         event2 = collected[-1]
         assert event2.mode_id == "replay"
+        # 切换到实盘模式
+        rmm.switch_mode("live")
+        assert len(collected) >= 3
+        event3 = collected[-1]
+        assert event3.mode_id == "live"
         event_types = report_state.setdefault("event_types_seen", [])
         if "ModeChanged" not in event_types:
             event_types.append("ModeChanged")
@@ -154,6 +164,11 @@ class TestThreeModesSynthesis:
         # 编译产物无模式相关字段（模式由 runtime_modes.json 表驱动）
         assert not hasattr(cp, "mode_id"), "CompiledPool 不应含模式字段"
         assert not hasattr(cp, "time_source"), "CompiledPool 不应含时间源字段"
+        # 编译产物含节点角色映射（与模式无关）
+        assert "src" in cp.node_role
+        assert "tgt" in cp.node_role
+        assert cp.node_role["src"] == "candidate"
+        assert cp.node_role["tgt"] == "target"
         modules = report_state.setdefault("modules_covered", [])
         if "core.execution_module" not in modules:
             modules.append("core.execution_module")
@@ -170,6 +185,10 @@ class TestThreeModesSynthesis:
         assert hasattr(event, "prev_mode")
         assert event.mode_id == "simulation"
         assert event.prev_mode == "live"
+        # 构造回放模式事件
+        event2 = ModeChanged(mode_id="replay", prev_mode="simulation")
+        assert event2.mode_id == "replay"
+        assert event2.prev_mode == "simulation"
         modules = report_state.setdefault("modules_covered", [])
         if "core.event_bus" not in modules:
             modules.append("core.event_bus")
@@ -193,3 +212,37 @@ class TestThreeModesSynthesis:
         rmm.switch_mode("nonexistent_mode")
         assert len(collected) == initial_count, \
             "切换到无效模式不应发布 ModeChanged 事件"
+        # 切换到空字符串也不应发布
+        rmm.switch_mode("")
+        assert len(collected) == initial_count, \
+            "切换到空模式名不应发布 ModeChanged 事件"
+
+    def test_kline_replay_engine_initial_state(self, report_state) -> None:
+        """KLineReplayEngine 初始状态正确（回放模式引擎）。
+
+        验证回放模式引擎可实例化，初始状态为暂停、未播放。
+        """
+        from core.runtime_mode_module import KLineReplayEngine
+        from core.engine import PoolEngine
+
+        engine = PoolEngine()
+        bus = None
+        try:
+            from core.event_bus import EventBus
+            bus = EventBus()
+        except Exception:
+            pass
+        kre = KLineReplayEngine(meta_engine=engine, bus=bus)
+        # 初始状态：暂停、未播放
+        assert kre._paused is True, "回放引擎初始应为暂停态"
+        assert kre._playing is False, "回放引擎初始未播放"
+        assert kre._current_index == -1, "初始索引应为 -1"
+        assert kre._total_bars == 0, "初始总 bar 数应为 0"
+        assert kre._base_period == "day", "默认基础周期应为 day"
+        assert kre._speed == 1.0, "默认速度应为 1.0"
+        # mode id 应为 replay
+        assert kre._engine._current_mode_id == "replay", \
+            "KLineReplayEngine 应设置 mode_id=replay"
+        modules = report_state.setdefault("modules_covered", [])
+        if "core.runtime_mode_module" not in modules:
+            modules.append("core.runtime_mode_module")

@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 
 from core.event_bus import (
+    _event_handler,
     EVENT_DATA_CHANGED,
     BarComposed,
     DataChanged,
@@ -953,6 +954,7 @@ class TickBarModule:
     # ------------------------------------------------------------------
     # PoolLoaded → 提取 codes → 重建 MockDataSource
     # ------------------------------------------------------------------
+    @_event_handler("_on_pool_loaded")
     def _on_pool_loaded(self, event: PoolLoaded) -> None:
         """收到 PoolLoaded 事件时，从 pool_config.nodes 提取股票 codes 并重建 MockDataSource。
 
@@ -961,42 +963,40 @@ class TickBarModule:
         本 handler 从 pool_config.nodes[*].params.stocks[*].code 提取所有股票代码，
         用 codes 重建 MockDataSource，使后续 SimulationStep 事件能正确生成 tick。
         """
-        try:
-            pool_config = event.pool_config or {}
-            nodes = pool_config.get("nodes", []) if isinstance(pool_config, dict) else []
-            codes: List[str] = []
-            for node in nodes:
-                if not isinstance(node, dict):
-                    continue
-                params = node.get("params") or {}
-                stocks = params.get("stocks") if isinstance(params, dict) else None
-                if not isinstance(stocks, list):
-                    continue
-                for s in stocks:
-                    if isinstance(s, dict):
-                        c = s.get("code", "")
-                        if c:
-                            codes.append(str(c))
-                    elif isinstance(s, str) and s:
-                        codes.append(s)
-            if codes:
-                # 保留原 clock_start/price_range 等配置，仅更新 codes
-                self._tick_source = MockDataSource(
-                    codes=codes,
-                    clock_start=float(self._config.get("clock_start", 0.0)),
-                    price_range=self._config.get("price_range", (5.0, 200.0)),
-                    change_pct_std=float(self._config.get("change_pct_std", 2.0)),
-                    volume_lognorm_mu=float(self._config.get("volume_lognorm_mu", 14.0)),
-                    volume_lognorm_sigma=float(self._config.get("volume_lognorm_sigma", 2.0)),
-                )
-                logger.info("TickBarModule PoolLoaded 重建 MockDataSource codes_count=%d sample=%s",
-                            len(codes), codes[:3])
-        except Exception as ex:
-            logger.warning("TickBarModule._on_pool_loaded 异常: %s", ex, exc_info=True)
+        pool_config = event.pool_config or {}
+        nodes = pool_config.get("nodes", []) if isinstance(pool_config, dict) else []
+        codes: List[str] = []
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            params = node.get("params") or {}
+            stocks = params.get("stocks") if isinstance(params, dict) else None
+            if not isinstance(stocks, list):
+                continue
+            for s in stocks:
+                if isinstance(s, dict):
+                    c = s.get("code", "")
+                    if c:
+                        codes.append(str(c))
+                elif isinstance(s, str) and s:
+                    codes.append(s)
+        if codes:
+            # 保留原 clock_start/price_range 等配置，仅更新 codes
+            self._tick_source = MockDataSource(
+                codes=codes,
+                clock_start=float(self._config.get("clock_start", 0.0)),
+                price_range=self._config.get("price_range", (5.0, 200.0)),
+                change_pct_std=float(self._config.get("change_pct_std", 2.0)),
+                volume_lognorm_mu=float(self._config.get("volume_lognorm_mu", 14.0)),
+                volume_lognorm_sigma=float(self._config.get("volume_lognorm_sigma", 2.0)),
+            )
+            logger.info("TickBarModule PoolLoaded 重建 MockDataSource codes_count=%d sample=%s",
+                        len(codes), codes[:3])
 
     # ------------------------------------------------------------------
     # SubTask 20.1：ModeChanged → 切换内部数据源状态
     # ------------------------------------------------------------------
+    @_event_handler("_on_mode_changed")
     def _on_mode_changed(self, event: ModeChanged) -> None:
         """模式切换时调整内部 tick 处理逻辑。
 
@@ -1010,16 +1010,13 @@ class TickBarModule:
         实现：仅记录 ``self._mode_id``，由 ``_on_simulation_step`` /
         ``_on_replay_step`` / ``_on_tick_received`` 根据 mode_id 选择处理路径。
         """
-        try:
-            new_mode = event.mode_id or "live"
-            prev = self._mode_id
-            self._mode_id = new_mode
-            logger.info(
-                "TickBarModule 模式切换: %s -> %s（数据源由事件驱动切换）",
-                prev, new_mode,
-            )
-        except Exception as ex:
-            logger.warning("TickBarModule _on_mode_changed 异常: %s", ex)
+        new_mode = event.mode_id or "live"
+        prev = self._mode_id
+        self._mode_id = new_mode
+        logger.info(
+            "TickBarModule 模式切换: %s -> %s（数据源由事件驱动切换）",
+            prev, new_mode,
+        )
 
     # ------------------------------------------------------------------
     # 公共 API：直接应用 tick 数据（不通过事件总线）
@@ -1077,6 +1074,7 @@ class TickBarModule:
     # ------------------------------------------------------------------
     # G2：TickDue → 生成 tick 数据 → 发布 TickReceived
     # ------------------------------------------------------------------
+    @_event_handler("_on_tick_due")
     def _on_tick_due(self, event: TickDue) -> None:
         """MockDataSource 定时器到时信号：生成实际 tick 数据并发布 TickReceived。
 
@@ -1084,94 +1082,87 @@ class TickBarModule:
         TickDue 后调用 ``self._tick_source.get_tick`` 完成，再经 TickReceived
         事件进入 _on_tick_received 写 latest_tick / 发布 DataChanged(tick)。
         """
-        try:
-            code = event.code
-            # G2 硬约束：仿真/实盘同代码，统一通过 time_at(state) 决定 ts。
-            # event.ts 优先（虚拟时钟秒），为 0 则用 state 虚拟时钟，
-            # 仍为 0 则保持 0（仿真冷启动前）。
-            ts = event.ts or time_at(state=self._state) or 0.0
-            if not code:
-                return
-            tick_source = self._tick_source
-            if tick_source is None:
-                return
-            tick = tick_source.get_tick(code, ts)
-            if not isinstance(tick, dict):
-                return
-            # 单 tick 包装成单元素 dict，复用 _publish_tick_batch 统一发布路径。
-            _publish_tick_batch(self._bus, {code: tick}, ts)
-        except Exception as ex:
-            logger.warning("TickBarModule._on_tick_due 异常: %s", ex, exc_info=True)
+        code = event.code
+        # G2 硬约束：仿真/实盘同代码，统一通过 time_at(state) 决定 ts。
+        # event.ts 优先（虚拟时钟秒），为 0 则用 state 虚拟时钟，
+        # 仍为 0 则保持 0（仿真冷启动前）。
+        ts = event.ts or time_at(state=self._state) or 0.0
+        if not code:
+            return
+        tick_source = self._tick_source
+        if tick_source is None:
+            return
+        tick = tick_source.get_tick(code, ts)
+        if not isinstance(tick, dict):
+            return
+        # 单 tick 包装成单元素 dict，复用 _publish_tick_batch 统一发布路径。
+        _publish_tick_batch(self._bus, {code: tick}, ts)
 
     # ------------------------------------------------------------------
     # SubTask 5.2：TickReceived → 写 latest_tick → 发 DataChanged
     # ------------------------------------------------------------------
+    @_event_handler("_on_tick_received")
     def _on_tick_received(self, event: TickReceived) -> None:
-        try:
-            tick_data = event.tick_data
-            if not isinstance(tick_data, dict):
-                return
-            code = event.code or tick_data.get("code", "") or tick_data.get("symbol", "") or tick_data.get("stock_code", "")
-            if not code:
-                if isinstance(tick_data, dict) and len(tick_data) > 0:
-                    for k in ("code", "symbol", "stock_code", "secucode"):
-                        if k in tick_data and tick_data[k]:
-                            code = str(tick_data[k])
-                            break
-            if not code:
-                return
-            code = str(code)
-            tick_copy = dict(tick_data)
-            tick_copy["code"] = code
-            self._data_updater.apply_data({code: tick_copy})
-            # G2 硬约束：仿真/实盘同代码，统一通过 time_at(state) 决定 ts。
-            # event.ts 优先（来自 TickDue 时的虚拟时钟）；为 0 则用 state 虚拟时钟；
-            # state.time_source.current_ts 也为 0（仿真冷启动前）则保持 0。
-            # 禁止 fallback 到 tick._ts（可能含真实 Unix 秒污染时间坐标系）。
-            ts = event.ts or time_at(state=self._state) or 0.0
-            self._bus.publish(DataChanged(
-                ts=ts,
-                bar_hash=self._state.bar_hash(),
-                codes=[code],
-                source="tick",
-                data=tick_copy,
-            ))
-        except Exception as ex:
-            logger.warning("TickBarModule._on_tick_received 异常: %s", ex, exc_info=True)
+        tick_data = event.tick_data
+        if not isinstance(tick_data, dict):
+            return
+        code = event.code or tick_data.get("code", "") or tick_data.get("symbol", "") or tick_data.get("stock_code", "")
+        if not code:
+            if isinstance(tick_data, dict) and len(tick_data) > 0:
+                for k in ("code", "symbol", "stock_code", "secucode"):
+                    if k in tick_data and tick_data[k]:
+                        code = str(tick_data[k])
+                        break
+        if not code:
+            return
+        code = str(code)
+        tick_copy = dict(tick_data)
+        tick_copy["code"] = code
+        self._data_updater.apply_data({code: tick_copy})
+        # G2 硬约束：仿真/实盘同代码，统一通过 time_at(state) 决定 ts。
+        # event.ts 优先（来自 TickDue 时的虚拟时钟）；为 0 则用 state 虚拟时钟；
+        # state.time_source.current_ts 也为 0（仿真冷启动前）则保持 0。
+        # 禁止 fallback 到 tick._ts（可能含真实 Unix 秒污染时间坐标系）。
+        ts = event.ts or time_at(state=self._state) or 0.0
+        self._bus.publish(DataChanged(
+            ts=ts,
+            bar_hash=self._state.bar_hash(),
+            codes=[code],
+            source="tick",
+            data=tick_copy,
+        ))
 
     # ------------------------------------------------------------------
     # SubTask 5.3：DataChanged(source=tick) → 合成 K 线 → 发 BarComposed
     # ------------------------------------------------------------------
+    @_event_handler("_on_data_changed")
     def _on_data_changed(self, event: DataChanged) -> None:
-        try:
-            if event.source != "tick":
-                return
-            codes = event.codes or []
-            if not codes:
-                return
+        if event.source != "tick":
+            return
+        codes = event.codes or []
+        if not codes:
+            return
 
-            # 1. Min1Aggregator 合成 1min K 线
-            for code in codes:
-                tick = self._state.latest_tick.get(code)
-                if isinstance(tick, dict):
-                    self._feed_minute_aggregator(code, tick, event.ts)
+        # 1. Min1Aggregator 合成 1min K 线
+        for code in codes:
+            tick = self._state.latest_tick.get(code)
+            if isinstance(tick, dict):
+                self._feed_minute_aggregator(code, tick, event.ts)
 
-            # 2. BarComposer 合成多周期 K 线（读 state.latest_tick，写 state.bars）
-            # G2：传入 event.ts，使 publish_data_changed 发布的 DataChanged(bar)/BarComposed
-            # 与上游 DataChanged(tick) 同源，避免 time_at(state) 在 _InternalState 未初始化时
-            # 回落 time.time() 污染仿真坐标系。
-            self._bar_composer.on_tick(codes, event.ts)
+        # 2. BarComposer 合成多周期 K 线（读 state.latest_tick，写 state.bars）
+        # G2：传入 event.ts，使 publish_data_changed 发布的 DataChanged(bar)/BarComposed
+        # 与上游 DataChanged(tick) 同源，避免 time_at(state) 在 _InternalState 未初始化时
+        # 回落 time.time() 污染仿真坐标系。
+        self._bar_composer.on_tick(codes, event.ts)
 
-            # 3. 发布 BarComposed 事件
-            for code in codes:
-                for period in self._bar_composer.periods:
-                    bar = self._bar_composer.get_bar(period, code)
-                    if bar:
-                        self._bus.publish(BarComposed(
-                            bar=dict(bar), period=period, code=code, ts=event.ts,
-                        ))
-        except Exception as ex:
-            logger.warning("TickBarModule._on_data_changed 异常: %s", ex)
+        # 3. 发布 BarComposed 事件
+        for code in codes:
+            for period in self._bar_composer.periods:
+                bar = self._bar_composer.get_bar(period, code)
+                if bar:
+                    self._bus.publish(BarComposed(
+                        bar=dict(bar), period=period, code=code, ts=event.ts,
+                    ))
 
     def _feed_minute_aggregator(self, code: str, tick: Dict[str, Any], ts: float) -> None:
         """将 tick 转换为 Tick NamedTuple 并喂入 Min1Aggregator。"""
@@ -1205,6 +1196,7 @@ class TickBarModule:
     # SubTask 5.4：SimulationStep / ReplayStep → 生成 tick → 发 TickReceived
     # 7 步同构骨架合并至 _on_step_event，两个入口仅构造 provider_fn 并委托。
     # ------------------------------------------------------------------
+    @_event_handler("_on_step_event")
     def _on_step_event(
         self,
         event,
@@ -1214,9 +1206,9 @@ class TickBarModule:
     ) -> None:
         """SimulationStep / ReplayStep 统一处理骨架。
 
-        7 步：try 包裹 → 从 event.step 提取 ts → 设置 state.time_source →
-        调用 provider_fn(step) 取 ticks → 校验 dict → 批量发布 TickReceived →
-        except 记日志。
+        7 步：从 event.step 提取 ts → 设置 state.time_source →
+        调用 provider_fn(step) 取 ticks → 校验 dict → 批量发布 TickReceived。
+        异常由 ``_event_handler`` 装饰器统一捕获并记录日志。
 
         Args:
             event: SimulationStep 或 ReplayStep 事件。
@@ -1226,17 +1218,12 @@ class TickBarModule:
                 调用方负责 _codes 非空 / replay_provider callable 等前置校验，
                 校验失败返回 ``{}`` 即可（_publish_tick_batch 会安全跳过）。
         """
-        try:
-            step = event.step or {}
-            ts_key = "virtual_ts" if driver_type == "virtual" else "ts"
-            ts = float(step.get(ts_key, 0.0))
-            self._state.time_source = {"current_ts": ts, "driver_type": driver_type}
-            ticks = provider_fn(step)
-            _publish_tick_batch(self._bus, ticks, ts)
-        except Exception as ex:
-            logger.warning(
-                "TickBarModule._on_step_event (%s) 异常: %s", driver_type, ex,
-            )
+        step = event.step or {}
+        ts_key = "virtual_ts" if driver_type == "virtual" else "ts"
+        ts = float(step.get(ts_key, 0.0))
+        self._state.time_source = {"current_ts": ts, "driver_type": driver_type}
+        ticks = provider_fn(step)
+        _publish_tick_batch(self._bus, ticks, ts)
 
     def _on_simulation_step(self, event: SimulationStep) -> None:
         """SimulationStep → 生成 mock tick → 发 TickReceived（委托 _on_step_event）。"""

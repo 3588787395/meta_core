@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import ast
 import inspect
+import re
+from pathlib import Path
 from typing import Any, Dict, List
 
 import pytest
@@ -279,3 +281,612 @@ def test_filter_spec_malformed_default(tick_table):
         assert rejected == [], (
             f"畸形 filter_spec 不应有拒绝，rejected={rejected}, spec={spec}"
         )
+
+
+# ============================================================================
+# 8. test_rule_87_no_configstore_bypass —— 规则 87 违规：ConfigStore 绕过检测
+# ============================================================================
+# RULES.md 规则 87：配置加载统一到 ConfigStore.get_table / get_data_file；
+# 禁止在模块级重新定义 _load_json / _load_config / _load_json_file / _load_json_cache
+# 帮助函数；所有 JSON 配置加载必须通过 ConfigStore，确保热加载能力。
+
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_CORE_DIR = _PROJECT_ROOT / "core"
+
+
+def _grep_count(pattern, file_path):
+    """统计文件中匹配 pattern 的行数（re 多行模式）。"""
+    if not file_path.exists():
+        return 0
+    content = file_path.read_text(encoding="utf-8")
+    return len(re.findall(pattern, content, re.MULTILINE))
+
+
+def _grep_count_in_dir(pattern, dir_path, exclude_names=()):
+    """统计目录下所有 .py 文件中匹配 pattern 的总行数（排除指定文件名）。"""
+    if not dir_path.is_dir():
+        return 0
+    total = 0
+    for f in sorted(dir_path.glob("*.py")):
+        if f.name in exclude_names:
+            continue
+        total += _grep_count(pattern, f)
+    return total
+
+
+def test_rule_87_no_configstore_bypass():
+    """规则 87 违规：ConfigStore 绕过检测。
+
+    验证：
+      1. core/*.py 不存在 ``def _load_json`` / ``def _load_config`` /
+         ``def _load_json_file`` / ``def _load_json_cache`` 帮助函数。
+      2. ``json.load(open())`` inline 模式不应复活（变更 G）。
+      3. ConfigStore 入口 ``get_global_config_store`` 至少被一个业务模块使用。
+    """
+    # 1. 不应有 _load_xxx 帮助函数定义
+    forbidden_helpers = [
+        r"^def _load_json\b",
+        r"^def _load_config\b",
+        r"^def _load_json_file\b",
+        r"^def _load_json_cache\b",
+    ]
+    for pat in forbidden_helpers:
+        total = _grep_count_in_dir(pat, _CORE_DIR)
+        assert total == 0, (
+            f"规则 87 违规：检测到 {total} 处 {pat} 帮助函数定义"
+            "（应统一到 ConfigStore.get_table / get_data_file）"
+        )
+
+    # 2. json.load(open()) inline 模式不应复活（ConfigStore/table_engine 内部除外）
+    inline_total = 0
+    for f in sorted(_CORE_DIR.glob("*.py")):
+        if f.name in ("config_store.py", "table_engine.py"):
+            continue
+        inline_total += _grep_count(r"json\.load\(open\(", f)
+    assert inline_total == 0, (
+        f"规则 87/变更 G 违规：检测到 {inline_total} 处 json.load(open()) inline"
+        "（应通过 ConfigStore 统一加载）"
+    )
+
+    # 3. ConfigStore 入口被业务模块使用
+    usage_total = _grep_count_in_dir(
+        r"get_global_config_store\(\)", _CORE_DIR
+    )
+    assert usage_total >= 1, (
+        "规则 87 违规：未检测到 get_global_config_store() 使用"
+        "（业务模块应通过 ConfigStore 加载配置）"
+    )
+
+
+# ============================================================================
+# 9. test_rule_59_no_hardcoded_type_branch —— 规则 59 违规：表驱动绕过检测
+# ============================================================================
+# RULES.md 规则 59：禁止 if type == "xxx" / if nset == X / if pool_type == "custom"
+# 硬编码分支；所有类型映射进 JSON 配置表。
+
+
+def test_rule_59_no_hardcoded_type_branch():
+    """规则 59 违规：表驱动绕过检测。
+
+    验证：
+      1. core/*.py 不存在 ``if type == "..."`` 硬编码分支（按字面字符串匹配类型）。
+      2. core/*.py 不存在 ``if pool_type == "custom"`` 硬编码分支。
+      3. ``_PROPAGATE_MODE_TABLE`` 表存在（mode 派发表驱动）。
+      4. ``_FILTER_SPEC_BUILDERS`` 表存在（FilterSpec 构造分派表驱动）。
+    """
+    # 1. 不应有 if type == "xxx" 硬编码分支
+    type_branch_total = _grep_count_in_dir(
+        r'if type == "', _CORE_DIR
+    )
+    assert type_branch_total == 0, (
+        f"规则 59 违规：检测到 {type_branch_total} 处 if type == \"...\""
+        "硬编码分支（应进 JSON 配置表）"
+    )
+
+    # 2. 不应有 if pool_type == "custom" 硬编码分支
+    pool_type_custom_total = _grep_count_in_dir(
+        r'if pool_type == "custom"', _CORE_DIR
+    )
+    assert pool_type_custom_total == 0, (
+        f"规则 59 违规：检测到 {pool_type_custom_total} 处 "
+        'if pool_type == "custom" 硬编码分支'
+    )
+
+    # 3. _PROPAGATE_MODE_TABLE 表存在（execution_module.py）
+    exec_path = _CORE_DIR / "execution_module.py"
+    assert exec_path.exists(), "core/execution_module.py 不存在"
+    propagate_table_count = _grep_count(
+        r"^_PROPAGATE_MODE_TABLE\s*:", exec_path
+    )
+    assert propagate_table_count >= 1, (
+        "规则 59 违规：_PROPAGATE_MODE_TABLE 表缺失"
+        "（mode 派发应表驱动，不应 if/elif 链）"
+    )
+
+    # 4. _FILTER_SPEC_BUILDERS 表存在（execution_module.py）
+    filter_builders_count = _grep_count(
+        r"^_FILTER_SPEC_BUILDERS\s*:", exec_path
+    )
+    assert filter_builders_count >= 1, (
+        "规则 59 违规：_FILTER_SPEC_BUILDERS 表缺失"
+        "（FilterSpec 构造应表驱动分派）"
+    )
+
+
+# ============================================================================
+# 15 项「同构复活」反测试（变更 A-O）
+# ============================================================================
+# 通过 Grep 断言旧同构代码零匹配，确保 Phase 1-3 合并的 15 组模式不会复活。
+
+
+def test_no_isomorphism_revival_nset_filter():
+    """变更 A: 旧 nset 筛选函数不应复活。
+
+    screening_module.py 应通过 ``_NSET_FILTER_HANDLERS`` 表驱动分派，
+    不应重新引入 ``_filter_condition_formula`` / ``_filter_expert_system`` /
+    ``_filter_financial_scalar`` / ``_filter_market_scalar`` 同构函数。
+    """
+    f = _CORE_DIR / "screening_module.py"
+    assert f.exists(), "core/screening_module.py 不存在"
+    count = _grep_count(
+        r"def _filter_condition_formula|def _filter_expert_system|"
+        r"def _filter_financial_scalar|def _filter_market_scalar",
+        f,
+    )
+    assert count == 0, (
+        f"变更 A 违规：screening_module.py 检测到 {count} 处旧 nset 同构函数"
+        "（应使用 _NSET_FILTER_HANDLERS 表驱动）"
+    )
+    # 额外断言：表驱动 _NSET_FILTER_HANDLERS 应存在
+    table_count = _grep_count(r"_NSET_FILTER_HANDLERS", f)
+    assert table_count >= 1, (
+        "变更 A 违规：_NSET_FILTER_HANDLERS 表缺失"
+    )
+
+
+def test_no_isomorphism_revival_json_load_open():
+    """变更 G: ``json.load(open())`` inline 模式不应复活。
+
+    core/*.py（ConfigStore / table_engine 内部除外）不应使用
+    ``json.load(open(...))`` inline 模式，所有 JSON 加载必须通过
+    ConfigStore 或 ``with open(...) as f: json.load(f)`` 显式资源管理。
+    """
+    total = 0
+    for f in sorted(_CORE_DIR.glob("*.py")):
+        if f.name in ("config_store.py", "table_engine.py"):
+            continue  # ConfigStore 内部除外
+        total += _grep_count(r"json\.load\(open\(", f)
+    assert total == 0, (
+        f"变更 G 违规：检测到 {total} 处 json.load(open()) inline"
+        "（应通过 ConfigStore 或 with open() 显式管理）"
+    )
+
+
+def test_no_isomorphism_revival_mode_inflection_rank():
+    """变更 H: ``if mode == "inflection"`` / ``if mode == "rank"`` 不应复活。
+
+    execution_module.py 不应通过 if 分支硬编码 mode 派发，
+    应通过 ``_PROPAGATE_MODE_TABLE`` 或 ``_FILTER_SPEC_BUILDERS`` 表驱动。
+    """
+    f = _CORE_DIR / "execution_module.py"
+    count = _grep_count(
+        r'if mode == "inflection"|if mode == "rank"', f
+    )
+    assert count == 0, (
+        f"变更 H 违规：execution_module.py 检测到 {count} 处 "
+        'if mode == "inflection"|"rank" 硬编码（应表驱动）'
+    )
+
+
+def test_no_isomorphism_revival_base_period():
+    """变更 I: ``if self._base_period ==`` 不应复活。
+
+    runtime_mode_module.py 不应通过 ``self._base_period`` 硬编码分支派发周期，
+    应通过 ``_PERIOD_KEY_FUNCS`` 表或类似机制。
+    """
+    f = _CORE_DIR / "runtime_mode_module.py"
+    count = _grep_count(r"if self\._base_period ==", f)
+    assert count == 0, (
+        f"变更 I 违规：runtime_mode_module.py 检测到 {count} 处 "
+        "if self._base_period == 硬编码（应表驱动）"
+    )
+
+
+def test_no_isomorphism_revival_apply_tradeattr_side():
+    """变更 E: ``_apply_tradeattr`` 方法体内 ``if side == "BUY"`` / ``elif side == "SELL"``
+    不应复活。
+
+    trade_module.py 的 ``_apply_tradeattr`` 应通过 ``_TRADEATTR_FIELD_MAP.get(side, [])``
+    表驱动提取字段，而非硬编码 BUY/SELL 分支。注意：其他方法中
+    ``if side == "BUY"`` 是合法的（订单处理逻辑），仅本方法禁止。
+    """
+    f = _CORE_DIR / "trade_module.py"
+    assert f.exists(), "core/trade_module.py 不存在"
+    content = f.read_text(encoding="utf-8")
+    # 提取 _apply_tradeattr 方法体
+    m = re.search(
+        r"def _apply_tradeattr\([^)]*\)[^:]*:.*?(?=\n    def |\nclass |\Z)",
+        content,
+        re.DOTALL,
+    )
+    assert m is not None, "未找到 _apply_tradeattr 方法定义"
+    body = m.group(0)
+    # 方法体内不应有 if side == "BUY" / elif side == "SELL"
+    bad_count = len(re.findall(
+        r'if side == "BUY"|elif side == "SELL"', body
+    ))
+    assert bad_count == 0, (
+        f"变更 E 违规：_apply_tradeattr 方法体内检测到 {bad_count} 处 "
+        'if side == "BUY"/elif side == "SELL" 硬编码'
+        "（应通过 _TRADEATTR_FIELD_MAP 表驱动）"
+    )
+    # 额外断言：_TRADEATTR_FIELD_MAP 表存在
+    assert "_TRADEATTR_FIELD_MAP" in content, (
+        "变更 E 违规：_TRADEATTR_FIELD_MAP 表缺失"
+    )
+
+
+def test_no_isomorphism_revival_parse_serialize_helpers():
+    """变更 C: ``_parse_dzh`` / ``_parse_tdx`` / ``_parse_json`` /
+    ``_serialize_dzh`` / ``_serialize_tdx`` / ``_serialize_json`` 不应复活。
+
+    import_export_module.py 应通过 ``_IMPORT_RULES`` / ``_EXPORT_RULES`` 表驱动
+    分派，而非同构函数。
+    """
+    f = _CORE_DIR / "import_export_module.py"
+    if not f.exists():
+        pytest.skip("core/import_export_module.py 不存在")
+    count = _grep_count(
+        r"def _parse_dzh|def _parse_tdx|def _parse_json|"
+        r"def _serialize_dzh|def _serialize_tdx|def _serialize_json",
+        f,
+    )
+    assert count == 0, (
+        f"变更 C 违规：import_export_module.py 检测到 {count} 处 "
+        "_parse_dzh/_parse_tdx/_parse_json/_serialize_dzh/_serialize_tdx/_serialize_json "
+        "同构函数（应使用 _IMPORT_RULES / _EXPORT_RULES 表）"
+    )
+
+
+def test_no_isomorphism_revival_eval_formula_thin_wrapper():
+    """变更 D: ``_eval_formula`` 与 ``_eval_formula_series`` 应为薄包装（方法体 ≤ 5 行）。
+
+    formula_module.py 的两个方法应委托给 ``_eval_formula_core`` 统一骨架，
+    而非各自实现完整求值逻辑（同构复活）。
+    """
+    import ast as _ast
+
+    f = _CORE_DIR / "formula_module.py"
+    assert f.exists(), "core/formula_module.py 不存在"
+    content = f.read_text(encoding="utf-8")
+    tree = _ast.parse(content)
+
+    target_names = {"_eval_formula", "_eval_formula_series"}
+    found_methods = {}
+
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.FunctionDef) and node.name in target_names:
+            # 统计方法体行数（去除 docstring 后）
+            body = node.body
+            # 跳过首条 docstring
+            if body and isinstance(body[0], _ast.Expr) and isinstance(
+                body[0].value, _ast.Constant
+            ) and isinstance(body[0].value.value, str):
+                body = body[1:]
+            # 用 end_lineno - lineno 估算方法体行数
+            body_lines = (node.end_lineno or node.lineno) - node.lineno
+            found_methods[node.name] = body_lines
+
+    assert "_eval_formula" in found_methods, (
+        "变更 D 违规：未找到 _eval_formula 方法"
+    )
+    assert "_eval_formula_series" in found_methods, (
+        "变更 D 违规：未找到 _eval_formula_series 方法"
+    )
+    for name, lines in found_methods.items():
+        assert lines <= 8, (
+            f"变更 D 违规：{name} 方法体行数 {lines} > 8（应为薄包装，"
+            "委托给 _eval_formula_core）"
+        )
+
+    # 额外断言：_eval_formula_core 应存在（统一骨架）
+    core_count = _grep_count(r"def _eval_formula_core\b", f)
+    assert core_count >= 1, (
+        "变更 D 违规：_eval_formula_core 统一骨架缺失"
+    )
+
+
+def test_no_isomorphism_revival_filter_spec_table_driven():
+    """变更 F: ``_build_filter_spec`` 应通过 ``_FILTER_SPEC_BUILDERS`` 表驱动分派，
+    不应内含 if/elif 4 路分支。
+
+    execution_module.py 的 ``_build_filter_spec`` 函数应通过三元组 key
+    查 ``_FILTER_SPEC_BUILDERS`` 表完成 4 路分派（tdx_func / formula_ref /
+    INTERSECTION / passthrough），而非 if/elif 链。
+    """
+    f = _CORE_DIR / "execution_module.py"
+    content = f.read_text(encoding="utf-8")
+    # 提取 _build_filter_spec 函数体（模块级或类方法均处理）
+    m = re.search(
+        r"def _build_filter_spec\([^)]*\)[^:]*:.*?(?=\n    def |\n    @staticmethod|\nclass |\ndef [a-z]|\Z)",
+        content,
+        re.DOTALL,
+    )
+    assert m is not None, "未找到 _build_filter_spec 函数定义"
+    body = m.group(0)
+    # 函数体应使用 _FILTER_SPEC_BUILDERS 表查询
+    assert "_FILTER_SPEC_BUILDERS[" in body or "_FILTER_SPEC_BUILDERS.get" in body, (
+        "变更 F 违规：_build_filter_spec 未使用 _FILTER_SPEC_BUILDERS 表分派"
+    )
+    # 不应内含 4 路 if/elif 显式分支（has_tdx_func/has_formula_ref/condition_type）
+    bad_count = len(re.findall(
+        r'elif has_tdx_func|elif has_formula_ref|elif condition_type',
+        body,
+    ))
+    assert bad_count == 0, (
+        f"变更 F 违规：_build_filter_spec 内含 {bad_count} 处显式 elif 分支"
+        "（应通过 _FILTER_SPEC_BUILDERS 表驱动）"
+    )
+    # _FILTER_SPEC_BUILDERS 表应存在
+    table_count = _grep_count(r"^_FILTER_SPEC_BUILDERS\s*:", f)
+    assert table_count >= 1, (
+        "变更 F 违规：_FILTER_SPEC_BUILDERS 表定义缺失"
+    )
+
+
+def test_no_isomorphism_revival_run_coro_module_level():
+    """变更 J: ``_run_coro_sync`` / ``_run_coro`` 应仅模块级存在，不应在类内定义。
+
+    runtime_mode_module.py 应通过模块级 ``_run_coro_sync(coro, loop_holder, ...)``
+    统一协程同步执行器，不应在 ``KLineReplayEngine`` / ``RuntimeSimulator`` 等
+    类内重复定义同构方法。
+    """
+    import ast as _ast
+
+    f = _CORE_DIR / "runtime_mode_module.py"
+    content = f.read_text(encoding="utf-8")
+    tree = _ast.parse(content)
+
+    # 遍历 AST，统计 _run_coro_sync / _run_coro 的定义位置（模块级 vs 类内）
+    module_level_count = 0
+    class_level_count = 0
+
+    # 模块级函数
+    for node in tree.body:
+        if isinstance(node, _ast.FunctionDef) and re.match(
+            r"_run_coro_sync\b|_run_coro\b", node.name
+        ):
+            module_level_count += 1
+
+    # 类内方法
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, _ast.FunctionDef) and re.match(
+                    r"_run_coro_sync\b|_run_coro\b", item.name
+                ):
+                    class_level_count += 1
+
+    assert module_level_count >= 1, (
+        "变更 J 违规：模块级 _run_coro_sync 缺失"
+        "（应模块级统一定义协程同步执行器）"
+    )
+    assert class_level_count == 0, (
+        f"变更 J 违规：检测到 {class_level_count} 处类内 "
+        "_run_coro_sync / _run_coro 方法定义（应仅模块级存在）"
+    )
+
+
+def test_no_isomorphism_revival_build_topology_thin():
+    """变更 K: ``engine.py`` / ``runtime_mode_module.py`` 的 ``_build_topology``
+    方法体 ≤ 3 行，应委托给 ``core/domain.py`` 的 ``_build_adjacency``。
+
+    注意：``_build_adjacency`` 在 ``core/domain.py`` 中合法存在（共享辅助），
+    不禁止；仅禁止 engine/runtime_mode_module 内的同构实现。
+    """
+    import ast as _ast
+
+    # 验证 _build_adjacency 在 domain.py 合法存在
+    domain_path = _CORE_DIR / "domain.py"
+    assert domain_path.exists(), "core/domain.py 不存在"
+    domain_count = _grep_count(r"^def _build_adjacency\b", domain_path)
+    assert domain_count >= 1, (
+        "变更 K：core/domain.py 的 _build_adjacency 应合法存在"
+    )
+
+    # engine.py 的 _build_topology 方法体应 ≤ 3 行
+    engine_path = _CORE_DIR / "engine.py"
+    engine_content = engine_path.read_text(encoding="utf-8")
+    engine_tree = _ast.parse(engine_content)
+
+    for node in _ast.walk(engine_tree):
+        if isinstance(node, _ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, _ast.FunctionDef) and item.name == "_build_topology":
+                    body_lines = (item.end_lineno or item.lineno) - item.lineno
+                    assert body_lines <= 4, (
+                        f"变更 K 违规：engine.py _build_topology 方法体 {body_lines} 行 > 4"
+                        "（应 ≤ 3 行委托给 _build_adjacency）"
+                    )
+                    # 应调用 _build_adjacency
+                    src = _ast.get_source_segment(engine_content, item) or ""
+                    assert "_build_adjacency" in src, (
+                        "变更 K 违规：engine.py _build_topology 未委托 _build_adjacency"
+                    )
+
+    # runtime_mode_module.py 的 _build_topology 方法体应 ≤ 5 行
+    rm_path = _CORE_DIR / "runtime_mode_module.py"
+    rm_content = rm_path.read_text(encoding="utf-8")
+    rm_tree = _ast.parse(rm_content)
+
+    found = False
+    for node in _ast.walk(rm_tree):
+        if isinstance(node, _ast.ClassDef):
+            for item in node.body:
+                if isinstance(item, _ast.FunctionDef) and item.name == "_build_topology":
+                    found = True
+                    body_lines = (item.end_lineno or item.lineno) - item.lineno
+                    assert body_lines <= 6, (
+                        f"变更 K 违规：runtime_mode_module.py _build_topology 方法体 "
+                        f"{body_lines} 行 > 6（应 ≤ 3 行委托给 _build_adjacency）"
+                    )
+                    src = _ast.get_source_segment(rm_content, item) or ""
+                    assert "_build_adjacency" in src, (
+                        "变更 K 违规：runtime_mode_module.py _build_topology "
+                        "未委托 _build_adjacency"
+                    )
+    assert found, "变更 K：runtime_mode_module.py 未找到 _build_topology 方法"
+
+
+def test_no_isomorphism_revival_event_handler_count():
+    """变更 N: ``@_event_handler`` 装饰器在 5 个核心模块共 ≥ 28 次。
+
+    execution_module / tick_bar_module / monitoring_module / screening_module /
+    trade_module 共应至少有 28 处 ``@_event_handler`` 装饰（事件总线订阅统一接口）。
+    """
+    target_modules = [
+        "execution_module.py",
+        "tick_bar_module.py",
+        "monitoring_module.py",
+        "screening_module.py",
+        "trade_module.py",
+    ]
+    total = 0
+    per_module = {}
+    for name in target_modules:
+        f = _CORE_DIR / name
+        if not f.exists():
+            continue
+        c = _grep_count(r"@_event_handler\b", f)
+        per_module[name] = c
+        total += c
+
+    assert total >= 28, (
+        f"变更 N 违规：5 模块共 {total} 处 @_event_handler < 28"
+        f"（按模块：{per_module}）"
+    )
+    # 至少每个模块有 ≥ 1 处
+    for name, c in per_module.items():
+        assert c >= 1, (
+            f"变更 N 违规：{name} 含 0 处 @_event_handler"
+        )
+
+
+def test_no_isomorphism_revival_pnl_helpers():
+    """变更 B: monitoring_module.py 不应复活 5 个 PnL 计算同构函数。
+
+    ``_compute_intraday_pnl`` / ``_compute_market_impact_pnl`` /
+    ``_compute_historical_pnl`` / ``_compute_distribution_pnl`` /
+    ``_compute_positioning_pnl`` 应通过统一 ``_PNL_COMPUTERS`` 表驱动分派。
+    """
+    f = _CORE_DIR / "monitoring_module.py"
+    if not f.exists():
+        pytest.skip("core/monitoring_module.py 不存在")
+    count = _grep_count(
+        r"def _compute_intraday_pnl|def _compute_market_impact_pnl|"
+        r"def _compute_historical_pnl|def _compute_distribution_pnl|"
+        r"def _compute_positioning_pnl",
+        f,
+    )
+    assert count == 0, (
+        f"变更 B 违规：monitoring_module.py 检测到 {count} 处 "
+        "5 个 PnL 同构函数（应通过 _PNL_COMPUTERS 表驱动）"
+    )
+
+
+def test_no_isomorphism_revival_pnl_keys():
+    """变更 L: monitoring_module.py 不应复活 ``_momentum_key`` / ``_trend_key`` /
+    ``_value_key`` 同构函数。
+
+    应通过统一 key 函数表（如 ``_PERIOD_KEY_FUNCS``）或参数化派生。
+    """
+    f = _CORE_DIR / "monitoring_module.py"
+    if not f.exists():
+        pytest.skip("core/monitoring_module.py 不存在")
+    count = _grep_count(
+        r"def _momentum_key|def _trend_key|def _value_key", f
+    )
+    assert count == 0, (
+        f"变更 L 违规：monitoring_module.py 检测到 {count} 处 "
+        "_momentum_key/_trend_key/_value_key 同构函数"
+    )
+
+
+def test_no_isomorphism_revival_apply_stock_filters_only_in_wrapper():
+    """变更 M: ``_apply_stock_filters`` 应仅在 ``_with_stock_filters`` 包装器内调用，
+    不应在 evaluator 函数体内直接调用。
+
+    execution_module.py 的 ``_eval_formula_path`` / ``_eval_scalar_path`` /
+    ``_eval_set_op_path`` 应通过 ``_with_stock_filters`` 包装器统一应用后过滤，
+    不应内联 ``_apply_stock_filters`` 调用。
+    """
+    import ast as _ast
+
+    f = _CORE_DIR / "execution_module.py"
+    content = f.read_text(encoding="utf-8")
+    tree = _ast.parse(content)
+
+    evaluator_names = {
+        "_eval_formula_path",
+        "_eval_scalar_path",
+        "_eval_set_op_path",
+    }
+
+    # 找到模块级 evaluator 函数定义
+    evaluator_funcs = {}
+    for node in tree.body:
+        if isinstance(node, _ast.FunctionDef) and node.name in evaluator_names:
+            evaluator_funcs[node.name] = node
+
+    # 至少有 1 个 evaluator 存在（其他可能改名）
+    assert len(evaluator_funcs) >= 1, (
+        "变更 M 违规：未找到 _eval_formula_path / _eval_scalar_path / "
+        "_eval_set_op_path 中的任一 evaluator 函数"
+    )
+
+    # 检查每个 evaluator 函数体内是否有 _apply_stock_filters 直接调用
+    for name, node in evaluator_funcs.items():
+        src = _ast.get_source_segment(content, node) or ""
+        # 排除函数定义行后查找 _apply_stock_filters( 调用
+        # 简单方法：去除函数签名行后 grep
+        body_src = src.split("\n", 1)[1] if "\n" in src else ""
+        bad_calls = re.findall(r"_apply_stock_filters\s*\(", body_src)
+        assert len(bad_calls) == 0, (
+            f"变更 M 违规：evaluator {name} 体内检测到 {len(bad_calls)} 处 "
+            "_apply_stock_filters 调用（应仅通过 _with_stock_filters 包装器调用）"
+        )
+
+    # _with_stock_filters 包装器应存在
+    wrapper_count = _grep_count(r"def _with_stock_filters\b", f)
+    assert wrapper_count >= 1, (
+        "变更 M 违规：_with_stock_filters 包装器缺失"
+    )
+
+
+def test_no_isomorphism_revival_iter_entries_in_table_engine():
+    """变更 O: ``_iter_entries`` 应在 ``table_engine.py`` 存在，
+    ``_validate_table`` 应使用它（表驱动按 type 分派，无 if/elif 双分支）。
+    """
+    f = _CORE_DIR / "table_engine.py"
+    assert f.exists(), "core/table_engine.py 不存在"
+
+    # _iter_entries 应作为模块级函数存在
+    iter_count = _grep_count(r"^def _iter_entries\b", f)
+    assert iter_count >= 1, (
+        "变更 O 违规：table_engine.py 缺失 _iter_entries 模块级函数"
+    )
+
+    # _validate_table 应使用 _iter_entries
+    content = f.read_text(encoding="utf-8")
+    m = re.search(
+        r"def _validate_table\([^)]*\)[^:]*:.*?(?=\n    def |\Z)",
+        content,
+        re.DOTALL,
+    )
+    assert m is not None, "未找到 _validate_table 方法定义"
+    body = m.group(0)
+    assert "_iter_entries(" in body, (
+        "变更 O 违规：_validate_table 未使用 _iter_entries"
+        "（应表驱动按 type 分派，无 if/elif 双分支）"
+    )

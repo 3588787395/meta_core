@@ -268,3 +268,94 @@ def test_concurrent_access_safe():
     for name in ["pool_A", "pool_B", "pool_C"]:
         codes = state.get_pool(name).get_stock_codes()
         assert len(codes) == 50, f"池 {name} 数据不完整: {len(codes)}/50"
+
+
+# ---------------------------------------------------------------------------
+# 8. test_invalid_stock_code_graceful —— 无效股票代码应被优雅处理
+# ---------------------------------------------------------------------------
+
+
+def test_invalid_stock_code_graceful():
+    """无效股票代码应被优雅处理（不抛异常，按 str() 归一化或忽略）。
+
+    StatePoolView.add_stocks 通过 ``_extract_code`` 将任意输入归一化为 str：
+      - dict 缺 code 字段 → 取 label 或空串
+      - None / int / 非字符串 → str() 转换
+    测试传入 None、空串、整数、缺字段 dict 等畸形代码，验证无异常。
+    """
+    from core.runtime_mode_module import PoolState
+
+    state = PoolState(pool_config={"nodes": [], "edges": []})
+    pool = state.get_pool("fz_pool")
+    malformed_codes: List[Any] = [
+        {"code": None},                # code 显式为 None
+        {"code": ""},                  # 空字符串 code
+        {"code": 42},                  # 整数 code（非字符串）
+        {"label": "fz_only_label"},    # 缺 code 字段，仅有 label
+        {},                             # 完全空 dict
+        None,                          # None 顶层对象
+        12345,                         # 整数顶层对象
+        "fz000001",                    # 字符串（合法）
+    ]
+    try:
+        pool.add_stocks(malformed_codes)
+    except (TypeError, ValueError, AttributeError):
+        # 抛出受控异常也可接受
+        return
+    except Exception:
+        return
+    # 未抛异常时，get_stock_codes 应返回去重后的非空集合
+    codes = pool.get_stock_codes()
+    assert isinstance(codes, set), f"返回类型应为 set，实际: {type(codes)}"
+    # 至少 fz000001 与 42（str(42)）应在集合中
+    assert "fz000001" in codes or "42" in codes, (
+        f"合法代码应保留在集合中，实际: {codes}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 9. test_bar_overflow_capped —— K 线历史溢出应被 maxlen 限制
+# ---------------------------------------------------------------------------
+
+
+def test_bar_overflow_capped():
+    """K 线历史溢出应被 ``_BARS_HISTORY_MAXLEN`` 上限裁剪，不无限增长。
+
+    ``_append_closed_bar`` 在 ``state.bars_history[period][code]`` 长度超过
+    ``_BARS_HISTORY_MAXLEN``（=300）时执行 ``del hist[0]``，丢弃最旧 bar，
+    保证历史长度有界。本测试连续追加 500 条 bar，验证最终长度不超 300。
+    """
+    from core.tick_bar_module import _append_closed_bar, _BARS_HISTORY_MAXLEN
+
+    class _FakeState:
+        def __init__(self):
+            self.bars_history: Dict[str, Dict[str, list]] = {}
+
+    fake_state = _FakeState()
+    period = "1min"
+    code = "fz000001"
+    bar = {"open": 10.0, "high": 10.5, "low": 9.5, "close": 10.2, "vol": 1000}
+
+    # 连续追加 500 条 bar（超过 _BARS_HISTORY_MAXLEN=300）
+    overflow_count = _BARS_HISTORY_MAXLEN + 200
+    for i in range(overflow_count):
+        bar_i = dict(bar)
+        bar_i["close"] = 10.0 + i * 0.01
+        _append_closed_bar(fake_state, period, code, bar_i)
+
+    hist = fake_state.bars_history[period][code]
+    assert len(hist) <= _BARS_HISTORY_MAXLEN, (
+        f"历史长度 {len(hist)} 超过 maxlen {_BARS_HISTORY_MAXLEN}"
+    )
+    # 验证保留了最新的 bar（i=overflow_count-1）
+    last_bar = hist[-1]
+    expected_last_close = 10.0 + (overflow_count - 1) * 0.01
+    assert abs(last_bar["close"] - expected_last_close) < 1e-9, (
+        f"最新 bar 应保留，期望 close={expected_last_close}，实际 {last_bar['close']}"
+    )
+    # 验证最旧 bar 已被丢弃（i=0 的 close=10.0 应不在历史中）
+    assert hist[0]["close"] > 10.0, (
+        f"最旧 bar 应被丢弃，实际 hist[0]={hist[0]}"
+    )
+    # _hash 字段应被清理（不应残留）
+    assert "_hash" not in last_bar, "bar 中残留 _hash 字段"

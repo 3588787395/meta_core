@@ -536,3 +536,89 @@ class TestFormulaScreeningSeparation:
         # __all__ 中不应有筛选相关符号
         assert "ScreeningModule" not in fm.__all__
         assert "eval_tdx_condition" not in fm.__all__
+
+
+# ---------------------------------------------------------------------------
+# 变更 D：_eval_formula_core 统一核心 + _eval_formula/_eval_formula_series 薄包装
+# ---------------------------------------------------------------------------
+
+
+class TestChangeDEvalFormulaCoreMerge:
+    """变更 D：_eval_formula_core 统一核心，_eval_formula/_eval_formula_series 为薄包装（≤5 行）。
+
+    注：变更 D 合并点位于 ``FormulaEngine`` 类（formula_module.py:1213），
+    该类含 ``_eval_formula``(@1318) / ``_eval_formula_core``(@1325) /
+    ``_eval_formula_series``(@1413)；``FormulaModule``(@2465) 为 EventBus
+    驱动的另一类，不含此三方法。
+    """
+
+    def test_eval_formula_core_method_exists(self):
+        """_eval_formula_core 方法存在（标量/序列共用核心）。"""
+        from core.formula_module import FormulaEngine
+        assert hasattr(FormulaEngine, "_eval_formula_core"), \
+            "FormulaEngine 应含 _eval_formula_core 方法（变更 D 合并核心）"
+        assert callable(getattr(FormulaEngine, "_eval_formula_core")), \
+            "_eval_formula_core 应为可调用方法"
+
+    def test_eval_formula_method_exists_as_thin_wrapper(self):
+        """_eval_formula 方法存在且为薄包装。"""
+        from core.formula_module import FormulaEngine
+        assert hasattr(FormulaEngine, "_eval_formula"), \
+            "FormulaEngine 应含 _eval_formula 方法"
+        assert hasattr(FormulaEngine, "_eval_formula_series"), \
+            "FormulaEngine 应含 _eval_formula_series 方法"
+
+    def test_eval_formula_body_le_five_lines(self):
+        """_eval_formula 方法体 ≤ 5 行（薄包装，委托 _eval_formula_core）。"""
+        import ast
+        import inspect
+        from core.formula_module import FormulaEngine
+        src = inspect.getsource(FormulaEngine)
+        tree = ast.parse(src)
+        found = False
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_eval_formula":
+                # 统计非 docstring 语句数
+                stmts = [n for n in node.body if not (
+                    isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
+                    and isinstance(n.value.value, str)
+                )]
+                assert len(stmts) <= 5, \
+                    f"_eval_formula 应 ≤ 5 行语句（薄包装，变更 D），实际 {len(stmts)}"
+                found = True
+        assert found, "FormulaEngine 应含 _eval_formula 方法定义"
+
+    def test_eval_formula_series_body_le_five_lines(self):
+        """_eval_formula_series 方法体 ≤ 5 行（薄包装，委托 _eval_formula_core）。"""
+        import ast
+        import inspect
+        from core.formula_module import FormulaEngine
+        src = inspect.getsource(FormulaEngine)
+        tree = ast.parse(src)
+        found = False
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_eval_formula_series":
+                stmts = [n for n in node.body if not (
+                    isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
+                    and isinstance(n.value.value, str)
+                )]
+                assert len(stmts) <= 5, \
+                    f"_eval_formula_series 应 ≤ 5 行语句（薄包装，变更 D），实际 {len(stmts)}"
+                found = True
+        assert found, "FormulaEngine 应含 _eval_formula_series 方法定义"
+
+    def test_thin_wrappers_delegate_to_core(self):
+        """_eval_formula 与 _eval_formula_series 均委托 _eval_formula_core。"""
+        import ast
+        import inspect
+        from core.formula_module import FormulaEngine
+        src = inspect.getsource(FormulaEngine)
+        tree = ast.parse(src)
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in (
+                "_eval_formula", "_eval_formula_series"
+            ):
+                end = getattr(node, "end_lineno", node.lineno) or node.lineno
+                method_text = "\n".join(src.splitlines()[node.lineno - 1: end])
+                assert "_eval_formula_core" in method_text, \
+                    f"{node.name} 应委托 _eval_formula_core（变更 D 薄包装）"

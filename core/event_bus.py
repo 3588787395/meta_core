@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import functools
 import logging
 from dataclasses import field
 from typing import Any, Callable, Dict, List, Optional
@@ -23,6 +24,20 @@ from pydantic.dataclasses import dataclass
 
 
 logger = logging.getLogger(__name__)
+
+
+def _event_handler(name: str):
+    """统一事件 handler 异常处理装饰器：捕获异常→logger.warning(exc_info=True)→返回 None。"""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            try:
+                return func(self, *args, **kwargs)
+            except Exception as ex:
+                logger.warning("%s %s 异常: %s", self.__class__.__name__, name, ex, exc_info=True)
+                return None
+        return wrapper
+    return decorator
 
 
 @dataclass

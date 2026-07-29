@@ -32,6 +32,18 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type
 
+from .table_engine import load_config_table
+
+
+def _build_adjacency(node_ids, edges_iter, src_getter, eid_getter) -> Dict[str, List[str]]:
+    """构建拓扑邻接表（纯函数，Task 12 变更 K：合并双 _build_topology）。"""
+    adj: Dict[str, List[str]] = {nid: [] for nid in node_ids}
+    for edge in edges_iter:
+        src, eid = src_getter(edge), eid_getter(edge)
+        if src and eid:
+            adj.setdefault(str(src), []).append(str(eid))
+    return adj
+
 
 # ════════════════════════════════════════════════════════════════
 # Section: 字段元数据（Task 11.1：_FieldMeta 用于 _NodeBase/_EdgeBase 子类
@@ -1418,13 +1430,11 @@ _CFG_ROOT = Path(__file__).parent.parent
 
 def _load_market_cfg() -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
     """从 data_config.json 加载市场代码前缀/后缀配置（fail-fast）。"""
-    path = _CFG_ROOT / "config" / "data" / "data_config.json"
-    try:
-        _dc = json.load(open(path, encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as ex:
+    _dc = load_config_table("data_config")
+    if not _dc:
         raise RuntimeError(
-            f"无法加载配置表 {path}: {ex}（fail-fast：禁止静默回退硬编码值）"
-        ) from ex
+            "无法加载配置表 data_config.json（fail-fast：禁止静默回退硬编码值）"
+        )
     return (
         tuple(_dc.get("market_code_prefixes", ["SH", "SZ", "BJ"])),
         tuple(_dc.get("market_code_suffixes", [".SH", ".SZ", ".BJ"])),

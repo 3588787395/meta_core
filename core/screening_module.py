@@ -61,7 +61,7 @@ from .domain import (
     MarketScalarEvaluator,
     SetOperationEvaluator,
 )
-from .event_bus import EventBus, FormulaEvaluated, PoolLoaded, StockFiltered
+from .event_bus import _event_handler, EventBus, FormulaEvaluated, PoolLoaded, StockFiltered
 from .table_engine import load_config_table
 
 # 表驱动：noperate 操作符规则配置（config/tdx_noperate_rules.json）
@@ -335,39 +335,23 @@ def eval_formula_nset(action_inputs: dict, nset_cfg: dict) -> list[str]:
             if isinstance(v, (int, float)) and v > 0]
 
 
-def _apply_noperate_mode(scalars: dict, noperate: int, fsecond: float,
-                         prev_lookup: Callable[[str], float | None], nset_label: str,
-                         eval_field: str | None = None) -> list[str]:
-    """nset 标量评估的 mode 分派内核：rank/inflection/compare 三模式统一处理。
+def _mode_inflection(scalars, noperate, fsecond, prev_lookup, nset_label, eval_field=None):
+    """标量拐点：需向量数据，标量模式无法支持。"""
+    logger.warning("nset=%s noperate=%d（拐点）需要向量数据，标量模式无法支持", nset_label, noperate)
+    return []
 
-    被 _eval_nset0_result（nset=0，从公式结果提取标量）与 eval_scalar_nset（nset=3/4，
-    从 MarketDataPort 获取标量）共用。I47：消除两处重复的 mode 分派（提取优先于表驱动——
-    分支非虚假特化但跨函数重复，提取共用内核而非各自表驱动）。
-        - rank（5-7 排名为/排名前N/排名后N）：收集 (symbol, value) 对用 _resolve_rank 处理
-        - inflection（8-9 上拐/下拐）：需要向量数据，标量模式无法支持
-        - compare（0-4 等于/大于/小于/上穿/下破）：逐只用 _scalar_compare 比较
-        - cross 信号公式（eval_field 为 CROSS_* / XG）：公式已计算穿越，truthy 即通过
-    """
+
+def _mode_rank(scalars, noperate, fsecond, prev_lookup, nset_label, eval_field=None):
+    """标量排名：收集 (symbol, value) 对用 _resolve_rank 处理。"""
+    return _resolve_rank([(s, v) for s, v in scalars.items() if v is not None],
+                         fsecond, _RANK_MODES.get(str(noperate), {}))
+
+
+def _mode_compare(scalars, noperate, fsecond, prev_lookup, nset_label, eval_field=None):
+    """标量比较：cross 信号公式（CROSS_*/XG）truthy 即通过，否则逐只 _scalar_compare。"""
     rule = _NOPERATE_RULES.get(str(noperate), {})
-    mode = rule.get("mode", "compare")
-    if mode == "inflection":
-        logger.warning("nset=%s noperate=%d（拐点）需要向量数据，标量模式无法支持", nset_label, noperate)
-        return []
-    if mode == "rank":
-        ranked = [(s, v) for s, v in scalars.items() if v is not None]
-        rank_rule = _RANK_MODES.get(str(noperate), {})
-        return _resolve_rank(ranked, fsecond, rank_rule)
-
-    # cross 信号公式快捷路径：公式自身已计算 CROSS，truthy 即视为满足上穿/下穿条件。
-    # CROSS 函数返回 0/1，noperate 任意值时均按 truthy 判断（>0 即通过），
-    # 避免 noperate=0(等于) 误将 CROSS=0 判为通过、noperate=1(大于) 误将 CROSS=1 判为通过。
-    is_cross_signal = eval_field and (
-        eval_field.upper().startswith("CROSS_") or eval_field.upper() == "XG"
-    )
-    if is_cross_signal:
+    if eval_field and (eval_field.upper().startswith("CROSS_") or eval_field.upper() == "XG"):
         return [s for s, v in scalars.items() if v is not None and v > 0]
-
-    # 比较模式：用 _scalar_compare 逐只比较
     passed = []
     for symbol, value in scalars.items():
         if value is None:
@@ -378,6 +362,84 @@ def _apply_noperate_mode(scalars: dict, noperate: int, fsecond: float,
         if _scalar_compare(value, fsecond, noperate, prev_value):
             passed.append(symbol)
     return passed
+
+
+# 表驱动：标量 mode 分派表，与 _MODE_HANDLERS_SERIES 共用 _NOPERATE_RULES 真值源。
+_MODE_HANDLERS = {"inflection": _mode_inflection, "rank": _mode_rank, "compare": _mode_compare}
+
+
+def _apply_noperate_mode(scalars: dict, noperate: int, fsecond: float,
+                         prev_lookup: Callable[[str], float | None], nset_label: str,
+                         eval_field: str | None = None) -> list[str]:
+    """nset 标量评估的 mode 分派内核：经 _MODE_HANDLERS 分派，被 _eval_nset0_result/eval_scalar_nset 共用。"""
+    rule = _NOPERATE_RULES.get(str(noperate), {})
+    handler = _MODE_HANDLERS.get(rule.get("mode", "compare"), _mode_compare)
+    return handler(scalars, noperate, fsecond, prev_lookup, nset_label, eval_field)
+
+
+def _mode_rank_series(codes, series_results, noperate, fsecond, cfirst, nfirst, csecond, nsecond, line_extractor):
+    """向量排名：按 codes 顺序提取 line1 末值，复用 _resolve_rank（与标量 _mode_rank 共用内核）。"""
+    ranked: List[Tuple[str, float]] = []
+    for code in codes:
+        line1 = line_extractor(series_results.get(code), cfirst, nfirst)
+        if line1 and len(line1) > 0 and line1[-1] is not None:
+            try:
+                ranked.append((code, float(line1[-1])))
+            except (TypeError, ValueError):
+                continue
+    return _resolve_rank(ranked, fsecond, _RANK_MODES.get(str(noperate), {}))
+
+
+def _mode_compare_series(codes, series_results, noperate, fsecond, cfirst, nfirst, csecond, nsecond, line_extractor):
+    """向量比较/拐点：提取 line1/line2 序列用 _eval_op；拐点经 prev/curr 自动处理，故 inflection 复用本 handler。"""
+    rule = _NOPERATE_RULES.get(str(noperate), {})
+    passed = []
+    for code in codes:
+        sres = series_results.get(code)
+        if sres is None:
+            continue
+        line1 = line_extractor(sres, cfirst, nfirst)
+        if line1 is None or len(line1) == 0:
+            continue
+        if nsecond >= 0 and csecond:
+            line2 = line_extractor(sres, csecond, nsecond)
+            if line2 is None:
+                line2 = [fsecond] * len(line1)
+        else:
+            line2 = [fsecond] * len(line1)
+        min_len = min(len(line1), len(line2))
+        if min_len == 0:
+            continue
+        op_ctx = _build_op_ctx(line1[-min_len:], line2[-min_len:], rule.get("params", {}))
+        try:
+            result = _eval_op(rule, op_ctx)
+            if result is not None and not isinstance(result, list):
+                try:
+                    if bool(result):
+                        passed.append(code)
+                except (TypeError, ValueError):
+                    pass
+        except (IndexError, TypeError, KeyError) as ex:
+            logger.debug("noperate求值异常 code=%s noperate=%d: %s", code, noperate, ex)
+            continue
+    return passed
+
+
+# 表驱动：向量 mode 分派表，与 _MODE_HANDLERS 共用 _NOPERATE_RULES 真值源；inflection 复用 compare。
+_MODE_HANDLERS_SERIES = {"inflection": _mode_compare_series, "rank": _mode_rank_series, "compare": _mode_compare_series}
+
+
+def _resolve_series_lookback(noperate: int) -> int:
+    """序列求值回看长度：拐点模式 5 根（需 prev/curr 两点），其余 3 根。"""
+    return 5 if _NOPERATE_RULES.get(str(noperate), {}).get("mode") == "inflection" else 3
+
+
+def _apply_noperate_mode_series(series_results, codes, noperate, fsecond,
+                                cfirst, nfirst, csecond, nsecond, line_extractor):
+    """nset 向量评估的 mode 分派内核：经 _MODE_HANDLERS_SERIES 分派，被 execution_module._eval_formula_path 调用。"""
+    rule = _NOPERATE_RULES.get(str(noperate), {})
+    handler = _MODE_HANDLERS_SERIES.get(rule.get("mode", "compare"), _mode_compare_series)
+    return handler(codes, series_results, noperate, fsecond, cfirst, nfirst, csecond, nsecond, line_extractor)
 
 
 def _eval_nset0_result(result: dict, noperate: int, fsecond: float,
@@ -617,13 +679,13 @@ def _filter_indicator(
     )
 
 
-def _filter_condition_formula(
+def _filter_truthy(
     filter_spec: FilterSpec,
     stock_results: Dict[str, Any],
     current_code: str,
     evaluator: Evaluator,
 ) -> Optional[List[str]]:
-    """nset=1：条件选股公式，公式求值返回 0/1 或 True/False，检查真值。
+    """nset=1（条件选股公式）/ nset=2（专家系统公式）：公式求值返回 0/1 或 True/False，检查真值。
 
     bool 是 int 子类，v>0 自然区分 True/False（与 core.evaluators.eval_formula_nset 一致）。
     """
@@ -633,28 +695,16 @@ def _filter_condition_formula(
             if isinstance(v, (int, float)) and v > 0]
 
 
-def _filter_expert_system(
+def _filter_scalar(
     filter_spec: FilterSpec,
     stock_results: Dict[str, Any],
     current_code: str,
     evaluator: Evaluator,
 ) -> Optional[List[str]]:
-    """nset=2：专家系统公式，同条件选股（公式求值返回 0/1 或 True/False）。"""
-    if not stock_results:
-        return None
-    return [c for c, v in stock_results.items()
-            if isinstance(v, (int, float)) and v > 0]
+    """nset=3（最新财务标量）/ nset=4（实时行情标量）：用 noperate 比较标量值。
 
-
-def _filter_financial_scalar(
-    filter_spec: FilterSpec,
-    stock_results: Dict[str, Any],
-    current_code: str,
-    evaluator: Evaluator,
-) -> Optional[List[str]]:
-    """nset=3：最新财务标量评估，用 noperate 比较标量值。
-
-    委托 core.evaluators._apply_noperate_mode 执行 rank/compare 分派。
+    委托 core.evaluators._apply_noperate_mode 执行 rank/compare 分派；
+    nset_label 由 filter_spec.nset 派生，对 3/4 自动正确。
     """
     if not stock_results:
         return None
@@ -665,27 +715,7 @@ def _filter_financial_scalar(
             scalars[code] = scalar
     return _apply_noperate_mode(
         scalars, filter_spec.noperate, filter_spec.fsecond,
-        prev_lookup=None, nset_label="3",
-    )
-
-
-def _filter_market_scalar(
-    filter_spec: FilterSpec,
-    stock_results: Dict[str, Any],
-    current_code: str,
-    evaluator: Evaluator,
-) -> Optional[List[str]]:
-    """nset=4：实时行情标量评估，用 noperate 比较标量值。"""
-    if not stock_results:
-        return None
-    scalars: Dict[str, float] = {}
-    for code, result in stock_results.items():
-        scalar = _extract_indicator_scalar(result)
-        if scalar is not None:
-            scalars[code] = scalar
-    return _apply_noperate_mode(
-        scalars, filter_spec.noperate, filter_spec.fsecond,
-        prev_lookup=None, nset_label="4",
+        prev_lookup=None, nset_label=str(filter_spec.nset),
     )
 
 
@@ -708,10 +738,10 @@ def _filter_set_operation(
 # 表驱动：nset → 筛选策略函数（无 if/elif 分派）
 _NSET_FILTER_HANDLERS: Dict[int, Callable[..., Optional[List[str]]]] = {
     0: _filter_indicator,
-    1: _filter_condition_formula,
-    2: _filter_expert_system,
-    3: _filter_financial_scalar,
-    4: _filter_market_scalar,
+    1: _filter_truthy,
+    2: _filter_truthy,
+    3: _filter_scalar,
+    4: _filter_scalar,
     5: _filter_set_operation,
 }
 
@@ -768,6 +798,7 @@ class ScreeningModule:
         self._bus.subscribe(FormulaEvaluated, self._on_formula_evaluated)
         self._bus.subscribe(PoolLoaded, self._on_pool_loaded)
 
+    @_event_handler("_on_pool_loaded")
     def _on_pool_loaded(self, event: PoolLoaded) -> None:
         """收到 PoolLoaded 时，从 pool_config.edges 提取 formula_ref 编译 filter_spec。
 
@@ -776,54 +807,51 @@ class ScreeningModule:
         支持三种 condition_type：INDICATOR（含 formula_ref）、INTERSECTION、
         以及无 formula_ref 的无条件边（pass_through）。
         """
-        try:
-            pool_config = event.pool_config or {}
-            edges = pool_config.get("edges", []) if isinstance(pool_config, dict) else []
-            # 清空旧 spec，避免重复池配置残留
-            self._edge_filter_specs.clear()
-            for edge in edges:
-                if not isinstance(edge, dict):
-                    continue
-                eid = str(edge.get("id") or edge.get("flow_id") or "")
-                if not eid:
-                    continue
-                params = edge.get("params") or {}
-                if not isinstance(params, dict):
-                    params = {}
-                formula_ref = str(params.get("formula_ref") or "")
-                condition_type = str(params.get("condition_type") or "")
-                if formula_ref:
-                    spec = FilterSpec(
-                        evaluator_type="formula",
-                        nset=0,
-                        noperate=int(params.get("noperate", 0) or 0),
-                        formula_ref=formula_ref,
-                        fsecond=params.get("fsecond", 0),
-                    )
-                elif condition_type == "INTERSECTION":
-                    spec = FilterSpec(
-                        evaluator_type="intersection",
-                        nset=5,
-                        noperate=2,  # 交集
-                        formula_ref="",
-                        fsecond=0,
-                    )
-                else:
-                    spec = FilterSpec(
-                        evaluator_type="pass_through",
-                        nset=5,
-                        noperate=0,
-                        formula_ref="",
-                        fsecond=0,
-                    )
-                self._edge_filter_specs[eid] = spec
-            logger.info(
-                "ScreeningModule PoolLoaded 编译 filter_spec 边数=%d spec=%s",
-                len(self._edge_filter_specs),
-                {eid: s.formula_ref for eid, s in self._edge_filter_specs.items()},
-            )
-        except Exception as ex:
-            logger.warning("ScreeningModule._on_pool_loaded 异常: %s", ex, exc_info=True)
+        pool_config = event.pool_config or {}
+        edges = pool_config.get("edges", []) if isinstance(pool_config, dict) else []
+        # 清空旧 spec，避免重复池配置残留
+        self._edge_filter_specs.clear()
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            eid = str(edge.get("id") or edge.get("flow_id") or "")
+            if not eid:
+                continue
+            params = edge.get("params") or {}
+            if not isinstance(params, dict):
+                params = {}
+            formula_ref = str(params.get("formula_ref") or "")
+            condition_type = str(params.get("condition_type") or "")
+            if formula_ref:
+                spec = FilterSpec(
+                    evaluator_type="formula",
+                    nset=0,
+                    noperate=int(params.get("noperate", 0) or 0),
+                    formula_ref=formula_ref,
+                    fsecond=params.get("fsecond", 0),
+                )
+            elif condition_type == "INTERSECTION":
+                spec = FilterSpec(
+                    evaluator_type="intersection",
+                    nset=5,
+                    noperate=2,  # 交集
+                    formula_ref="",
+                    fsecond=0,
+                )
+            else:
+                spec = FilterSpec(
+                    evaluator_type="pass_through",
+                    nset=5,
+                    noperate=0,
+                    formula_ref="",
+                    fsecond=0,
+                )
+            self._edge_filter_specs[eid] = spec
+        logger.info(
+            "ScreeningModule PoolLoaded 编译 filter_spec 边数=%d spec=%s",
+            len(self._edge_filter_specs),
+            {eid: s.formula_ref for eid, s in self._edge_filter_specs.items()},
+        )
 
     def _load_dispatch_config(self) -> Dict[str, Any]:
         """加载 config/dispatch.json 的 nset_dispatch 配置。
@@ -862,6 +890,7 @@ class ScreeningModule:
         evaluator_cls = self._NSET_TO_EVALUATOR.get(nset, IndicatorEvaluator)
         return evaluator_cls()
 
+    @_event_handler("_on_formula_evaluated")
     def _on_formula_evaluated(self, event: FormulaEvaluated) -> None:
         """处理 FormulaEvaluated 事件：per-code 缓存并触发依赖边的增量筛选。
 
@@ -869,40 +898,34 @@ class ScreeningModule:
         增量策略：仅对事件携带的 code（或 result 中的 codes）重新评估，
         其余股票沿用 _edge_passed_cache 中缓存的 passed 集合。
 
-        异常隔离：所有逻辑用 try/except 包裹 + logger.warning，
+        异常隔离：由 ``_event_handler`` 装饰器统一捕获 + ``logger.warning``，
         保证事件总线与其他订阅者不受影响。
         """
-        try:
-            # 确定本次变化的 code 集合
-            changed_codes: List[str] = []
-            if event.code:
-                changed_codes = [event.code]
-                self._formula_results[(event.formula_ref, event.code)] = event.result
-            elif isinstance(event.result, dict) and all(
-                isinstance(k, str) for k in event.result.keys()
-            ):
-                changed_codes = list(event.result.keys())
-                for code, value in event.result.items():
-                    self._formula_results[(event.formula_ref, code)] = value
+        # 确定本次变化的 code 集合
+        changed_codes: List[str] = []
+        if event.code:
+            changed_codes = [event.code]
+            self._formula_results[(event.formula_ref, event.code)] = event.result
+        elif isinstance(event.result, dict) and all(
+            isinstance(k, str) for k in event.result.keys()
+        ):
+            changed_codes = list(event.result.keys())
+            for code, value in event.result.items():
+                self._formula_results[(event.formula_ref, code)] = value
 
-            # 触发依赖此公式的边的增量筛选
-            for eid, filter_spec in list(self._edge_filter_specs.items()):
-                if filter_spec.formula_ref != event.formula_ref:
-                    continue
-                passed, rejected = self._evaluate_filter(
-                    eid, filter_spec, changed_codes=changed_codes,
-                )
-                if passed is not None:
-                    self._bus.publish(StockFiltered(
-                        eid=eid, passed=passed, rejected=rejected,
-                        filter_ref=filter_spec.formula_ref,
-                        ts=time.time(),
-                    ))
-        except Exception as ex:
-            logger.warning(
-                "ScreeningModule._on_formula_evaluated 异常 (formula_ref=%s): %s",
-                event.formula_ref, ex,
+        # 触发依赖此公式的边的增量筛选
+        for eid, filter_spec in list(self._edge_filter_specs.items()):
+            if filter_spec.formula_ref != event.formula_ref:
+                continue
+            passed, rejected = self._evaluate_filter(
+                eid, filter_spec, changed_codes=changed_codes,
             )
+            if passed is not None:
+                self._bus.publish(StockFiltered(
+                    eid=eid, passed=passed, rejected=rejected,
+                    filter_ref=filter_spec.formula_ref,
+                    ts=time.time(),
+                ))
 
     def _evaluate_filter(
         self,
@@ -994,6 +1017,11 @@ __all__ = [
     "evaluate_intersection",
     # 评估器层（向后兼容 re-export，原 core.evaluators 私有但被外部 import）
     "_apply_noperate_mode",
+    # Task 3：mode 分派真值源（标量 + 向量），execution_module 经此共用 _NOPERATE_RULES
+    "_MODE_HANDLERS",
+    "_MODE_HANDLERS_SERIES",
+    "_apply_noperate_mode_series",
+    "_resolve_series_lookback",
     "_extract_indicator_scalar",
     "_lookup_builtin_script",
     "_lookup_builtin_formula_info",

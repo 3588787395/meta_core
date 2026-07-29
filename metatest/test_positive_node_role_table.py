@@ -141,3 +141,91 @@ def test_no_if_node_type_chain():
         f"engine.py should not contain `if node.type ==` chains in code, "
         f"found {len(code_matches)} occurrences (only comments allowed)"
     )
+
+
+# 8. _ROLE_ACTIONS registry is a dict with on_enter/on_exit structure
+def test_role_actions_registry_is_dict():
+    """_ROLE_ACTIONS 应为 dict 类型。"""
+    from core.engine import _ROLE_ACTIONS
+    assert isinstance(_ROLE_ACTIONS, dict), \
+        "_ROLE_ACTIONS 应为 dict"
+
+
+# 9. _resolve_action resolves known action names to callables
+def test_resolve_action_returns_callable_for_known_actions():
+    """_resolve_action 对已知 action 名返回可调用 lambda。"""
+    from core.engine import _resolve_action
+    known_actions = [
+        "mark_out_edges_dirty",
+        "publish_enter_event",
+        "publish_exit_event",
+        "publish_buy_signal",
+        "publish_sell_signal",
+    ]
+    for action_name in known_actions:
+        fn = _resolve_action(action_name)
+        assert callable(fn), f"_resolve_action({action_name!r}) 应返回可调用"
+
+
+# 10. _resolve_action returns no-op for unknown action
+def test_resolve_action_unknown_returns_noop():
+    """_resolve_action 对未知 action 名返回 no-op（不抛异常）。"""
+    from core.engine import _resolve_action
+    fn = _resolve_action("definitely_not_an_action")
+    assert callable(fn), "未知 action 也应返回可调用 no-op"
+    # 调用 no-op 不抛异常
+    result = fn(None, "node_1", "fz000001", 34500.0)
+    assert result is None
+
+
+# 11. _init_role_actions and _dispatch_role_action exist
+def test_init_and_dispatch_role_action_functions_exist():
+    """_init_role_actions 与 _dispatch_role_action 函数存在且可调用。"""
+    from core.engine import _init_role_actions, _dispatch_role_action
+    assert callable(_init_role_actions), "_init_role_actions 应为可调用函数"
+    assert callable(_dispatch_role_action), "_dispatch_role_action 应为可调用函数"
+
+
+# 12. _init_role_actions populates _ROLE_ACTIONS from roles config
+def test_init_role_actions_populates_from_config():
+    """_init_role_actions 从 roles 配置填充 _ROLE_ACTIONS 表。"""
+    from core.engine import _ROLE_ACTIONS, _init_role_actions
+    # 用最小 roles 配置初始化
+    test_roles = {
+        "test_role": {
+            "on_enter": ["publish_buy_signal"],
+            "on_exit": ["publish_sell_signal"],
+        }
+    }
+    _init_role_actions(test_roles)
+    assert "test_role" in _ROLE_ACTIONS, \
+        "_init_role_actions 应将 test_role 填入 _ROLE_ACTIONS"
+    role_entry = _ROLE_ACTIONS["test_role"]
+    assert isinstance(role_entry, dict), "role 条目应为 dict"
+    assert "on_enter" in role_entry, "role 条目应含 on_enter"
+    assert "on_exit" in role_entry, "role 条目应含 on_exit"
+    assert isinstance(role_entry["on_enter"], list), "on_enter 应为 list"
+    assert isinstance(role_entry["on_exit"], list), "on_exit 应为 list"
+    # on_enter 列表中的元素应为可调用（经 _resolve_action 解析）
+    assert len(role_entry["on_enter"]) == 1
+    assert callable(role_entry["on_enter"][0]), \
+        "on_enter 元素应为可调用 action"
+    assert len(role_entry["on_exit"]) == 1
+    assert callable(role_entry["on_exit"][0]), \
+        "on_exit 元素应为可调用 action"
+
+
+# 13. engine.py defines 5 action handler lambdas
+def test_engine_defines_five_action_handlers():
+    """engine.py 定义 5 个 action handler（mark_out_edges_dirty 等）。"""
+    src = _ENGINE_PY.read_text(encoding="utf-8")
+    expected_handlers = [
+        "mark_out_edges_dirty",
+        "publish_enter_event",
+        "publish_exit_event",
+        "publish_buy_signal",
+        "publish_sell_signal",
+    ]
+    for handler in expected_handlers:
+        assert f'"{handler}"' in src, \
+            f"engine.py 应定义 action handler: {handler}"

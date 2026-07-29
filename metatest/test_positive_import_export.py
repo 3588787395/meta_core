@@ -286,3 +286,78 @@ def test_module_counts_exports(event_collector):
             os.unlink(out_path)
         os.rmdir(tmp_dir)
         collector.disconnect()
+
+
+# ============================================================================
+# 变更 C：_CONVERTER_REGISTRY + _call_converter 合并 6 个 _parse/_serialize 同构函数
+# ============================================================================
+
+
+class TestChangeCConverterRegistry:
+    """变更 C：_CONVERTER_REGISTRY 表 + _call_converter 函数，消除 6 个旧 _parse/_serialize。"""
+
+    def test_converter_registry_exists(self):
+        """_CONVERTER_REGISTRY 表存在。"""
+        from core.import_export_module import _CONVERTER_REGISTRY
+        assert isinstance(_CONVERTER_REGISTRY, dict), \
+            "_CONVERTER_REGISTRY 应为 dict"
+
+    def test_converter_registry_covers_dzh_tdx_json(self):
+        """_CONVERTER_REGISTRY 覆盖 dzh/tdx/json 三种格式。"""
+        from core.import_export_module import _CONVERTER_REGISTRY
+        formats = {fmt for (fmt, _direction) in _CONVERTER_REGISTRY.keys()}
+        assert "dzh" in formats, "_CONVERTER_REGISTRY 应覆盖 dzh 格式"
+        assert "tdx" in formats, "_CONVERTER_REGISTRY 应覆盖 tdx 格式"
+        assert "json" in formats, "_CONVERTER_REGISTRY 应覆盖 json 格式"
+
+    def test_converter_registry_covers_import_and_export(self):
+        """_CONVERTER_REGISTRY 覆盖 import 与 export 两个方向。"""
+        from core.import_export_module import _CONVERTER_REGISTRY
+        directions = {direction for (_fmt, direction) in _CONVERTER_REGISTRY.keys()}
+        assert "import" in directions, "_CONVERTER_REGISTRY 应含 import 方向"
+        assert "export" in directions, "_CONVERTER_REGISTRY 应含 export 方向"
+
+    def test_call_converter_exists_and_callable(self):
+        """_call_converter 函数存在且可调用。"""
+        from core.import_export_module import _call_converter
+        assert callable(_call_converter), "_call_converter 应为可调用函数"
+
+    def test_no_legacy_parse_serialize_functions(self):
+        """Grep 验证：import_export_module 6 个旧 _parse/_serialize 函数 = 0。"""
+        import re
+        from pathlib import Path
+        ie_path = Path(__file__).resolve().parent.parent / "core" / "import_export_module.py"
+        src = ie_path.read_text(encoding="utf-8")
+        legacy_pattern = (
+            r"def _parse_dzh|def _parse_tdx|def _parse_json|"
+            r"def _serialize_dzh|def _serialize_tdx|def _serialize_json"
+        )
+        matches = re.findall(legacy_pattern, src)
+        assert len(matches) == 0, (
+            f"import_export_module 不应含旧 _parse/_serialize 函数（变更 C 已合并），"
+            f"实际 {matches}"
+        )
+
+    def test_import_export_uses_call_converter_and_registry(self):
+        """import_export_module 引用 _call_converter 与 _CONVERTER_REGISTRY。"""
+        import re
+        from pathlib import Path
+        ie_path = Path(__file__).resolve().parent.parent / "core" / "import_export_module.py"
+        src = ie_path.read_text(encoding="utf-8")
+        assert "_call_converter" in src, \
+            "import_export_module 应使用 _call_converter（变更 C 合并入口）"
+        assert "_CONVERTER_REGISTRY" in src, \
+            "import_export_module 应查 _CONVERTER_REGISTRY 表（变更 C 表驱动）"
+
+    def test_import_export_rules_built_from_registry(self):
+        """_IMPORT_RULES / _EXPORT_RULES 由 _CONVERTER_REGISTRY 派生。"""
+        from core.import_export_module import (
+            _CONVERTER_REGISTRY, _IMPORT_RULES, _EXPORT_RULES,
+        )
+        import_formats = {fmt for (fmt, d) in _CONVERTER_REGISTRY.keys() if d == "import"}
+        export_formats = {fmt for (fmt, d) in _CONVERTER_REGISTRY.keys() if d == "export"}
+        # import/export 规则应覆盖 registry 中对应方向的格式
+        assert set(_IMPORT_RULES.keys()) >= import_formats, \
+            f"_IMPORT_RULES 应覆盖 registry 的 import 格式，实际 {set(_IMPORT_RULES.keys())}"
+        assert set(_EXPORT_RULES.keys()) >= export_formats, \
+            f"_EXPORT_RULES 应覆盖 registry 的 export 格式，实际 {set(_EXPORT_RULES.keys())}"

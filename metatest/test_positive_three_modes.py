@@ -374,3 +374,56 @@ class TestEventCollector:
         assert len(collector.events) == 0
 
         collector.disconnect()
+
+
+# ============================================================================
+# 变更 J：模块级 _run_coro_sync 合并类内 _run_coro 同构方法回归断言
+# ============================================================================
+
+
+class TestChangeJRunCoroSyncModuleLevel:
+    """变更 J：_run_coro_sync 模块级函数合法，类内 _run_coro/_run_coro_sync 方法 = 0。"""
+
+    def test_run_coro_sync_module_level_exists(self):
+        """runtime_mode_module 含模块级 _run_coro_sync 函数（无缩进 def）。"""
+        import re
+        from pathlib import Path
+        rt_path = Path(__file__).resolve().parent.parent / "core" / "runtime_mode_module.py"
+        src = rt_path.read_text(encoding="utf-8")
+        # 模块级 def（行首无缩进）
+        assert re.search(r"^def _run_coro_sync\b", src, re.MULTILINE), \
+            "runtime_mode_module 应定义模块级 _run_coro_sync 函数（变更 J 合并入口）"
+
+    def test_run_coro_sync_importable_and_callable(self):
+        """_run_coro_sync 可从 runtime_mode_module 导入且可调用。"""
+        from core.runtime_mode_module import _run_coro_sync
+        assert callable(_run_coro_sync), \
+            "_run_coro_sync 应为可调用模块级函数"
+
+    def test_no_class_internal_run_coro_methods(self):
+        """Grep 验证：runtime_mode_module 类内 _run_coro_sync/_run_coro 方法 = 0。
+
+        类内方法有缩进（``\\s+def``），模块级函数无缩进（``^def``）。
+        """
+        import re
+        from pathlib import Path
+        rt_path = Path(__file__).resolve().parent.parent / "core" / "runtime_mode_module.py"
+        src = rt_path.read_text(encoding="utf-8")
+        # 缩进 def（类内方法）
+        legacy_pattern = r"^\s+def _run_coro_sync\b|^\s+def _run_coro\b"
+        matches = re.findall(legacy_pattern, src, re.MULTILINE)
+        assert len(matches) == 0, (
+            f"runtime_mode_module 类内不应含 _run_coro_sync/_run_coro 方法"
+            f"（变更 J 已合并为模块级），实际 {len(matches)} 处"
+        )
+
+    def test_module_level_run_coro_sync_used_for_coro_execution(self):
+        """runtime_mode_module 引用 _run_coro_sync 执行协程。"""
+        import re
+        from pathlib import Path
+        rt_path = Path(__file__).resolve().parent.parent / "core" / "runtime_mode_module.py"
+        src = rt_path.read_text(encoding="utf-8")
+        # 模块内多处调用 _run_coro_sync
+        call_count = len(re.findall(r"\b_run_coro_sync\(", src))
+        assert call_count >= 1, \
+            f"runtime_mode_module 应调用 _run_coro_sync 执行协程（变更 J），实际 {call_count} 处"

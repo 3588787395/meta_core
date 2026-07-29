@@ -23,10 +23,10 @@ import pytest
 from metatest.conftest import EventCollector
 
 
-# 项目根目录（meta_core/），用于定位 config/pools/ 配置文件
+# 项目根目录（meta_core/）；fixture 副本在 metatest/fixtures/ 下（原 config/pools/ 已归档至 _archive）
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_SIM_DEMO_POOL = _PROJECT_ROOT / "config" / "pools" / "sim_demo_pool.json"
-_SIM_TEST_POOL_100 = _PROJECT_ROOT / "config" / "pools" / "sim_test_pool_100.json"
+_SIM_DEMO_POOL = _PROJECT_ROOT / "metatest" / "fixtures" / "sim_demo_pool.json"
+_SIM_TEST_POOL_100 = _PROJECT_ROOT / "metatest" / "fixtures" / "sim_test_pool_100.json"
 
 
 # ============================================================================
@@ -361,3 +361,140 @@ class TestTTLOneShotNoReregistration:
         next_fire = driver._heap[0][0]
         assert next_fire == 110.0, \
             f"下次触发应为 110.0（fire_time+interval），实际 {next_fire}"
+
+
+# ============================================================================
+# 变更 A：nset 筛选同构合并回归断言（screening_module 4 旧函数 → _NSET_FILTER_HANDLERS 表）
+# ============================================================================
+
+
+class TestChangeANsetFilterMerge:
+    """变更 A：_filter_truthy / _filter_scalar + _NSET_FILTER_HANDLERS 表合并回归。"""
+
+    def test_filter_truthy_exists_and_handles_nset_1_2(self) -> None:
+        """_filter_truthy 函数存在，负责 nset=1/2 的真值筛选分支。"""
+        import re
+        screening_path = _PROJECT_ROOT / "core" / "screening_module.py"
+        src = screening_path.read_text(encoding="utf-8")
+        assert re.search(r"def _filter_truthy\b", src), \
+            "screening_module 应定义 _filter_truthy 函数（变更 A 合并）"
+        # _NSET_FILTER_HANDLERS 表中 nset=1/2 应映射到 _filter_truthy
+        assert re.search(r"\b1:\s*_filter_truthy\b", src), \
+            "_NSET_FILTER_HANDLERS[1] 应为 _filter_truthy"
+        assert re.search(r"\b2:\s*_filter_truthy\b", src), \
+            "_NSET_FILTER_HANDLERS[2] 应为 _filter_truthy"
+
+    def test_filter_scalar_exists_and_handles_nset_3_4(self) -> None:
+        """_filter_scalar 函数存在，负责 nset=3/4 的标量筛选分支。"""
+        import re
+        screening_path = _PROJECT_ROOT / "core" / "screening_module.py"
+        src = screening_path.read_text(encoding="utf-8")
+        assert re.search(r"def _filter_scalar\b", src), \
+            "screening_module 应定义 _filter_scalar 函数（变更 A 合并）"
+        assert re.search(r"\b3:\s*_filter_scalar\b", src), \
+            "_NSET_FILTER_HANDLERS[3] 应为 _filter_scalar"
+        assert re.search(r"\b4:\s*_filter_scalar\b", src), \
+            "_NSET_FILTER_HANDLERS[4] 应为 _filter_scalar"
+
+    def test_nset_filter_handlers_table_complete(self) -> None:
+        """_NSET_FILTER_HANDLERS 表含 {1:_filter_truthy, 2:_filter_truthy, 3:_filter_scalar, 4:_filter_scalar}。"""
+        from core.screening_module import _NSET_FILTER_HANDLERS
+        assert isinstance(_NSET_FILTER_HANDLERS, dict), \
+            "_NSET_FILTER_HANDLERS 应为 dict"
+        assert set(_NSET_FILTER_HANDLERS.keys()) >= {1, 2, 3, 4}, \
+            f"_NSET_FILTER_HANDLERS 应含 nset=1/2/3/4，实际 {set(_NSET_FILTER_HANDLERS.keys())}"
+        from core.screening_module import _filter_truthy, _filter_scalar
+        assert _NSET_FILTER_HANDLERS[1] is _filter_truthy
+        assert _NSET_FILTER_HANDLERS[2] is _filter_truthy
+        assert _NSET_FILTER_HANDLERS[3] is _filter_scalar
+        assert _NSET_FILTER_HANDLERS[4] is _filter_scalar
+
+    def test_no_legacy_nset_filter_functions_in_screening(self) -> None:
+        """Grep 验证：screening_module.py 中 4 个旧 nset 筛选函数 = 0。"""
+        import re
+        screening_path = _PROJECT_ROOT / "core" / "screening_module.py"
+        src = screening_path.read_text(encoding="utf-8")
+        legacy_pattern = (
+            r"def _filter_condition_formula|def _filter_expert_system|"
+            r"def _filter_financial_scalar|def _filter_market_scalar"
+        )
+        matches = re.findall(legacy_pattern, src)
+        assert len(matches) == 0, \
+            f"screening_module 不应含旧 nset 筛选函数（变更 A 已合并），实际 {matches}"
+
+
+# ============================================================================
+# 变更 K：_build_adjacency 纯函数合并双 _build_topology 回归断言
+# ============================================================================
+
+
+class TestChangeKBuildAdjacencyMerge:
+    """变更 K：_build_adjacency 纯函数在 core/domain.py 合法存在，双 _build_topology 薄包装。"""
+
+    def test_build_adjacency_exists_in_domain(self) -> None:
+        """_build_adjacency 纯函数在 core/domain.py 合法定义（Task 12 合并入口）。"""
+        import re
+        domain_path = _PROJECT_ROOT / "core" / "domain.py"
+        assert domain_path.is_file(), "core/domain.py 应存在"
+        src = domain_path.read_text(encoding="utf-8")
+        # 模块级 def _build_adjacency（无缩进）
+        assert re.search(r"^def _build_adjacency\b", src, re.MULTILINE), \
+            "core/domain.py 应定义模块级 _build_adjacency 纯函数（变更 K 合法入口）"
+
+    def test_build_adjacency_importable_and_callable(self) -> None:
+        """_build_adjacency 可从 core.domain 导入且可调用。"""
+        from core.domain import _build_adjacency
+        assert callable(_build_adjacency), "_build_adjacency 应为可调用纯函数"
+        # 纯函数：输入节点与边列表，返回邻接表 dict
+        adj = _build_adjacency(
+            {"a", "b", "c"},
+            [{"from": "a", "id": "e1"}, {"from": "b", "id": "e2"}],
+            lambda e: e.get("from"),
+            lambda e: e.get("id"),
+        )
+        assert isinstance(adj, dict), "_build_adjacency 应返回 dict"
+
+    def test_engine_build_topology_is_thin_wrapper(self) -> None:
+        """engine.py 的 _build_topology 方法体 ≤ 3 行（薄包装，委托 _build_adjacency）。"""
+        import ast
+        engine_path = _PROJECT_ROOT / "core" / "engine.py"
+        tree = ast.parse(engine_path.read_text(encoding="utf-8"))
+        found = False
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_build_topology":
+                # 统计非 docstring 语句数
+                stmts = [n for n in node.body if not (
+                    isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
+                    and isinstance(n.value.value, str)
+                )]
+                assert len(stmts) <= 3, \
+                    f"engine._build_topology 应 ≤ 3 行语句（薄包装），实际 {len(stmts)}"
+                found = True
+        assert found, "engine.py 应含 _build_topology 方法"
+
+    def test_runtime_build_topology_is_thin_wrapper(self) -> None:
+        """runtime_mode_module.py 的 _build_topology 方法体 ≤ 3 行（薄包装）。"""
+        import ast
+        rt_path = _PROJECT_ROOT / "core" / "runtime_mode_module.py"
+        tree = ast.parse(rt_path.read_text(encoding="utf-8"))
+        found = False
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_build_topology":
+                stmts = [n for n in node.body if not (
+                    isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
+                    and isinstance(n.value.value, str)
+                )]
+                assert len(stmts) <= 3, \
+                    f"runtime_mode_module._build_topology 应 ≤ 3 行语句（薄包装），实际 {len(stmts)}"
+                found = True
+        assert found, "runtime_mode_module.py 应含 _build_topology 方法"
+
+    def test_build_topology_delegates_to_build_adjacency(self) -> None:
+        """engine 与 runtime 的 _build_topology 均调用 _build_adjacency。"""
+        import re
+        engine_src = (_PROJECT_ROOT / "core" / "engine.py").read_text(encoding="utf-8")
+        rt_src = (_PROJECT_ROOT / "core" / "runtime_mode_module.py").read_text(encoding="utf-8")
+        assert "_build_adjacency" in engine_src, \
+            "engine.py 应调用 _build_adjacency（变更 K 合并）"
+        assert "_build_adjacency" in rt_src, \
+            "runtime_mode_module.py 应调用 _build_adjacency（变更 K 合并）"

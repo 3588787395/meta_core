@@ -116,6 +116,12 @@ class TestSafePathJoin:
 
     def test_absolute_drive_path_rejected_by_realpath_check(self, tmp_path: Path) -> None:
         """safe_path_join 拒绝 Windows 盘符绝对路径（经 realpath 二次校验拦截）。"""
+        # Linux 的 os.path.join / realpath 不识别 Windows 盘符语义：反斜杠被当作普通字符，
+        # "C:\\..." 在 Linux 上只是一个相对文件名，realpath 不会判定其超出基目录，
+        # 故 Windows 盘符路径检查在 Linux 上不适用，跳过以消除平台差异。
+        import sys
+        if sys.platform.startswith("linux"):
+            pytest.skip("Linux realpath 语义差异，Windows 盘符路径检查不适用")
         from services.storage import safe_path_join
 
         base = str(tmp_path)

@@ -231,6 +231,26 @@
 
 90. **前端事件画布统一为 `renderEventCanvas(ctx, state, layoutMode)` + `_DRAW_LAYERS` 表 + `_STYLE` 配置**：禁止重新引入矩阵视图/散点视图的独立渲染函数；样式从 `_STYLE` 配置对象读取，禁止硬编码颜色/线宽/字体；`_DRAW_LAYERS` 表驱动图层顺序。
 
+91. **nset 筛选函数值驱动**：screening_module 的 nset 筛选必须通过 `_NSET_FILTER_HANDLERS` 表驱动分派，禁止重新引入 `_filter_condition_formula` / `_filter_expert_system` / `_filter_financial_scalar` / `_filter_market_scalar` 同构函数。nset=1/2 共用 `_filter_truthy`，nset=3/4 共用 `_filter_scalar`（nset_label 由 `str(nset)` 派生）。
+
+92. **ConfigStore 配置加载统一**：core/*.py 的所有配置加载必须通过 `get_global_config_store().get_table(...)` 统一入口，禁止重新引入 `json.load(open(...))` 样板（ConfigStore 内部除外）。确保热加载能力（无模块级缓存冻结）。
+
+93. **noperate mode 表驱动**：execution_module 的 noperate mode 分派必须通过 `_MODE_HANDLERS` 表驱动，禁止重新引入 `if mode == "inflection"` / `if mode == "rank"` 硬编码分支。execution_module 与 screening_module 共享同一 mode 真相源，通过 `_apply_noperate_mode_series` 向量变体复用。
+
+94. **base_period 目标表驱动**：runtime_mode_module 的 base_period 目标周期必须通过 `_BASE_PERIOD_TARGETS` 表驱动，禁止重新引入 `if/elif base_period` 分支。day 基周期通过空列表短路返回。
+
+95. **tradeattr BUY/SELL 表驱动**：trade_module 的 `_apply_tradeattr` 必须通过 `_TRADEATTR_FIELD_MAP` 表驱动 + 单循环，禁止重新引入 `if side == "BUY"` / `elif side == "SELL"` 双分支。BUY 用 `enter*` 字段，SELL 用 `exit*` 字段，共用 `_TRADEATTR_TARGET_KEYS` 目标 key 列表。
+
+96. **导入导出 converter 统一入口**：import_export_module 的格式转换必须通过 `_CONVERTER_REGISTRY` 表 + `_call_converter(path, fmt, direction, config=None)` 单一入口，禁止重新引入 `_parse_dzh` / `_parse_tdx` / `_parse_json` / `_serialize_dzh` / `_serialize_tdx` / `_serialize_json` 同构函数。
+
+97. **公式 eval 核心合并**：formula_module 的公式求值必须通过 `_eval_formula_core(series=False)` 统一入口，`_eval_formula` 与 `_eval_formula_series` 改为薄包装委托（方法体 ≤ 5 行），禁止重新引入双实现非薄包装。
+
+98. **同步协程执行器统一**：runtime_mode_module 的同步协程执行必须通过模块级 `_run_coro_sync(coro, loop_holder, loop_attr="_sim_loop")` 统一入口，禁止重新引入类内 `_run_coro_sync` / `_run_coro` 双方法。KLineReplayEngine 用 `"_replay_loop"`，RuntimeSimulator 用 `"_sim_loop"`。
+
+99. **事件 handler 装饰器统一**：trade_module / execution_module / monitoring_module / tick_bar_module / screening_module 5 模块的 `_on_xxx` 事件 handler 必须通过 `@_event_handler(name)` 装饰器统一异常处理，禁止在 handler 函数体内重新引入 try/except 样板。装饰器统一 `exc_info=True`，异常被捕获并 `logger.warning`，返回 None。
+
+100. **pnl 计算表驱动**：monitoring_module 的 pnl 指标计算必须通过 `_PNL_METRIC_SPECS` 表 + 单一 `_compute_pnl_metric(metric_name)` 方法，禁止重新引入 `_compute_intraday_pnl` / `_compute_market_impact_pnl` / `_compute_historical_pnl` / `_compute_distribution_pnl` / `_compute_positioning_pnl` 同构方法。排序键必须通过 `_ANGLE_SORT_KEYS` lambda dict，禁止重新引入 `_momentum_key` / `_trend_key` / `_value_key` 方法。
+
 ---
 
 ## 附：文件路径映射（文档 vs 实际代码）

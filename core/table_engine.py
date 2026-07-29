@@ -26,13 +26,32 @@ import hashlib
 import logging
 from pathlib import Path
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
 from core.event_bus import ConfigChanged, ConfigLoaded, EventBus
 
 logger = logging.getLogger(__name__)
 
 # ─── 配置表加载器 ───────────────────────────────────────────────
+
+# dict/list 集合归一化迭代器（表驱动按 type 分派，供 ConfigStore._validate_table 复用）
+_ENTRY_ITERATORS: Dict[type, Callable[[Any], Iterator[Tuple[str, Any]]]] = {
+    dict: lambda c: ((f".{k}", v) for k, v in c.items()),
+    list: lambda c: ((f"[{i}]", v) for i, v in enumerate(c)),
+}
+
+
+def _iter_entries(collection) -> Iterator[Tuple[str, Any]]:
+    """归一化 dict/list 集合为 (location_suffix, entry) 迭代器。
+
+    dict 集合 → location_suffix 为 ``.{entry_id}``（拼接 collection_key 后形如 ``layouts.{eid}``）；
+    list 集合 → location_suffix 为 ``[{idx}]``（拼接 collection_key 后形如 ``rules[{idx}]``）。
+    非集合类型不产出条目（与原 dict/list 双分支 elif 语义一致）。
+    """
+    iterate = _ENTRY_ITERATORS.get(type(collection))
+    if iterate is not None:
+        yield from iterate(collection)
+
 
 class ConfigStore:
     """配置表存储：加载、缓存、校验、热加载"""
@@ -223,20 +242,12 @@ class ConfigStore:
             collection_key = self._get_collection_key(name, data)
             if collection_key and collection_key in data:
                 collection = data[collection_key]
-                if isinstance(collection, dict):
-                    # 字典集合：如 ui_layouts.layouts = {id: entry, ...}
-                    for entry_id, entry in collection.items():
-                        if isinstance(entry, dict):
-                            for field in required:
-                                if field not in entry:
-                                    errors.append(f"{collection_key}.{entry_id} 缺少必填字段: {field}")
-                elif isinstance(collection, list):
-                    # 数组集合：如 action_rules.rules = [entry, ...]
-                    for idx, entry in enumerate(collection):
-                        if isinstance(entry, dict):
-                            for field in required:
-                                if field not in entry:
-                                    errors.append(f"{collection_key}[{idx}] 缺少必填字段: {field}")
+                # dict/list 集合归一化为 _iter_entries 迭代器（表驱动分派，无 if/elif 双分支）
+                for loc, entry in _iter_entries(collection):
+                    if isinstance(entry, dict):
+                        for field in required:
+                            if field not in entry:
+                                errors.append(f"{collection_key}{loc} 缺少必填字段: {field}")
             else:
                 for field in required:
                     if field not in data:

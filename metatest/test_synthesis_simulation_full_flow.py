@@ -4,6 +4,8 @@
 买入信号 → TTL 超时 → 卖出信号。复用 conftest.py 的 fixture，使用
 加速虚拟时钟驱动仿真，断言事件链与池状态转换。
 
+fixture 路径统一使用 ``metatest/fixtures/`` 前缀（旧 ``config/pools/`` 已归档）。
+
 测试用例：
   1. test_candidate_pool_initialized_with_fz_codes
   2. test_pool_config_has_a_b_c_pools
@@ -13,6 +15,7 @@
   6. test_propagate_apply_copy_mode
   7. test_role_actions_target_role_buy_signal
   8. test_simulator_step_produces_events
+  9. test_event_chain_order
 """
 from __future__ import annotations
 
@@ -24,11 +27,13 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# 项目路径常量
+# 项目路径常量（fixture 统一使用 metatest/fixtures/ 前缀）
 # ---------------------------------------------------------------------------
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_SIM_POOL_100 = _PROJECT_ROOT / "config" / "pools" / "sim_test_pool_100.json"
-_SIM_POOL_10 = _PROJECT_ROOT / "config" / "pools" / "sim_test_pool.json"
+_THIS_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _THIS_DIR.parent
+_FIXTURES_DIR = _THIS_DIR / "fixtures"
+_SIM_POOL_100 = _FIXTURES_DIR / "sim_test_pool_100.json"
+_SIM_POOL_10 = _FIXTURES_DIR / "sim_test_pool.json"
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +74,14 @@ class TestSimulationFullFlow:
         config = _load_pool_config(_SIM_POOL_100)
         codes = _extract_stock_codes(config)
         assert len(codes) == 100, f"备选池应有 100 只股票，实际 {len(codes)}"
+        assert codes[0].startswith("fz"), f"首只股票代码 {codes[0]} 必须以 fz 开头"
+        assert codes[-1].startswith("fz"), f"末只股票代码 {codes[-1]} 必须以 fz 开头"
         for code in codes:
             assert code.startswith("fz"), f"股票代码 {code} 必须以 fz 开头"
+        # fz_stocks 工厂生成的代码与配置一致前缀
+        factory_codes = fz_stocks(100)
+        assert len(factory_codes) == 100
+        assert all(c.startswith("fz") for c in factory_codes)
         # 记录模块覆盖
         modules = report_state.setdefault("modules_covered", [])
         for m in ("core.runtime_mode_module", "core.engine"):
@@ -91,7 +102,6 @@ class TestSimulationFullFlow:
         ]
         assert len(state_pools) >= 3, f"至少 3 个状态池，实际 {len(state_pools)}"
         pool_ids = {n["id"] for n in state_pools}
-        # 至少含 pool_A / pool_B / pool_C（或等价命名）
         assert "pool_A" in pool_ids or any("A" in pid for pid in pool_ids), \
             "缺少 A 池节点"
         assert "pool_B" in pool_ids or any("B" in pid for pid in pool_ids), \
@@ -106,6 +116,9 @@ class TestSimulationFullFlow:
         params = c_pool.get("params", {})
         assert "enter_action" in params, "C 池必须配置 enter_action（买入）"
         assert "exit_action" in params, "C 池必须配置 exit_action（卖出）"
+        # C 池的 psatt 应含 baimpool（目标池标记）
+        psatt = params.get("psatt", {})
+        assert psatt.get("baimpool") == 1, "C 池应标记为目标池 baimpool=1"
 
     def test_edges_have_correct_order(self, report_state) -> None:
         """边按 _order 字段排序，反映设计期执行顺序。
@@ -125,6 +138,8 @@ class TestSimulationFullFlow:
         # _order 应为递增序列（非拓扑排序，设计期结构）
         assert orders == sorted(orders), \
             f"边 _order 应递增，实际 {orders}"
+        # 首条边 _order 应小于末条边
+        assert orders[0] <= orders[-1], "_order 序列应非递减"
         # 记录事件链
         event_types = report_state.setdefault("event_types_seen", [])
         for et in ("EdgeFired", "TransferExecuted"):
@@ -153,6 +168,9 @@ class TestSimulationFullFlow:
         assert tick_table.get("fz000001")["close"] == 11.0
         snap = tick_table.snapshot()
         assert "fz000001" in snap
+        assert snap is not tick_table.data, "snapshot 应返回副本"
+        # hash 属性存在且为 int
+        assert isinstance(tick_table.hash, int)
         # 记录底层逻辑覆盖
         modules = report_state.setdefault("modules_covered", [])
         if "core.runtime_mode_module" not in modules:
@@ -183,6 +201,12 @@ class TestSimulationFullFlow:
         assert len(cp.source_nodes) > 0, "source_nodes 不应为空"
         # node_role 含角色映射
         assert len(cp.node_role) > 0, "node_role 不应为空"
+        # node_role 中 src 应为 candidate
+        assert cp.node_role.get("src") == "candidate", \
+            f"src 节点角色应为 candidate，实际 {cp.node_role.get('src')}"
+        # node_role 中 tgt 应为 target
+        assert cp.node_role.get("tgt") == "target", \
+            f"tgt 节点角色应为 target，实际 {cp.node_role.get('tgt')}"
         modules = report_state.setdefault("modules_covered", [])
         if "core.execution_module" not in modules:
             modules.append("core.execution_module")
@@ -202,6 +226,11 @@ class TestSimulationFullFlow:
         # copy 模式：passed 加入 tgt，源不变
         assert "fz000001" in new_tgt, "copy 模式 passed 应进入目标"
         assert "fz000003" in new_tgt, "原目标应保留"
+        assert "fz000002" not in new_tgt, "src 未通过部分不应进入目标"
+        # move 模式：passed 进入目标，源移除（语义由 spec 决定）
+        spec_move = {"mode": "move"}
+        new_tgt_move = propagate_apply(src, tgt, passed, spec_move)
+        assert "fz000001" in new_tgt_move, "move 模式 passed 应进入目标"
 
     def test_role_actions_target_role_buy_signal(
         self, config_store, report_state
@@ -231,6 +260,7 @@ class TestSimulationFullFlow:
         assert len(_ROLE_ACTIONS) >= 5, \
             f"_ROLE_ACTIONS 至少 5 种角色，实际 {len(_ROLE_ACTIONS)}"
         assert "target" in _ROLE_ACTIONS, "_ROLE_ACTIONS 缺 target 角色"
+        assert "candidate" in _ROLE_ACTIONS, "_ROLE_ACTIONS 缺 candidate 角色"
 
     def test_simulator_step_produces_events(self, report_state) -> None:
         """RuntimeSimulator.step() 产出事件列表。
@@ -249,6 +279,7 @@ class TestSimulationFullFlow:
         assert "changed_codes" in result, "step 结果缺 changed_codes 字段"
         # 事件列表应为 list 类型（可能为空，因为首步可能仅初始化）
         assert isinstance(result["events"], list), "events 必须为 list"
+        assert isinstance(result["changed_codes"], list), "changed_codes 必须为 list"
         # 记录性能数据
         report_state["sim_1000_tick_time_s"] = 0.0  # 加速测试不计性能
         event_types = report_state.setdefault("event_types_seen", [])
@@ -259,3 +290,56 @@ class TestSimulationFullFlow:
         for m in ("core.runtime_mode_module", "core.engine", "core.event_bus"):
             if m not in modules:
                 modules.append(m)
+
+    def test_event_chain_order(self, event_collector, report_state) -> None:
+        """仿真事件链顺序验证。
+
+        验证事件链：TickReceived → DataChanged(tick) → BarComposed →
+        DataChanged(bar) → EdgeFired → FormulaEvaluated → StockFiltered →
+        TransferExecuted → Signal → OrderPlaced → OrderFilled → PositionUpdated。
+
+        使用 RuntimeSimulator 驱动仿真，收集事件并断言相对顺序正确。
+        部分事件可能在首步不触发，仅断言已出现事件的相对顺序。
+        """
+        from core.runtime_mode_module import RuntimeSimulator
+        from core.event_bus import EventBus
+
+        config = _load_pool_config(_SIM_POOL_10)
+        bus = EventBus()
+        collector = event_collector(bus)
+        sim = RuntimeSimulator(pool_model=config, seed=42, bus=bus)
+        sim.initialize()
+        # 步进若干次以触发事件链
+        for _ in range(5):
+            sim.step(d=1.0)
+        collected = collector.events
+        # 至少应收集到一些事件（仿真首步可能仅初始化）
+        assert isinstance(collected, list), "事件收集应为列表"
+        # 事件类型名列表（按收集顺序）
+        type_names = [type(ev).__name__ for ev in collected]
+        # 记录所有出现的事件类型
+        seen_types = set(type_names)
+        event_types = report_state.setdefault("event_types_seen", [])
+        for et in seen_types:
+            if et not in event_types:
+                event_types.append(et)
+        # 验证事件链相对顺序：若 TickReceived 与 DataChanged 都出现，
+        # 则 TickReceived 应在 DataChanged 之前
+        _CHAIN = [
+            "TickReceived", "DataChanged", "BarComposed", "EdgeFired",
+            "FormulaEvaluated", "StockFiltered", "TransferExecuted",
+            "Signal", "OrderPlaced", "OrderFilled", "PositionUpdated",
+        ]
+        # 对每个出现的事件类型，验证其在链中的相对顺序
+        appeared = [t for t in _CHAIN if t in seen_types]
+        for i in range(len(appeared) - 1):
+            earlier = appeared[i]
+            later = appeared[i + 1]
+            # earlier 的首次出现索引应小于 later 的首次出现索引
+            idx_earlier = type_names.index(earlier)
+            idx_later = type_names.index(later)
+            assert idx_earlier < idx_later, \
+                f"事件 {earlier}(idx={idx_earlier}) 应在 {later}(idx={idx_later}) 之前"
+        # collector 可断开
+        collector.disconnect()
+        report_state["event_chain_correct"] = True

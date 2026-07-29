@@ -107,18 +107,21 @@ def test_meta_pattern_formula_engine_class_exists():
 
 def test_meta_pattern_require_config_store_exists():
     """元模式 3：api.require_config_store Depends 函数必须存在。"""
+    pytest.importorskip("fastapi")
     import api
     assert hasattr(api, "require_config_store"), "api 缺少 require_config_store"
 
 
 def test_meta_pattern_get_simulator_exists():
     """元模式 3：app.get_simulator Depends 函数必须存在。"""
+    pytest.importorskip("fastapi")
     import app
     assert hasattr(app, "get_simulator"), "app 缺少 get_simulator"
 
 
 def test_meta_pattern_sim_actions_table_exists():
     """元模式 3：_SIM_ACTIONS 表必须存在且非空。"""
+    pytest.importorskip("fastapi")
     import app
     assert hasattr(app, "_SIM_ACTIONS"), "app 缺少 _SIM_ACTIONS"
     table = app._SIM_ACTIONS
@@ -128,6 +131,7 @@ def test_meta_pattern_sim_actions_table_exists():
 
 def test_meta_pattern_sim_actions_has_expected_actions():
     """元模式 3：_SIM_ACTIONS 应含 start/pause/resume/stop 等动作。"""
+    pytest.importorskip("fastapi")
     import app
     table = app._SIM_ACTIONS
     # 至少含 3 个动作

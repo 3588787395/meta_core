@@ -8,8 +8,12 @@
   - 边端点解析（sid/tid）正确
   - 边类型判定（conditional/unconditional）编译期完成
   - 节点角色映射编译期产出
-  - 运行时无 ``json.loads`` / ``_parse_edge`` / ``_build_adjacency`` 调用
+  - 运行时无 ``json.loads`` / ``_parse_edge`` 调用
     （通过 Grep engine.py 验证源代码无此调用）
+
+  注：``_build_adjacency`` 经变更 K 合并至 ``core/domain.py`` 作为纯函数，
+  ``engine.py`` 与 ``runtime_mode_module.py`` 的 ``_build_topology`` 改为薄包装
+  委托调用（见 tasks.md Task 12 / spec.md 变更 K），属合法架构，不再禁止。
 """
 from __future__ import annotations
 
@@ -237,32 +241,40 @@ def test_node_role_mapping_at_compile_time():
 
 
 # ---------------------------------------------------------------------------
-# 7. 运行时无 json.loads / _parse_edge / _build_adjacency 调用
+# 7. 运行时无 json.loads / _parse_edge 调用（_build_adjacency 经变更 K 合法化）
 # ---------------------------------------------------------------------------
 
 
 def test_runtime_zero_parsing():
-    """运行期 engine.py 中应无 json.loads / _parse_edge / _build_adjacency 调用。
+    """运行期 engine.py 中应无 json.loads / _parse_edge 调用。
 
     验证编译-运行分离硬约束：所有解析在编译期完成，运行期只读预编译结构。
     通过 Grep engine.py 源代码验证匹配数为 0。
+
+    注：``_build_adjacency`` 经变更 K 合并至 ``core/domain.py``，engine.py 仅
+    通过薄包装 ``_build_topology`` 委托调用，属合法架构（spec.md 变更 K），
+    不再断言禁止；本测试聚焦运行期字符串反序列化（json.loads）与内联边解析
+    （_parse_edge）两类违规。
     """
     # 引擎源文件路径
     assert _ENGINE_PY.exists(), f"engine.py 不存在：{_ENGINE_PY}"
     src = _ENGINE_PY.read_text(encoding="utf-8")
     # 验证无 json.loads 直接调用（json.load 用于启动期配置加载是允许的，
     # 但 json.loads 通常用于运行期反序列化字符串，违反编译-运行分离）
-    # 实际查 json.loads 与 _parse_edge / _build_adjacency 函数调用
+    # 验证无 _parse_edge 内联解析（边解析应在编译期 _extract_edge_endpoint 完成）
     # 使用 word boundary 避免误匹配子字符串
     json_loads_calls = re.findall(r"\bjson\.loads\b", src)
     parse_edge_calls = re.findall(r"\b_parse_edge\b", src)
-    build_adjacency_calls = re.findall(r"\b_build_adjacency\b", src)
     assert len(json_loads_calls) == 0, (
         f"engine.py 不应在运行期调用 json.loads，发现 {len(json_loads_calls)} 处"
     )
     assert len(parse_edge_calls) == 0, (
         f"engine.py 不应包含 _parse_edge 调用/定义，发现 {len(parse_edge_calls)} 处"
     )
-    assert len(build_adjacency_calls) == 0, (
-        f"engine.py 不应包含 _build_adjacency 调用/定义，发现 {len(build_adjacency_calls)} 处"
+    # 变更 K 正向断言：_build_adjacency 应在 engine.py 中作为委托目标被引用
+    # （从 core.domain 导入并用于 _build_topology 薄包装），证明合并已落地
+    build_adjacency_refs = re.findall(r"\b_build_adjacency\b", src)
+    assert len(build_adjacency_refs) >= 1, (
+        "engine.py 应引用 _build_adjacency（变更 K：_build_topology 委托 core.domain._build_adjacency），"
+        f"发现 {len(build_adjacency_refs)} 处引用"
     )

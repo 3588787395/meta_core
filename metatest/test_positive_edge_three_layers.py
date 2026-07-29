@@ -217,3 +217,146 @@ def test_no_six_layer_intermediate_functions():
         "core/ has forbidden six-layer intermediate function definitions:\n  " +
         "\n  ".join(failures)
     )
+
+
+# ============================================================================
+# 变更 H：mode 分派表驱动合并回归断言（execution_module if mode == 链 → _MODE_HANDLERS 表）
+# ============================================================================
+
+
+class TestChangeHModeHandlerTable:
+    """变更 H：_MODE_HANDLERS 表含 inflection/rank/compare，消除 execution_module if mode == 链。"""
+
+    def test_mode_handlers_table_exists_with_three_modes(self):
+        """_MODE_HANDLERS 表存在，含 inflection/rank/compare 三键。"""
+        from core.screening_module import _MODE_HANDLERS
+        assert isinstance(_MODE_HANDLERS, dict), "_MODE_HANDLERS 应为 dict"
+        assert "inflection" in _MODE_HANDLERS, "_MODE_HANDLERS 应含 inflection"
+        assert "rank" in _MODE_HANDLERS, "_MODE_HANDLERS 应含 rank"
+        assert "compare" in _MODE_HANDLERS, "_MODE_HANDLERS 应含 compare"
+        # 每个键映射到可调用 handler
+        for mode_name in ("inflection", "rank", "compare"):
+            assert callable(_MODE_HANDLERS[mode_name]), \
+                f"_MODE_HANDLERS[{mode_name}] 应为可调用 handler"
+
+    def test_apply_noperate_mode_series_exists(self):
+        """_apply_noperate_mode_series 函数存在（execution_module 经表驱动分派）。"""
+        import re
+        exec_path = _CORE_DIR / "execution_module.py"
+        src = exec_path.read_text(encoding="utf-8")
+        # execution_module 从 screening_module 导入 _apply_noperate_mode_series
+        assert "_apply_noperate_mode_series" in src, \
+            "execution_module 应引用 _apply_noperate_mode_series（变更 H 表驱动）"
+
+    def test_apply_noperate_mode_series_importable(self):
+        """_apply_noperate_mode_series 可从 screening_module 导入。"""
+        from core.screening_module import _apply_noperate_mode_series
+        assert callable(_apply_noperate_mode_series), \
+            "_apply_noperate_mode_series 应为可调用函数"
+
+    def test_no_if_mode_inflection_rank_in_execution_module(self):
+        """Grep 验证：execution_module.py 中 if mode == "inflection"/"rank" = 0。"""
+        import re
+        exec_path = _CORE_DIR / "execution_module.py"
+        src = exec_path.read_text(encoding="utf-8")
+        legacy_pattern = r'if mode == "inflection"|if mode == "rank"'
+        matches = re.findall(legacy_pattern, src)
+        assert len(matches) == 0, (
+            f'execution_module 不应含 if mode == "inflection"/"rank" 硬编码分支'
+            f'（变更 H 已表驱动化），实际 {matches}'
+        )
+
+
+# ============================================================================
+# 变更 F：edge 三层参数提取与 FilterSpec 构造表回归断言
+# ============================================================================
+
+
+class TestChangeFEdgeSpecBuilders:
+    """变更 F：_extract_edge_params + _FILTER_SPEC_BUILDERS + _TIMING_SPEC_FIELDS + _PROPAGATE_SPEC_FIELDS。"""
+
+    def test_extract_edge_params_exists(self):
+        """_extract_edge_params 函数存在（edge 参数提取统一入口）。"""
+        import re
+        exec_path = _CORE_DIR / "execution_module.py"
+        src = exec_path.read_text(encoding="utf-8")
+        assert re.search(r"def _extract_edge_params\b", src), \
+            "execution_module 应定义 _extract_edge_params 函数（变更 F）"
+
+    def test_filter_spec_builders_table_has_four_builders(self):
+        """_FILTER_SPEC_BUILDERS 表含 4 个 FilterSpec 构造器。"""
+        from core.execution_module import _FILTER_SPEC_BUILDERS
+        assert isinstance(_FILTER_SPEC_BUILDERS, dict), \
+            "_FILTER_SPEC_BUILDERS 应为 dict"
+        # 表含 4 个构造器条目
+        assert len(_FILTER_SPEC_BUILDERS) >= 4, \
+            f"_FILTER_SPEC_BUILDERS 应含 ≥4 个构造器，实际 {len(_FILTER_SPEC_BUILDERS)}"
+        # 每个条目映射到可调用构造器
+        for key, builder in _FILTER_SPEC_BUILDERS.items():
+            assert callable(builder), \
+                f"_FILTER_SPEC_BUILDERS[{key}] 应为可调用构造器"
+
+    def test_timing_spec_fields_table_exists(self):
+        """_TIMING_SPEC_FIELDS 表存在。"""
+        from core.execution_module import _TIMING_SPEC_FIELDS
+        assert isinstance(_TIMING_SPEC_FIELDS, dict), \
+            "_TIMING_SPEC_FIELDS 应为 dict"
+        assert len(_TIMING_SPEC_FIELDS) > 0, \
+            "_TIMING_SPEC_FIELDS 不应为空"
+
+    def test_propagate_spec_fields_table_exists(self):
+        """_PROPAGATE_SPEC_FIELDS 表存在。"""
+        from core.execution_module import _PROPAGATE_SPEC_FIELDS
+        assert isinstance(_PROPAGATE_SPEC_FIELDS, dict), \
+            "_PROPAGATE_SPEC_FIELDS 应为 dict"
+        assert len(_PROPAGATE_SPEC_FIELDS) > 0, \
+            "_PROPAGATE_SPEC_FIELDS 不应为空"
+
+    def test_extract_edge_params_importable_and_callable(self):
+        """_extract_edge_params 可导入且可调用。"""
+        from core.execution_module import _extract_edge_params
+        assert callable(_extract_edge_params), \
+            "_extract_edge_params 应为可调用函数"
+
+
+# ============================================================================
+# 变更 M：_with_stock_filters 包装器合并 stock 后过滤回归断言
+# ============================================================================
+
+
+class TestChangeMWithStockFilters:
+    """变更 M：_with_stock_filters 包装器统一 stock 后过滤，evaluator 体内无 _apply_stock_filters。"""
+
+    def test_with_stock_filters_wrapper_exists(self):
+        """_with_stock_filters 包装器函数存在。"""
+        import re
+        exec_path = _CORE_DIR / "execution_module.py"
+        src = exec_path.read_text(encoding="utf-8")
+        assert re.search(r"def _with_stock_filters\b", src), \
+            "execution_module 应定义 _with_stock_filters 包装器（变更 M）"
+
+    def test_with_stock_filters_importable(self):
+        """_with_stock_filters 可导入且可调用。"""
+        from core.execution_module import _with_stock_filters
+        assert callable(_with_stock_filters), \
+            "_with_stock_filters 应为可调用包装器"
+
+    def test_apply_stock_filters_exists_as_inner_helper(self):
+        """_apply_stock_filters 作为内部辅助函数存在（被 _with_stock_filters 调用）。"""
+        import re
+        exec_path = _CORE_DIR / "execution_module.py"
+        src = exec_path.read_text(encoding="utf-8")
+        assert re.search(r"def _apply_stock_filters\b", src), \
+            "execution_module 应定义 _apply_stock_filters 辅助函数（变更 M）"
+
+    def test_evaluator_path_handlers_wrapped_by_with_stock_filters(self):
+        """formula/scalar/set_operation 三类 evaluator 路径均经 _with_stock_filters 包装。"""
+        import re
+        exec_path = _CORE_DIR / "execution_module.py"
+        src = exec_path.read_text(encoding="utf-8")
+        # 注册表中应出现 _with_stock_filters 包装调用
+        wrapped_count = len(re.findall(r"_with_stock_filters\(", src))
+        assert wrapped_count >= 3, (
+            f"至少 3 类 evaluator 路径应经 _with_stock_filters 包装（变更 M），"
+            f"实际 {wrapped_count} 处"
+        )

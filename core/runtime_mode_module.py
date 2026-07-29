@@ -44,7 +44,7 @@ from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Se
 
 import pandas as pd
 
-from core.domain import DZH_COL_MAP, MockDataSource, _hash_tick, _normalize_to_fz, _stock_code, time_at, _safe_timestamp, EdgeState
+from core.domain import DZH_COL_MAP, MockDataSource, _hash_tick, _normalize_to_fz, _stock_code, time_at, _safe_timestamp, EdgeState, _build_adjacency
 from core.table_engine import get_global_config_store
 
 if TYPE_CHECKING:
@@ -104,6 +104,12 @@ _PERIOD_TO_KLP: Dict[str, str] = {
     '60min': '60m',
     'day': '1d',
     'week': '1wk',
+}
+
+_BASE_PERIOD_TARGETS: Dict[str, List[str]] = {
+    "1min": ["5min", "15min", "30min", "60min", "day", "week", "month"],
+    "5min": ["15min", "30min", "60min", "day", "week", "month"],
+    "day": [],
 }
 
 MARKET_OPEN_AM = dt_time(9, 30)
@@ -231,6 +237,36 @@ class StatePool:
 #  _flow_exec_counts / market_data_port），完整事件化需先将这些状态迁移到对应模块。
 # Task 24+（Item 3）：KLineReplayEngine 订阅 ReplayStarted 事件触发回放启动，
 # _do_step 末尾发布 DataChanged 事件由 TickBar 模块处理（不再仅依赖直接方法调用）。
+def _run_coro_sync(coro, loop_holder, loop_attr="_sim_loop"):
+    """复用持久事件循环同步执行协程：复用 loop → run_until_complete → 运行中降级线程。
+
+    KLineReplayEngine._replay_loop 与 RuntimeSimulator._sim_loop 同构，loop 属性名经
+    loop_attr 参数化（getattr/setattr 读写 loop_holder 上的持久 loop）。
+    """
+    loop = getattr(loop_holder, loop_attr)
+    if loop is None or loop.is_closed():
+        loop = asyncio.new_event_loop()
+        setattr(loop_holder, loop_attr, loop)
+    try:
+        return loop.run_until_complete(coro)
+    except RuntimeError:
+        # 已在运行的循环中（如 Jupyter / uvicorn），降级到线程执行
+        result = []
+
+        def _runner():
+            try:
+                result.append(asyncio.run(coro))
+            except Exception as exc:
+                result.append(exc)
+
+        t = threading.Thread(target=_runner)
+        t.start()
+        t.join()
+        if result and isinstance(result[0], Exception):
+            raise result[0]
+        return result[0] if result else None
+
+
 class KLineReplayEngine:
     def __init__(self, meta_engine: PoolEngine, storage: Optional[Any] = None,
                  bus: Optional[Any] = None):
@@ -335,7 +371,7 @@ class KLineReplayEngine:
                 coro = kline_provider.get_kline_series(
                     code, period=klp_period, end_time=end_dt, count=10000
                 )
-                df = self._run_coro_sync(coro)
+                df = _run_coro_sync(coro, self, "_replay_loop")
                 self._bars[code] = self._df_to_bar_list(df, start)
             except Exception as e:
                 logger.warning("通过 KLineProvider 获取 K 线失败 code=%s: %s", code, e)
@@ -544,13 +580,9 @@ class KLineReplayEngine:
 
     def _build_synthesized_bars(self) -> None:
         self._synthesized_bars = {}
-        if self._base_period == "day":
+        target_periods = _BASE_PERIOD_TARGETS.get(self._base_period, [])
+        if not target_periods:
             return
-        target_periods = []
-        if self._base_period == "5min":
-            target_periods = ["15min", "30min", "60min", "day", "week", "month"]
-        elif self._base_period == "1min":
-            target_periods = ["5min", "15min", "30min", "60min", "day", "week", "month"]
         for code, bars in self._bars.items():
             self._synthesized_bars[code] = {}
             for tp in target_periods:
@@ -571,33 +603,6 @@ class KLineReplayEngine:
             except ValueError:
                 continue
         return None
-
-    def _run_coro_sync(self, coro):
-        """复用持久事件循环，避免每步 new_event_loop 开销"""
-        if self._replay_loop is None or self._replay_loop.is_closed():
-            self._replay_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self._replay_loop)
-        try:
-            return self._replay_loop.run_until_complete(coro)
-        except RuntimeError:
-            # 已在运行的循环中（如 Jupyter），降级到线程执行
-            result = [None]
-            exc = [None]
-            def run_in_thread():
-                try:
-                    new_loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(new_loop)
-                    result[0] = new_loop.run_until_complete(coro)
-                except Exception as e:
-                    exc[0] = e
-                finally:
-                    new_loop.close()
-            t = threading.Thread(target=run_in_thread)
-            t.start()
-            t.join()
-            if exc[0] is not None:
-                raise exc[0]
-            return result[0]
 
     def _do_step(self) -> Dict:
         self._current_index += 1
@@ -622,7 +627,7 @@ class KLineReplayEngine:
             current_bar_data,
             self._mode_state
         )
-        self._mode_state['node_stocks'] = self._run_coro_sync(coro)
+        self._mode_state['node_stocks'] = _run_coro_sync(coro, self, "_replay_loop")
 
         # 表驱动：_run_tick_event_driven 已自增 _flow_exec_counts，对比上一步基线
         prev_counts = getattr(self, "_prev_flow_counts", {}) or {}
@@ -898,8 +903,8 @@ class KLineReplayEngine:
         ]
         for field in market_fields:
             try:
-                values = self._run_coro_sync(
-                    market_data_port.get_market_scalars_batch(codes, field)
+                values = _run_coro_sync(
+                    market_data_port.get_market_scalars_batch(codes, field), self, "_replay_loop"
                 )
             except Exception:
                 values = {}
@@ -1218,41 +1223,6 @@ class RuntimeSimulator:
         }
 
     # ------------------------------------------------------------------
-    # Async helper
-    # ------------------------------------------------------------------
-    def _run_coro(self, coro):
-        """复用持久事件循环，避免每步 new_event_loop 开销。"""
-        try:
-            running = asyncio.get_running_loop()
-        except RuntimeError:
-            running = None
-
-        if running is None:
-            # 无运行中的循环 — 复用持久循环
-            if self._sim_loop is None or self._sim_loop.is_closed():
-                self._sim_loop = asyncio.new_event_loop()
-            return self._sim_loop.run_until_complete(coro)
-
-        if not running.is_running():
-            return running.run_until_complete(coro)
-
-        # 已有运行中的循环（uvicorn）— 在线程中执行
-        result = []
-
-        def _runner():
-            try:
-                result.append(asyncio.run(coro))
-            except Exception as exc:
-                result.append(exc)
-
-        t = threading.Thread(target=_runner)
-        t.start()
-        t.join()
-        if result and isinstance(result[0], Exception):
-            raise result[0]
-        return result[0] if result else None
-
-    # ------------------------------------------------------------------
     # Data helpers
     # ------------------------------------------------------------------
     def _dict_to_mock(self, d):
@@ -1569,8 +1539,8 @@ class RuntimeSimulator:
         """同步路径：延迟调用 run_mode 获取初始 mode_state（首次 step 时执行）。"""
         if self._mode_state is not None:
             return
-        self._mode_state = self._run_coro(
-            self._engine.run_mode("simulation", self.pool_config)
+        self._mode_state = _run_coro_sync(
+            self._engine.run_mode("simulation", self.pool_config), self, "_sim_loop"
         )
         self._post_init_mode_state()
 
@@ -1685,7 +1655,7 @@ class RuntimeSimulator:
     async def _step_once_impl(self, d, *, async_mode: bool):
         """_step_once 与 _astep_once 的统一骨架（11 步）。
 
-        async_mode=False：通过 _run_coro 调用 engine._tick（同步路径），
+        async_mode=False：通过 _run_coro_sync 调用 engine._tick（同步路径），
                           末尾根据 not self._astep_mode 发布 SimulationStep。
         async_mode=True：直接 await engine._tick（异步路径），
                          应用 _ASTEP_KEY_TYPES 过滤 + 200 条上限；
@@ -1759,7 +1729,7 @@ class RuntimeSimulator:
             pe.state.add_changed_codes(changed_codes)
 
         # ── 4. 执行引擎 tick（统一代码路径：live/sim 共用） ──
-        # async_mode 分派：同步用 _run_coro，异步用 await。
+        # async_mode 分派：同步用 _run_coro_sync，异步用 await。
         t_engine_start = time.perf_counter()
         if async_mode:
             self._mode_state["node_stocks"] = await self._engine._tick(
@@ -1769,13 +1739,13 @@ class RuntimeSimulator:
                 self._mode_state,
             )
         else:
-            self._mode_state["node_stocks"] = self._run_coro(
+            self._mode_state["node_stocks"] = _run_coro_sync(
                 self._engine._tick(
                     None,
                     self._mode_state["node_stocks"],
                     bar_data if bar_data else None,
                     self._mode_state,
-                )
+                ), self, "_sim_loop"
             )
         t_engine_ms = (time.perf_counter() - t_engine_start) * 1000.0
         self._perf_phases['engine_tick'].append(t_engine_ms)
@@ -1895,8 +1865,8 @@ class RuntimeSimulator:
         }
 
     def _step_once(self, d):
-        """同步路径：通过 _run_coro 调用 async 骨架；末尾根据 not _astep_mode 发布 SimulationStep。"""
-        return self._run_coro(self._step_once_impl(d, async_mode=False))
+        """同步路径：通过 _run_coro_sync 调用 async 骨架；末尾根据 not _astep_mode 发布 SimulationStep。"""
+        return _run_coro_sync(self._step_once_impl(d, async_mode=False), self, "_sim_loop")
 
     async def _astep_once(self, d):
         """异步路径：直接 await async 骨架；SimulationStep 由调用方处理。"""
@@ -2723,18 +2693,8 @@ class PoolStateMixin:
     def _build_topology(self) -> None:
         """根据 pool_config 的 nodes/edges 预建 topology 邻接表。"""
         cfg = self.pool_config
-        edges = cfg.get("edges", [])
-        nodes = cfg.get("nodes", [])
-        node_ids = {n["id"] for n in nodes if isinstance(n, dict) and "id" in n}
-        adj: Dict[str, List[str]] = {nid: [] for nid in node_ids}
-        for edge in edges:
-            if not isinstance(edge, dict):
-                continue
-            src = edge.get("source") or edge.get("from") or edge.get("sid")
-            eid = edge.get("id") or edge.get("flow_id")
-            if src and eid:
-                adj.setdefault(str(src), []).append(str(eid))
-        self.topology = adj
+        node_ids = {n["id"] for n in cfg.get("nodes", []) if isinstance(n, dict) and "id" in n}
+        self.topology = _build_adjacency(node_ids, cfg.get("edges", []), lambda e: e.get("source") or e.get("from") or e.get("sid") if isinstance(e, dict) else None, lambda e: e.get("id") or e.get("flow_id") if isinstance(e, dict) else None)
 
     def __getattr__(self, name: str) -> Any:
         if name in _TABLE_NAMES:

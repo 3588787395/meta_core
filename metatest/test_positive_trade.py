@@ -676,3 +676,93 @@ class TestBuySignalEventChain:
             signal_type="BUY", code="code_a", pool_id="pool_C",
             price=10.0, ts=34500.0, quantity=100,
         ))
+
+
+# ============================================================================
+# 变更 E：_TRADEATTR_FIELD_MAP 表合并 if side == "BUY" 链回归断言
+# ============================================================================
+
+
+class TestChangeETradeattrFieldMap:
+    """变更 E：_TRADEATTR_FIELD_MAP + _TRADEATTR_TARGET_KEYS 表，消除 if side == "BUY" 分支。"""
+
+    def test_tradeattr_field_map_exists(self):
+        """_TRADEATTR_FIELD_MAP 表存在。"""
+        from core.trade_module import _TRADEATTR_FIELD_MAP
+        assert isinstance(_TRADEATTR_FIELD_MAP, dict), \
+            "_TRADEATTR_FIELD_MAP 应为 dict"
+
+    def test_tradeattr_field_map_has_buy_and_sell(self):
+        """_TRADEATTR_FIELD_MAP 含 BUY 与 SELL 两键。"""
+        from core.trade_module import _TRADEATTR_FIELD_MAP
+        assert "BUY" in _TRADEATTR_FIELD_MAP, "_TRADEATTR_FIELD_MAP 应含 BUY"
+        assert "SELL" in _TRADEATTR_FIELD_MAP, "_TRADEATTR_FIELD_MAP 应含 SELL"
+
+    def test_tradeattr_field_map_buy_has_nine_fields(self):
+        """BUY 字段列表含 9 个 enter* 字段。"""
+        from core.trade_module import _TRADEATTR_FIELD_MAP
+        buy_fields = _TRADEATTR_FIELD_MAP["BUY"]
+        assert isinstance(buy_fields, list), "BUY 字段应为 list"
+        assert len(buy_fields) == 9, \
+            f"BUY 应含 9 个字段，实际 {len(buy_fields)}"
+        # 全部字段应以 enter 前缀开头
+        assert all(f.startswith("enter") for f in buy_fields), \
+            f"BUY 字段应以 enter 前缀开头，实际 {buy_fields}"
+
+    def test_tradeattr_field_map_sell_has_nine_fields(self):
+        """SELL 字段列表含 9 个 exit* 字段。"""
+        from core.trade_module import _TRADEATTR_FIELD_MAP
+        sell_fields = _TRADEATTR_FIELD_MAP["SELL"]
+        assert isinstance(sell_fields, list), "SELL 字段应为 list"
+        assert len(sell_fields) == 9, \
+            f"SELL 应含 9 个字段，实际 {len(sell_fields)}"
+        # 全部字段应以 exit 前缀开头
+        assert all(f.startswith("exit") for f in sell_fields), \
+            f"SELL 字段应以 exit 前缀开头，实际 {sell_fields}"
+
+    def test_tradeattr_target_keys_has_nine_keys(self):
+        """_TRADEATTR_TARGET_KEYS 列表含 9 个 key。"""
+        from core.trade_module import _TRADEATTR_TARGET_KEYS
+        assert isinstance(_TRADEATTR_TARGET_KEYS, list), \
+            "_TRADEATTR_TARGET_KEYS 应为 list"
+        assert len(_TRADEATTR_TARGET_KEYS) == 9, \
+            f"_TRADEATTR_TARGET_KEYS 应含 9 个 key，实际 {len(_TRADEATTR_TARGET_KEYS)}"
+
+    def test_apply_tradeattr_no_if_side_buy_branch(self):
+        """_apply_tradeattr 方法体内无 if side == "BUY"/elif side == "SELL" 分支。"""
+        import ast
+        import re
+        from pathlib import Path
+        trade_path = Path(__file__).resolve().parent.parent / "core" / "trade_module.py"
+        src = trade_path.read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        method_text = None
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_apply_tradeattr":
+                end = getattr(node, "end_lineno", node.lineno) or node.lineno
+                method_text = "\n".join(src.splitlines()[node.lineno - 1: end])
+                break
+        assert method_text is not None, "trade_module 应含 _apply_tradeattr 方法"
+        matches = re.findall(r'if side == "BUY"|elif side == "SELL"', method_text)
+        assert len(matches) == 0, (
+            f"_apply_tradeattr 不应含 if side == \"BUY\"/elif side == \"SELL\" 分支"
+            f"（变更 E 已表驱动化），实际 {matches}"
+        )
+
+    def test_apply_tradeattr_uses_field_map_and_target_keys(self):
+        """_apply_tradeattr 方法引用 _TRADEATTR_FIELD_MAP 与 _TRADEATTR_TARGET_KEYS。"""
+        import ast
+        from pathlib import Path
+        trade_path = Path(__file__).resolve().parent.parent / "core" / "trade_module.py"
+        src = trade_path.read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        method_text = ""
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_apply_tradeattr":
+                end = getattr(node, "end_lineno", node.lineno) or node.lineno
+                method_text = "\n".join(src.splitlines()[node.lineno - 1: end])
+                break
+        assert "_TRADEATTR_FIELD_MAP" in method_text, \
+            "_apply_tradeattr 应查 _TRADEATTR_FIELD_MAP 表（变更 E 表驱动）"
+        assert "_TRADEATTR_TARGET_KEYS" in method_text, \
+            "_apply_tradeattr 应引用 _TRADEATTR_TARGET_KEYS（变更 E 表驱动）"
