@@ -5,7 +5,7 @@ import dataclasses
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from fastapi import FastAPI, Request as _Request, HTTPException as _HTTPException, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.security import APIKeyHeader
 from fastapi.middleware.cors import CORSMiddleware
@@ -126,9 +126,9 @@ except ImportError:
     from core.web_state import format_event, format_timer_queue, runtime_state, normalize_display_ms
 
 try:
-    from .core.table_engine import ConfigStore
+    from .core.table_engine import ConfigStore, set_global_config_store
 except ImportError:
-    from core.table_engine import ConfigStore
+    from core.table_engine import ConfigStore, set_global_config_store
 
 try:
     from .core.tick_bar_module import TickBarModule
@@ -396,6 +396,8 @@ async def lifespan(app):
     config_store = ConfigStore(config_dir=config_dir, bus=bus)
     config_store.load_all()
     app.state.config_store = config_store
+    # 注入全局 ConfigStore 引用，供模块级函数通过 get_global_config_store() 访问
+    set_global_config_store(config_store)
 
     # ── 3.2 Database 模块（Storage 已事件化，构造函数接收 bus） ──
     storage = Storage(bus=bus)
@@ -686,18 +688,107 @@ async def tdx_list_pools():
         return {"success": True, "data": [{"name": f[:-4], "filename": f, "has_screenshot": os.path.isfile(os.path.join(d, f[:-4] + '.png'))} for f in sorted(os.listdir(d)) if f.endswith('.xml')]}
     except Exception as ex: return {"success": False, "error": str(ex)}
 
-@app.get("/api/tdx/pools/{name:path}/load", tags=["tdx"])
-async def tdx_load_pool(name: str):
+def _tdx_path_guard(name: str) -> Path:
+    """校验 tdx 池名称合法性并返回对应的 xml 文件路径。"""
     if ".." in name or "/" in name or "\\" in name:
-        raise _HTTPException(status_code=400, detail="Invalid pool name")
+        raise _HTTPException(status_code=400, detail="非法名称")
+    return Path(__file__).parent / "tdxpool" / f"{name}.xml"
+
+
+async def _tdx_load(name: str, request: _Request) -> Dict[str, Any]:
     try:
         from converters import parse_tdx_xml
-        xml_path = os.path.join(os.path.dirname(__file__), 'tdxpool', name + '.xml')
-        if not os.path.isfile(xml_path): raise _HTTPException(status_code=404, detail=f"文件未找到: {name}.xml")
-        pool = parse_tdx_xml(xml_path)
+        xml_path = _tdx_path_guard(name)
+        if not xml_path.is_file():
+            raise _HTTPException(status_code=404, detail=f"文件未找到: {name}.xml")
+        pool = parse_tdx_xml(str(xml_path))
         return {"success": True, "data": _tdx_pool_to_frontend(pool, name), "stats": {"cells": len(pool.cells), "flows": len(pool.flows), "name": name}}
-    except _HTTPException: raise
-    except Exception as ex: return {"success": False, "error": f"TDX 加载失败: {str(ex)}"}
+    except _HTTPException:
+        raise
+    except Exception as ex:
+        return {"success": False, "error": f"TDX 加载失败: {str(ex)}"}
+
+
+async def _tdx_create(name: str, request: _Request) -> Dict[str, Any]:
+    try:
+        body = await request.json()
+        xml_path = _tdx_path_guard(name)
+        xml_path.parent.mkdir(parents=True, exist_ok=True)
+        if xml_path.exists():
+            return {"success": False, "error": f"股票池 {name} 已存在"}
+        bc = body.get("backcolor", 1114112)
+        xml_path.write_text(
+            f'<?xml version="1.0" encoding="GBK"?>\n<root>\n<pool nextid="1" backcolor="{bc}">\n<cells>\n</cells>\n<flows>\n</flows>\n</pool>\n</root>',
+            encoding='gbk',
+        )
+        pool_id = "pool_" + uuid.uuid4().hex[:12]
+        request.app.state.storage.save_pool(pool_id, {"name": name, "pool_type": "tdx", "description": f"TDX pool: {name}", "topology_mode": "flow", "status": "draft"})
+        return {"success": True, "data": {"name": name, "filename": f"{name}.xml", "backcolor": bc, "pool_id": pool_id}}
+    except _HTTPException:
+        raise
+    except Exception as ex:
+        return {"success": False, "error": f"TDX 创建失败: {str(ex)}"}
+
+
+async def _tdx_save(name: str, request: _Request) -> Dict[str, Any]:
+    try:
+        body = await request.json()
+        pool_data = body.get("pool_data", body)
+        if not pool_data or not isinstance(pool_data, dict):
+            return {"success": False, "error": "无效的 pool_data"}
+        xml_path = _tdx_path_guard(name)
+        xml_path.parent.mkdir(parents=True, exist_ok=True)
+        _build_tdx_xml(pool_data, str(xml_path))
+        storage = request.app.state.storage
+        pm = pool_data.get("pool_meta", {})
+        pool_id = pool_data.get("pool_id") or pool_data.get("id") or f"tdx_{name}"
+        if not storage.get_pool(pool_id):
+            for p in storage.list_pools():
+                if p.get("name") == name and p.get("pool_type") == "tdx":
+                    pool_id = p.get("pool_id", pool_id)
+                    break
+        storage.save_pool(pool_id, {"name": pool_data.get("name", name), "pool_type": "tdx" if pm.get("type") == "tdx" else "dzh",
+                                     "description": pool_data.get("description", ""), "xml_source": str(xml_path),
+                                     "topology_mode": "flow", "status": "active",
+                                     "nodes": pool_data.get("nodes", []), "edges": pool_data.get("edges", []),
+                                     "pool_meta": pm})
+        return {"success": True, "data": {"name": name, "filename": f"{name}.xml"}}
+    except _HTTPException:
+        raise
+    except Exception as ex:
+        return {"success": False, "error": f"TDX 保存失败: {str(ex)}"}
+
+
+async def _tdx_delete(name: str, request: _Request) -> Dict[str, Any]:
+    try:
+        xml_path = _tdx_path_guard(name)
+        if not xml_path.is_file():
+            raise _HTTPException(status_code=404, detail=f"文件未找到: {name}.xml")
+        xml_path.unlink()
+        png_path = xml_path.with_suffix('.png')
+        if png_path.is_file():
+            png_path.unlink()
+        return {"success": True}
+    except _HTTPException:
+        raise
+    except Exception as ex:
+        return {"success": False, "error": f"TDX 删除失败: {str(ex)}"}
+
+
+_TDX_ACTIONS: Dict[str, Callable] = {
+    "GET": _tdx_load,
+    "POST": _tdx_create,
+    "PUT": _tdx_save,
+    "DELETE": _tdx_delete,
+}
+
+
+@app.api_route("/api/tdx/pool/{name}", methods=["GET", "POST", "PUT", "DELETE"], tags=["tdx"], dependencies=[Depends(verify_api_key)])
+async def tdx_pool_dispatch(name: str, request: _Request):
+    action = _TDX_ACTIONS.get(request.method)
+    if action is None:
+        raise _HTTPException(status_code=405, detail="Method not allowed")
+    return await action(name, request)
 
 @app.post("/api/tdx/export", tags=["tdx"], dependencies=[Depends(verify_api_key)])
 async def tdx_export_xml(request: _Request):
@@ -710,26 +801,6 @@ async def tdx_export_xml(request: _Request):
         _build_tdx_xml(pool_data, tmp_path)
         return FileResponse(tmp_path, media_type="application/xml", filename=pool_data.get("name", "tdx_pool") + ".xml", background=BackgroundTask(os.remove, tmp_path))
     except Exception as ex: return {"success": False, "error": f"TDX导出失败: {str(ex)}"}
-
-@app.post("/api/tdx/pools", tags=["tdx"], dependencies=[Depends(verify_api_key)])
-async def tdx_create_pool(request: _Request):
-    import uuid
-    try:
-        body = await request.json(); name = body.get("name", "").strip()
-        if not name: return {"success": False, "error": "缺少 name 参数"}
-        if ".." in name or "/" in name or "\\" in name:
-            raise _HTTPException(status_code=400, detail="Invalid pool name")
-        d = os.path.join(os.path.dirname(__file__), 'tdxpool'); os.makedirs(d, exist_ok=True)
-        xml_path = os.path.join(d, f"{name}.xml")
-        if os.path.exists(xml_path): return {"success": False, "error": f"股票池 {name} 已存在"}
-        bc = body.get("backcolor", 1114112)
-        with open(xml_path, 'w', encoding='gbk') as f:
-            f.write(f'<?xml version="1.0" encoding="GBK"?>\n<root>\n<pool nextid="1" backcolor="{bc}">\n<cells>\n</cells>\n<flows>\n</flows>\n</pool>\n</root>')
-        pool_id = "pool_" + uuid.uuid4().hex[:12]
-        request.app.state.storage.save_pool(pool_id, {"name": name, "pool_type": "tdx", "description": f"TDX pool: {name}", "topology_mode": "flow", "status": "draft"})
-        return {"success": True, "data": {"name": name, "filename": f"{name}.xml", "backcolor": bc, "pool_id": pool_id}}
-    except _HTTPException: raise
-    except Exception as ex: return {"success": False, "error": f"TDX 创建失败: {str(ex)}"}
 
 @app.post("/api/tdx/execute-pool", tags=["tdx"], dependencies=[Depends(verify_api_key)])
 async def tdx_execute_pool(request: _Request):
@@ -755,49 +826,6 @@ async def tdx_execute_pool(request: _Request):
         if _saved_count[0] > 0: resp["history_saved"] = {"realtime_entries": _saved_count[0], "mode": "incremental"}
         return resp
     except Exception as ex: return {"success": False, "error": f"TDX 执行失败: {str(ex)}"}
-
-@app.delete("/api/tdx/pools/{name:path}", tags=["tdx"], dependencies=[Depends(verify_api_key)])
-async def tdx_delete_pool(name: str):
-    try:
-        d = os.path.join(os.path.dirname(__file__), 'tdxpool')
-        try:
-            xml_path = safe_path_join(d, name + '.xml')
-        except ValueError as ex:
-            raise _HTTPException(status_code=400, detail=str(ex))
-        if not os.path.isfile(xml_path): raise _HTTPException(status_code=404, detail=f"文件未找到: {name}.xml")
-        os.remove(xml_path)
-        png = os.path.join(d, name + '.png')
-        if os.path.isfile(png): os.remove(png)
-        return {"success": True}
-    except _HTTPException: raise
-    except Exception as ex: return {"success": False, "error": str(ex)}
-
-@app.put("/api/tdx/pools/{name:path}", tags=["tdx"], dependencies=[Depends(verify_api_key)])
-async def tdx_save_pool(name: str, request: _Request):
-    try:
-        body = await request.json()
-        pool_data = body.get("pool_data", body)
-        if not pool_data or not isinstance(pool_data, dict): return {"success": False, "error": "无效的 pool_data"}
-        d = os.path.join(os.path.dirname(__file__), 'tdxpool'); os.makedirs(d, exist_ok=True)
-        try:
-            _xml_path = safe_path_join(d, f"{name}.xml")
-        except ValueError as ex:
-            return {"success": False, "error": str(ex)}
-        _build_tdx_xml(pool_data, _xml_path)
-        storage = request.app.state.storage
-        pm = pool_data.get("pool_meta", {})
-        pool_id = pool_data.get("pool_id") or pool_data.get("id") or f"tdx_{name}"
-        if not storage.get_pool(pool_id):
-            for p in storage.list_pools():
-                if p.get("name") == name and p.get("pool_type") == "tdx": pool_id = p.get("pool_id", pool_id); break
-        storage.save_pool(pool_id, {"name": pool_data.get("name", name), "pool_type": "tdx" if pm.get("type") == "tdx" else "dzh",
-                                     "description": pool_data.get("description", ""), "xml_source": _xml_path,
-                                     "topology_mode": "flow", "status": "active",
-                                     "nodes": pool_data.get("nodes", []), "edges": pool_data.get("edges", []),
-                                     "pool_meta": pm})
-        return {"success": True, "data": {"name": name, "filename": f"{name}.xml"}}
-    except Exception as ex: return {"success": False, "error": f"TDX 保存失败: {str(ex)}"}
-
 
 # ══════════════════════════════════════════════════════════════════════
 #  数据源状态端点（H2 修复：暴露状态 + 显式切换）
@@ -1633,55 +1661,6 @@ async def sim_init(name: str):
     }
 
 
-@app.post("/api/pool/{name:path}/sim/pause", tags=["pool"], dependencies=[Depends(verify_api_key)])
-async def sim_pause(name: str):
-    """暂停仿真会话。"""
-    simulators = getattr(app.state, "_simulators", {})
-    simulator = simulators.get(name)
-    if simulator is None:
-        return {"success": False, "error": f"仿真会话不存在: {name}（请先调用 /sim/init）"}
-    simulator.pause()
-    return {"success": True, "data": {"pool": name, "paused": True}}
-
-
-@app.post("/api/pool/{name:path}/sim/resume", tags=["pool"], dependencies=[Depends(verify_api_key)])
-async def sim_resume(name: str):
-    """恢复仿真会话。"""
-    simulators = getattr(app.state, "_simulators", {})
-    simulator = simulators.get(name)
-    if simulator is None:
-        return {"success": False, "error": f"仿真会话不存在: {name}"}
-    simulator.resume()
-    return {"success": True, "data": {"pool": name, "paused": False}}
-
-
-@app.post("/api/pool/{name:path}/sim/stop", tags=["pool"], dependencies=[Depends(verify_api_key)])
-async def sim_stop(name: str):
-    """停止仿真会话并清理实例。"""
-    simulators = getattr(app.state, "_simulators", {})
-    simulator = simulators.pop(name, None)
-    if simulator is not None:
-        try:
-            simulator.reset()
-        except Exception:
-            pass
-    return {"success": True, "data": {"pool": name, "stopped": simulator is not None}}
-
-
-@app.get("/api/pool/{name:path}/sim/state", tags=["pool"])
-async def sim_get_state(name: str):
-    """获取仿真会话状态快照。"""
-    simulators = getattr(app.state, "_simulators", {})
-    simulator = simulators.get(name)
-    if simulator is None:
-        return {"success": False, "error": f"仿真会话不存在: {name}"}
-    try:
-        snapshot = simulator.get_state_snapshot()
-        return {"success": True, "data": snapshot}
-    except Exception as ex:
-        return {"success": False, "error": str(ex)}
-
-
 @app.post("/api/pool/{name:path}/sim/start", tags=["pool"], dependencies=[Depends(verify_api_key)])
 async def sim_start(name: str, request: _Request):
     """仿真模式别名端点：同 /api/pool/{name}/simulation/step。"""
@@ -1693,22 +1672,65 @@ async def sim_start(name: str, request: _Request):
     return await _run_simulation_step(name, delta)
 
 
-@app.post("/api/pool/{name:path}/sim/speed", tags=["pool"], dependencies=[Depends(verify_api_key)])
-async def sim_set_speed(name: str, request: _Request):
-    """设置仿真速度倍数（支持 XML 和 SQLite 池）。"""
+def get_simulator(name: str):
+    """FastAPI 依赖：按池名查找仿真会话，不存在则 404。
+
+    init / start 涉及创建会话，不走此依赖；其余 sim 动作统一依赖此函数。
+    """
     simulators = getattr(app.state, "_simulators", {})
-    simulator = simulators.get(name)
-    if simulator is None:
-        return {"success": False, "error": f"仿真会话不存在: {name}（请先调用 /sim/init）"}
-    try:
-        body = await request.json()
-        speed = float(body.get("speed", 1.0))
-    except Exception:
-        speed = 1.0
-    if speed <= 0:
-        speed = 1.0
-    simulator.speed = speed
-    return {"success": True, "data": {"pool": name, "speed": speed}}
+    sim = simulators.get(name)
+    if sim is None:
+        raise _HTTPException(404, f"仿真会话不存在: {name}")
+    return sim
+
+
+# 表驱动 sim 动作映射：URL action → RuntimeSimulator 方法名
+# init / start 涉及创建会话，保留为独立路由；pause/resume/stop/get_state/set_speed 走合并路由
+_SIM_ACTIONS: Dict[str, str] = {
+    "pause": "pause",
+    "resume": "resume",
+    "stop": "reset",
+    "get_state": "get_state_snapshot",
+    "set_speed": "set_speed",
+}
+
+
+@app.post("/api/pool/{name:path}/sim/{action}", tags=["pool"], dependencies=[Depends(verify_api_key)])
+async def sim_action(name: str, action: str, request: _Request, simulator=Depends(get_simulator)):
+    """表驱动的仿真会话控制（合并 sim_pause/resume/stop/get_state/set_speed）。
+
+    init / start 涉及创建会话，保留为独立路由；其余 5 个动作统一走此端点。
+    """
+    if action not in _SIM_ACTIONS:
+        raise _HTTPException(400, f"未知仿真操作: {action}")
+    # stop：从会话池移除并 reset
+    if action == "stop":
+        getattr(app.state, "_simulators", {}).pop(name, None)
+        try:
+            simulator.reset()
+        except Exception:
+            pass
+        return {"success": True, "data": {"pool": name, "stopped": True}}
+    # set_speed：从请求体读取 speed 并设置属性（RuntimeSimulator 无 set_speed 方法）
+    if action == "set_speed":
+        try:
+            body = await request.json()
+            speed = float(body.get("speed", 1.0))
+        except Exception:
+            speed = 1.0
+        if speed <= 0:
+            speed = 1.0
+        simulator.speed = speed
+        return {"success": True, "data": {"pool": name, "speed": speed}}
+    # pause / resume / get_state：方法调用
+    method = getattr(simulator, _SIM_ACTIONS[action])
+    if action == "get_state":
+        try:
+            return {"success": True, "data": method()}
+        except Exception as ex:
+            return {"success": False, "error": str(ex)}
+    method()
+    return {"success": True, "data": {"pool": name, "paused": action == "pause"}}
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -2476,26 +2498,24 @@ _DEFAULT_TABLES_DEFAULTS = {
 }
 
 
-def _load_json_file(path: Path, default):
-    if path.exists():
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as ex:
-            logger.warning("读取配置失败 %s: %s", path, ex)
-    return default
-
-
 @app.get("/api/config/tables/highlight_rules", tags=["highlight"])
 async def get_highlight_rules():
     """返回高亮规则配置。"""
-    return _load_json_file(_CONFIG / "runtime" / "highlight_rules.json", _DEFAULT_HIGHLIGHT_RULES)
+    _cs = app.state.config_store if hasattr(app, "state") and hasattr(app.state, "config_store") else None
+    if _cs is not None:
+        _t = _cs.get_table("highlight_rules")
+        return _t if _t else _DEFAULT_HIGHLIGHT_RULES
+    return _DEFAULT_HIGHLIGHT_RULES
 
 
 @app.get("/api/config/tables/defaults", tags=["highlight"])
 async def get_tables_defaults():
     """返回表格默认配置（含高亮 WebSocket 路径）。"""
-    return _load_json_file(_CONFIG / "runtime" / "defaults.json", _DEFAULT_TABLES_DEFAULTS)
+    _cs = app.state.config_store if hasattr(app, "state") and hasattr(app.state, "config_store") else None
+    if _cs is not None:
+        _t = _cs.get_table("defaults")
+        return _t if _t else _DEFAULT_TABLES_DEFAULTS
+    return _DEFAULT_TABLES_DEFAULTS
 
 
 @app.get("/api/highlight-events", tags=["highlight"])

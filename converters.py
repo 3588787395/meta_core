@@ -63,6 +63,7 @@ from core.domain import (
     _NOPERATE_RULES,
     _RANK_MODES,
 )
+from core.table_engine import get_global_config_store
 
 logger = logging.getLogger(__name__)
 
@@ -5845,22 +5846,8 @@ _BASE = Path(__file__).parent
 _CONFIG = _BASE / "config"
 
 
-def _load_json_cache(attr_name):
-    cache = globals().get(attr_name)
-    if cache is None:
-        fname = {'_XML_MAP': 'xml_mapping.json', '_HIST_SCHEMA': 'runtime/history_schema.json', '_ACTION_CFG': 'ui/action_table.json'}[attr_name]
-        try:
-            with open(_CONFIG / fname, encoding="utf-8-sig" if 'xml' in fname else "utf-8") as f:
-                cache = json.load(f)
-        except (OSError, json.JSONDecodeError) as ex:
-            # fail-fast 标记：返回带 _load_error 的非空 dict，禁止静默回退空字典
-            logger.warning("加载配置表 %s 失败: %s（已标记 _load_error）", fname, ex, exc_info=True)
-            cache = {"_load_error": f"无法加载 {fname}: {ex}", "_load_error_file": fname}
-        globals()[attr_name] = cache
-    return cache
-
-
-_get_xml_mapping = lambda: _load_json_cache('_XML_MAP')
+# Task 9.10: _load_json_cache 已删除，改为通过 ConfigStore.get_table 加载
+_get_xml_mapping = lambda: (get_global_config_store().get_table("xml_mapping") if get_global_config_store() else {})
 
 _STOCK_NAMES = {}
 try:

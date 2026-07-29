@@ -2256,3 +2256,38 @@ TypeError: APIKeyHeader.__call__() missing 1 required positional argument: 'requ
   dependencies 都会破坏 WebSocket 路由
 - **WebSocket 鉴权方案**：如需对 WebSocket 鉴权，应在路由函数体内通过 `websocket.headers.get(...)`
   或 `websocket.query_params.get(...)` 主动校验，不得使用 `Depends(APIKeyHeader)` 形式
+
+## 元模式彻底完善迭代
+
+基于 14 类同构代码模式洞察，分 6 轮迭代完成元模式彻底完善：
+
+### 迭代 1：同步/异步双路径统一
+- `_step_once` / `_astep_once` → `_step_once_impl(async_mode)` 单一骨架
+- `_on_simulation_step` / `_on_replay_step` → `_on_step_event(driver_type, provider_fn)` 单一处理器
+- 5 处 `TickReceived` 发布循环 → `_publish_tick_batch(bus, tick_data, ts)` 模块级函数
+
+### 迭代 2：公式引擎协议化
+- 定义 `IFormulaEngine` Protocol，统一 4 个引擎类的 `eval`/`eval_outvars`/`eval_series`/`eval_batch` 签名
+- `FormulaRouter` 引擎分派从 if/elif 链改为 `_ENGINE_DISPATCH` dict 表驱动
+
+### 迭代 3：HTTP 路由 Depends 化
+- 21+ 处 `if not _config_store` 样板 → FastAPI `Depends(require_config_store)` router 级挂载
+- 5 个独立 sim 路由 → 单一 `POST /api/pool/{name}/sim/{action}` + `_SIM_ACTIONS` 表驱动
+
+### 迭代 4：配置加载统一到 ConfigStore
+- 10 处散落 `_load_json` / `_load_config` / `_load_json_file` / `_load_json_cache` → `ConfigStore.get_table` / `get_data_file`
+- `ConfigStore` 新增 `get_data_file(name)` 方法处理非配置表 JSON
+
+### 迭代 5：中等优先级批次收敛
+- `engine.py` `if mode_id == "replay"` → `state_scope` 字段表驱动
+- `domain.py` 10+ Node/Edge/Spec 类 `to_dict`/`from_dict` 样板 → `_FieldMeta` + 基类统一实现
+- `domain.py` Evaluator 子类 → `_EVALUATOR_REGISTRY` + `@register_evaluator` 装饰器
+- 4 个 K 线合成函数 → `synthesize(bars, source, target)` + `_SYNTHESIS_RULES` 表
+- 5 个 tdx CRUD 路由 → 2 个端点 + `_TDX_ACTIONS` 表
+- 9 个导入/导出方法 → `import_pool` / `export_pool` + `_IMPORT_RULES` / `_EXPORT_RULES` 表
+- 4 对 `set_xxx`/`get_xxx` → 直接属性访问（保留 setter 委托）
+- 5 个 `draw_xxx` + 矩阵/散点独立渲染 → `renderEventCanvas(layoutMode)` + `_DRAW_LAYERS` + `_STYLE`
+
+### 迭代 6：低优先级收尾
+- `table_engine.py` 2 处 `ConfigChanged` 发布 → `_notify_changed` 单一方法
+- `execution_module.py` 4 处 `EdgeFired`/`TTLDue` 发布 → `_publish_edge_fired` / `_publish_ttl_due` 工厂函数

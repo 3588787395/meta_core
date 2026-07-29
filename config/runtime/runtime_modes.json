@@ -4,6 +4,7 @@
   "modes": {
     "live": {
       "mode_id": "live",
+      "state_scope": "live",
       "name": "实盘",
       "time_source_id": "realtime",
       "data_source_id": "live",
@@ -21,6 +22,7 @@
     },
     "replay": {
       "mode_id": "replay",
+      "state_scope": "replay",
       "name": "回放",
       "time_source_id": "kline_timeline",
       "data_source_id": "replay_history",
@@ -39,6 +41,7 @@
     },
     "simulation": {
       "mode_id": "simulation",
+      "state_scope": "live",
       "name": "仿真",
       "time_source_id": "virtual_clock",
       "data_source_id": "mock",

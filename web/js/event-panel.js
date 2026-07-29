@@ -114,6 +114,50 @@
     '定时器': '#2196f3'
   };
 
+  // ===== 画布图层样式表（表驱动：5 个 draw_xxx 函数统一读取）=====
+  const _STYLE = {
+    label: {
+      fill: 'rgba(0,0,0,0.25)',          // 硬约束：标签区背景
+      borderStroke: 'rgba(255,255,255,0.12)',
+      lineWidth: 1
+    },
+    grid: {
+      stroke: 'rgba(255,255,255,0.05)',
+      lineWidth: 1,
+      padRight: 8
+    },
+    axis: {
+      tickStroke: 'rgba(255,255,255,0.06)',
+      tickLineWidth: 1,
+      tickDash: [2, 3],
+      labelFill: '#8080a0',
+      labelFont: '9px Consolas, monospace',
+      minTickGapPx: 60,
+      baselineStroke: 'rgba(255,255,255,0.2)',
+      baselineLineWidth: 1
+    },
+    event: {
+      iconSize: 14,
+      iconFont: '14px Segoe UI Emoji, Apple Color Emoji, Segoe UI, Microsoft YaHei, system-ui, sans-serif', // 硬约束：emoji 字体
+      emptyFill: '#505070',
+      emptyFont: '12px Segoe UI Emoji, Apple Color Emoji, Microsoft YaHei, sans-serif',
+      borderLineWidth: 1.2,
+      borderAlpha: 0.8,
+      defaultGlowSize: 4,
+      hoverStroke: 'rgba(255,255,255,0.7)',
+      hoverLineWidth: 1.5,
+      hoverDash: [3, 2],
+      hoverRadiusPad: 4
+    },
+    now: {
+      stroke: '#ef4444',                // 硬约束：NOW 线红色
+      lineWidth: 1.5,
+      dash: [4, 4],
+      shadowColor: 'rgba(239,68,68,0.6)',
+      shadowBlur: 4
+    }
+  };
+
   function escapeHtml(s) {
     if (s == null) return '';
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -264,9 +308,9 @@
     if (!eventMatrix) return null;
     var line = document.createElement('div');
     line.className = 'etp-matrix-now-line';
-    line.style.cssText = 'position:absolute;top:0;bottom:' + MATRIX_AXIS_HEIGHT + 'px;width:2px;background:#f44336;box-shadow:0 0 6px rgba(244,67,54,0.7),0 0 2px rgba(244,67,54,0.9);z-index:2;pointer-events:none;left:0;will-change:transform;';
+    line.style.cssText = 'position:absolute;top:0;bottom:' + MATRIX_AXIS_HEIGHT + 'px;width:2px;background:' + _STYLE.now.stroke + ';box-shadow:0 0 6px rgba(239,68,68,0.7),0 0 2px rgba(239,68,68,0.9);z-index:2;pointer-events:none;left:0;will-change:transform;';
     var label = document.createElement('div');
-    label.style.cssText = 'position:absolute;bottom:-2px;left:50%;transform:translateX(-50%);font-size:8px;color:#f44336;white-space:nowrap;font-family:Consolas,monospace;font-weight:700;text-shadow:0 0 3px rgba(0,0,0,0.8);';
+    label.style.cssText = 'position:absolute;bottom:-2px;left:50%;transform:translateX(-50%);font-size:8px;color:' + _STYLE.now.stroke + ';white-space:nowrap;font-family:Consolas,monospace;font-weight:700;text-shadow:0 0 3px rgba(0,0,0,0.8);';
     label.textContent = 'NOW';
     line.appendChild(label);
     eventMatrix.style.position = 'relative';
@@ -309,11 +353,10 @@
   function drawLabelArea(ctx, opts) {
     var labelWidth = opts.labelWidth;
     var plotH = opts.plotH;
-    var W = opts.W;
-    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillStyle = _STYLE.label.fill;
     ctx.fillRect(0, 0, labelWidth - 1, plotH);
-    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = _STYLE.label.borderStroke;
+    ctx.lineWidth = _STYLE.label.lineWidth;
     ctx.beginPath();
     ctx.moveTo(labelWidth - 1, 0);
     ctx.lineTo(labelWidth - 1, plotH);
@@ -326,9 +369,9 @@
     var plotH = opts.plotH;
     var rowH = opts.rowH;
     var catCount = opts.catCount;
-    var padRight = opts.padRight == null ? 8 : opts.padRight;
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-    ctx.lineWidth = 1;
+    var padRight = opts.padRight == null ? _STYLE.grid.padRight : opts.padRight;
+    ctx.strokeStyle = _STYLE.grid.stroke;
+    ctx.lineWidth = _STYLE.grid.lineWidth;
     for (var i = 0; i <= catCount; i++) {
       var gy = i * rowH;
       ctx.beginPath();
@@ -346,14 +389,14 @@
     var minTs = opts.minTs;
     var timeSpan = opts.timeSpan;
     var all = opts.all;
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-    ctx.lineWidth = 1;
-    ctx.fillStyle = '#8080a0';
-    ctx.font = '9px Consolas, monospace';
+    ctx.strokeStyle = _STYLE.axis.tickStroke;
+    ctx.lineWidth = _STYLE.axis.tickLineWidth;
+    ctx.fillStyle = _STYLE.axis.labelFill;
+    ctx.font = _STYLE.axis.labelFont;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
 
-    // 以事件 display_ts 为刻度，使用后端已格式化的 display_time_ms
+    // 以事件 display_ts 为刻度，使用后端已格式化的 display_time_ms（显示实际时间）
     var ticks = [];
     var seen = new Set();
     all.forEach(function (ev) {
@@ -365,8 +408,8 @@
       }
     });
     ticks.sort(function (a, b) { return a.ts - b.ts; });
-    // 避免过密：间隔至少 60px
-    var minPx = 60;
+    // 避免过密：间隔至少 minTickGapPx
+    var minPx = _STYLE.axis.minTickGapPx;
     var filtered = [];
     var lastX = -Infinity;
     ticks.forEach(function (tick) {
@@ -380,7 +423,7 @@
     filtered.forEach(function (tick) {
       var x = plotX + ((tick.ts - minTs) / timeSpan) * plotW;
       ctx.beginPath();
-      ctx.setLineDash([2, 3]);
+      ctx.setLineDash(_STYLE.axis.tickDash);
       ctx.moveTo(x, 0);
       ctx.lineTo(x, plotH);
       ctx.stroke();
@@ -388,8 +431,8 @@
       ctx.fillText(tick.label, x, H - 4);
     });
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = _STYLE.axis.baselineStroke;
+    ctx.lineWidth = _STYLE.axis.baselineLineWidth;
     ctx.beginPath();
     ctx.moveTo(plotX, plotH);
     ctx.lineTo(plotX + plotW, plotH);
@@ -401,16 +444,15 @@
     var ey = opts.ey;
     var cfg = opts.cfg;
     var state = opts.state || 'triggered';
-    var iconSize = opts.iconSize || 14;
-    var labelFont = opts.labelFont;
+    var iconSize = opts.iconSize || _STYLE.event.iconSize;
     var isHover = opts.isHover;
     var style = STATE_STYLE[state] || STATE_STYLE.triggered;
     if (style.borderStyle) {
       ctx.save();
       ctx.setLineDash(style.borderStyle);
       ctx.strokeStyle = style.borderColor;
-      ctx.lineWidth = 1.2;
-      ctx.globalAlpha = 0.8;
+      ctx.lineWidth = _STYLE.event.borderLineWidth;
+      ctx.globalAlpha = _STYLE.event.borderAlpha;
       ctx.strokeRect(ex - iconSize / 2 - 2, ey - iconSize / 2 - 2, iconSize + 4, iconSize + 4);
       ctx.setLineDash([]);
       ctx.restore();
@@ -418,8 +460,8 @@
     ctx.save();
     ctx.globalAlpha = style.fillAlpha;
     ctx.shadowColor = style.glowColor || cfg.color;
-    ctx.shadowBlur = style.glowSize || 4;
-    ctx.font = '14px ' + labelFont;
+    ctx.shadowBlur = style.glowSize || _STYLE.event.defaultGlowSize;
+    ctx.font = _STYLE.event.iconFont;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(cfg.icon, ex, ey);
@@ -427,11 +469,11 @@
     ctx.restore();
     if (isHover) {
       ctx.save();
-      ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([3, 2]);
+      ctx.strokeStyle = _STYLE.event.hoverStroke;
+      ctx.lineWidth = _STYLE.event.hoverLineWidth;
+      ctx.setLineDash(_STYLE.event.hoverDash);
       ctx.beginPath();
-      ctx.arc(ex, ey, iconSize / 2 + 4, 0, Math.PI * 2);
+      ctx.arc(ex, ey, iconSize / 2 + _STYLE.event.hoverRadiusPad, 0, Math.PI * 2);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
@@ -447,11 +489,11 @@
     var timeSpan = opts.timeSpan;
     var ratio = Math.max(0, Math.min(1, (now - minTs) / timeSpan));
     var x = plotX + ratio * plotW;
-    ctx.strokeStyle = '#f44336';
-    ctx.setLineDash([4, 4]);
-    ctx.lineWidth = 1.5;
-    ctx.shadowColor = 'rgba(244,67,54,0.6)';
-    ctx.shadowBlur = 4;
+    ctx.strokeStyle = _STYLE.now.stroke;
+    ctx.setLineDash(_STYLE.now.dash);
+    ctx.lineWidth = _STYLE.now.lineWidth;
+    ctx.shadowColor = _STYLE.now.shadowColor;
+    ctx.shadowBlur = _STYLE.now.shadowBlur;
     ctx.beginPath();
     ctx.moveTo(x, 0);
     ctx.lineTo(x, plotH);
@@ -460,66 +502,21 @@
     ctx.shadowBlur = 0;
   }
 
-  function renderMatrix() {
-    if (!eventMatrixCanvas) return;
-    eventMatrix.style.display = 'block';
-    eventMatrixCanvas.style.display = 'block';
-    eventScatterCanvas.style.display = 'none';
-    if (categoryRowContainer) categoryRowContainer.style.display = '';
-    ensureMatrixNowLine();
+  // ===== 画布图层声明（表驱动：渲染顺序声明）=====
+  const _DRAW_LAYERS = [
+    { name: 'label',  fn: drawLabelArea },
+    { name: 'grid',   fn: drawHorizontalGrid },
+    { name: 'axis',   fn: drawTimeAxis },
+    { name: 'events', fn: drawEventIcon },
+    { name: 'now',    fn: drawNowLine }
+  ];
 
-    var canvas = eventMatrixCanvas;
-    var rect = eventMatrix.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return;
-    canvas.width = rect.width * window.devicePixelRatio;
-    canvas.height = rect.height * window.devicePixelRatio;
-    var ctx = canvas.getContext('2d');
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-    var W = rect.width, H = rect.height;
-    ctx.clearRect(0, 0, W, H);
-    matrixHitRegions = [];
-
-    var labelWidth = MATRIX_LABEL_WIDTH;
-    var padRight = 8;
-    var axisH = MATRIX_AXIS_HEIGHT;
-    var plotX = labelWidth;
-    var plotW = Math.max(W - labelWidth - padRight, 80);
-    var plotH = H - axisH;
-    var rowH = plotH / CATEGORIES.length;
-    var catCount = CATEGORIES.length;
-
-    var all = events.concat(pendingEvents).filter(function (ev) { return activeFilters.has(ev.category); });
-    if (all.length === 0) {
-      ctx.fillStyle = '#505070';
-      ctx.font = '12px Segoe UI Emoji, Apple Color Emoji, Microsoft YaHei, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('暂无事件', W / 2, H / 2);
-      if (matrixNowLine) matrixNowLine.style.display = 'none';
-      lastMatrixLayout = null;
-      var emptyByCat = {};
-      CATEGORIES.forEach(function (c) { emptyByCat[c] = []; });
-      updateCategoryRows({ rowH: rowH }, emptyByCat);
-      return;
-    }
-
-    if (matrixNowLine) matrixNowLine.style.display = '';
-
-    var now = getCurrentTime();
-    var win = computeTimeWindow(all);
-    var minTs = win.minTs;
-    var timeSpan = win.timeSpan;
-
-    lastMatrixLayout = { plotX: plotX, plotW: plotW, plotTop: 0, plotH: plotH, minTs: minTs, timeSpan: timeSpan, rowH: rowH, W: W, H: H, axisH: axisH, labelWidth: labelWidth };
-
-    var byCat = {};
-    CATEGORIES.forEach(function (c) { byCat[c] = []; });
-    all.forEach(function (ev) { byCat[ev.category].push(ev); });
-    updateCategoryRows(lastMatrixLayout, byCat);
-
-    var labelFont = 'Segoe UI Emoji, Apple Color Emoji, Segoe UI, Microsoft YaHei, system-ui, sans-serif';
-    drawLabelArea(ctx, { labelWidth: labelWidth, plotH: plotH, W: W });
-    drawHorizontalGrid(ctx, { plotX: plotX, W: W, plotH: plotH, rowH: rowH, catCount: catCount, padRight: padRight });
-    drawTimeAxis(ctx, { plotX: plotX, plotW: plotW, plotH: plotH, H: H, minTs: minTs, timeSpan: timeSpan, all: all });
+  // 矩阵视图事件层：按分类分行 + 同位置抖动
+  function drawMatrixEvents(ctx, layout, all) {
+    var plotX = layout.plotX, plotW = layout.plotW, rowH = layout.rowH;
+    var minTs = layout.minTs, timeSpan = layout.timeSpan;
+    var iconSize = _STYLE.event.iconSize;
+    var jitterStep = 10;
 
     var buckets = {};
     all.forEach(function (ev) {
@@ -529,8 +526,6 @@
       buckets[key].push(ev);
     });
 
-    var iconSize = 14;
-    var jitterStep = 10;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
@@ -561,14 +556,147 @@
 
       drawEventIcon(ctx, {
         ex: ex, ey: ey, cfg: cfg, state: ev.state,
-        iconSize: iconSize, labelFont: labelFont,
+        iconSize: iconSize,
         isHover: !!(matrixHoverEvent && matrixHoverEvent.id === ev.id)
       });
 
       matrixHitRegions.push({ x: ex - iconSize / 2, y: ey - iconSize / 2, w: iconSize, h: iconSize, ev: ev });
     });
+  }
 
-    updateMatrixNowLinePosition();
+  // 散点视图事件层：聚合后绘制，所有事件固定在同一水平中线（硬约束）
+  function drawScatterEvents(ctx, layout, all) {
+    var plotX = layout.plotX, plotW = layout.plotW, plotH = layout.plotH;
+    var minTs = layout.minTs, timeSpan = layout.timeSpan;
+    var iconSize = _STYLE.event.iconSize;
+    var badgeRadius = 8;
+
+    var clusters = aggregateScatterEvents(all, minTs, timeSpan, scatterLayout);
+
+    clusters.forEach(function (cluster) {
+      var cat = cluster.primaryCategory;
+      var cfg = CATEGORY_CONFIG[cat];
+      var cx = plotX + ((cluster.centerTs - minTs) / timeSpan) * plotW;
+      var cy = plotH / 2; // 硬约束：散点视图所有事件在同一水平中线，禁止按分类上下错开
+      var isCluster = cluster.events.length > 1;
+      var hasSelected = cluster.events.some(function (e) { return e.id === selectedEventId; });
+
+      drawEventIcon(ctx, { ex: cx, ey: cy, cfg: cfg, state: cluster.state, iconSize: iconSize, isHover: hasSelected });
+
+      if (isCluster) {
+        var badgeX = cx + iconSize / 2 - 2;
+        var badgeY = cy - iconSize / 2 + 2;
+        ctx.beginPath();
+        ctx.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2);
+        ctx.fillStyle = '#ff5722';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 9px Consolas';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        var countText = cluster.events.length > 99 ? '99+' : String(cluster.events.length);
+        ctx.fillText(countText, badgeX, badgeY);
+      }
+
+      scatterHitRegions.push({ cx: cx, cy: cy, cluster: cluster });
+    });
+  }
+
+  // ===== 单一渲染函数：表驱动图层遍历 =====
+  // layoutMode = "matrix" | "scatter"
+  function renderEventCanvas(ctx, canvasState, layoutMode) {
+    var W = canvasState.W, H = canvasState.H;
+    var labelWidth = MATRIX_LABEL_WIDTH;
+    var padRight = _STYLE.grid.padRight;
+    var axisH = MATRIX_AXIS_HEIGHT;
+    var plotX = labelWidth;
+    var plotW = Math.max(W - labelWidth - padRight, 80);
+    var plotH = H - axisH;
+    var catCount = CATEGORIES.length;
+    var rowH = plotH / catCount;
+
+    var all = events.concat(pendingEvents).filter(function (ev) { return activeFilters.has(ev.category); });
+    if (all.length === 0) {
+      ctx.fillStyle = _STYLE.event.emptyFill;
+      ctx.font = _STYLE.event.emptyFont;
+      ctx.textAlign = 'center';
+      ctx.fillText('暂无事件', W / 2, H / 2);
+      return null;
+    }
+
+    var now = getCurrentTime();
+    var win = computeTimeWindow(all);
+    var minTs = win.minTs;
+    var timeSpan = win.timeSpan;
+
+    var byCat = {};
+    CATEGORIES.forEach(function (c) { byCat[c] = []; });
+    all.forEach(function (ev) { byCat[ev.category].push(ev); });
+
+    var layout = {
+      plotX: plotX, plotW: plotW, plotTop: 0, plotH: plotH,
+      minTs: minTs, timeSpan: timeSpan, rowH: rowH,
+      W: W, H: H, axisH: axisH, labelWidth: labelWidth
+    };
+    updateCategoryRows(layout, byCat);
+
+    var layerOpts = {
+      label: { labelWidth: labelWidth, plotH: plotH, W: W },
+      grid: { plotX: plotX, W: W, plotH: plotH, rowH: rowH, catCount: catCount, padRight: padRight },
+      axis: { plotX: plotX, plotW: plotW, plotH: plotH, H: H, minTs: minTs, timeSpan: timeSpan, all: all },
+      now: { now: now, plotX: plotX, plotW: plotW, plotH: plotH, minTs: minTs, timeSpan: timeSpan }
+    };
+
+    _DRAW_LAYERS.forEach(function (layer) {
+      if (layer.name === 'events') {
+        if (layoutMode === 'matrix') {
+          drawMatrixEvents(ctx, layout, all);
+        } else {
+          drawScatterEvents(ctx, layout, all);
+        }
+      } else {
+        layer.fn(ctx, layerOpts[layer.name]);
+      }
+    });
+
+    return layout;
+  }
+
+  function renderMatrix() {
+    if (!eventMatrixCanvas) return;
+    eventMatrix.style.display = 'block';
+    eventMatrixCanvas.style.display = 'block';
+    eventScatterCanvas.style.display = 'none';
+    if (categoryRowContainer) categoryRowContainer.style.display = '';
+    ensureMatrixNowLine();
+
+    var canvas = eventMatrixCanvas;
+    var rect = eventMatrix.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    canvas.width = rect.width * window.devicePixelRatio;
+    canvas.height = rect.height * window.devicePixelRatio;
+    var ctx = canvas.getContext('2d');
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+    var W = rect.width, H = rect.height;
+    ctx.clearRect(0, 0, W, H);
+    matrixHitRegions = [];
+
+    var layout = renderEventCanvas(ctx, { W: W, H: H }, 'matrix');
+    if (layout) {
+      lastMatrixLayout = layout;
+      if (matrixNowLine) matrixNowLine.style.display = '';
+      updateMatrixNowLinePosition();
+    } else {
+      if (matrixNowLine) matrixNowLine.style.display = 'none';
+      lastMatrixLayout = null;
+      var emptyByCat = {};
+      CATEGORIES.forEach(function (c) { emptyByCat[c] = []; });
+      updateCategoryRows({ rowH: (H - MATRIX_AXIS_HEIGHT) / CATEGORIES.length }, emptyByCat);
+    }
   }
 
   function getMatrixEventAt(x, y) {
@@ -864,111 +992,36 @@
     return clusters.sort((a, b) => a.centerTs - b.centerTs);
   }
 
-  // ===== 渲染：散点分布 =====
+  // ===== 渲染：散点分布（薄包装：委托 renderEventCanvas，cy=plotH/2 硬约束在 drawScatterEvents）=====
   function renderScatter() {
     if (!eventScatterCanvas) return;
     eventMatrix.style.display = 'none';
     eventMatrixCanvas.style.display = 'none';
     eventScatterCanvas.style.display = 'block';
+    if (categoryRowContainer) categoryRowContainer.style.display = '';
+    // 散点视图无 DOM NOW 线（NOW 线由 drawNowLine 绘制在 Canvas 上）
+    if (matrixNowLine) matrixNowLine.style.display = 'none';
 
-    const canvas = eventScatterCanvas;
-    const rect = canvas.parentElement.getBoundingClientRect();
+    var canvas = eventScatterCanvas;
+    var rect = canvas.parentElement.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
     canvas.width = rect.width * window.devicePixelRatio;
     canvas.height = rect.height * window.devicePixelRatio;
-    const ctx = canvas.getContext('2d');
+    var ctx = canvas.getContext('2d');
     ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-    const W = rect.width, H = rect.height;
+    var W = rect.width, H = rect.height;
     ctx.clearRect(0, 0, W, H);
     scatterHitRegions = [];
 
-    const labelPadLeft = MATRIX_LABEL_WIDTH;
-    const axisH = MATRIX_AXIS_HEIGHT;
-    const plotW = Math.max(W - labelPadLeft - 8, 80);
-    const plotH = H - axisH;
-
-    const catCount = CATEGORIES.length;
-    const rowH = plotH / catCount;
-    lastScatterLayout = { minTs: 0, span: DEFAULT_TIME_WINDOW, W: W, H: H, rowH: rowH, catCount: catCount };
-
-    if (events.length === 0 && pendingEvents.length === 0) {
-      ctx.fillStyle = '#505070';
-      ctx.font = '12px Segoe UI Emoji, Apple Color Emoji, Microsoft YaHei, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('暂无事件', W / 2, H / 2);
+    var layout = renderEventCanvas(ctx, { W: W, H: H }, 'scatter');
+    if (layout) {
+      lastScatterLayout = layout;
+    } else {
+      lastScatterLayout = null;
       var emptyByCat = {};
       CATEGORIES.forEach(function (c) { emptyByCat[c] = []; });
-      updateCategoryRows(lastScatterLayout, emptyByCat);
-      return;
+      updateCategoryRows({ rowH: (H - MATRIX_AXIS_HEIGHT) / CATEGORIES.length }, emptyByCat);
     }
-
-    const all = events.concat(pendingEvents).filter(ev => activeFilters.has(ev.category));
-    if (all.length === 0) {
-      var emptyByCat2 = {};
-      CATEGORIES.forEach(function (c) { emptyByCat2[c] = []; });
-      updateCategoryRows(lastScatterLayout, emptyByCat2);
-      return;
-    }
-
-    const now = getCurrentTime();
-    const win = computeTimeWindow(all);
-    const minTs = win.minTs;
-    const span = win.timeSpan;
-    lastScatterLayout = { minTs: minTs, span: span, W: W, H: H, rowH: rowH, catCount: catCount };
-
-    const catIndex = {};
-    CATEGORIES.forEach((c, i) => catIndex[c] = i);
-
-    const labelFont = 'Segoe UI Emoji, Apple Color Emoji, Segoe UI, Microsoft YaHei, system-ui, sans-serif';
-
-    const byCat = {};
-    CATEGORIES.forEach(c => byCat[c] = []);
-    all.forEach(ev => { byCat[ev.category].push(ev); });
-    updateCategoryRows(lastScatterLayout, byCat);
-
-    drawLabelArea(ctx, { labelWidth: labelPadLeft, plotH: plotH, W: W });
-    drawHorizontalGrid(ctx, { plotX: labelPadLeft, W: W, plotH: plotH, rowH: rowH, catCount: catCount, padRight: 8 });
-    drawTimeAxis(ctx, { plotX: labelPadLeft, plotW: plotW, plotH: plotH, H: H, minTs: minTs, timeSpan: span, all: all });
-
-    const clusters = aggregateScatterEvents(all, minTs, span, scatterLayout);
-    const iconSize = 14;
-    const badgeRadius = 8;
-
-    clusters.forEach(cluster => {
-      const cat = cluster.primaryCategory;
-      const cfg = CATEGORY_CONFIG[cat];
-      const idx = catIndex[cat];
-      if (idx < 0) return;
-      const cx = labelPadLeft + ((cluster.centerTs - minTs) / span) * plotW;
-      const cy = scatterLayout === 'category' ? idx * rowH + rowH / 2 : plotH / 2;
-      const isCluster = cluster.events.length > 1;
-      const hasSelected = cluster.events.some(e => e.id === selectedEventId);
-
-      drawEventIcon(ctx, { ex: cx, ey: cy, cfg: cfg, state: cluster.state, iconSize: iconSize, labelFont: labelFont, isHover: hasSelected });
-
-      if (isCluster) {
-        const badgeX = cx + iconSize / 2 - 2;
-        const badgeY = cy - iconSize / 2 + 2;
-        ctx.beginPath();
-        ctx.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2);
-        ctx.fillStyle = '#ff5722';
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 9px Consolas';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        const countText = cluster.events.length > 99 ? '99+' : String(cluster.events.length);
-        ctx.fillText(countText, badgeX, badgeY);
-      }
-
-      scatterHitRegions.push({ cx: cx, cy: cy, cluster: cluster });
-    });
-
-    drawNowLine(ctx, { now: now, plotX: labelPadLeft, plotW: plotW, plotH: plotH, minTs: minTs, timeSpan: span });
   }
 
   function getScatterClusterAt(x, y) {

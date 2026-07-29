@@ -1805,5 +1805,12 @@
       "topology_patterns.json"
     ],
     "target_count": 30
-  }
+  },
+  "steps": [
+    {"step_name": "gate"},
+    {"step_name": "filter"},
+    {"step_name": "propagate"},
+    {"step_name": "ttl"},
+    {"step_name": "callback"}
+  ]
 }

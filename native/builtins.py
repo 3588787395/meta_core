@@ -29,7 +29,28 @@ try:
 except ImportError:
     from core.domain import _stock_code
 
+try:
+    from ..core.table_engine import get_global_config_store
+except ImportError:
+    from core.table_engine import get_global_config_store
+
 logger = logging.getLogger(__name__)
+
+
+def _get_table(filename, *, required=False):
+    """通过 ConfigStore.get_table 加载配置表（Task 9.3 统一入口）。
+
+    替代历史 _load_config_json。required=True 时缺失抛 ConfigLoadError（fail-fast）。
+    filename 可带 .json 后缀（自动剥离），与 ConfigStore 的 stem key 对齐。
+    """
+    name = filename[:-5] if filename.endswith(".json") else filename
+    cs = get_global_config_store()
+    table = cs.get_table(name) if cs else {}
+    if required and not table:
+        raise ConfigLoadError(
+            f"无法加载配置表 {filename}（fail-fast：禁止静默返回空 dict）"
+        )
+    return table
 
 
 # ──────────────────────────────────────────────────────────────
@@ -116,29 +137,8 @@ def _parse_indiparam(indiparam) -> Optional[dict]:
     return args or None
 
 
-_JSON_CACHE = {}
 _CFG_DIR = os.path.join(os.path.dirname(__file__), "..", "config")
-def _load_config_json(filename, *, raise_on_error=False):
-    """加载 config/<filename> 并缓存（单缓存层，参数化错误策略）。
-
-    I38 统一：合并历史 _load_builtin_json（fail-fast）与 _load_json（静默）两套实现，
-    消除双缓存 + 双定义。语义由 raise_on_error 显式声明，禁止隐式分派。
-
-    raise_on_error=True : fail-fast，抛 ConfigLoadError（禁止静默返回空 dict）。
-    raise_on_error=False（默认）: 静默返回 {}（兼容历史 _load_json 语义）。
-    """
-    if filename not in _JSON_CACHE:
-        path = os.path.join(_CFG_DIR, filename)
-        try:
-            with open(path, encoding="utf-8") as f:
-                _JSON_CACHE[filename] = json.load(f)
-        except (OSError, json.JSONDecodeError) as ex:
-            if raise_on_error:
-                raise ConfigLoadError(
-                    f"无法加载配置表 {filename}: {ex}（fail-fast：禁止静默返回空 dict）"
-                ) from ex
-            _JSON_CACHE[filename] = {}
-    return _JSON_CACHE[filename]
+# Task 9.3: _load_config_json 已删除，统一改用 _get_table()（通过 ConfigStore.get_table）
 
 
 # 降级条件检查器表：condition 名 → 检查函数（差异在表内容非代码分支）
@@ -162,7 +162,7 @@ def _resolve_fallback(chain_name, stock_list, inputs):
     tq = inputs.get("tq_adapter")
     tq_available = tq is not None and not getattr(tq, "mock_mode", False)
     try:
-        chains = _load_config_json("fallback_chain.json", raise_on_error=True).get("chains", {})
+        chains = _get_table("fallback_chain.json", required=True).get("chains", {})
     except Exception:
         chains = {}
     chain_config = chains.get(chain_name, [])
@@ -206,7 +206,7 @@ def _resolve_fallback(chain_name, stock_list, inputs):
 
 def _propagate(node_stocks, src_id, tgt_id, is_move, is_overwrite):
     # 表驱动：根据 flow_mode_registry.json 的 propagate_rules 决定清源/清目标/合并行为
-    registry = _load_config_json("flow_mode_registry.json", raise_on_error=True)
+    registry = _get_table("flow_mode_registry.json", required=True)
     flag_map = registry.get("propagate_flag_map", {})
     mode = flag_map.get(f"{int(bool(is_move))},{int(bool(is_overwrite))}", "copy")
     rule = registry.get("propagate_rules", {}).get(mode, {})
@@ -239,7 +239,7 @@ def _propagate(node_stocks, src_id, tgt_id, is_move, is_overwrite):
 
 def _gen_sector_stocks(sector_code):
     try:
-        data = _load_config_json("mock_data.json", raise_on_error=True)
+        data = _get_table("mock_data.json", required=True)
     except Exception:
         return []
     sectors = data.get("sector_stocks", {})
@@ -265,7 +265,7 @@ def _gen_sector_stocks(sector_code):
 
 def _gen_stock_codes(market_id):
     try:
-        markets = {m["id"]: m for m in _load_config_json("markets.json").get("markets", []) if "id" in m}
+        markets = {m["id"]: m for m in _get_table("markets.json").get("markets", []) if "id" in m}
     except Exception: markets = {}
     m = markets.get(market_id)
     if not m: return []
@@ -287,7 +287,7 @@ def _decode_type201_attr(attr_int):
     try: attr_int = int(attr_int)
     except (ValueError, TypeError): attr_int = 0
     try:
-        bits = _load_config_json("field_definitions.json").get("bit_fields", {}).get("201", {})
+        bits = _get_table("field_definitions.json").get("bit_fields", {}).get("201", {})
     except Exception: bits = {}
     result = {"raw": attr_int}
     for name, info in bits.items():
@@ -314,12 +314,12 @@ def _apply_formula_mode(passed, rejected, mode, params):
     rank 模式含 top_n 切片与越界保护，属于算法逻辑，在 _action_default 内部处理。
     """
     try:
-        modes = _load_config_json("formula_modes.json").get("modes", {})
+        modes = _get_table("formula_modes.json").get("modes", {})
     except Exception: modes = {}
     cfg = modes.get(mode, {})
     action = cfg.get("action", "default")
     # 查 formula_action_handlers 表获取处理器函数名
-    handlers = _load_config_json("analysis_config.json").get("formula_action_handlers", {})
+    handlers = _get_table("analysis_config.json").get("formula_action_handlers", {})
     handler_cfg = handlers.get(action, handlers.get("default", {}))
     handler_name = handler_cfg.get("handler", "_action_default")
     handler = globals().get(handler_name)
@@ -346,7 +346,7 @@ def _action_default(passed, rejected, mode=None, params=None, **kw):
     return list(passed), list(rejected)
 def _build_dzh_extra(passed, hs, cl, so, rh, cfp, ks, cdf, ds, oc, ctype, fcrc, ftype, is_ftype_zero, fdec, fsize, iparam, st, ea, xa):
     try:
-        defaults = _load_config_json("dzh_extra_fields.json").get("defaults", {})
+        defaults = _get_table("dzh_extra_fields.json").get("defaults", {})
     except Exception: defaults = {}
     result = {"hold_sec": hs, "col_list": cl or [], "show_overview": so, "record_history": rh,
               "calc_profit_from_prev": cfp, "keep_source": ks, "clear_dest_first": cdf,
@@ -512,7 +512,7 @@ def profit_analysis_calc(inputs):
     """
     stocks = inputs.get("stocks") or inputs.get("passed") or inputs.get("stock_list") or []
     atype, tq = inputs.get("analysis_type", "intraday"), inputs.get("tq_adapter")
-    tcfg = _load_config_json("analysis_config.json").get("analysis_types", {}).get(atype, {})
+    tcfg = _get_table("analysis_config.json").get("analysis_types", {}).get(atype, {})
     samples = stocks if stocks else tcfg.get("default_sample_stocks", ["000001.SZ", "600000.SH"])
     snaps, kdata = {}, {}
     if tq and not getattr(tq, "mock_mode", False):
@@ -523,7 +523,7 @@ def profit_analysis_calc(inputs):
     title, structure, fields = tcfg.get("title", atype), tcfg.get("result_structure", "per_stock"), tcfg.get("fields", [])
     real = bool(snaps or kdata)
     # 查 result_structure_handlers 表获取处理器函数名
-    handlers = _load_config_json("analysis_config.json").get("result_structure_handlers", {})
+    handlers = _get_table("analysis_config.json").get("result_structure_handlers", {})
     handler_cfg = handlers.get(structure, handlers.get("per_stock", {}))
     handler_name = handler_cfg.get("handler")
     handler = globals().get(handler_name) if handler_name else None
@@ -574,7 +574,7 @@ def _calc_mock_field(field, code):
     消除内联 magic numbers（% 1000/% 9000/% 9500 等），范围常量外置到 config。
     """
     fn, c = field["name"], code
-    spec = _load_config_json("mock_field_ranges.json", raise_on_error=True).get("fields", {}).get(fn)
+    spec = _get_table("mock_field_ranges.json", required=True).get("fields", {}).get(fn)
     if not spec:
         return field.get("default", 0)
     raw = (hash(c + spec.get("suffix", "")) % spec.get("modulus", 1) + spec.get("offset", 0)) / spec.get("divisor", 1)
@@ -627,7 +627,7 @@ def _calc_aggregate_field_from_formula(field, snapshots, kline_data):
             return None
         arg_field = call.args[0].id
         # 查 aggregate_funcs 表获取实现名和最小数据量
-        aggr_cfg = _load_config_json("analysis_config.json").get("aggregate_funcs", {}).get(func_name)
+        aggr_cfg = _get_table("analysis_config.json").get("aggregate_funcs", {}).get(func_name)
         if not aggr_cfg:
             return None
         impl_name = aggr_cfg.get("impl")
@@ -829,7 +829,7 @@ def condition_dispatcher(inputs):
         passed = list(stocks)
     else:
         # 表驱动：查 match_modes.json 的 set_op 字段，通用集合合并器按 set_op 执行交集/并集
-        mm_cfg = _load_config_json("match_modes.json").get("match_modes", {})
+        mm_cfg = _get_table("match_modes.json").get("match_modes", {})
         mode_entry = mm_cfg.get(match_mode.upper()) or mm_cfg.get(match_mode) or {}
         set_op = mode_entry.get("set_op", "union")
         merge = _SET_OPS.get(set_op, _SET_OPS["union"])
@@ -970,7 +970,7 @@ def _execute_action(action_name, inputs):
 
     表驱动：多 action 差异隐含于 steps 列表内容，非独立函数体。
     """
-    steps = _load_config_json("action_pipeline.json").get("actions", {}).get(action_name, {}).get("steps", [])
+    steps = _get_table("action_pipeline.json").get("actions", {}).get(action_name, {}).get("steps", [])
     for step in steps:
         fn = _STEP_FUNCS.get(step)
         if fn:

@@ -62,6 +62,7 @@ from .domain import (
     SetOperationEvaluator,
 )
 from .event_bus import EventBus, FormulaEvaluated, PoolLoaded, StockFiltered
+from .table_engine import load_config_table
 
 # 表驱动：noperate 操作符规则配置（config/tdx_noperate_rules.json）
 # Task 23.3: _noperate_data / _NOPERATE_RULES / _RANK_MODES / _COMBINE_OPS 已迁移至
@@ -90,10 +91,10 @@ logger = logging.getLogger(__name__)
 # ════════════════════════════════════════════════════════════
 
 # 模块级常量（原 evaluators.py 顶层）
-_lu = json.loads((Path(__file__).parent.parent/"config"/"data"/"tdx_ntjindexno_lookup.json").read_text("utf-8"))
+_lu = load_config_table("tdx_ntjindexno_lookup")
 _financial_fields = {f["value"]: f for f in _lu["nset_3_financial"]["fields"]}
 _market_fields = {f["value"]: f for f in _lu["nset_4_market"]["fields"]}
-_indicators_data = json.loads((Path(__file__).parent.parent/"config"/"data"/"tdx_indicators.json").read_text("utf-8"))
+_indicators_data = load_config_table("tdx_indicators")
 _SHARE_UNIT_FIELDS = {"zgb", "ltg", "bg", "hg"}
 
 # 表驱动：nset5 集合运算分派表，消除 eval_nset5_set_operation 内联 ops 表
@@ -163,12 +164,17 @@ def _load_data_source_mappings():
     global _data_source_mappings_cache
     if _data_source_mappings_cache is not None:
         return _data_source_mappings_cache
-    path = Path(__file__).parent.parent / "config" / "data" / "data_source_mappings.json"
     try:
-        _data_source_mappings_cache = json.loads(path.read_text("utf-8"))
-    except (OSError, json.JSONDecodeError) as ex:
+        _data_source_mappings_cache = load_config_table("data_source_mappings")
+        if not _data_source_mappings_cache:
+            raise ConfigLoadError(
+                "无法加载配置表 data_source_mappings（fail-fast：禁止静默回退硬编码值）"
+            )
+    except ConfigLoadError:
+        raise
+    except Exception as ex:
         raise ConfigLoadError(
-            f"无法加载配置表 {path}: {ex}（fail-fast：禁止静默回退硬编码值）"
+            f"无法加载配置表 data_source_mappings: {ex}（fail-fast：禁止静默回退硬编码值）"
         ) from ex
     return _data_source_mappings_cache
 
@@ -519,9 +525,7 @@ def eval_nset5_set_operation(action_inputs: dict) -> list[str]:
 
 
 # 表驱动：nset 分发配置（config/dispatch.json:nset_dispatch）
-_NSET_DISPATCH = json.loads(
-    (Path(__file__).parent.parent/"config"/"architecture"/"dispatch.json").read_text("utf-8")
-).get("nset_dispatch", {})
+_NSET_DISPATCH = load_config_table("dispatch").get("nset_dispatch", {})
 # dispatch_key → nset_cfg 查找表
 _DISPATCH_TO_NSET_CFG = {
     cfg.get("dispatch_key"): cfg for cfg in _NSET_DISPATCH.values()
@@ -827,10 +831,9 @@ class ScreeningModule:
         fail-tolerant：加载失败时返回空 dict 并 warning，不阻断模块初始化。
         """
         try:
-            path = Path(__file__).parent.parent / "config" / "architecture" / "dispatch.json"
-            data = json.loads(path.read_text("utf-8"))
+            data = load_config_table("dispatch")
             return data.get("nset_dispatch", {})
-        except (OSError, json.JSONDecodeError) as ex:
+        except Exception as ex:
             logger.warning("ScreeningModule 加载 dispatch.json 失败: %s", ex)
             return {}
 

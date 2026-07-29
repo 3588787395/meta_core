@@ -40,11 +40,12 @@ import tracemalloc
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, time as dt_time, timedelta
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, TYPE_CHECKING
 
 import pandas as pd
 
 from core.domain import DZH_COL_MAP, MockDataSource, _hash_tick, _normalize_to_fz, _stock_code, time_at, _safe_timestamp, EdgeState
+from core.table_engine import get_global_config_store
 
 if TYPE_CHECKING:
     from core.engine import PoolEngine
@@ -66,6 +67,10 @@ from core.schemas import (
     StatePoolCellModel,
     StockSnapshotModel,
 )
+# Task 3：从 tick_bar_module 导入统一批量发布工具，消除 _step_once_impl 内
+# TickReceived 发布循环样板（_publish_tick_batch 无 state 依赖，无循环导入风险）。
+from core.tick_bar_module import _publish_tick_batch
+from core.tick_table import TickTable
 
 logger = logging.getLogger(__name__)
 
@@ -73,12 +78,12 @@ logger = logging.getLogger(__name__)
 _SIM_SPEED_MIN = 0.5
 _SIM_SPEED_MAX = 20.0
 
-# 配置文件相对路径（相对于项目根目录）
-# SubTask 27.14: 配置文件分类到子目录后，路径需包含 runtime/ 前缀
+# 配置表名（ConfigStore stem key，递归查找 config/runtime/*.json）
+# Task 9.6: _load_json 已删除，改用 ConfigStore.get_table 加载
 _CONFIG_FILES = {
-    "runtime_modes": "config/runtime/runtime_modes.json",
-    "time_sources": "config/runtime/time_sources.json",
-    "trade_interfaces": "config/runtime/trade_interfaces.json",
+    "runtime_modes": "runtime_modes",
+    "time_sources": "time_sources",
+    "trade_interfaces": "trade_interfaces",
 }
 
 # =====================================================================
@@ -1013,16 +1018,6 @@ def _aggregate_bars(bars: List[Dict], n: int) -> List[Dict]:
     return result
 
 
-def synthesize_from_1min(bars: List[Dict], target_period: str) -> List[Dict]:
-    n = _PERIOD_BARS_1MIN[target_period]
-    return _aggregate_bars(bars, n)
-
-
-def synthesize_from_5min(bars: List[Dict], target_period: str) -> List[Dict]:
-    n = _PERIOD_BARS_5MIN[target_period]
-    return _aggregate_bars(bars, n)
-
-
 def _get_week_key(dt: datetime) -> str:
     monday = dt - timedelta(days=dt.weekday())
     return monday.strftime("%Y-%m-%d")
@@ -1030,6 +1025,10 @@ def _get_week_key(dt: datetime) -> str:
 
 def _get_month_key(dt: datetime) -> str:
     return dt.strftime("%Y-%m")
+
+
+def _day_key(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d")
 
 
 def _group_and_synthesize(bars: List[Dict], key_func) -> List[Dict]:
@@ -1058,18 +1057,16 @@ def _group_and_synthesize(bars: List[Dict], key_func) -> List[Dict]:
     return result
 
 
-def synthesize_from_daily(bars: List[Dict], target_period: str) -> List[Dict]:
-    if target_period == "week":
-        return _group_and_synthesize(bars, _get_week_key)
-    if target_period == "month":
-        return _group_and_synthesize(bars, _get_month_key)
-    return []
+# SubTask 13.1: 周期 → 分组 key 函数表
+_PERIOD_KEY_FUNCS: Dict[str, Callable[[datetime], str]] = {
+    "day": _day_key,
+    "week": _get_week_key,
+    "month": _get_month_key,
+}
 
 
-def _synthesize_day_from_intraday(bars: List[Dict]) -> List[Dict]:
-    def _day_key(dt: datetime) -> str:
-        return dt.strftime("%Y-%m-%d")
-
+def _synthesize_intraday_to_day(bars: List[Dict]) -> List[Dict]:
+    """分钟级 → day：按日分组并将 time 重写为当日 ``00:00:00``。"""
     result = _group_and_synthesize(bars, _day_key)
     for bar in result:
         dt = datetime.strptime(bar["time"], "%Y-%m-%d %H:%M:%S")
@@ -1077,31 +1074,55 @@ def _synthesize_day_from_intraday(bars: List[Dict]) -> List[Dict]:
     return result
 
 
+def _synthesize_by_period(bars: List[Dict], target_period: str) -> List[Dict]:
+    """day → week/month：按目标周期 key 函数分组（查 ``_PERIOD_KEY_FUNCS``）。"""
+    key_func = _PERIOD_KEY_FUNCS[target_period]
+    return _group_and_synthesize(bars, key_func)
+
+
+# SubTask 13.2: (source_period, target_period) → 合成函数表
+# 1min/5min 用固定 bar 数聚合；60min → day 单独处理 time 重写；
+# day → week/month 走 _PERIOD_KEY_FUNCS 分组。
+_SYNTHESIS_RULES: Dict[Tuple[str, str], Callable[[List[Dict]], List[Dict]]] = {
+    ("1min", "5min"): lambda bars: _aggregate_bars(bars, 5),
+    ("1min", "15min"): lambda bars: _aggregate_bars(bars, 15),
+    ("1min", "30min"): lambda bars: _aggregate_bars(bars, 30),
+    ("1min", "60min"): lambda bars: _aggregate_bars(bars, 60),
+    ("5min", "15min"): lambda bars: _aggregate_bars(bars, 3),
+    ("5min", "30min"): lambda bars: _aggregate_bars(bars, 6),
+    ("5min", "60min"): lambda bars: _aggregate_bars(bars, 12),
+    ("60min", "day"): _synthesize_intraday_to_day,
+    ("day", "week"): lambda bars: _synthesize_by_period(bars, "week"),
+    ("day", "month"): lambda bars: _synthesize_by_period(bars, "month"),
+}
+
+
+# SubTask 13.3: 单一合成入口：查表 + 调用
+def synthesize(bars: List[Dict], source_period: str, target_period: str) -> List[Dict]:
+    rule = _SYNTHESIS_RULES.get((source_period, target_period))
+    if rule is None:
+        return bars
+    return rule(bars)
+
+
 def synthesize_kline(bars: List[Dict], source_period: str, target_period: str) -> List[Dict]:
     if source_period == target_period:
         return bars
 
-    if source_period == "1min":
-        if target_period in _PERIOD_BARS_1MIN:
-            return synthesize_from_1min(bars, target_period)
-        intermediate = synthesize_from_1min(bars, "60min")
+    # 直接映射：查 _SYNTHESIS_RULES
+    rule = _SYNTHESIS_RULES.get((source_period, target_period))
+    if rule is not None:
+        return synthesize(bars, source_period, target_period)
+
+    # 递归分派：1min/5min → 60min 中转
+    if source_period in ("1min", "5min"):
+        intermediate = synthesize(bars, source_period, "60min")
         return synthesize_kline(intermediate, "60min", target_period)
 
-    if source_period == "5min":
-        if target_period in _PERIOD_BARS_5MIN:
-            return synthesize_from_5min(bars, target_period)
-        intermediate = synthesize_from_5min(bars, "60min")
-        return synthesize_kline(intermediate, "60min", target_period)
-
-    if source_period == "60min":
-        if target_period == "day":
-            return _synthesize_day_from_intraday(bars)
-        if target_period in ("week", "month"):
-            daily = _synthesize_day_from_intraday(bars)
-            return synthesize_from_daily(daily, target_period)
-
-    if source_period == "day":
-        return synthesize_from_daily(bars, target_period)
+    # 60min → week/month：先合成 day，再合成 week/month
+    if source_period == "60min" and target_period in ("week", "month"):
+        daily = synthesize(bars, "60min", "day")
+        return synthesize(daily, "day", target_period)
 
     return bars
 
@@ -1661,7 +1682,15 @@ class RuntimeSimulator:
         finally:
             self._astep_mode = False
 
-    def _step_once(self, d):
+    async def _step_once_impl(self, d, *, async_mode: bool):
+        """_step_once 与 _astep_once 的统一骨架（11 步）。
+
+        async_mode=False：通过 _run_coro 调用 engine._tick（同步路径），
+                          末尾根据 not self._astep_mode 发布 SimulationStep。
+        async_mode=True：直接 await engine._tick（异步路径），
+                         应用 _ASTEP_KEY_TYPES 过滤 + 200 条上限；
+                         SimulationStep 由调用方处理。
+        """
         tick_seq = self._perf_tick_count
         pe = self._engine._pool_engine
         if pe is not None:
@@ -1669,8 +1698,9 @@ class RuntimeSimulator:
             # 此处仅推进虚拟时钟 current_ts（每 tick 必须推进，否则 fire_due 永不触发）。
             # 不重复覆盖 driver_type——_post_init_mode_state 已设置，重复覆盖是冗余。
             pe.state.time_source["current_ts"] = self.clock
-        logger.info("tick=%d clock=%.1f (%s) step=%.1f",
-                     tick_seq, self.clock, self._ft(self.clock), d)
+        logger.info("tick=%d clock=%.1f (%s) %s=%.1f",
+                     tick_seq, self.clock, self._ft(self.clock),
+                     "astep" if async_mode else "step", d)
 
         event_bus = pe._components.get("event_bus") if pe is not None else None
         event_offset = event_bus.total_published if event_bus is not None else 0
@@ -1693,6 +1723,8 @@ class RuntimeSimulator:
             bar_data = step_result.get("bar_data", {})
             tick_data = step_result.get("tick_data", {})
             # 同步虚拟时钟（MockDataSource 内部已推进）
+            # 统一逻辑：sync/async 路径均在 virtual_clock 非 None 时同步
+            # pe.state.time_source["current_ts"]（修复 _step_once 的 latent bug）。
             if step_result.get("virtual_clock") is not None:
                 self.clock = step_result["virtual_clock"]
                 if pe is not None:
@@ -1706,18 +1738,11 @@ class RuntimeSimulator:
             # 此处的 tick_data 来自 tick_source.step()，可能为空。
             # TickReceived → DataChanged(tick) → BarComposed 的桥接由
             # PoolEngine._on_tick_received 订阅者完成（engine.py）。
+            # Task 3：委托 _publish_tick_batch 统一发布（ts=None 时按 tick._ts 取值，
+            # fallback 到 self.clock 保留原 ts=float(tick.get("_ts", self.clock)) 语义；
+            # per-tick try/except 错误隔离由 _publish_tick_batch 内部维护）。
             if event_bus is not None and tick_data:
-                for code, tick in tick_data.items():
-                    if not code or not isinstance(tick, dict):
-                        continue
-                    try:
-                        event_bus.publish(TickReceived(
-                            tick_data=dict(tick),
-                            code=str(code),
-                            ts=float(tick.get("_ts", self.clock)),
-                        ))
-                    except Exception as ex:
-                        logger.warning("TickReceived publish failed for %s: %s", code, ex)
+                _publish_tick_batch(event_bus, tick_data, None, ts_fallback=self.clock)
         else:
             # 无 tick_source（兼容旧路径）：使用 _generate_mock_bar_data
             t_mock_start = time.perf_counter()
@@ -1734,204 +1759,63 @@ class RuntimeSimulator:
             pe.state.add_changed_codes(changed_codes)
 
         # ── 4. 执行引擎 tick（统一代码路径：live/sim 共用） ──
+        # async_mode 分派：同步用 _run_coro，异步用 await。
         t_engine_start = time.perf_counter()
-        self._mode_state["node_stocks"] = self._run_coro(
-            self._engine._tick(
+        if async_mode:
+            self._mode_state["node_stocks"] = await self._engine._tick(
                 None,
                 self._mode_state["node_stocks"],
                 bar_data if bar_data else None,
                 self._mode_state,
             )
-        )
+        else:
+            self._mode_state["node_stocks"] = self._run_coro(
+                self._engine._tick(
+                    None,
+                    self._mode_state["node_stocks"],
+                    bar_data if bar_data else None,
+                    self._mode_state,
+                )
+            )
         t_engine_ms = (time.perf_counter() - t_engine_start) * 1000.0
         self._perf_phases['engine_tick'].append(t_engine_ms)
         logger.info("tick=%d phase=engine_tick duration_ms=%.2f", tick_seq, t_engine_ms)
 
         # ── 5. 收集事件 ──
+        # async_mode=True：仅收集 _ASTEP_KEY_TYPES 关键事件 + 200 条上限。
+        # async_mode=False：收集所有事件（无过滤）。
         t_evt_start = time.perf_counter()
         events = []
         if event_bus is not None:
             new_events = event_bus.get_events_since(event_offset)
-            for ev in new_events:
-                try:
-                    ev_dict = asdict(ev) if hasattr(ev, '__dataclass_fields__') else dict(ev)
-                except Exception:
-                    ev_dict = {"repr": repr(ev)}
-                ev_dict["event_type"] = type(ev).__name__
-                ev_dict["time"] = self.clock
-                events.append(ev_dict)
-        while not self._engine._event_queue.empty():
-            try:
-                self._engine._event_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-        while not self._engine._signal_queue.empty():
-            try:
-                self._engine._signal_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-        t_evt_ms = (time.perf_counter() - t_evt_start) * 1000.0
-        self._perf_phases['event_collect'].append(t_evt_ms)
-        self.event_log.extend(events)
-        if len(self.event_log) > EVENT_LOG_MAX_SIZE:
-            del self.event_log[:len(self.event_log) - EVENT_LOG_MAX_SIZE]
-
-        if self._bus is not None and not self._astep_mode:
-            try:
-                pre_step_offset = event_bus.total_published if event_bus is not None else 0
-                self._bus.publish(SimulationStep(
-                    step={
-                        "step_idx": tick_seq,
-                        "virtual_ts": self.clock,
-                        "interval": d,
-                        "events_count": len(events),
-                        "changed_codes": changed_codes,
-                    },
-                    session_id=str(self.pool_config.get("id", "")),
-                ))
-                if event_bus is not None:
-                    post_events = event_bus.get_events_since(pre_step_offset)
-                    _KEY_EVENT_TYPES = frozenset({
-                        "TickReceived", "DataChanged", "BarComposed",
-                        "FormulaEvaluated", "StockFiltered", "EdgeFired",
-                        "Executed", "TransferExecuted", "Signal",
-                        "OrderPlaced", "OrderFilled", "PositionUpdated",
-                        "TTLExpired", "SimulationStep", "TimeAdvanced",
-                        "EventLogged", "AlertRaised",
-                    })
-                    for ev in post_events:
-                        ev_type = type(ev).__name__
-                        if ev_type not in _KEY_EVENT_TYPES:
-                            continue
-                        try:
-                            ev_dict = asdict(ev) if hasattr(ev, '__dataclass_fields__') else dict(ev)
-                        except Exception:
-                            ev_dict = {"repr": repr(ev)}
-                        ev_dict["event_type"] = ev_type
-                        ev_dict["time"] = self.clock
-                        events.append(ev_dict)
-                        self.event_log.append(ev_dict)
-                    if len(self.event_log) > EVENT_LOG_MAX_SIZE:
-                        del self.event_log[:len(self.event_log) - EVENT_LOG_MAX_SIZE]
-            except Exception as ex:
-                logger.warning("SimulationStep 发布失败 (tick=%d): %s", tick_seq, ex)
-
-        t_tick_total = (time.perf_counter() - t_tick_start) * 1000.0
-        self._perf_phases['tick_total'].append(t_tick_total)
-        self._perf_tick_count += 1
-
-        ns = self._mode_state.get("node_stocks", {}) if self._mode_state else {}
-        for nid, stocks in ns.items():
-            if isinstance(stocks, list) and stocks:
-                codes = [_scode(s) for s in stocks[:5]]
-                logger.info("tick=%d node_id=%s stock_count=%d sample=%s",
-                             tick_seq, nid, len(stocks), codes)
-
-        logger.info("tick=%d done total_ms=%.2f events=%d changed=%d",
-                     tick_seq, t_tick_total, len(events), len(changed_codes))
-        return {
-            "events": events,
-            "bar_data": bar_data,
-            "changed_codes": changed_codes,
-        }
-
-    async def _astep_once(self, d):
-        """async 版 _step_once：直接 await engine._tick() 避免跨 loop 死锁。"""
-        tick_seq = self._perf_tick_count
-        pe = self._engine._pool_engine
-        if pe is not None:
-            # G2 硬约束：仿真模式 driver_type 由 _post_init_mode_state 一次性设置（virtual），
-            # 此处仅推进虚拟时钟 current_ts。
-            pe.state.time_source["current_ts"] = self.clock
-        logger.info("tick=%d clock=%.1f (%s) astep=%.1f",
-                     tick_seq, self.clock, self._ft(self.clock), d)
-
-        event_bus = pe._components.get("event_bus") if pe is not None else None
-        event_offset = event_bus.total_published if event_bus is not None else 0
-
-        t_tick_start = time.perf_counter()
-
-        # ── 1. 从 MockDataSource 获取本步 tick 更新 ──
-        tick_source = pe._components.get("tick_source") if pe is not None else None
-        changed_codes: List[str] = []
-        bar_data: Dict[str, Any] = {}
-        tick_data: Dict[str, Any] = {}
-
-        if tick_source is not None:
-            t_mock_start = time.perf_counter()
-            step_result = tick_source.step(d)
-            t_mock_ms = (time.perf_counter() - t_mock_start) * 1000.0
-            self._perf_phases['mock_generate'].append(t_mock_ms)
-
-            changed_codes = step_result.get("changed_codes", [])
-            bar_data = step_result.get("bar_data", {})
-            tick_data = step_result.get("tick_data", {})
-            if step_result.get("virtual_clock") is not None:
-                self.clock = step_result["virtual_clock"]
-                if pe is not None:
-                    pe.state.time_source["current_ts"] = self.clock
-
-            if event_bus is not None and tick_data:
-                for code, tick in tick_data.items():
-                    if not code or not isinstance(tick, dict):
+            if async_mode:
+                _ASTEP_KEY_TYPES = frozenset({
+                    "EdgeFired", "TransferExecuted", "Signal",
+                    "OrderPlaced", "OrderFilled", "PositionUpdated",
+                    "StockFiltered", "FormulaEvaluated",
+                })
+                for ev in new_events:
+                    ev_type = type(ev).__name__
+                    if ev_type not in _ASTEP_KEY_TYPES:
                         continue
                     try:
-                        event_bus.publish(TickReceived(
-                            tick_data=dict(tick),
-                            code=str(code),
-                            ts=float(tick.get("_ts", self.clock)),
-                        ))
-                    except Exception as ex:
-                        logger.warning("TickReceived publish failed for %s: %s", code, ex)
-        else:
-            t_mock_start = time.perf_counter()
-            bar_data = self._generate_mock_bar_data()
-            t_mock_ms = (time.perf_counter() - t_mock_start) * 1000.0
-            self._perf_phases['mock_generate'].append(t_mock_ms)
-            changed_codes = list(bar_data.keys())
-
-        # ── 2. 同步 bar_data 到 node_stocks 价格字段 ──
-        self._sync_stock_prices(bar_data)
-
-        # ── 3. 记录 changed_codes 到 DirtyState ──
-        if pe is not None and changed_codes:
-            pe.state.add_changed_codes(changed_codes)
-
-        # ── 4. 直接 await engine._tick() —— 无需 _run_coro ──
-        t_engine_start = time.perf_counter()
-        self._mode_state["node_stocks"] = await self._engine._tick(
-            None,
-            self._mode_state["node_stocks"],
-            bar_data if bar_data else None,
-            self._mode_state,
-        )
-        t_engine_ms = (time.perf_counter() - t_engine_start) * 1000.0
-        self._perf_phases['engine_tick'].append(t_engine_ms)
-        logger.info("tick=%d phase=engine_tick duration_ms=%.2f", tick_seq, t_engine_ms)
-
-        # ── 5. 收集事件 ──
-        t_evt_start = time.perf_counter()
-        events = []
-        if event_bus is not None:
-            new_events = event_bus.get_events_since(event_offset)
-            _ASTEP_KEY_TYPES = frozenset({
-                "EdgeFired", "TransferExecuted", "Signal",
-                "OrderPlaced", "OrderFilled", "PositionUpdated",
-                "StockFiltered", "FormulaEvaluated",
-            })
-            for ev in new_events:
-                ev_type = type(ev).__name__
-                if ev_type not in _ASTEP_KEY_TYPES:
-                    continue
-                try:
-                    ev_dict = asdict(ev) if hasattr(ev, '__dataclass_fields__') else dict(ev)
-                except Exception:
-                    ev_dict = {"repr": repr(ev)}
-                ev_dict["event_type"] = ev_type
-                ev_dict["time"] = self.clock
-                events.append(ev_dict)
-                if len(events) >= 200:
-                    break
+                        ev_dict = asdict(ev) if hasattr(ev, '__dataclass_fields__') else dict(ev)
+                    except Exception:
+                        ev_dict = {"repr": repr(ev)}
+                    ev_dict["event_type"] = ev_type
+                    ev_dict["time"] = self.clock
+                    events.append(ev_dict)
+                    if len(events) >= 200:
+                        break
+            else:
+                for ev in new_events:
+                    try:
+                        ev_dict = asdict(ev) if hasattr(ev, '__dataclass_fields__') else dict(ev)
+                    except Exception:
+                        ev_dict = {"repr": repr(ev)}
+                    ev_dict["event_type"] = type(ev).__name__
+                    ev_dict["time"] = self.clock
+                    events.append(ev_dict)
         while not self._engine._event_queue.empty():
             try:
                 self._engine._event_queue.get_nowait()
@@ -1948,7 +1832,10 @@ class RuntimeSimulator:
         if len(self.event_log) > EVENT_LOG_MAX_SIZE:
             del self.event_log[:len(self.event_log) - EVENT_LOG_MAX_SIZE]
 
-        if self._bus is not None and not self._astep_mode:
+        # ── 6. SimulationStep 事件发布 ──
+        # 仅同步路径（async_mode=False）在 _step_once_impl 内发布；
+        # 异步路径的 SimulationStep 由调用方处理。
+        if not async_mode and self._bus is not None and not self._astep_mode:
             try:
                 pre_step_offset = event_bus.total_published if event_bus is not None else 0
                 self._bus.publish(SimulationStep(
@@ -2006,6 +1893,14 @@ class RuntimeSimulator:
             "bar_data": bar_data,
             "changed_codes": changed_codes,
         }
+
+    def _step_once(self, d):
+        """同步路径：通过 _run_coro 调用 async 骨架；末尾根据 not _astep_mode 发布 SimulationStep。"""
+        return self._run_coro(self._step_once_impl(d, async_mode=False))
+
+    async def _astep_once(self, d):
+        """异步路径：直接 await async 骨架；SimulationStep 由调用方处理。"""
+        return await self._step_once_impl(d, async_mode=True)
 
     def run_to(self, t):
         ts = self._parse_target_seconds(t)
@@ -2451,10 +2346,11 @@ class RuntimeModeModule:
     def __init__(self, bus: EventBus, config: Optional[Dict[str, Any]] = None) -> None:
         self._bus = bus
         self._config = config or {}
-        # 加载配置表
-        self._runtime_modes = self._load_json(_CONFIG_FILES["runtime_modes"])
-        self._time_sources = self._load_json(_CONFIG_FILES["time_sources"])
-        self._trade_interfaces = self._load_json(_CONFIG_FILES["trade_interfaces"])
+        # 加载配置表（Task 9.6: 通过 ConfigStore.get_table 加载，参与热加载）
+        _cs = get_global_config_store()
+        self._runtime_modes = _cs.get_table(_CONFIG_FILES["runtime_modes"]) if _cs else {}
+        self._time_sources = _cs.get_table(_CONFIG_FILES["time_sources"]) if _cs else {}
+        self._trade_interfaces = _cs.get_table(_CONFIG_FILES["trade_interfaces"]) if _cs else {}
         # 当前模式
         self._current_mode: str = "live"
         # Task 24+：attach_replay_engine / attach_simulator 已删除，
@@ -2478,21 +2374,7 @@ class RuntimeModeModule:
     # ------------------------------------------------------------------
     # 内部辅助
     # ------------------------------------------------------------------
-    def _load_json(self, rel_path: str) -> Dict[str, Any]:
-        """加载配置 JSON 文件，返回 dict；失败返回空 dict。"""
-        try:
-            # 定位项目根目录：本文件位于 core/runtime_mode_module.py
-            base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            full = os.path.join(base, rel_path)
-            with open(full, "r", encoding="utf-8") as fh:
-                data = json.load(fh)
-            if isinstance(data, dict):
-                return data
-            logger.warning("配置文件 %s 顶层非 dict: %s", rel_path, type(data).__name__)
-            return {}
-        except Exception as ex:
-            logger.warning("加载配置文件 %s 失败: %s", rel_path, ex)
-            return {}
+    # Task 9.6: _load_json 已删除，统一改用 ConfigStore.get_table（通过 get_global_config_store）
 
     def _register_subscribers(self) -> None:
         """注册事件订阅。"""
@@ -2515,8 +2397,12 @@ class RuntimeModeModule:
                 self._runtime_modes, dict
             ) else {}
             if mode_id not in modes:
-                logger.warning("Unknown mode: %s", mode_id)
-                return
+                # ConfigStore 未初始化时 modes 为空，放行 3 种已知模式
+                if not modes and mode_id in ("live", "replay", "simulation"):
+                    pass
+                else:
+                    logger.warning("Unknown mode: %s", mode_id)
+                    return
             prev = self._current_mode
             self._current_mode = mode_id
             # 模式切换时重置仿真/回放运行态
@@ -2936,6 +2822,8 @@ class PoolStateMixin:
         self.latest_tick.update(normalized)
         self.latest_tick["_hash"] = new_hash
         self.latest_tick["_ts"] = now
+        # Task 2: sync tick_table (normalized has no _ metadata keys)
+        self.tick_table.update(normalized)
         self.mark_data_dirty()
         return True
 
@@ -3046,30 +2934,33 @@ class PoolStateMixin:
 
     # ------------------------------------------------------------------
     # time_source / 三模式配置行
+    # Task 16: 4 个字段已通过 ``_populate_tables`` 初始化为 ``{}``，
+    # 并经 ``__getattr__``/``__setattr__`` 代理到 ``self._tables[name]``。
+    # ``get_xxx`` 已删除——外部直接用 ``state.time_source`` 等属性访问。
+    # ``set_xxx`` 因 ``core/engine.py`` 多处外部调用而保留，简化为直接赋值。
     # ------------------------------------------------------------------
     def set_time_source(self, ts_config: Dict[str, Any]) -> None:
-        self.time_source = dict(ts_config)
-
-    def get_time_source(self) -> Dict[str, Any]:
-        return self.time_source
+        self.time_source = ts_config or {}
 
     def set_data_source(self, ds_config: Dict[str, Any]) -> None:
-        self.data_source = dict(ds_config)
-
-    def get_data_source(self) -> Dict[str, Any]:
-        return self.data_source
+        self.data_source = ds_config or {}
 
     def set_trade_interface(self, ti_config: Dict[str, Any]) -> None:
-        self.trade_interface = dict(ti_config)
-
-    def get_trade_interface(self) -> Dict[str, Any]:
-        return self.trade_interface
+        self.trade_interface = ti_config or {}
 
     def set_side_effects_scope(self, se_config: Dict[str, Any]) -> None:
-        self.side_effects_scope = dict(se_config)
+        self.side_effects_scope = se_config or {}
 
-    def get_side_effects_scope(self) -> Dict[str, Any]:
-        return self.side_effects_scope
+    def set_state_scope(self, cfg: Dict[str, Any]) -> None:
+        """根据模式配置的 state_scope 字段切换回放/实盘状态作用域。
+
+        ``state_scope == "replay"`` 进入回放隔离副本；其他值在回放激活时
+        退出回放恢复实盘状态。表驱动替代 ``if mode_id == "replay"`` 分支。
+        """
+        if cfg.get("state_scope", "live") == "replay":
+            self.enter_replay()
+        elif self.is_replay_active():
+            self.exit_replay()
 
     # ------------------------------------------------------------------
     # 回放状态隔离
@@ -3150,6 +3041,11 @@ class PoolState(PoolStateMixin):
         self.first_run = True
         self._populate_tables()
         self._build_topology()
+        # Task 2: TickTable coexists with latest_tick (dual-write).
+        self.tick_table = TickTable()
+
+
+# TickTable 已抽离至 core.tick_table（共享值对象），顶部 import 保持向后兼容导出
 
 
 if __name__ == "__main__":
@@ -3165,7 +3061,7 @@ if __name__ == "__main__":
             "amount": 10000.0 + i * 1000.0,
         })
 
-    result_5min = synthesize_from_1min(bars_1min, "5min")
+    result_5min = synthesize(bars_1min, "1min", "5min")
     assert len(result_5min) == 6, f"Expected 6 5min bars, got {len(result_5min)}"
     assert result_5min[0]["open"] == 10.0
     assert result_5min[0]["close"] == 14.2
@@ -3177,7 +3073,7 @@ if __name__ == "__main__":
     assert result_5min[-1]["close"] == 39.2
     print("PASS: synthesize_from_1min -> 5min")
 
-    result_15min = synthesize_from_1min(bars_1min, "15min")
+    result_15min = synthesize(bars_1min, "1min", "15min")
     assert len(result_15min) == 2, f"Expected 2 15min bars, got {len(result_15min)}"
     assert result_15min[0]["open"] == 10.0
     assert result_15min[0]["close"] == 24.2
@@ -3202,7 +3098,7 @@ if __name__ == "__main__":
             "amount": 20000.0 + i * 2000.0,
         })
 
-    result_30min = synthesize_from_5min(bars_5min, "30min")
+    result_30min = synthesize(bars_5min, "5min", "30min")
     assert len(result_30min) == 4, f"Expected 4 30min bars, got {len(result_30min)}"
     assert result_30min[0]["open"] == 20.0
     assert result_30min[0]["close"] == 25.1
@@ -3211,7 +3107,7 @@ if __name__ == "__main__":
     assert result_30min[0]["volume"] == sum(2000 + i * 200 for i in range(6))
     print("PASS: synthesize_from_5min -> 30min")
 
-    result_60min = synthesize_from_5min(bars_5min, "60min")
+    result_60min = synthesize(bars_5min, "5min", "60min")
     assert len(result_60min) == 2, f"Expected 2 60min bars, got {len(result_60min)}"
     assert result_60min[0]["open"] == 20.0
     assert result_60min[0]["close"] == 31.1
@@ -3233,14 +3129,14 @@ if __name__ == "__main__":
             "amount": 50000.0 + i * 5000.0,
         })
 
-    result_week = synthesize_from_daily(bars_daily, "week")
+    result_week = synthesize(bars_daily, "day", "week")
     assert len(result_week) >= 8, f"Expected >=8 week bars, got {len(result_week)}"
     assert result_week[0]["open"] == 50.0
     assert result_week[0]["time"].startswith("2024-01-01")
     assert result_week[1]["time"].startswith("2024-01-08")
     print(f"PASS: synthesize_from_daily -> week ({len(result_week)} bars)")
 
-    result_month = synthesize_from_daily(bars_daily, "month")
+    result_month = synthesize(bars_daily, "day", "month")
     assert len(result_month) >= 2, f"Expected >=2 month bars, got {len(result_month)}"
     assert result_month[0]["open"] == 50.0
     assert result_month[0]["time"].startswith("2024-01-01")
@@ -3273,6 +3169,27 @@ if __name__ == "__main__":
     k_5min_to_30min = synthesize_kline(bars_5min, "5min", "30min")
     assert len(k_5min_to_30min) == 4
     print("PASS: synthesize_kline 5min -> 30min")
+
+    # === Task 1: TickTable 单元测试 ===
+    tt = TickTable()
+    # 相同数据重复 update 返回 False
+    assert tt.update({"fz000001": {"close": 10}}) is True
+    assert tt.update({"fz000001": {"close": 10}}) is False
+    # 不同数据返回 True，ts 递增
+    ts1 = tt.ts
+    assert tt.update({"fz000001": {"close": 11}}) is True
+    assert tt.ts > ts1
+    # hash 随数据变化
+    h1 = tt.hash
+    assert tt.update({"fz000001": {"close": 12}}) is True
+    assert tt.hash != h1
+    # get / snapshot
+    assert tt.get("fz000001") == {"close": 12}
+    assert tt.get("fz000002") == {}
+    snap = tt.snapshot()
+    assert snap == {"fz000001": {"close": 12}}
+    assert snap is not tt.data
+    print("PASS: TickTable waterline (same→False, diff→True, ts increments, hash changes)")
 
     print("\n=== ALL TESTS PASSED ===")
 

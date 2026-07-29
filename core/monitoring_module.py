@@ -23,43 +23,37 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from core.event_bus import (
-    AlertRaised,
     BarComposed,
-    ConfigChanged,
-    ConfigLoaded,
-    CrossOverDetected,
     DataChanged,
     DomainEvent,
-    EdgeFired,
     EVENT_DATA_CHANGED,
     EVENT_DOMAIN,
     EVENT_EXECUTED,
     EVENT_SIGNAL,
     EventBus,
-    EventLogged,
     Executed,
-    FormulaEvaluated,
     is_event_bus,
-    ModeChanged,
-    OrderFilled,
-    OrderPlaced,
-    PoolLoaded,
     PositionUpdated,
     RankingChanged,
     Signal,
     SnapshotUpdated,
     StatisticsUpdated,
-    StockFiltered,
-    TickReceived,
-    TimeAdvanced,
-    TransferExecuted,
-    TTLExpired,
 )
+from core.table_engine import get_global_config_store
 
 logger = logging.getLogger(__name__)
+
+
+def _get_table(name: str) -> Dict[str, Any]:
+    """通过 ConfigStore.get_table 加载配置表（Task 9.7/9.8 统一入口）。
+
+    替代 MonitoringModule/StatisticsModule._load_json。name 为表名 stem（不含路径和 .json）。
+    """
+    cs = get_global_config_store()
+    return cs.get_table(name) if cs else {}
 
 
 def _import_stock_code():
@@ -111,11 +105,16 @@ class _EventPanel:
     def subscribe(self) -> None:
         if self._enabled or not is_event_bus(self.bus):
             return
-        self.bus.subscribe(EVENT_DATA_CHANGED, self._on_data_changed)
-        self.bus.subscribe(EVENT_DOMAIN, self._on_domain_event)
-        self.bus.subscribe(EVENT_EXECUTED, self._on_executed)
-        self.bus.subscribe(EVENT_SIGNAL, self._on_signal)
+        self.bus.subscribe_any(self._on_any_event)
         self._enabled = True
+
+    def _on_any_event(self, event) -> None:
+        """统一事件处理：查表转换 + 加入事件列表。"""
+        try:
+            record = event_to_record(event)
+            self._append(record)
+        except Exception as ex:
+            logger.warning("_EventPanel _on_any_event failed: %s", ex)
 
     def _append(self, record: Dict[str, Any]) -> None:
         # 统一记录格式：顶层包含 event_type / code / node_id / timestamp / details
@@ -133,64 +132,6 @@ class _EventPanel:
             del self._events[0]
         if len(self._pending) > _MAX_PANEL_EVENTS:
             del self._pending[0]
-
-    def _on_data_changed(self, event: DataChanged) -> None:
-        self._append({
-            "ts": event.ts if hasattr(event, 'ts') else 0,
-            "event_type": "DataChanged",
-            "details": {
-                "source": event.source,
-                "codes": list(event.codes) if event.codes else [],
-                "period": event.period or "",
-            },
-        })
-
-    def _on_domain_event(self, event: DomainEvent) -> None:
-        # DomainEvent 直接对应 ENTER/EXIT/TIMEOUT/RANK_CHANGED 等业务事件
-        self._append({
-            "timestamp": event.ts if hasattr(event, 'ts') else 0,
-            "event_type": event.event_type,
-            "code": event.code,
-            "node_id": event.pool_id,
-            "pool_id": event.pool_id,
-            "details": dict(event.details) if isinstance(event.details, dict) else {},
-        })
-
-    def _on_executed(self, event: Executed) -> None:
-        d = event.details if isinstance(event.details, dict) else {}
-        self._append({
-            "timestamp": d.get("timestamp", 0),
-            "event_type": "Executed",
-            "code": "",
-            "node_id": event.tid,
-            "pool_id": event.tid,
-            "details": {
-                "edge_id": event.eid,
-                "sid": event.sid,
-                "tid": event.tid,
-                "entered": list(event.entered) if event.entered else [],
-                "exited": list(event.exited) if event.exited else [],
-                "actions": d.get("actions", []),
-            },
-        })
-
-    def _on_signal(self, event: Signal) -> None:
-        # Signal 的 signal_type 为 BUY/SELL，直接作为顶层 event_type
-        self._append({
-            "timestamp": event.ts,
-            "event_type": event.signal_type,
-            "code": event.code,
-            "node_id": event.pool_id,
-            "pool_id": event.pool_id,
-            "details": {
-                "signal_type": event.signal_type,
-                "price": event.price,
-                "quantity": event.quantity,
-                "condition": event.condition,
-                "profit_pct": event.profit_pct,
-                "hold_days": event.hold_days,
-            },
-        })
 
     def get_events(self) -> List[Dict[str, Any]]:
         return list(self._events)
@@ -389,40 +330,392 @@ class _SnapshotBuilder:
             }
 
 
-# 表驱动：事件类型 → handler 方法名（无 if/elif 链）
-_EVENT_HANDLERS: Dict[type, str] = {
-    TickReceived: "_on_tick_received",
-    DataChanged: "_on_data_changed_monitor",
-    BarComposed: "_on_bar_composed",
-    FormulaEvaluated: "_on_formula_evaluated",
-    StockFiltered: "_on_stock_filtered",
-    EdgeFired: "_on_edge_fired",
-    Executed: "_on_executed_monitor",
-    TransferExecuted: "_on_transfer_executed",
-    DomainEvent: "_on_domain_event_monitor",
-    TTLExpired: "_on_ttl_expired",
-    OrderPlaced: "_on_order_placed",
-    OrderFilled: "_on_order_filled",
-    PositionUpdated: "_on_position_updated",
-    Signal: "_on_signal",
-    StatisticsUpdated: "_on_statistics_updated",
-    RankingChanged: "_on_ranking_changed",
-    AlertRaised: "_on_alert_raised",
-    CrossOverDetected: "_on_crossover_detected",
-    ModeChanged: "_on_mode_changed",
-    TimeAdvanced: "_on_time_advanced",
-    PoolLoaded: "_on_pool_loaded",
-    ConfigLoaded: "_on_config_loaded",
-    ConfigChanged: "_on_config_changed",
-    SnapshotUpdated: "_on_snapshot_updated",
-    EventLogged: "_on_event_logged",
+# === 事件记录适配器（表驱动，无 if/elif 链）===
+# 每个适配器从事件对象提取 details 字段，返回统一记录 dict。
+# event_to_record 按 type(event).__name__ 查表分派。
+
+
+def _adapter_tick_received(event):
+    code = event.code or ""
+    tick_data = event.tick_data or {}
+    if not code and isinstance(tick_data, dict):
+        code = tick_data.get("code", "") or tick_data.get("symbol", "")
+    return {
+        "event_type": "TickReceived",
+        "code": code,
+        "ts": event.ts,
+        "details": {
+            "price": tick_data.get("price", 0) if isinstance(tick_data, dict) else 0,
+            "volume": tick_data.get("volume", 0) if isinstance(tick_data, dict) else 0,
+        },
+    }
+
+
+def _adapter_data_changed(event):
+    codes = list(event.codes) if event.codes else []
+    code_str = ",".join(codes[:5]) + ("..." if len(codes) > 5 else "")
+    return {
+        "event_type": "DataChanged",
+        "code": code_str,
+        "ts": event.ts,
+        "details": {
+            "source": event.source or "",
+            "period": event.period or "",
+            "count": len(codes),
+        },
+    }
+
+
+def _adapter_bar_composed(event):
+    bar = event.bar or {}
+    return {
+        "event_type": "BarComposed",
+        "code": event.code,
+        "ts": event.ts,
+        "details": {
+            "period": event.period,
+            "close": bar.get("close", 0) if isinstance(bar, dict) else 0,
+        },
+    }
+
+
+def _adapter_formula_evaluated(event):
+    result = event.result
+    result_str = ""
+    if isinstance(result, (int, float, bool)):
+        result_str = str(result)
+    elif isinstance(result, (list, tuple)):
+        result_str = f"len={len(result)}"
+    ts = event.ts if hasattr(event, 'ts') and event.ts else time.time()
+    return {
+        "event_type": "FormulaEvaluated",
+        "code": event.code,
+        "ts": ts,
+        "details": {
+            "formula": event.formula_ref,
+            "result": result_str,
+        },
+    }
+
+
+def _adapter_stock_filtered(event):
+    return {
+        "event_type": "StockFiltered",
+        "edge_id": event.eid,
+        "ts": time.time(),
+        "details": {
+            "passed": len(event.passed),
+            "rejected": len(event.rejected),
+            "filter": event.filter_ref,
+        },
+    }
+
+
+def _adapter_time_advanced(event):
+    return {
+        "event_type": "TimeAdvanced",
+        "ts": event.ts,
+        "details": {
+            "source": event.source or "",
+        },
+    }
+
+
+def _adapter_snapshot_updated(event):
+    return {
+        "event_type": "SnapshotUpdated",
+        "ts": event.ts,
+        "details": {
+            "nodes": len(event.snapshot.get("node_snapshots", {})) if isinstance(event.snapshot, dict) else 0,
+        },
+    }
+
+
+def _adapter_event_logged(event):
+    """EventLogged 不重复记录到浮窗（避免循环）。"""
+    return None
+
+
+def _adapter_executed(event):
+    d = event.details if isinstance(event.details, dict) else {}
+    codes = list(event.entered) if event.entered else []
+    code_str = ",".join(codes[:5]) + ("..." if len(codes) > 5 else "")
+    return {
+        "event_type": "Executed",
+        "code": code_str,
+        "node_id": event.tid,
+        "pool_id": event.tid,
+        "edge_id": event.eid,
+        "ts": d.get("timestamp", time.time()),
+        "details": {
+            "sid": event.sid,
+            "tid": event.tid,
+            "mode": event.mode,
+            "entered": len(event.entered or []),
+            "exited": len(event.exited or []),
+            "target_cleared": len(event.target_cleared or []),
+        },
+    }
+
+
+def _adapter_domain_event(event):
+    return {
+        "event_type": event.event_type,
+        "code": event.code,
+        "node_id": event.pool_id,
+        "pool_id": event.pool_id,
+        "ts": time.time(),
+        "details": dict(event.details) if isinstance(event.details, dict) else {},
+    }
+
+
+def _adapter_pool_loaded(event):
+    return {
+        "event_type": "PoolLoaded",
+        "ts": time.time(),
+        "details": {
+            "format": event.source_format,
+        },
+    }
+
+
+def _adapter_config_loaded(event):
+    return {
+        "event_type": "ConfigLoaded",
+        "ts": time.time(),
+        "details": {
+            "tables": len(event.config_tables) if isinstance(event.config_tables, dict) else 0,
+        },
+    }
+
+
+def _adapter_config_changed(event):
+    return {
+        "event_type": "ConfigChanged",
+        "ts": time.time(),
+        "details": {
+            "changed": event.changed_tables if event.changed_tables else [],
+        },
+    }
+
+
+def _adapter_transfer_executed(event):
+    codes = list(event.codes) if event.codes else []
+    code_str = ",".join(codes[:5]) + ("..." if len(codes) > 5 else "")
+    return {
+        "event_type": "TransferExecuted",
+        "code": code_str,
+        "node_id": event.tgt,
+        "pool_id": event.tgt,
+        "ts": event.ts,
+        "details": {
+            "src": event.src,
+            "tgt": event.tgt,
+            "mode": event.mode,
+            "count": len(codes),
+        },
+    }
+
+
+def _adapter_ttl_expired(event):
+    codes = list(event.codes) if event.codes else []
+    code_str = ",".join(codes[:5]) + ("..." if len(codes) > 5 else "")
+    return {
+        "event_type": "TTLExpired",
+        "code": code_str,
+        "node_id": event.node_id,
+        "pool_id": event.node_id,
+        "ts": event.ts,
+        "details": {
+            "node": event.node_id,
+            "count": len(codes),
+        },
+    }
+
+
+def _adapter_order_placed(event):
+    order = dict(event.order or {})
+    code = order.get("code", "")
+    return {
+        "event_type": "OrderPlaced",
+        "code": code,
+        "ts": event.ts,
+        "details": {
+            "side": order.get("side", ""),
+            "qty": order.get("qty", 0),
+            "price": order.get("price", 0),
+        },
+    }
+
+
+def _adapter_order_filled(event):
+    fill = dict(event.fill or {})
+    code = fill.get("code", "")
+    return {
+        "event_type": "OrderFilled",
+        "code": code,
+        "ts": event.ts,
+        "details": {
+            "side": fill.get("side", ""),
+            "qty": fill.get("qty", 0),
+            "price": fill.get("price", 0),
+        },
+    }
+
+
+def _adapter_alert_raised(event):
+    alert = event.alert or {}
+    rule_id = str(alert.get("rule_id", "") or "")
+    code = str(alert.get("code", "") or "")
+    return {
+        "event_type": "AlertRaised",
+        "code": code,
+        "ts": float(event.ts or 0.0),
+        "details": {
+            "rule": rule_id,
+            "severity": alert.get("severity", ""),
+            "message": alert.get("message", ""),
+        },
+    }
+
+
+def _adapter_position_updated(event):
+    tracker = event.tracker or {}
+    node_id = str(tracker.get("node_id", "") or "")
+    code = str(tracker.get("code", "") or "")
+    return {
+        "event_type": "PositionUpdated",
+        "code": code,
+        "node_id": node_id,
+        "pool_id": node_id,
+        "ts": event.ts,
+        "details": {
+            "qty": tracker.get("qty", 0),
+            "entry_price": tracker.get("entry_price", 0),
+            "pnl": round(float(tracker.get("pnl", 0) or 0), 2),
+        },
+    }
+
+
+def _adapter_statistics_updated(event):
+    stats = dict(event.stats or {})
+    return {
+        "event_type": "StatisticsUpdated",
+        "ts": event.ts,
+        "details": {
+            "total_pnl": round(float(stats.get("total_pnl", 0) or 0), 2),
+            "trade_count": stats.get("trade_count", 0),
+            "win_rate": round(float(stats.get("win_rate", 0) or 0), 1),
+        },
+    }
+
+
+def _adapter_ranking_changed(event):
+    return {
+        "event_type": "RankingChanged",
+        "ts": event.ts,
+        "details": {
+            "dimension": event.dimension,
+        },
+    }
+
+
+def _adapter_edge_fired(event):
+    return {
+        "event_type": "EdgeFired",
+        "edge_id": event.eid,
+        "eid": event.eid,
+        "code": "",
+        "ts": event.ts,
+        "details": {},
+    }
+
+
+def _adapter_signal(event):
+    return {
+        "event_type": event.signal_type,
+        "code": event.code,
+        "node_id": event.pool_id,
+        "pool_id": event.pool_id,
+        "ts": event.ts,
+        "details": {
+            "signal_type": event.signal_type,
+            "price": event.price,
+            "quantity": event.quantity,
+            "condition": event.condition,
+            "profit_pct": event.profit_pct,
+            "hold_days": event.hold_days,
+        },
+    }
+
+
+def _adapter_crossover_detected(event):
+    return {
+        "event_type": "CrossOverDetected",
+        "code": event.code,
+        "ts": event.ts,
+        "details": {
+            "cross_type": event.cross_type,
+            "formula_ref": event.formula_ref,
+        },
+    }
+
+
+def _adapter_mode_changed(event):
+    return {
+        "event_type": "ModeChanged",
+        "ts": float(time.time()),
+        "details": {
+            "mode_id": event.mode_id,
+            "prev_mode": event.prev_mode,
+        },
+    }
+
+
+EVENT_RECORD_ADAPTERS: Dict[str, Callable[[Any], dict]] = {
+    "TickReceived": _adapter_tick_received,
+    "DataChanged": _adapter_data_changed,
+    "BarComposed": _adapter_bar_composed,
+    "FormulaEvaluated": _adapter_formula_evaluated,
+    "StockFiltered": _adapter_stock_filtered,
+    "TimeAdvanced": _adapter_time_advanced,
+    "SnapshotUpdated": _adapter_snapshot_updated,
+    "EventLogged": _adapter_event_logged,
+    "Executed": _adapter_executed,
+    "DomainEvent": _adapter_domain_event,
+    "PoolLoaded": _adapter_pool_loaded,
+    "ConfigLoaded": _adapter_config_loaded,
+    "ConfigChanged": _adapter_config_changed,
+    "TransferExecuted": _adapter_transfer_executed,
+    "TTLExpired": _adapter_ttl_expired,
+    "OrderPlaced": _adapter_order_placed,
+    "OrderFilled": _adapter_order_filled,
+    "AlertRaised": _adapter_alert_raised,
+    "PositionUpdated": _adapter_position_updated,
+    "StatisticsUpdated": _adapter_statistics_updated,
+    "RankingChanged": _adapter_ranking_changed,
+    "EdgeFired": _adapter_edge_fired,
+    "Signal": _adapter_signal,
+    "CrossOverDetected": _adapter_crossover_detected,
+    "ModeChanged": _adapter_mode_changed,
 }
 
-# 表驱动：排名维度 → 看盘面板字段（无 if/elif 链）
-_RANKING_DIMENSION_FIELDS: Dict[str, str] = {
-    "pk": "pk_rankings",
-    "analysis_angles": "analysis_angles",
-}
+
+def _default_adapter(event):
+    """默认 adapter：提取通用字段。"""
+    return {
+        "ts": getattr(event, 'ts', 0) or 0,
+        "event_type": type(event).__name__,
+        "code": getattr(event, 'code', '') or '',
+        "details": dict(event.details) if isinstance(getattr(event, 'details', None), dict) else {},
+    }
+
+
+def event_to_record(event):
+    """将事件对象转换为监控记录 dict。表驱动查 EVENT_RECORD_ADAPTERS。"""
+    event_type_name = type(event).__name__
+    adapter = EVENT_RECORD_ADAPTERS.get(event_type_name, _default_adapter)
+    return adapter(event)
 
 
 class MonitoringModule:
@@ -445,10 +738,10 @@ class MonitoringModule:
     def __init__(self, bus: EventBus, config: Optional[Dict[str, Any]] = None) -> None:
         self._bus = bus
         self._config = config or {}
-        # 加载配置表
-        self._dashboard_schema = self._load_json("config/ui/dashboard_schema.json")
+        # 加载配置表（Task 9.7: 通过 ConfigStore.get_table 加载，参与热加载）
+        self._dashboard_schema = _get_table("dashboard_schema")
         self._alert_rules = self._normalize_alert_rules(
-            self._load_json("config/alert_rules.json")
+            _get_table("alert_rules")
         )
         # 持有原 2 个组件实例（不暴露给外部）
         # EventPanel 不调用 subscribe()，避免与 MonitoringModule 的 Signal 订阅重复；
@@ -469,20 +762,10 @@ class MonitoringModule:
         # 看盘面板数据
         self._dashboard_data: Dict[str, Any] = {}
         # 注册所有事件类型订阅
-        self._register_subscribers()
+        self.subscribe(self._bus)
 
     # === 初始化辅助 ===
-
-    @staticmethod
-    def _load_json(rel_path: str) -> Dict[str, Any]:
-        """加载 JSON 配置表（基于工作目录解析相对路径）。"""
-        try:
-            full = rel_path if os.path.isabs(rel_path) else os.path.join(os.getcwd(), rel_path)
-            with open(full, "r", encoding="utf-8") as fh:
-                return json.load(fh)
-        except (FileNotFoundError, json.JSONDecodeError, OSError) as ex:
-            logger.warning("MonitoringModule 加载配置表失败 %s: %s", rel_path, ex)
-            return {}
+    # Task 9.7: _load_json 已删除，统一改用模块级 _get_table()（通过 ConfigStore.get_table）
 
     @staticmethod
     def _normalize_alert_rules(raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -502,12 +785,20 @@ class MonitoringModule:
             if isinstance(rule, dict)
         }
 
-    def _register_subscribers(self) -> None:
-        """注册所有事件类型订阅（表驱动，无 if/elif 链）。"""
-        for event_cls, handler_name in _EVENT_HANDLERS.items():
-            handler = getattr(self, handler_name, None)
-            if callable(handler):
-                self._bus.subscribe(event_cls, handler)
+    def subscribe(self, bus) -> None:
+        """订阅所有事件，统一通过 _on_any_event 处理。"""
+        if not is_event_bus(bus):
+            return
+        bus.subscribe_any(self._on_any_event)
+
+    def _on_any_event(self, event) -> None:
+        """统一事件处理：查表转换 + 加入事件列表。"""
+        try:
+            record = event_to_record(event)
+            if record:
+                self._add_to_event_list(record)
+        except Exception as ex:
+            logger.warning("MonitoringModule _on_any_event failed: %s", ex)
 
     # === 浮窗事件列表管理 ===
 
@@ -557,453 +848,6 @@ class MonitoringModule:
         if len(self._pending_events) > _MAX_EVENT_LIST:
             self._pending_events = self._pending_events[-_MAX_EVENT_LIST:]
 
-    # === SubTask 11.2: 订阅事件构建浮窗/面板/告警 ===
-
-    def _on_tick_received(self, event: TickReceived) -> None:
-        """Tick接收事件加入浮窗。"""
-        try:
-            code = event.code or ""
-            tick_data = event.tick_data or {}
-            if not code and isinstance(tick_data, dict):
-                code = tick_data.get("code", "") or tick_data.get("symbol", "")
-            self._add_to_event_list({
-                "event_type": "TickReceived",
-                "code": code,
-                "ts": event.ts,
-                "details": {
-                    "price": tick_data.get("price", 0) if isinstance(tick_data, dict) else 0,
-                    "volume": tick_data.get("volume", 0) if isinstance(tick_data, dict) else 0,
-                },
-            })
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_tick_received failed: %s", ex)
-
-    def _on_data_changed_monitor(self, event: DataChanged) -> None:
-        """数据变更事件加入浮窗。"""
-        try:
-            codes = list(event.codes) if event.codes else []
-            code_str = ",".join(codes[:5]) + ("..." if len(codes) > 5 else "")
-            self._add_to_event_list({
-                "event_type": "DataChanged",
-                "code": code_str,
-                "ts": event.ts,
-                "details": {
-                    "source": event.source or "",
-                    "period": event.period or "",
-                    "count": len(codes),
-                },
-            })
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_data_changed_monitor failed: %s", ex)
-
-    def _on_bar_composed(self, event: BarComposed) -> None:
-        """K线合成事件加入浮窗。"""
-        try:
-            bar = event.bar or {}
-            self._add_to_event_list({
-                "event_type": "BarComposed",
-                "code": event.code,
-                "ts": event.ts,
-                "details": {
-                    "period": event.period,
-                    "close": bar.get("close", 0) if isinstance(bar, dict) else 0,
-                },
-            })
-            # BarComposed也需要通知StatisticsModule更新（已在StatisticsModule单独订阅）
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_bar_composed failed: %s", ex)
-
-    def _on_formula_evaluated(self, event: FormulaEvaluated) -> None:
-        """公式求值完成事件加入浮窗。"""
-        try:
-            result = event.result
-            result_str = ""
-            if isinstance(result, (int, float, bool)):
-                result_str = str(result)
-            elif isinstance(result, (list, tuple)):
-                result_str = f"len={len(result)}"
-            ts = event.ts if hasattr(event, 'ts') and event.ts else time.time()
-            self._add_to_event_list({
-                "event_type": "FormulaEvaluated",
-                "code": event.code,
-                "ts": ts,
-                "details": {
-                    "formula": event.formula_ref,
-                    "result": result_str,
-                },
-            })
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_formula_evaluated failed: %s", ex)
-
-    def _on_stock_filtered(self, event: StockFiltered) -> None:
-        """股票过滤事件加入浮窗。"""
-        try:
-            self._add_to_event_list({
-                "event_type": "StockFiltered",
-                "edge_id": event.eid,
-                "ts": time.time(),
-                "details": {
-                    "passed": len(event.passed),
-                    "rejected": len(event.rejected),
-                    "filter": event.filter_ref,
-                },
-            })
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_stock_filtered failed: %s", ex)
-
-    def _on_time_advanced(self, event: TimeAdvanced) -> None:
-        """时间推进事件加入浮窗。"""
-        try:
-            self._add_to_event_list({
-                "event_type": "TimeAdvanced",
-                "ts": event.ts,
-                "details": {
-                    "source": event.source or "",
-                },
-            })
-            self._update_snapshot(event.ts)
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_time_advanced failed: %s", ex)
-
-    def _on_snapshot_updated(self, event: SnapshotUpdated) -> None:
-        """快照更新事件，仅记录不发布（避免循环）。"""
-        try:
-            self._add_to_event_list({
-                "event_type": "SnapshotUpdated",
-                "ts": event.ts,
-                "details": {
-                    "nodes": len(event.snapshot.get("node_snapshots", {})) if isinstance(event.snapshot, dict) else 0,
-                },
-            })
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_snapshot_updated failed: %s", ex)
-
-    def _on_event_logged(self, event: EventLogged) -> None:
-        """事件日志事件，不需要重复记录到浮窗（避免循环）。"""
-        pass
-
-    def _on_executed_monitor(self, event: Executed) -> None:
-        """Executed事件（股票转移执行）加入浮窗 + 持久化 + 更新节点快照。"""
-        try:
-            d = event.details if isinstance(event.details, dict) else {}
-            codes = list(event.entered) if event.entered else []
-            code_str = ",".join(codes[:5]) + ("..." if len(codes) > 5 else "")
-            self._add_to_event_list({
-                "event_type": "Executed",
-                "code": code_str,
-                "node_id": event.tid,
-                "pool_id": event.tid,
-                "edge_id": event.eid,
-                "ts": d.get("timestamp", time.time()),
-                "details": {
-                    "sid": event.sid,
-                    "tid": event.tid,
-                    "mode": event.mode,
-                    "entered": len(event.entered or []),
-                    "exited": len(event.exited or []),
-                    "target_cleared": len(event.target_cleared or []),
-                },
-            })
-            self._bus.publish(EventLogged(
-                event={
-                    "kind": "transfer",
-                    "eid": event.eid,
-                    "sid": event.sid,
-                    "tid": event.tid,
-                    "entered": list(event.entered or []),
-                    "exited": list(event.exited or []),
-                    "mode": event.mode,
-                },
-                event_kind="executed",
-                ts=d.get("timestamp", time.time()),
-            ))
-            self._update_snapshot(d.get("timestamp", time.time()))
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_executed_monitor failed: %s", ex)
-
-    def _on_domain_event_monitor(self, event: DomainEvent) -> None:
-        """DomainEvent事件（ENTER/EXIT/TIMEOUT/RANK_CHANGED）加入浮窗。"""
-        try:
-            self._add_to_event_list({
-                "event_type": event.event_type,
-                "code": event.code,
-                "node_id": event.pool_id,
-                "pool_id": event.pool_id,
-                "ts": time.time(),
-                "details": dict(event.details) if isinstance(event.details, dict) else {},
-            })
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_domain_event_monitor failed: %s", ex)
-
-    def _on_pool_loaded(self, event: PoolLoaded) -> None:
-        """PoolLoaded事件加入浮窗。"""
-        try:
-            self._add_to_event_list({
-                "event_type": "PoolLoaded",
-                "ts": time.time(),
-                "details": {
-                    "format": event.source_format,
-                },
-            })
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_pool_loaded failed: %s", ex)
-
-    def _on_config_loaded(self, event: ConfigLoaded) -> None:
-        """ConfigLoaded事件加入浮窗。"""
-        try:
-            self._add_to_event_list({
-                "event_type": "ConfigLoaded",
-                "ts": time.time(),
-                "details": {
-                    "tables": len(event.config_tables) if isinstance(event.config_tables, dict) else 0,
-                },
-            })
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_config_loaded failed: %s", ex)
-
-    def _on_config_changed(self, event: ConfigChanged) -> None:
-        """ConfigChanged事件加入浮窗。"""
-        try:
-            self._add_to_event_list({
-                "event_type": "ConfigChanged",
-                "ts": time.time(),
-                "details": {
-                    "changed": event.changed_tables if event.changed_tables else [],
-                },
-            })
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_config_changed failed: %s", ex)
-
-    def _on_transfer_executed(self, event: TransferExecuted) -> None:
-        """股票流转事件加入浮窗 + 持久化 + 更新节点快照。"""
-        try:
-            codes = list(event.codes) if event.codes else []
-            code_str = ",".join(codes[:5]) + ("..." if len(codes) > 5 else "")
-            self._add_to_event_list({
-                "event_type": "TransferExecuted",
-                "code": code_str,
-                "node_id": event.tgt,
-                "pool_id": event.tgt,
-                "ts": event.ts,
-                "details": {
-                    "src": event.src,
-                    "tgt": event.tgt,
-                    "mode": event.mode,
-                    "count": len(codes),
-                },
-            })
-            # 发布 EventLogged 事件供 Database 持久化
-            self._bus.publish(EventLogged(
-                event={
-                    "kind": "transfer",
-                    "src": event.src, "tgt": event.tgt,
-                    "codes": codes, "mode": event.mode,
-                },
-                event_kind="transfer_executed",
-                ts=event.ts,
-            ))
-            # 更新节点股票快照
-            self._apply_transfer_to_snapshot(event)
-            self._update_snapshot(event.ts)
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_transfer_executed failed: %s", ex)
-
-    def _on_ttl_expired(self, event: TTLExpired) -> None:
-        """TTL 超时事件加入浮窗 + 持久化 + 从节点快照移除。"""
-        try:
-            codes = list(event.codes) if event.codes else []
-            code_str = ",".join(codes[:5]) + ("..." if len(codes) > 5 else "")
-            self._add_to_event_list({
-                "event_type": "TTLExpired",
-                "code": code_str,
-                "node_id": event.node_id,
-                "pool_id": event.node_id,
-                "ts": event.ts,
-                "details": {
-                    "node": event.node_id,
-                    "count": len(codes),
-                },
-            })
-            self._bus.publish(EventLogged(
-                event={
-                    "kind": "ttl_expired", "node_id": event.node_id, "codes": codes,
-                },
-                event_kind="ttl_expired",
-                ts=event.ts,
-            ))
-            # 从节点快照移除超时代码
-            node = self._node_snapshots.get(event.node_id)
-            if isinstance(node, set):
-                for code in codes:
-                    node.discard(code)
-            self._update_snapshot(event.ts)
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_ttl_expired failed: %s", ex)
-
-    def _on_order_placed(self, event: OrderPlaced) -> None:
-        """订单提交事件加入浮窗 + 持久化。"""
-        try:
-            order = dict(event.order or {})
-            code = order.get("code", "")
-            self._add_to_event_list({
-                "event_type": "OrderPlaced",
-                "code": code,
-                "ts": event.ts,
-                "details": {
-                    "side": order.get("side", ""),
-                    "qty": order.get("qty", 0),
-                    "price": order.get("price", 0),
-                },
-            })
-            self._bus.publish(EventLogged(
-                event={"kind": "order_placed", "order": order},
-                event_kind="order_placed",
-                ts=event.ts,
-            ))
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_order_placed failed: %s", ex)
-
-    def _on_order_filled(self, event: OrderFilled) -> None:
-        """成交事件加入浮窗 + 持久化。"""
-        try:
-            fill = dict(event.fill or {})
-            code = fill.get("code", "")
-            self._add_to_event_list({
-                "event_type": "OrderFilled",
-                "code": code,
-                "ts": event.ts,
-                "details": {
-                    "side": fill.get("side", ""),
-                    "qty": fill.get("qty", 0),
-                    "price": fill.get("price", 0),
-                },
-            })
-            self._bus.publish(EventLogged(
-                event={"kind": "order_filled", "fill": fill},
-                event_kind="order_filled",
-                ts=event.ts,
-            ))
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_order_filled failed: %s", ex)
-
-    def _on_alert_raised(self, event: AlertRaised) -> None:
-        """告警事件加入浮窗 + 更新告警冷却 + 持久化。"""
-        try:
-            alert = event.alert or {}
-            rule_id = str(alert.get("rule_id", "") or "")
-            code = str(alert.get("code", "") or "")
-            cur_ts = float(event.ts or 0.0)
-            cooldown_key = (rule_id, code)
-            last_ts = self._alert_cooldown.get(cooldown_key, 0.0)
-            cooldown_sec = float(
-                self._alert_rules.get(rule_id, {}).get("cooldown_sec", _DEFAULT_ALERT_COOLDOWN_SEC)
-                or _DEFAULT_ALERT_COOLDOWN_SEC
-            )
-            if cur_ts - last_ts < cooldown_sec:
-                return
-            self._alert_cooldown[cooldown_key] = cur_ts
-            self._add_to_event_list({
-                "event_type": "AlertRaised",
-                "code": code,
-                "ts": cur_ts,
-                "details": {
-                    "rule": rule_id,
-                    "severity": alert.get("severity", ""),
-                    "message": alert.get("message", ""),
-                },
-            })
-            self._bus.publish(EventLogged(
-                event={"kind": "alert", "alert": dict(alert)},
-                event_kind="alert_raised",
-                ts=cur_ts,
-            ))
-            self._update_snapshot(cur_ts)
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_alert_raised failed: %s", ex)
-
-    # === SubTask 11.3: 订阅事件构建快照，发布 SnapshotUpdated ===
-
-    def _on_position_updated(self, event: PositionUpdated) -> None:
-        """持仓更新触发快照重建。"""
-        try:
-            tracker = event.tracker or {}
-            node_id = str(tracker.get("node_id", "") or "")
-            code = str(tracker.get("code", "") or "")
-            if node_id and code:
-                node_set = self._node_snapshots.setdefault(node_id, set())
-                if isinstance(node_set, set):
-                    node_set.add(code)
-            self._add_to_event_list({
-                "event_type": "PositionUpdated",
-                "code": code,
-                "node_id": node_id,
-                "pool_id": node_id,
-                "ts": event.ts,
-                "details": {
-                    "qty": tracker.get("qty", 0),
-                    "entry_price": tracker.get("entry_price", 0),
-                    "pnl": round(float(tracker.get("pnl", 0) or 0), 2),
-                },
-            })
-            positions = self._dashboard_data.setdefault("positions", {})
-            if code:
-                positions[code] = tracker
-            self._update_snapshot(event.ts)
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_position_updated failed: %s", ex)
-
-    def _on_statistics_updated(self, event: StatisticsUpdated) -> None:
-        """统计更新触发看盘面板数据刷新 + 快照重建。"""
-        try:
-            stats = dict(event.stats or {})
-            self._dashboard_data["stats"] = stats
-            self._add_to_event_list({
-                "event_type": "StatisticsUpdated",
-                "ts": event.ts,
-                "details": {
-                    "total_pnl": round(float(stats.get("total_pnl", 0) or 0), 2),
-                    "trade_count": stats.get("trade_count", 0),
-                    "win_rate": round(float(stats.get("win_rate", 0) or 0), 1),
-                },
-            })
-            self._update_snapshot(event.ts)
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_statistics_updated failed: %s", ex)
-
-    def _on_ranking_changed(self, event: RankingChanged) -> None:
-        """排名变化更新看盘面板（表驱动分派，无 if/elif 链）。"""
-        try:
-            field_name = _RANKING_DIMENSION_FIELDS.get(event.dimension, "")
-            if field_name:
-                self._dashboard_data[field_name] = dict(event.rankings or {})
-            self._add_to_event_list({
-                "event_type": "RankingChanged",
-                "ts": event.ts,
-                "details": {
-                    "dimension": event.dimension,
-                },
-            })
-            self._update_snapshot(event.ts)
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_ranking_changed failed: %s", ex)
-
-    def _apply_transfer_to_snapshot(self, event: TransferExecuted) -> None:
-        """将转移事件应用到节点股票快照（copy/move 模式）。"""
-        codes = list(event.codes) if event.codes else []
-        if not codes:
-            return
-        # 目标节点添加
-        tgt_set = self._node_snapshots.setdefault(event.tgt, set())
-        if isinstance(tgt_set, set):
-            for code in codes:
-                tgt_set.add(code)
-        # move 模式：从源节点移除
-        if event.mode == "move":
-            src_set = self._node_snapshots.get(event.src)
-            if isinstance(src_set, set):
-                for code in codes:
-                    src_set.discard(code)
-
     def _update_snapshot(self, ts: float) -> None:
         """构建并发布快照。"""
         try:
@@ -1020,100 +864,6 @@ class MonitoringModule:
             self._bus.publish(SnapshotUpdated(snapshot=snapshot, ts=ts_val))
         except Exception as ex:
             logger.warning("MonitoringModule _update_snapshot failed: %s", ex)
-
-    # === SubTask 11.4: 发布 EventLogged 事件供 Database 持久化 ===
-
-    def _on_edge_fired(self, event: EdgeFired) -> None:
-        """边触发事件加入浮窗 + 持久化。"""
-        try:
-            self._add_to_event_list({
-                "event_type": "EdgeFired",
-                "edge_id": event.eid,
-                "eid": event.eid,
-                "code": "",
-                "ts": event.ts,
-                "details": {},
-            })
-            self._bus.publish(EventLogged(
-                event={"kind": "edge_fired", "eid": event.eid},
-                event_kind="edge_fired",
-                ts=event.ts,
-            ))
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_edge_fired failed: %s", ex)
-
-    def _on_signal(self, event: Signal) -> None:
-        """交易信号事件加入浮窗 + 持久化。"""
-        try:
-            self._add_to_event_list({
-                "event_type": event.signal_type,
-                "code": event.code,
-                "node_id": event.pool_id,
-                "pool_id": event.pool_id,
-                "ts": event.ts,
-                "details": {
-                    "signal_type": event.signal_type,
-                    "price": event.price,
-                    "quantity": event.quantity,
-                    "condition": event.condition,
-                    "profit_pct": event.profit_pct,
-                    "hold_days": event.hold_days,
-                },
-            })
-            self._bus.publish(EventLogged(
-                event={
-                    "kind": "signal",
-                    "signal_type": event.signal_type,
-                    "code": event.code,
-                    "price": event.price,
-                },
-                event_kind="signal",
-                ts=event.ts,
-            ))
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_signal failed: %s", ex)
-
-    def _on_crossover_detected(self, event: CrossOverDetected) -> None:
-        """金叉/死叉事件加入浮窗 + 持久化。"""
-        try:
-            self._add_to_event_list({
-                "event_type": "CrossOverDetected",
-                "code": event.code,
-                "ts": event.ts,
-                "details": {
-                    "cross_type": event.cross_type,
-                    "formula_ref": event.formula_ref,
-                },
-            })
-            self._bus.publish(EventLogged(
-                event={
-                    "kind": "crossover",
-                    "code": event.code,
-                    "cross_type": event.cross_type,
-                    "formula_ref": event.formula_ref,
-                },
-                event_kind="crossover_detected",
-                ts=event.ts,
-            ))
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_crossover_detected failed: %s", ex)
-
-    def _on_mode_changed(self, event: ModeChanged) -> None:
-        """模式切换事件加入浮窗 + 更新看盘面板模式。"""
-        try:
-            cur_ts = float(time.time())
-            self._add_to_event_list({
-                "event_type": "ModeChanged",
-                "ts": cur_ts,
-                "details": {
-                    "mode_id": event.mode_id,
-                    "prev_mode": event.prev_mode,
-                },
-            })
-            self._dashboard_data["mode"] = event.mode_id
-            self._update_snapshot(cur_ts)
-        except Exception as ex:
-            logger.warning("MonitoringModule _on_mode_changed failed: %s", ex)
 
     # === 向后兼容：暴露原组件的查询方法 ===
 
@@ -1182,9 +932,9 @@ class StatisticsModule:
     def __init__(self, bus: EventBus, config: Optional[Dict[str, Any]] = None) -> None:
         self._bus = bus
         self._config = config or {}
-        # 加载配置表
-        self._pk_cfg = self._load_json("config/pk_config.json")
-        self._analysis_cfg = self._load_json("config/analysis_config.json")
+        # 加载配置表（Task 9.8: 通过 ConfigStore.get_table 加载，参与热加载）
+        self._pk_cfg = _get_table("pk_config")
+        self._analysis_cfg = _get_table("analysis_config")
         # 持仓跟踪表镜像（从 PositionUpdated 事件维护）
         self._trackers: Dict[Tuple[str, str], Dict[str, Any]] = {}
         # 累计统计
@@ -1230,16 +980,7 @@ class StatisticsModule:
         except Exception as ex:
             logger.warning("StatisticsModule _on_statistics_updated failed: %s", ex)
 
-    @staticmethod
-    def _load_json(rel_path: str) -> Dict[str, Any]:
-        """加载 JSON 配置表（基于工作目录解析相对路径）。"""
-        try:
-            full = rel_path if os.path.isabs(rel_path) else os.path.join(os.getcwd(), rel_path)
-            with open(full, "r", encoding="utf-8") as fh:
-                return json.load(fh)
-        except (FileNotFoundError, json.JSONDecodeError, OSError) as ex:
-            logger.warning("StatisticsModule 加载配置表失败 %s: %s", rel_path, ex)
-            return {}
+    # Task 9.8: _load_json 已删除，统一改用模块级 _get_table()（通过 ConfigStore.get_table）
 
     # === SubTask 10.2: 订阅事件计算交易统计 + 5 种收益分析 ===
 

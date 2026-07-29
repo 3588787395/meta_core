@@ -1,0 +1,17 @@
+{
+  "copy": {
+    "description": "复制：源不变，目标累加 passed 列表",
+    "src_action": "keep",
+    "tgt_action": "union"
+  },
+  "move": {
+    "description": "移动：源清空 passed，目标累加 passed 列表",
+    "src_action": "remove_passed",
+    "tgt_action": "union"
+  },
+  "overwrite": {
+    "description": "覆盖：目标替换为 passed 列表",
+    "src_action": "keep",
+    "tgt_action": "replace"
+  }
+}

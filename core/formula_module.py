@@ -29,7 +29,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Protocol, Tuple, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Literal, Optional, Protocol, Tuple, TYPE_CHECKING, runtime_checkable
 
 import numpy as np
 import pandas as pd
@@ -46,6 +46,7 @@ from .event_bus import (
     FormulaEvaluated,
     PoolLoaded,
 )
+from .table_engine import load_config_table
 
 logger = logging.getLogger(__name__)
 
@@ -87,9 +88,7 @@ _FIELD_MAP = {
 }
 
 # 表驱动：从 formula_funcs.json 加载算子配置，驱动通用 window_op/shift_op/cross_op
-_FUNCS_CFG = json.loads(
-    (Path(__file__).parent.parent / "config" / "data" / "formula_funcs.json").read_text("utf-8")
-)["funcs"]
+_FUNCS_CFG = load_config_table("formula_funcs").get("funcs", [])
 
 _TOKEN_RE = re.compile(
     r"(?i)(:=|>=|<=|==|!=|[<>=:\-+*/(),;]|[A-Za-z_][A-Za-z0-9_]*|\d+\.?\d*)"
@@ -603,11 +602,71 @@ def _parse_statement(stmt: List[str]) -> Tuple[str, Optional[str], Any]:
 
 
 # ---------------------------------------------------------------------------
+# 公式引擎协议（Task 4 / RULES.md 第 85 条）
+# ---------------------------------------------------------------------------
+@runtime_checkable
+class IFormulaEngine(Protocol):
+    """公式引擎协议：统一 ``CompiledFormula`` / ``PythonFormulaEngine`` /
+    ``FormulaEngine`` / ``FormulaRouter`` 的 ``eval`` / ``eval_outvars`` /
+    ``eval_series`` / ``eval_batch`` 方法契约。
+
+    Protocol 是结构化的，sync 与 async 变体均兼容（duck typing）：
+    ``FormulaRouter`` 的 async 方法满足本协议（方法名存在即结构匹配），
+    其余 3 个类为 sync 实现。具体类按各自上下文实现方法签名，
+    但方法名与返回值语义须一致。
+
+    新增公式引擎（如 JS 引擎）SHALL 实现本协议，并在
+    ``FormulaRouter._ENGINE_DISPATCH`` 中登记分派条目，零行
+    ``FormulaRouter`` 改动（详见 spec 迭代 2 Scenario: 新增公式引擎）。
+    """
+
+    def eval(self, *args: Any, **kwargs: Any) -> Any:
+        """公式求值：单股条件/指标求值。
+
+        Returns:
+            - 条件公式返回最后一根 K 线是否成立（bool）；
+            - 单输出指标返回最后一根 K 线的标量值；
+            - 多输出指标返回 ``{output_name: last_value}``。
+        """
+        ...
+
+    def eval_outvars(self, *args: Any, **kwargs: Any) -> Optional[Dict[str, Any]]:
+        """公式求值：返回全部输出变量末值字典。
+
+        Returns:
+            ``{outvar_name: last_value}`` 字典（匿名/XG 输出归一为 ``"XG"``）；
+            求值失败或无输出时返回 None。
+        """
+        ...
+
+    def eval_series(self, *args: Any, **kwargs: Any) -> Optional[Dict[str, Any]]:
+        """公式序列求值：返回输出变量的最近 N 个值序列。
+
+        Returns:
+            ``{outvar_name: [v0, v1, ..., vN-1]}`` 字典（vN-1 为最新值）；
+            求值失败时返回 None。
+        """
+        ...
+
+    def eval_batch(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        """批量求值：返回 ``{symbol: eval_result}`` 映射。
+
+        任一标的数据不足或求值失败时该标的结果为 ``False`` / ``None``。
+        """
+        ...
+
+
+# ---------------------------------------------------------------------------
 # 编译产物
 # ---------------------------------------------------------------------------
 @dataclass
 class CompiledFormula:
-    """已编译的公式，保存按顺序执行的语句（赋值/输出）及其 code 对象。"""
+    """已编译的公式，保存按顺序执行的语句（赋值/输出）及其 code 对象。
+
+    impl IFormulaEngine（Task 4.2 / RULES.md 第 85 条）：结构化实现
+    ``eval`` / ``eval_outvars`` / ``eval_series``，作为 ``PythonFormulaEngine``
+    的编译产物求值核心。``eval_batch`` 由 ``PythonFormulaEngine`` 在引擎层封装。
+    """
 
     formula: str
     statements: List[Tuple[str, Optional[str], Any]] = field(default_factory=list)
@@ -814,7 +873,13 @@ def _build_namespace(bars: pd.DataFrame) -> Optional[Dict[str, Any]]:
 # 公式引擎主类
 # ---------------------------------------------------------------------------
 class PythonFormulaEngine:
-    """纯 Python 公式引擎（轻量级、numpy/pandas 向量化）。"""
+    """纯 Python 公式引擎（轻量级、numpy/pandas 向量化）。
+
+    impl IFormulaEngine（Task 4.3 / RULES.md 第 85 条）：结构化实现
+    ``eval`` / ``eval_outvars`` / ``eval_batch``，并通过 ``eval_series_batch``
+    提供序列批量求值。作为 ``FormulaRouter`` 的 Python 引擎实现，
+    以及 ``FormulaEngine`` 的底层求值核心。
+    """
 
     def __init__(self, data_query: Any = None):
         """初始化引擎。
@@ -1147,6 +1212,11 @@ def simulation_context(
 
 class FormulaEngine:
     """统一公式引擎（有状态，依赖 ``PoolState``）。
+
+    impl IFormulaEngine（Task 4.4 / RULES.md 第 85 条）：结构化实现
+    ``eval`` / ``eval_series``（经 ``_cached_eval`` 统一缓存），并经
+    ``_python_engine.eval_batch`` 提供 batch 能力。``eval_outvars`` 由
+    ``PythonFormulaEngine`` 直接提供，本层在 ``_eval_formula`` 中转调。
 
     属性 ≤ 5、方法 ≤ 6、事件 ≤ 3：
       - 属性：state, _python_engine, _logger
@@ -1544,7 +1614,31 @@ def _hash_object(obj: Any) -> str:
 
 
 class FormulaRouter:
-    """公式路由器：按复杂度与周期选择执行引擎，并管理结果缓存。"""
+    """公式路由器：按复杂度与周期选择执行引擎，并管理结果缓存。
+
+    impl IFormulaEngine（Task 4.5 / RULES.md 第 85 条）：结构化实现
+    ``eval`` / ``eval_outvars`` / ``eval_batch``（均为 async）。引擎分派
+    通过 ``_ENGINE_DISPATCH`` 表驱动查表，禁止 if/elif engine_type 链
+    （Task 5 / spec 迭代 2 Scenario: 公式路由分派）。
+    """
+
+    # Task 5.1 — 表驱动引擎分派表（spec 迭代 2 / RULES.md 第 16 条）。
+    # 映射 engine_name → {method_key: method_name}，由 ``_dispatch_engine_call``
+    # 反射调用。新增引擎（如 JS）仅需在此表追加条目，零行分派代码改动。
+    # 优先级：``formula_routing.json`` 的 ``engine_methods`` 覆盖此默认表
+    # （由 ``_load_engine_methods`` 合并），保持配置热加载能力。
+    _ENGINE_DISPATCH: Dict[str, Dict[str, str]] = {
+        "python": {
+            "eval": "_eval_python",
+            "eval_outvars": "_eval_python_outvars",
+            "eval_batch": "_eval_python_batch",
+        },
+        "hqchart": {
+            "eval": "_eval_hqchart",
+            "eval_outvars": "_eval_hqchart_outvars",
+            "eval_batch": "_eval_hqchart_batch",
+        },
+    }
 
     def __init__(
         self,
@@ -1643,8 +1737,17 @@ class FormulaRouter:
 
     @staticmethod
     def _load_engine_methods() -> dict:
-        """从 config/formula_routing.json 加载引擎方法映射表。"""
-        return FormulaRouter._load_routing_config("engine_methods", {})
+        """加载引擎方法映射表：优先 ``formula_routing.json`` 的 ``engine_methods``，
+        缺失或为空时回退到类级 ``_ENGINE_DISPATCH`` 默认表（Task 5.1）。
+
+        这样 ``_ENGINE_DISPATCH`` 既是 spec 要求的表驱动分派声明，
+        也是 JSON 配置缺失时的兜底，保持配置热加载能力不退化。
+        """
+        json_methods = FormulaRouter._load_routing_config("engine_methods", {})
+        if json_methods:
+            return json_methods
+        # JSON 缺失/为空：回退到类级 _ENGINE_DISPATCH 默认表
+        return FormulaRouter._ENGINE_DISPATCH
 
     def _resolve_engine(self, ctx: dict) -> str:
         """按 formula_routing.json 规则表匹配引擎。
@@ -1684,10 +1787,11 @@ class FormulaRouter:
     async def _dispatch_engine_call(
         self, engine: str, method_key: str, *args: Any, **kwargs: Any
     ) -> Any:
-        """通用引擎方法分派器：查 engine_methods 表反射调用。
+        """通用引擎方法分派器：查 ``_ENGINE_DISPATCH`` 表反射调用（Task 5.2-5.4）。
 
-        按 formula_routing.json 的 engine_methods[engine][method_key] 取方法名，
-        getattr(self, method_name) 反射调用，无 if engine 分支。
+        按 ``_engine_methods``（来自 ``formula_routing.json`` 或类级
+        ``_ENGINE_DISPATCH`` 兜底）的 ``[engine][method_key]`` 取方法名，
+        ``getattr(self, method_name)`` 反射调用，无 if engine 分支。
 
         Args:
             engine: 引擎名称（"python" / "hqchart"）。
@@ -1699,7 +1803,7 @@ class FormulaRouter:
             目标方法的返回值。
 
         Raises:
-            RuntimeError: engine 或 method_key 未在 engine_methods 表中声明。
+            RuntimeError: engine 或 method_key 未在 ``_ENGINE_DISPATCH`` 表中声明。
         """
         engine_map = self._engine_methods.get(engine)
         if not engine_map:

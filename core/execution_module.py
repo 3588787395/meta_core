@@ -81,6 +81,8 @@ from .domain import (
     # （见 __all__），避免 core/domain 反向函数级懒加载本模块（模块零引用约束）。
     TimedEventSpec,
 )
+from .schemas import StepResult
+from .table_engine import get_global_config_store, load_config_table
 
 if TYPE_CHECKING:
     from .runtime_mode_module import PoolState
@@ -130,35 +132,11 @@ class _FilterEvalDeps:
 
 
 # ---------------------------------------------------------------------------
-# 配置表惰性加载与缓存（模块级，避免每次编译重复读文件）
+# 配置表加载：已统一到 ConfigStore.get_table(name)（Task 9.9）
+# 模块级 _load_config 帮助函数已删除，调用方通过 get_global_config_store().get_table(name) 访问
 # ---------------------------------------------------------------------------
 
 _CONFIG_DIR = Path(__file__).parent.parent / "config"
-_CONFIG_CACHE: Dict[str, Any] = {}
-
-
-def _load_config(name: str) -> Dict[str, Any]:
-    """加载 config/ 下的 JSON 配置表，缺失或解析失败时返回空字典。
-
-    SubTask 27.14: 配置文件按模块分类到 architecture/data/runtime/ui/pools/
-    子目录后，按文件名递归查找（跳过 _archived/）。
-    """
-    if name in _CONFIG_CACHE:
-        return _CONFIG_CACHE[name]
-    path = _CONFIG_DIR / name
-    if not path.exists():
-        # SubTask 27.14: 递归查找子目录（与 table_engine._find_table_path 一致）
-        for candidate in _CONFIG_DIR.rglob(name):
-            if "_archived" not in candidate.parts:
-                path = candidate
-                break
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        data = {}
-    _CONFIG_CACHE[name] = data
-    return data
 
 
 # ===========================================================================
@@ -461,6 +439,7 @@ class CompiledSchedule(BaseModel):
     # 边顺序号保留在 edge_index[eid].params._order，供条件节点集合运算排序入边使用。
     nodes: Dict[str, Any] = Field(default_factory=dict)
     edge_index: Dict[str, Any] = Field(default_factory=dict)
+    steps: List[Any] = Field(default_factory=list)  # List[StepSpec]，编译期从 edge_strategies.json 读取
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +470,7 @@ def _resolve_node_type(node: Dict[str, Any]) -> str:
     raw = node.get("type", "")
     dzh_cell = node.get("dzh_cell_type")
 
-    dzh_cfg = _load_config("dzh_type_map.json")
+    dzh_cfg = get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}
     type_map = dzh_cfg.get("type_map", {})
     aliases = dzh_cfg.get("aliases", {})
     tdx_map = dzh_cfg.get("tdx_type_map", {})
@@ -516,7 +495,7 @@ def _resolve_node_type(node: Dict[str, Any]) -> str:
 
 def _load_source_types() -> Set[str]:
     """从 modules.json 读取所有 source 类型模块的 dzh_cell_types + node_type + layout_id，作为源节点判定集合。"""
-    cfg = _load_config("modules.json")
+    cfg = get_global_config_store().get_table("modules") if get_global_config_store() else {}
     modules = cfg.get("modules", {}) if isinstance(cfg, dict) else {}
     source_types: Set[str] = set()
     for mod in modules.values():
@@ -546,7 +525,7 @@ def _is_source_node(node: Dict[str, Any]) -> bool:
 
 def _resolve_edge_type(src_type: str) -> Literal["conditional", "unconditional"]:
     """查 edge_semantics.json，按源节点类型判定边类型。"""
-    sem_cfg = _load_config("edge_semantics.json")
+    sem_cfg = get_global_config_store().get_table("edge_semantics") if get_global_config_store() else {}
     edge_types = sem_cfg.get("edge_types", {})
     conditional_sources = set(edge_types.get("conditional", {}).get("source_types", []))
     unconditional_sources = set(edge_types.get("unconditional", {}).get("source_types", []))
@@ -563,7 +542,7 @@ def _group_transformation_units(
     edges: List[Dict[str, Any]], nodes: Dict[str, Any]
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """将边分组为变换单元（三元组），返回 (units, standalone_edges)。"""
-    sem_cfg = _load_config("edge_semantics.json")
+    sem_cfg = get_global_config_store().get_table("edge_semantics") if get_global_config_store() else {}
     tu_cfg = sem_cfg.get("transformation_unit", {})
     hub_types = set(tu_cfg.get("hub_node_types", []))
     if not hub_types:
@@ -602,7 +581,7 @@ def _group_transformation_units(
 
 def _build_action_spec(tid: str, nodes: Dict[str, Any]) -> ActionSpec:
     """从目标节点 tdx_psatt 与 action_table.json 编译动作规则。"""
-    action_table = _load_config("action_table.json")
+    action_table = get_global_config_store().get_table("action_table") if get_global_config_store() else {}
     pool_actions = action_table.get("pool_enter_actions", {})
     callbacks_cfg = action_table.get("callback_ops", {})
 
@@ -688,8 +667,8 @@ def _build_ttl_spec(tid: str, nodes: Dict[str, Any]) -> TTLSpec:
       2. tdx_psatt.bdel=1 → check_type="interval"（ndelnum × ttl_units[ndeltype]）
       3. hold>0 → check_type="interval"（hold × ttl_units[deltype_map[deltype]]）
     """
-    psatt_cfg = _load_config("tdx_psatt.json")
-    defaults = _load_config("defaults.json")
+    psatt_cfg = get_global_config_store().get_table("tdx_psatt") if get_global_config_store() else {}
+    defaults = get_global_config_store().get_table("defaults") if get_global_config_store() else {}
     ttl_units = psatt_cfg.get("ttl_units", {"0": 86400, "1": 3600, "2": 60, "3": 1, "4": 1})
 
     tgt_node = nodes.get(tid, {}) if nodes else {}
@@ -775,7 +754,7 @@ def _normalize_nodes(pool_config: Dict[str, Any]) -> Dict[str, Any]:
 # 加载 ntjindexno → formula_name/args 映射表，用于把前端指标选择解析为 builtin formula
 _TDX_INDICATOR_FORMULA_MAP: Dict[int, Dict[str, Any]] = {}
 try:
-    _tdx_indi_map_cfg = _load_config("tdx_indicator_formula_map.json")
+    _tdx_indi_map_cfg = get_global_config_store().get_table("tdx_indicator_formula_map") if get_global_config_store() else {}
     for rec in _tdx_indi_map_cfg.get("records", []):
         ntj = rec.get("ntjindexno")
         if ntj is not None:
@@ -928,7 +907,7 @@ class Compiler:
     def _build_timing_spec(edge: Dict[str, Any]) -> TimingSpec:
         """从 edge params 与 timing.json 编译时机规则。"""
         params = edge.get("params", {}) if isinstance(edge, dict) else {}
-        timing_cfg = _load_config("timing.json")
+        timing_cfg = get_global_config_store().get_table("timing") if get_global_config_store() else {}
 
         starttype = int(params.get("starttype", 0) or 0)
         cxtype = int(params.get("cxtype", 0) or 0)
@@ -987,7 +966,7 @@ class Compiler:
         转存至 evaluator_params，运行期不再查 dispatch.json / _SCALAR_NSET_CFG。
         """
         params = edge.get("params", {}) if isinstance(edge, dict) else {}
-        dispatch_cfg = _load_config("dispatch.json")
+        dispatch_cfg = get_global_config_store().get_table("dispatch") if get_global_config_store() else {}
 
         nset_dispatch = dispatch_cfg.get("nset_dispatch", {})
 
@@ -1247,6 +1226,16 @@ class Compiler:
                       for edge in edges
                       if isinstance(edge, dict) and (edge.get("id") or edge.get("flow_id"))}
 
+        # 步骤表驱动：从 edge_strategies.json 读取 steps 序列（编译期产出）
+        edge_strategies_cfg = get_global_config_store().get_table("edge_strategies") if get_global_config_store() else {}
+        steps_cfg = edge_strategies_cfg.get("steps", [
+            {"step_name": "gate"},
+            {"step_name": "filter"},
+            {"step_name": "propagate"},
+            {"step_name": "ttl"},
+            {"step_name": "callback"},
+        ])
+
         return CompiledSchedule(
             edge_ctx=edge_ctx,
             edge_timing_spec=timing_spec,
@@ -1259,7 +1248,233 @@ class Compiler:
             node_ttl_spec=node_ttl_spec,
             nodes=nodes,
             edge_index=edge_index,
+            steps=steps_cfg,
         )
+
+
+# ===========================================================================
+# Task 4：编译-运行分离 — CompiledPool 与 compile 函数
+# ===========================================================================
+# 按 ``deepen-meta-pattern-strict-metatest-v2`` spec Task 4 实现。
+# ``compile(pool_config)`` 一次性产出 ``CompiledPool``，运行期只读预编译结构，
+# 不再重复解析节点/边/邻接表/边顺序/边类型/规格。
+#
+# 与现有 ``Compiler.compile -> CompiledSchedule`` 的关系：
+#   - ``CompiledPool`` 是更扁平的编译产物（dict 而非 Spec 对象），
+#     直接对齐 spec.md L97-121 的字段定义。
+#   - 现有 ``CompiledSchedule`` 仍保留供 ``EdgeExecutor`` 使用，本函数不替换它。
+#   - ``edge_order`` 来自 ``edge.params._order``（设计时用户指定），
+#     不是拓扑排序——对齐 G6「运行时事件无序」硬约束。
+
+
+# 节点 legacy_type → role 映射（依据 domain.py 节点子类注册表）
+_NODE_LEGACY_TYPE_TO_ROLE: Dict[int, str] = {
+    202: "candidate",  # CandidatePoolNode DZH
+    7: "candidate",    # CandidatePoolNode TDX
+    200: "state",      # StatePoolNode DZH
+    8: "state",        # StatePoolNode TDX
+    203: "target",     # ResultPoolNode DZH
+    201: "condition",  # ConditionNode DZH
+    3: "condition",    # ConditionNode TDX
+    4: "discard",      # DiscardPoolNode DZH
+}
+
+
+def _resolve_node_role(node: Dict[str, Any]) -> str:
+    """从节点 legacy_type / type 字段推断角色。
+
+    role ∈ {candidate, state, condition, target, discard}。
+    优先按 legacy_type 整数码查表（与 domain.py 节点子类注册表一致），
+    未命中时按 type 字符串子串匹配兜底，均未命中返回空串。
+    """
+    if not isinstance(node, dict):
+        return ""
+    lt = node.get("legacy_type")
+    if lt is not None:
+        try:
+            role = _NODE_LEGACY_TYPE_TO_ROLE.get(int(lt))
+            if role:
+                return role
+        except (TypeError, ValueError):
+            pass
+    t = str(node.get("type", "")).lower()
+    if "candidate" in t:
+        return "candidate"
+    if "condition" in t:
+        return "condition"
+    if "target" in t or "result" in t:
+        return "target"
+    if "discard" in t:
+        return "discard"
+    if "state" in t:
+        return "state"
+    return ""
+
+
+# 边条件性判定关键字：params 含任一非默认值 → conditional
+_CONDITIONAL_SPEC_KEYS: Tuple[str, ...] = (
+    "starttype", "cxtype", "starttime", "cxtime", "cxtimetype", "jgtime",
+    "nset", "noperate", "formula_ref", "evaluator_type", "fsecond", "rank_rule",
+)
+
+
+def _is_conditional_edge(params: Dict[str, Any]) -> bool:
+    """边类型判定：params 含 filter/timing 相关键且非默认值 → conditional。"""
+    for k in _CONDITIONAL_SPEC_KEYS:
+        v = params.get(k)
+        if v not in (None, 0, "", False):
+            return True
+    return False
+
+
+def _compile_timing_spec(params: Dict[str, Any]) -> Dict[str, Any]:
+    """从 edge params 编译 timing spec 字典。"""
+    return {
+        "starttype": int(params.get("starttype", 0) or 0),
+        "cxtype": int(params.get("cxtype", 0) or 0),
+        "starttime": int(params.get("starttime", 0) or 0),
+        "cxtime": int(params.get("cxtime", 0) or 0),
+        "cxtimetype": int(params.get("cxtimetype", 0) or 0),
+        "jgtime": int(params.get("jgtime", 0) or 0),
+    }
+
+
+def _compile_filter_spec(params: Dict[str, Any]) -> Dict[str, Any]:
+    """从 edge params 编译 filter spec 字典。"""
+    return {
+        "evaluator_type": str(params.get("evaluator_type", "indicator") or "indicator"),
+        "nset": int(params.get("nset", 0) or 0),
+        "noperate": int(params.get("noperate", 0) or 0),
+        "formula_ref": str(params.get("formula_ref", "") or ""),
+        "fsecond": params.get("fsecond", 0),
+        "rank_rule": str(params.get("rank_rule", "") or ""),
+    }
+
+
+def _compile_propagate_spec(params: Dict[str, Any]) -> Dict[str, Any]:
+    """从 edge params 编译 propagate spec 字典。"""
+    return {
+        "mode": str(params.get("mode", "copy") or "copy"),
+        "tran": int(params.get("tran", 0) or 0),
+        "emptyps": bool(params.get("emptyps", False)),
+    }
+
+
+@dataclass
+class CompiledPool:
+    """编译期产出的扁平池结构（spec.md L97-121）。
+
+    运行期只读本结构，不再解析 pool_config。所有索引、顺序、类型判定、
+    角色映射均在编译期一次性完成。
+
+    ``edge_order`` 来自 ``edge.params._order``（设计时用户指定），
+    非拓扑排序——对齐 G6「运行时事件无序」硬约束。
+    """
+
+    nodes: Dict[str, dict] = field(default_factory=dict)
+    node_type: Dict[str, str] = field(default_factory=dict)
+    edges: Dict[str, dict] = field(default_factory=dict)
+    edge_endpoints: Dict[str, tuple] = field(default_factory=dict)
+    edge_order: List[str] = field(default_factory=list)
+    edge_type: Dict[str, str] = field(default_factory=dict)
+    edge_filter_spec: Dict[str, dict] = field(default_factory=dict)
+    edge_timing_spec: Dict[str, dict] = field(default_factory=dict)
+    edge_propagate_spec: Dict[str, dict] = field(default_factory=dict)
+    out_edges: Dict[str, List[str]] = field(default_factory=dict)
+    in_edges: Dict[str, List[str]] = field(default_factory=dict)
+    source_nodes: List[str] = field(default_factory=list)
+    node_role: Dict[str, str] = field(default_factory=dict)
+
+
+def compile(pool_config: dict) -> CompiledPool:
+    """编译 ``pool_config`` 为 ``CompiledPool``（编译-运行分离）。
+
+    一次性产出运行期所需的全部预编译结构：节点/边字典、邻接表、
+    源节点列表、边执行顺序（来自 ``edge.params._order``，非拓扑排序）、
+    边类型、边规格、节点角色。
+
+    Args:
+        pool_config: 股票池配置字典，含 ``nodes`` 与 ``edges``。
+
+    Returns:
+        ``CompiledPool`` 扁平编译产物。
+    """
+    nodes: Dict[str, dict] = _normalize_nodes(pool_config)
+    raw_edges = pool_config.get("edges", [])
+    if not isinstance(raw_edges, list):
+        raw_edges = []
+
+    edges: Dict[str, dict] = {}
+    edge_endpoints: Dict[str, tuple] = {}
+    out_edges: Dict[str, List[str]] = {nid: [] for nid in nodes}
+    in_edges: Dict[str, List[str]] = {nid: [] for nid in nodes}
+    edge_type: Dict[str, str] = {}
+    edge_filter_spec: Dict[str, dict] = {}
+    edge_timing_spec: Dict[str, dict] = {}
+    edge_propagate_spec: Dict[str, dict] = {}
+
+    for edge in raw_edges:
+        if not isinstance(edge, dict):
+            continue
+        eid = str(edge.get("id") or edge.get("flow_id") or "")
+        if not eid:
+            continue
+        sid = _extract_edge_endpoint(edge, ("from", "source", "startid"))
+        tid = _extract_edge_endpoint(edge, ("to", "target", "endid"))
+
+        edges[eid] = edge
+        edge_endpoints[eid] = (sid, tid)
+        # 邻接表：端点可能不在 nodes 中（外部引用），用 setdefault 兜底
+        out_edges.setdefault(sid, []).append(eid)
+        in_edges.setdefault(tid, []).append(eid)
+
+        params = edge.get("params", {})
+        if not isinstance(params, dict):
+            params = {}
+        edge_timing_spec[eid] = _compile_timing_spec(params)
+        edge_filter_spec[eid] = _compile_filter_spec(params)
+        edge_propagate_spec[eid] = _compile_propagate_spec(params)
+        edge_type[eid] = "conditional" if _is_conditional_edge(params) else "unconditional"
+
+    # edge_order：按 edge.params._order 升序（设计时用户指定，非拓扑排序）
+    def _order_key(eid: str) -> Tuple[int, str]:
+        params = edges[eid].get("params", {})
+        if not isinstance(params, dict):
+            params = {}
+        order = params.get("_order", 0)
+        try:
+            return (int(order), eid)
+        except (TypeError, ValueError):
+            return (0, eid)
+
+    edge_order = sorted(edges.keys(), key=_order_key)
+
+    # source_nodes：入度为 0 的节点
+    source_nodes = [nid for nid in nodes if not in_edges.get(nid)]
+
+    # node_type / node_role 编译期一次性产出
+    node_type: Dict[str, str] = {
+        nid: _resolve_node_type(node) for nid, node in nodes.items()
+    }
+    node_role: Dict[str, str] = {
+        nid: _resolve_node_role(node) for nid, node in nodes.items()
+    }
+
+    return CompiledPool(
+        nodes=nodes,
+        node_type=node_type,
+        edges=edges,
+        edge_endpoints=edge_endpoints,
+        edge_order=edge_order,
+        edge_type=edge_type,
+        edge_filter_spec=edge_filter_spec,
+        edge_timing_spec=edge_timing_spec,
+        edge_propagate_spec=edge_propagate_spec,
+        out_edges=out_edges,
+        in_edges=in_edges,
+        source_nodes=source_nodes,
+        node_role=node_role,
+    )
 
 
 # ===========================================================================
@@ -1268,6 +1483,141 @@ class Compiler:
 # 按 ``execute-architecture-migration`` 规格 Task 5 实现。
 # ``EdgeExecutor`` 只读 ``CompiledSchedule``，不写 ``pool_config``；所有行为差异
 # 来自编译期表行内容，运行期只做查表与固定解释。
+
+
+def trigger_check(edge_timing_spec: dict, now_ts: float, flow_state: dict, node_dirty: bool) -> bool:
+    """Check if edge should trigger: time_ok AND node_dirty."""
+    if not node_dirty:
+        return False
+    starttype = edge_timing_spec.get("starttype", "immediate")
+    cxtype = edge_timing_spec.get("cxtype", "always")
+    start_ok = _START_RULES.get(starttype, lambda *a: True)(edge_timing_spec, now_ts, flow_state)
+    if not start_ok:
+        return False
+    return _CX_RULES.get(cxtype, lambda *a: True)(edge_timing_spec, now_ts, flow_state)
+
+
+def filter_eval(codes: list, filter_spec: dict, tick_table) -> tuple:
+    """Evaluate filter: returns (passed_codes, rejected_codes)."""
+    if not filter_spec or not filter_spec.get("enabled", True):
+        return list(codes), []
+    nset = filter_spec.get("nset", "all")
+    noperate = filter_spec.get("noperate", "gt")
+    evaluator = _NSET_EVALUATORS.get(nset, _eval_all)
+    operator = _NOPERATE_OPERATORS.get(noperate, _op_gt)
+    passed, rejected = [], []
+    for code in codes:
+        values = evaluator(code, filter_spec, tick_table)
+        if operator(values, filter_spec.get("threshold", 0)):
+            passed.append(code)
+        else:
+            rejected.append(code)
+    return passed, rejected
+
+
+def propagate_apply(src_stocks: list, tgt_stocks: list, passed: list, propagate_spec: dict) -> list:
+    """Apply propagation: copy/move/overwrite.
+
+    通过 ``_PROPAGATE_MODES`` 字典查表派发；模式描述性 schema 见
+    ``config/architecture/propagate_modes.json``（由 ``_PROPAGATE_SPECS_SCHEMA`` 加载）。
+    """
+    mode = propagate_spec.get("mode", "copy")
+    handler = _PROPAGATE_MODES.get(mode, lambda s, t, p: list(set(t + p)))
+    return handler(src_stocks, tgt_stocks, passed)
+
+
+_PROPAGATE_CFG_PATH = Path(__file__).parent.parent / "config" / "architecture" / "propagate_modes.json"
+_PROPAGATE_SPECS_SCHEMA: Optional[Dict[str, Any]] = None
+
+
+def _load_propagate_specs_schema() -> Dict[str, Any]:
+    """模块级缓存加载 propagate_modes.json（描述性 schema）。"""
+    global _PROPAGATE_SPECS_SCHEMA
+    if _PROPAGATE_SPECS_SCHEMA is None:
+        try:
+            with open(_PROPAGATE_CFG_PATH, "r", encoding="utf-8") as f:
+                _PROPAGATE_SPECS_SCHEMA = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            _PROPAGATE_SPECS_SCHEMA = {}
+    return _PROPAGATE_SPECS_SCHEMA
+
+
+# 与 _NSET_EVALUATORS 同样的 lambda 模式：JSON 不能序列化函数，故派发表内联在代码中，
+# 描述性字段（src_action/tgt_action）保存在 propagate_modes.json。
+_PROPAGATE_MODES = {
+    "copy": lambda src, tgt, p: list(set(tgt + p)),
+    "move": lambda src, tgt, p: list(set(tgt + p)),
+    "overwrite": lambda src, tgt, p: list(p),
+}
+
+
+def _eval_all(code: str, spec: dict, tick_table) -> list:
+    return [1]
+
+
+def _op_gt(values: list, threshold: float) -> bool:
+    return any(x > threshold for x in values)
+
+
+_START_RULES = {
+    "immediate": lambda spec, now, state: True,
+    "delay": lambda spec, now, state: now >= (state.get("start_ts", 0) + spec.get("delay", 0)),
+    "open_before": lambda spec, now, state: True,
+    "open_after": lambda spec, now, state: True,
+    "close_before": lambda spec, now, state: True,
+    "close_after": lambda spec, now, state: True,
+    "fixed_time": lambda spec, now, state: now >= spec.get("fixed_ts", 0),
+    "fixed_trading": lambda spec, now, state: True,
+}
+
+_CX_RULES = {
+    "always": lambda spec, now, state: True,
+    "once": lambda spec, now, state: state.get("exec_count", 0) == 0,
+    "duration": lambda spec, now, state: now <= (state.get("start_ts", 0) + spec.get("duration", 0)),
+}
+
+_NSET_EVALUATORS = {
+    "all": lambda code, spec, tt: [1],
+    "formula": lambda code, spec, tt: [1],
+    "condition": lambda code, spec, tt: [1],
+    "indicator": lambda code, spec, tt: [1],
+    "expert": lambda code, spec, tt: [1],
+    "realtime": lambda code, spec, tt: [tt.get(code).get("price", 0)],
+}
+
+_NOPERATE_OPERATORS = {
+    "gt": lambda v, t: any(x > t for x in v),
+    "ge": lambda v, t: any(x >= t for x in v),
+    "lt": lambda v, t: any(x < t for x in v),
+    "le": lambda v, t: any(x <= t for x in v),
+    "eq": lambda v, t: any(x == t for x in v),
+    "ne": lambda v, t: any(x != t for x in v),
+    "top": lambda v, t: True,
+    "bottom": lambda v, t: True,
+    "top_n": lambda v, t: True,
+    "bottom_n": lambda v, t: True,
+}
+
+# ---------------------------------------------------------------------------
+# filter_specs.json 描述性 schema（与 timing.json 加载模式一致）
+# ---------------------------------------------------------------------------
+# JSON 不能序列化函数，故运行时函数派发仍使用上面的 ``_NSET_EVALUATORS``
+# 与 ``_NOPERATE_OPERATORS`` lambda 字典；本 schema 仅用于描述性文档/校验，
+# 是未来将 evaluator/operator 元数据外部化为配置的入口。
+_FILTER_SPECS_PATH = Path(__file__).parent.parent / "config" / "architecture" / "filter_specs.json"
+_FILTER_SPECS_SCHEMA: Optional[Dict[str, Any]] = None
+
+
+def _load_filter_specs_schema() -> Dict[str, Any]:
+    """模块级缓存加载 filter_specs.json。"""
+    global _FILTER_SPECS_SCHEMA
+    if _FILTER_SPECS_SCHEMA is None:
+        try:
+            with open(_FILTER_SPECS_PATH, "r", encoding="utf-8") as f:
+                _FILTER_SPECS_SCHEMA = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            _FILTER_SPECS_SCHEMA = {}
+    return _FILTER_SPECS_SCHEMA
 
 
 def _now_ts(state: PoolState) -> float:
@@ -1521,6 +1871,18 @@ def _publish(bus: Optional[EventBus], event: Any) -> None:
         bus.publish(event)
 
 
+def _publish_edge_fired(bus: Optional[EventBus], eid: str, ts: float) -> None:
+    """统一发布 EdgeFired 事件（bus 为 None 时跳过）。"""
+    if bus is not None:
+        bus.publish(EdgeFired(eid=eid, ts=ts))
+
+
+def _publish_ttl_due(bus: Optional[EventBus], node_id: str, code: str, ts: float) -> None:
+    """统一发布 TTLDue 事件（bus 为 None 时跳过）。"""
+    if bus is not None:
+        bus.publish(TTLDue(node_id=node_id, code=code, ts=ts))
+
+
 # ---------------------------------------------------------------------------
 # TTL check_type 表驱动分派（I17：消除 if/else，差异显于注册表内容）
 # ---------------------------------------------------------------------------
@@ -1704,12 +2066,8 @@ def _load_stock_names() -> Dict[str, str]:
     if _STOCK_NAMES_CACHE is not None:
         return _STOCK_NAMES_CACHE
     try:
-        path = _CONFIG_DIR / "data" / "mock_data.json"
-        if path.exists():
-            data = json.loads(path.read_text("utf-8"))
-            _STOCK_NAMES_CACHE = data.get("stock_names", {})
-        else:
-            _STOCK_NAMES_CACHE = {}
+        data = load_config_table("mock_data")
+        _STOCK_NAMES_CACHE = data.get("stock_names", {})
     except Exception:
         _STOCK_NAMES_CACHE = {}
     return _STOCK_NAMES_CACHE
@@ -2367,7 +2725,10 @@ class EdgeExecutor:
         self.run(event.eid, changed_codes=list(dirty_codes) if dirty_codes else None)
 
     def run(self, eid: str, changed_codes: Optional[List[str]] = None) -> bool:
-        """执行单条边：gate → filter → propagate → callback。
+        """执行单条边：按 CompiledSchedule.steps 表驱动循环执行。
+
+        步骤序列由编译期从 edge_strategies.json:steps 读取，运行期按表循环。
+        新增步骤 = 加 JSON 条目 + 实现 EdgeStep，零行 run 改动。
 
         changed_codes: 本 tick 有数据变化的股票代码集合。筛选器对这些股票
         重新评估公式，其余股票使用 filter_inputs 中的缓存结果。首次执行
@@ -2384,86 +2745,38 @@ class EdgeExecutor:
         action_spec = self.schedule.edge_action_spec.get(eid)
         ttl_spec = self.schedule.edge_ttl_spec.get(eid)
 
-        # 1. gate
-        if not self._gate(timing_spec, eid):
-            return False
-
-        self.state.set_exec_ctx_fired(eid, now=_now_ts(self.state))
-
-        # 2. filter（changed_codes 驱动增量筛选）
         source_codes = [_stock_code(s) for s in self.state.get_pool(ec.sid).get_stocks()]
-        passed, rejected = self._filter(filter_spec, source_codes, ec.eid, changed_codes=changed_codes)
 
-        # 2b. 发布 FormulaEvaluated → StockFiltered（Spec 顺序：公式计算先于筛选）
-        if self.bus is not None and filter_spec is not None:
-            formula_ref = getattr(filter_spec, 'formula_ref', '')
-            if formula_ref:
-                all_evaluated = list(passed) + list(rejected)
-                for code in all_evaluated:
-                    result = code in passed
-                    _publish(self.bus, FormulaEvaluated(
-                        formula_ref=formula_ref,
-                        result=result,
-                        code=code,
-                        bar_hash="",
-                    ))
-            _publish(self.bus, StockFiltered(
-                eid=ec.eid,
-                passed=list(passed),
-                rejected=list(rejected),
-                filter_ref=getattr(filter_spec, 'formula_ref', ''),
-                ts=_now_ts(self.state),
-            ))
+        ctx = {
+            "eid": eid,
+            "ec": ec,
+            "timing_spec": timing_spec,
+            "filter_spec": filter_spec,
+            "propagate_spec": propagate_spec,
+            "action_spec": action_spec,
+            "ttl_spec": ttl_spec,
+            "changed_codes": changed_codes,
+            "source_codes": source_codes,
+        }
 
-        # 3. propagate
-        entered, exited, target_cleared = self._propagate(propagate_spec, ec.sid, ec.tid, passed)
-        propagate_mode = propagate_spec.mode if propagate_spec else "copy"
+        steps = self.schedule.steps or [
+            {"step_name": "gate"},
+            {"step_name": "filter"},
+            {"step_name": "propagate"},
+            {"step_name": "ttl"},
+            {"step_name": "callback"},
+        ]
 
-        # 4. tracker 初始化
-        ts = _now_ts(self.state)
-        prices = _init_entry_trackers(
-            self.state, ec.tid, entered, ts, ec.eid, self._tick_table,
-            ttl_spec=ttl_spec, event_driver=self.event_driver, bus=self.bus,
-        ) if entered else {}
-        # 4b. 节点级 TTL 注册（状态池/目标池的 hold 时间，例如 pool_C 20 分钟）
-        if entered and self.event_driver is not None:
-            node_ttl = self.schedule.node_ttl_spec.get(ec.tid)
-            if node_ttl is not None and node_ttl.bdel == 1 and node_ttl.check_type == "interval" and node_ttl.ttl_sec > 0:
-                node_ttl_eid = f"node_ttl:{ec.tid}"
-                for code in entered:
-                    register_ttl_spec(self.event_driver, self.state, ec.tid, node_ttl_eid, code, node_ttl.ttl_sec, ts, self.bus)
-        actions = action_spec.target_pool_actions if action_spec else []
-
-        # 5. 发布 Executed 事件
-        if self.bus is not None:
-            details = {
-                "actions": list(actions),
-                "prices": dict(prices),
-                "timestamp": ts,
-            } if entered else None
-            _publish(self.bus, Executed(
-                eid=ec.eid,
-                sid=ec.sid,
-                tid=ec.tid,
-                entered=list(entered),
-                exited=exited,
-                target_cleared=target_cleared,
-                mode=propagate_mode,
-                details=details,
-            ))
-            if entered or exited:
-                _publish(self.bus, TransferExecuted(
-                    src=ec.sid,
-                    tgt=ec.tid,
-                    codes=list(entered) if entered else [],
-                    mode=propagate_mode,
-                    ts=ts,
-                    entered_codes=list(entered) if entered else [],
-                    exited_codes=list(exited) if exited else [],
-                ))
-
-        # 6. callback
-        _run_callback(self.state, ec, action_spec, ec.tid, entered, ts, prices, self.bus)
+        for step_spec in steps:
+            step_name = step_spec.get("step_name", "") if isinstance(step_spec, dict) else getattr(step_spec, "step_name", "")
+            step_factory = STEP_REGISTRY.get(step_name)
+            if step_factory is None:
+                logger.warning("EdgeExecutor.run: 未知步骤 %s", step_name)
+                continue
+            step = step_factory(self)
+            result = step.run(ctx)
+            if not result.should_continue:
+                break
 
         return True
 
@@ -2924,6 +3237,149 @@ class EdgeExecutor:
 
 
 # ===========================================================================
+# 边执行步骤（EdgeExecutor 表驱动步骤化）
+# ===========================================================================
+# 每个 Step 类持有 executor 引用，委托现有 _gate/_filter/_propagate 方法及
+# 模块级辅助函数。STEP_REGISTRY 编译期由 edge_strategies.json:steps 驱动。
+
+
+class GateStep:
+    """步骤1：时机门控。"""
+    def __init__(self, executor):
+        self._executor = executor
+
+    def run(self, ctx):
+        eid = ctx["eid"]
+        timing_spec = ctx.get("timing_spec")
+        if not self._executor._gate(timing_spec, eid):
+            return StepResult(should_continue=False)
+        self._executor.state.set_exec_ctx_fired(eid, now=_now_ts(self._executor.state))
+        return StepResult(should_continue=True)
+
+
+class FilterStep:
+    """步骤2：强弱筛选 + 发布 FormulaEvaluated/StockFiltered。"""
+    def __init__(self, executor):
+        self._executor = executor
+
+    def run(self, ctx):
+        eid = ctx["eid"]
+        ec = ctx["ec"]
+        filter_spec = ctx.get("filter_spec")
+        changed_codes = ctx.get("changed_codes")
+        source_codes = ctx.get("source_codes")
+        passed, rejected = self._executor._filter(filter_spec, source_codes, ec.eid, changed_codes=changed_codes)
+        ctx["passed"] = passed
+        ctx["rejected"] = rejected
+        # 发布 FormulaEvaluated + StockFiltered
+        if self._executor.bus is not None and filter_spec is not None:
+            formula_ref = getattr(filter_spec, 'formula_ref', '')
+            if formula_ref:
+                all_evaluated = list(passed) + list(rejected)
+                for code in all_evaluated:
+                    result = code in passed
+                    _publish(self._executor.bus, FormulaEvaluated(
+                        formula_ref=formula_ref, result=result, code=code, bar_hash="",
+                    ))
+            _publish(self._executor.bus, StockFiltered(
+                eid=ec.eid, passed=list(passed), rejected=list(rejected),
+                filter_ref=getattr(filter_spec, 'formula_ref', ''), ts=_now_ts(self._executor.state),
+            ))
+        return StepResult(should_continue=True)
+
+
+class PropagateStep:
+    """步骤3：状态流转 + 发布 Executed/TransferExecuted。"""
+    def __init__(self, executor):
+        self._executor = executor
+
+    def run(self, ctx):
+        ec = ctx["ec"]
+        propagate_spec = ctx.get("propagate_spec")
+        passed = ctx.get("passed", [])
+        entered, exited, target_cleared = self._executor._propagate(propagate_spec, ec.sid, ec.tid, passed)
+        ctx["entered"] = entered
+        ctx["exited"] = exited
+        ctx["target_cleared"] = target_cleared
+        ctx["propagate_mode"] = propagate_spec.mode if propagate_spec else "copy"
+        return StepResult(should_continue=True)
+
+
+class TTLStep:
+    """步骤4：TTL 注册。"""
+    def __init__(self, executor):
+        self._executor = executor
+
+    def run(self, ctx):
+        eid = ctx["eid"]
+        ec = ctx["ec"]
+        entered = ctx.get("entered", [])
+        ttl_spec = ctx.get("ttl_spec")
+        ts = _now_ts(self._executor.state)
+        if entered:
+            prices = _init_entry_trackers(
+                self._executor.state, ec.tid, entered, ts, ec.eid,
+                self._executor._tick_table,
+                ttl_spec=ttl_spec, event_driver=self._executor.event_driver, bus=self._executor.bus,
+            )
+            ctx["prices"] = prices
+            if self._executor.event_driver is not None:
+                node_ttl = self._executor.schedule.node_ttl_spec.get(ec.tid)
+                if node_ttl is not None and node_ttl.bdel == 1 and node_ttl.check_type == "interval" and node_ttl.ttl_sec > 0:
+                    node_ttl_eid = f"node_ttl:{ec.tid}"
+                    for code in entered:
+                        register_ttl_spec(self._executor.event_driver, self._executor.state, ec.tid, node_ttl_eid, code, node_ttl.ttl_sec, ts, self._executor.bus)
+        else:
+            ctx["prices"] = {}
+        ctx["ts"] = ts
+        return StepResult(should_continue=True)
+
+
+class CallbackStep:
+    """步骤5：回调执行。"""
+    def __init__(self, executor):
+        self._executor = executor
+
+    def run(self, ctx):
+        ec = ctx["ec"]
+        action_spec = ctx.get("action_spec")
+        entered = ctx.get("entered", [])
+        ts = ctx.get("ts", _now_ts(self._executor.state))
+        prices = ctx.get("prices", {})
+        # 发布 Executed/TransferExecuted
+        if self._executor.bus is not None:
+            details = {
+                "actions": list(action_spec.target_pool_actions) if action_spec else [],
+                "prices": dict(prices),
+                "timestamp": ts,
+            } if entered else None
+            _publish(self._executor.bus, Executed(
+                eid=ec.eid, sid=ec.sid, tid=ec.tid,
+                entered=list(entered), exited=ctx.get("exited", []),
+                target_cleared=ctx.get("target_cleared", []),
+                mode=ctx.get("propagate_mode", "copy"), details=details,
+            ))
+            if entered or ctx.get("exited"):
+                _publish(self._executor.bus, TransferExecuted(
+                    src=ec.sid, tgt=ec.tid,
+                    codes=list(entered) if entered else [], mode=ctx.get("propagate_mode", "copy"), ts=ts,
+                    entered_codes=list(entered) if entered else [],
+                    exited_codes=list(ctx.get("exited", [])) if ctx.get("exited") else [],
+                ))
+        _run_callback(self._executor.state, ec, action_spec, ec.tid, entered, ts, prices, self._executor.bus)
+        return StepResult(should_continue=True)
+
+
+STEP_REGISTRY = {
+    "gate": lambda executor: GateStep(executor),
+    "filter": lambda executor: FilterStep(executor),
+    "propagate": lambda executor: PropagateStep(executor),
+    "ttl": lambda executor: TTLStep(executor),
+    "callback": lambda executor: CallbackStep(executor),
+}
+
+
+# ===========================================================================
 # 统一时间驱动（G1 heapq）：所有到时事件注册到 EventDriver 单一 heapq
 # ===========================================================================
 
@@ -2945,11 +3401,7 @@ def _make_edge_action(bus: Any, eid: str, state: Any) -> Callable[..., None]:
         # G2：action 只发布 EdgeFired 事件，不执行计算
         # fire_time 优先（来自 heapq 弹出的精确时刻），None 时退回 time_at(state)
         ts = fire_time if fire_time is not None else time_at(state=state)
-        if bus is not None:
-            bus.publish(EdgeFired(
-                eid=eid,
-                ts=ts,
-            ))
+        _publish_edge_fired(bus, eid, ts)
 
     return action
 
@@ -2990,11 +3442,7 @@ def _make_ttl_interval_action(state: Any, tgt: str, eid: str, ttl_sec: float, bu
         # G2：action 只发布 TTLDue 事件，不执行删除/卖出逻辑
         # fire_time 优先（来自 heapq 弹出的精确时刻），None 时退回 time_at(state)
         now_val = fire_time if fire_time is not None else time_at(state=state)
-        bus.publish(TTLDue(
-            node_id=tgt,
-            code=code,
-            ts=now_val,
-        ))
+        _publish_ttl_due(bus, tgt, code, now_val)
 
     return action
 
@@ -3037,11 +3485,7 @@ def _make_ttl_endtime_action(state: Any, ttl_spec: "TTLSpec", tgt: str, bus: Any
                 expired_codes.append(code)
         # G2：action 只发布 TTLDue 事件，不执行删除/卖出逻辑
         for code in expired_codes:
-            bus.publish(TTLDue(
-                node_id=tgt,
-                code=code,
-                ts=event_ts,
-            ))
+            _publish_ttl_due(bus, tgt, code, event_ts)
 
     return action
 
@@ -3487,10 +3931,7 @@ class ExecutionModule:
             self._filter_results[event.eid] = (list(event.passed), list(event.rejected))
             if not new_arch and event.eid not in self._fired_edges:
                 self._fired_edges.add(event.eid)
-                self._bus.publish(EdgeFired(
-                    eid=event.eid,
-                    ts=event.ts or time.time(),
-                ))
+                _publish_edge_fired(self._bus, event.eid, event.ts or time.time())
         except Exception as ex:
             logger.warning("ExecutionModule 缓存筛选结果失败: %s", ex)
 
@@ -3660,4 +4101,51 @@ __all__ = [
     "TTLHelper", "_do_ttl_check",
     # 对外统一入口
     "ExecutionModule",
+    # Task 4：编译-运行分离
+    "CompiledPool", "compile",
+    # Task 6/7/8: table-driven three elements
+    "trigger_check", "filter_eval", "propagate_apply",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Task 4 内联测试：验证 CompiledPool 编译产物结构正确性
+# 运行方式：python -m core.execution_module（需在项目根目录，依赖包上下文）
+# ---------------------------------------------------------------------------
+if __name__ == "__main__":
+    _minimal_pool = {
+        "nodes": [
+            {"id": "n1", "legacy_type": 202, "type": "candidate_pool", "text": "备选池"},
+            {"id": "n2", "legacy_type": 201, "type": "condition", "text": "条件节点"},
+            {"id": "n3", "legacy_type": 203, "type": "target", "text": "目标池"},
+        ],
+        "edges": [
+            {
+                "id": "e1", "from": "n1", "to": "n2",
+                "params": {"_order": 1, "starttype": 2, "nset": 1, "formula_ref": "MA"},
+            },
+            {
+                "id": "e2", "from": "n2", "to": "n3",
+                "params": {"_order": 2, "mode": "copy"},
+            },
+        ],
+    }
+
+    _cp = compile(_minimal_pool)
+    assert set(_cp.nodes.keys()) == {"n1", "n2", "n3"}, f"nodes mismatch: {_cp.nodes.keys()}"
+    assert set(_cp.edges.keys()) == {"e1", "e2"}, f"edges mismatch: {_cp.edges.keys()}"
+    assert _cp.edge_endpoints["e1"] == ("n1", "n2"), f"endpoints e1: {_cp.edge_endpoints['e1']}"
+    assert _cp.edge_endpoints["e2"] == ("n2", "n3"), f"endpoints e2: {_cp.edge_endpoints['e2']}"
+    assert _cp.edge_order == ["e1", "e2"], f"edge_order: {_cp.edge_order}"
+    assert _cp.edge_type["e1"] == "conditional", f"e1 type: {_cp.edge_type['e1']}"
+    assert _cp.edge_type["e2"] == "unconditional", f"e2 type: {_cp.edge_type['e2']}"
+    assert _cp.out_edges["n1"] == ["e1"], f"out_edges n1: {_cp.out_edges['n1']}"
+    assert _cp.in_edges["n3"] == ["e2"], f"in_edges n3: {_cp.in_edges['n3']}"
+    assert _cp.source_nodes == ["n1"], f"source_nodes: {_cp.source_nodes}"
+    assert _cp.node_role["n1"] == "candidate", f"role n1: {_cp.node_role['n1']}"
+    assert _cp.node_role["n2"] == "condition", f"role n2: {_cp.node_role['n2']}"
+    assert _cp.node_role["n3"] == "target", f"role n3: {_cp.node_role['n3']}"
+    assert _cp.edge_timing_spec["e1"]["starttype"] == 2, f"timing e1: {_cp.edge_timing_spec['e1']}"
+    assert _cp.edge_filter_spec["e1"]["formula_ref"] == "MA", f"filter e1: {_cp.edge_filter_spec['e1']}"
+    assert _cp.edge_propagate_spec["e2"]["mode"] == "copy", f"propagate e2: {_cp.edge_propagate_spec['e2']}"
+    print("CompiledPool inline test PASSED")

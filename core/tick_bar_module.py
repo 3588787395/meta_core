@@ -14,7 +14,7 @@ import json
 import logging
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, NamedTuple, Optional, Set
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set
 
 import numpy as np
 import pandas as pd
@@ -33,6 +33,7 @@ from core.event_bus import (
     is_event_bus,
 )
 from core.domain import MockDataSource, TickSource, _hash_tick, time_at
+from core.tick_table import TickTable
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,76 @@ def _now_from_state(state: Any) -> float:
     return time_at(state=state)
 
 
+def publish_data_changed(bus, state, source, codes, ts, data=None, period=None, bar_hash=""):
+    """统一 DataChanged 事件发布器。
+
+    合并原 _publish_tick_changed 和 _publish_bar_changed，消除同构重复。
+    - source="tick": 发布 DataChanged(tick)
+    - source="bar": 发布 DataChanged(bar) + 对每个 code 发布 BarComposed
+
+    G2 约束：ts 由调用方传入，不在此处调用 time_at(state)。
+    """
+    if not codes:
+        return
+    if not is_event_bus(bus):
+        return
+    state.add_changed_codes(list(codes))
+    event = DataChanged(
+        ts=ts,
+        bar_hash=bar_hash,
+        codes=list(codes),
+        source=source,
+        data=data,
+        period=period or "",
+    )
+    bus.publish(event)
+    if source == "bar":
+        for code in codes:
+            bar = state.bars.get(period, {}).get(code) if period else None
+            if bar:
+                bus.publish(BarComposed(
+                    bar=dict(bar), period=period, code=code, ts=ts,
+                ))
+
+
+def _publish_tick_batch(
+    bus: Any,
+    tick_data: Optional[Dict[str, Any]],
+    ts: Optional[float],
+    *,
+    ts_fallback: float = 0.0,
+) -> None:
+    """统一批量发布 TickReceived 事件。
+
+    消除 ``for code, tick in tick_data.items(): ... TickReceived(tick_data=tick_copy,
+    code=str(code), ts=ts)`` 样板，集中维护字段复制与发布逻辑。
+
+    Args:
+        bus: EventBus 实例。
+        tick_data: ``{code: tick_dict}`` 映射；空或非 dict 直接返回。
+        ts: 统一时间戳。若为 ``None``，则对每个 tick 使用
+            ``float(tick.get("_ts", ts_fallback))``（保留 _step_once_impl
+            "每 tick 自带 _ts 优先"语义）。
+        ts_fallback: ``ts`` 为 ``None`` 且 tick 缺失 ``_ts`` 时的回退值。
+
+    单个 tick 发布失败不影响后续 tick（per-tick try/except 错误隔离）。
+    """
+    if not tick_data or not isinstance(tick_data, dict):
+        return
+    for code, tick in tick_data.items():
+        if not code or not isinstance(tick, dict):
+            continue
+        try:
+            tick_copy = dict(tick)
+            tick_copy["code"] = str(code)
+            ts_use = ts if ts is not None else float(tick.get("_ts", ts_fallback))
+            bus.publish(TickReceived(
+                tick_data=tick_copy, code=str(code), ts=ts_use,
+            ))
+        except Exception as ex:
+            logger.warning("TickReceived publish failed for %s: %s", code, ex)
+
+
 # ====================================================================
 # DataUpdater：行情数据更新器（来自 core/data_updater.py）
 # ====================================================================
@@ -76,12 +147,11 @@ class DataUpdater:
       - _fundamentals: 基本面字段缓存（写入 state.fundamentals 前）
       - _watermark: 每只股票最新 _ts 水位线（冗余缓存，避免遍历 state.latest_tick）
 
-    方法（≤ 6）:
+    方法（≤ 5）:
       - __init__
       - bind
       - apply_data
       - _apply_code_tick
-      - _publish_tick_changed
       - _hash_aggregate
     """
 
@@ -124,14 +194,14 @@ class DataUpdater:
         if not updated:
             return False
 
-        self.state.latest_tick["_hash"] = self._hash_aggregate()
-        self.state.latest_tick["_ts"] = _now_from_state(self.state)
+        # Task 2: 顶层 _hash/_ts 元数据由 TickTable 内部管理，不再直写 latest_tick
 
         # 记录本 tick 有变化的股票代码（updated 包含首次写入和推进的股票）
         updated_codes = list(updated.keys())
         self.state.add_changed_codes(updated_codes)
 
-        self._publish_tick_changed(updated_codes, updated)
+        data_payload = updated if updated else None
+        publish_data_changed(self.bus, self.state, "tick", updated_codes, _now_from_state(self.state), data=data_payload)
         if updated_codes:
             self.state.mark_data_dirty()
         if advanced_codes:
@@ -151,7 +221,15 @@ class DataUpdater:
         if existing is None:
             tick["_ts"] = new_ts
             tick["_hash"] = new_hash
-            self.state.latest_tick[code] = tick
+            # Task 2: 通过 tick_table 统一入口（snapshot + 增量合并 + update）
+            tick_table = getattr(self.state, "tick_table", None)
+            if tick_table is not None:
+                _snap = tick_table.snapshot()
+                _snap[code] = tick
+                tick_table.update(_snap)
+                self.state.latest_tick = _snap
+            else:
+                self.state.latest_tick = {**self.state.latest_tick, code: tick}
             self._watermark[code] = new_ts
             return True, False
 
@@ -173,27 +251,18 @@ class DataUpdater:
         self.state.prev_tick[code] = {k: v for k, v in existing.items() if not k.startswith("_")}
         tick["_ts"] = new_ts
         tick["_hash"] = new_hash
-        self.state.latest_tick[code] = tick
+        # Task 2: 通过 tick_table 统一入口（snapshot + 增量合并 + update）
+        tick_table = getattr(self.state, "tick_table", None)
+        if tick_table is not None:
+            _snap = tick_table.snapshot()
+            _snap[code] = tick
+            tick_table.update(_snap)
+            self.state.latest_tick = _snap
+        else:
+            self.state.latest_tick = {**self.state.latest_tick, code: tick}
         self._watermark[code] = new_ts
         advanced = new_ts > old_ts
         return True, advanced
-
-    def _publish_tick_changed(self, codes: List[str], tick_data: Optional[Dict[str, Any]] = None) -> None:
-        if not is_event_bus(self.bus):
-            return
-        top_hash = self.state.bar_hash()
-        # 附带 tick_data 使 TradeModule._on_data_changed 可提取最新价
-        data_payload = tick_data if tick_data else None
-        event = DataChanged(
-            ts=_now_from_state(self.state),
-            bar_hash=top_hash,
-            codes=list(codes),
-            source="tick",
-            data=data_payload,
-        )
-        # I22：删除 try/except + logger.debug——EventBus.publish 内部已隔离订阅者异常，
-        # 外层吞掉仅掩盖总线自身 bug（如 _events.append 失败）。
-        self.bus.publish(event)
 
     def _hash_aggregate(self) -> str:
         """对所有 per-code tick（不含顶层 _hash/_ts）做聚合摘要。
@@ -355,38 +424,6 @@ def _append_closed_bar(state: Any, period: str, code: str, bar: Dict[str, Any]) 
         del hist[0]
 
 
-def _publish_bar_changed(composer: "BarComposer", period: str, codes: List[str], ts: float) -> None:
-    """发布 DataChanged(bar) 与 BarComposed 事件。
-
-    G2 硬约束：ts 由调用方（BarComposer.on_tick）传入，来源于 DataChanged(tick)
-    事件的 event.ts。不在此处重复调用 ``time_at(state)``——那会与上游事件 ts 不一致，
-    且在 ``_InternalState.time_source`` 未初始化时回落到 ``time.time()`` 污染仿真坐标系。
-    仿真/实盘同代码：实盘模式下 event.ts 同样来自 ``time_at(state)``（PoolState），
-    由事件流传递，无需重复计算。
-    """
-    if not codes:
-        return
-    composer.state.add_changed_codes(codes)
-    if not is_event_bus(composer.bus):
-        return
-    period_hash = composer._bar_hashes.get(period, "")
-    event = DataChanged(
-        ts=ts,
-        bar_hash=period_hash,
-        codes=list(codes),
-        source="bar",
-        period=period,
-        data=None,
-    )
-    composer.bus.publish(event)
-    for code in codes:
-        bar = composer.get_bar(period, code)
-        if bar:
-            composer.bus.publish(BarComposed(
-                bar=dict(bar), period=period, code=code, ts=ts,
-            ))
-
-
 # ====================================================================
 # BarComposer：多周期 K 线组合器（来自 core/bar_composer.py）
 # ====================================================================
@@ -495,7 +532,7 @@ class BarComposer:
 
             self._bar_hashes[period] = _hash_period_bars(period_bars)
             if period_advanced:
-                _publish_bar_changed(self, period, period_advanced, now)
+                publish_data_changed(self.bus, self.state, "bar", period_advanced, now, period=period, bar_hash=self._bar_hashes.get(period, ""))
 
     def get_bar(self, period: str, code: str) -> Optional[Dict[str, Any]]:
         """读取指定周期某只股票的当前 bar。"""
@@ -804,6 +841,8 @@ class _InternalState:
         self.bars_history: Dict[str, Any] = {}
         self.time_source: Dict[str, Any] = {}
         self.changed_codes: Set[str] = set()
+        # Task 2: TickTable 作为统一入口，latest_tick 由 tick_table.data 同步
+        self.tick_table = TickTable()
 
     def mark_data_dirty(self) -> None:
         """接口契约：TickBarModule 内部不消费脏标记。"""
@@ -1059,11 +1098,8 @@ class TickBarModule:
             tick = tick_source.get_tick(code, ts)
             if not isinstance(tick, dict):
                 return
-            tick_copy = dict(tick)
-            tick_copy["code"] = str(code)
-            self._bus.publish(TickReceived(
-                tick_data=tick_copy, code=str(code), ts=ts,
-            ))
+            # 单 tick 包装成单元素 dict，复用 _publish_tick_batch 统一发布路径。
+            _publish_tick_batch(self._bus, {code: tick}, ts)
         except Exception as ex:
             logger.warning("TickBarModule._on_tick_due 异常: %s", ex, exc_info=True)
 
@@ -1121,7 +1157,7 @@ class TickBarModule:
                     self._feed_minute_aggregator(code, tick, event.ts)
 
             # 2. BarComposer 合成多周期 K 线（读 state.latest_tick，写 state.bars）
-            # G2：传入 event.ts，使 _publish_bar_changed 发布的 DataChanged(bar)/BarComposed
+            # G2：传入 event.ts，使 publish_data_changed 发布的 DataChanged(bar)/BarComposed
             # 与上游 DataChanged(tick) 同源，避免 time_at(state) 在 _InternalState 未初始化时
             # 回落 time.time() 污染仿真坐标系。
             self._bar_composer.on_tick(codes, event.ts)
@@ -1166,57 +1202,64 @@ class TickBarModule:
             return 0
 
     # ------------------------------------------------------------------
-    # SubTask 5.4：SimulationStep → 生成 mock tick → 发 TickReceived
+    # SubTask 5.4：SimulationStep / ReplayStep → 生成 tick → 发 TickReceived
+    # 7 步同构骨架合并至 _on_step_event，两个入口仅构造 provider_fn 并委托。
     # ------------------------------------------------------------------
-    def _on_simulation_step(self, event: SimulationStep) -> None:
+    def _on_step_event(
+        self,
+        event,
+        *,
+        driver_type: str,
+        provider_fn: Callable[[Dict[str, Any]], Optional[Dict[str, Any]]],
+    ) -> None:
+        """SimulationStep / ReplayStep 统一处理骨架。
+
+        7 步：try 包裹 → 从 event.step 提取 ts → 设置 state.time_source →
+        调用 provider_fn(step) 取 ticks → 校验 dict → 批量发布 TickReceived →
+        except 记日志。
+
+        Args:
+            event: SimulationStep 或 ReplayStep 事件。
+            driver_type: "virtual"（仿真，ts 字段 virtual_ts）或
+                "sequence"（回放，ts 字段 ts）。
+            provider_fn: 接受 step dict，返回 ``{code: tick}`` 映射；
+                调用方负责 _codes 非空 / replay_provider callable 等前置校验，
+                校验失败返回 ``{}`` 即可（_publish_tick_batch 会安全跳过）。
+        """
         try:
             step = event.step or {}
-            virtual_ts = float(step.get("virtual_ts", 0.0))
-            self._state.time_source = {"current_ts": virtual_ts, "driver_type": "virtual"}
+            ts_key = "virtual_ts" if driver_type == "virtual" else "ts"
+            ts = float(step.get(ts_key, 0.0))
+            self._state.time_source = {"current_ts": ts, "driver_type": driver_type}
+            ticks = provider_fn(step)
+            _publish_tick_batch(self._bus, ticks, ts)
+        except Exception as ex:
+            logger.warning(
+                "TickBarModule._on_step_event (%s) 异常: %s", driver_type, ex,
+            )
+
+    def _on_simulation_step(self, event: SimulationStep) -> None:
+        """SimulationStep → 生成 mock tick → 发 TickReceived（委托 _on_step_event）。"""
+        def _provider(step: Dict[str, Any]) -> Dict[str, Any]:
             codes = getattr(self._tick_source, '_codes', [])
             if not codes:
-                return
-            ticks = self._tick_source.next_ticks(virtual_ts)
-            ts_codes = list(ticks.keys()) if isinstance(ticks, dict) else []
-            for code, tick in ticks.items():
-                if not code:
-                    continue
-                if not isinstance(tick, dict):
-                    continue
-                tick = dict(tick)
-                tick["code"] = str(code)
-                self._bus.publish(TickReceived(
-                    tick_data=tick, code=str(code), ts=virtual_ts,
-                ))
-        except Exception as ex:
-            logger.warning("TickBarModule._on_simulation_step 异常: %s", ex)
+                return {}
+            virtual_ts = float((step or {}).get("virtual_ts", 0.0))
+            return self._tick_source.next_ticks(virtual_ts)
+        return self._on_step_event(
+            event, driver_type="virtual", provider_fn=_provider,
+        )
 
-    # ------------------------------------------------------------------
-    # SubTask 5.4：ReplayStep → 从历史 K 线生成 tick → 发 TickReceived
-    # ------------------------------------------------------------------
     def _on_replay_step(self, event: ReplayStep) -> None:
-        try:
-            step = event.step or {}
-            ts = float(step.get("ts", 0.0))
-            self._state.time_source = {"current_ts": ts, "driver_type": "sequence"}
+        """ReplayStep → 从历史 K 线生成 tick → 发 TickReceived（委托 _on_step_event）。"""
+        def _provider(step: Dict[str, Any]) -> Dict[str, Any]:
             provider = self._config.get("replay_provider")
             if not callable(provider):
-                return
-            ticks = provider(step)
-            if not isinstance(ticks, dict):
-                return
-            for code, tick in ticks.items():
-                if not code:
-                    continue
-                if not isinstance(tick, dict):
-                    continue
-                tick = dict(tick)
-                tick["code"] = str(code)
-                self._bus.publish(TickReceived(
-                    tick_data=tick, code=str(code), ts=ts,
-                ))
-        except Exception as ex:
-            logger.warning("TickBarModule._on_replay_step 异常: %s", ex)
+                return {}
+            return provider(step)
+        return self._on_step_event(
+            event, driver_type="sequence", provider_fn=_provider,
+        )
 
 
 __all__ = [

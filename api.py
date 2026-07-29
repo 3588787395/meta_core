@@ -36,6 +36,7 @@ from uuid import uuid4
 from fastapi import (
     APIRouter,
     Body,
+    Depends,
     File,
     Form,
     HTTPException,
@@ -203,15 +204,24 @@ __all__ = [
 #  Part 1: 来自 config_api.py — 配置管理 API
 # ══════════════════════════════════════════════════════════════════════
 
-router = APIRouter(prefix="/api/config", tags=["config"])
-
-# 合法表名模式：字母/下划线开头，仅含字母、数字、下划线（防止路径遍历）
-TABLE_NAME_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
-
 # 引擎实例（由app.py注入）
 _config_store = None
 _hot_reload_manager = None
 _schema_validator = None
+
+
+def require_config_store():
+    """FastAPI 依赖：确保 _config_store 已注入，未初始化则返回 500。"""
+    if _config_store is None:
+        raise HTTPException(status_code=500, detail="引擎未初始化")
+    return _config_store
+
+
+router = APIRouter(prefix="/api/config", tags=["config"],
+                   dependencies=[Depends(require_config_store)])
+
+# 合法表名模式：字母/下划线开头，仅含字母、数字、下划线（防止路径遍历）
+TABLE_NAME_PATTERN = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 
 
 def init(config_store, hot_reload_manager=None, schema_validator=None):
@@ -227,8 +237,6 @@ def init(config_store, hot_reload_manager=None, schema_validator=None):
 @router.get("/tables")
 def list_tables():
     """列出所有已加载的配置表"""
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
     tables = {}
     for name in _config_store.table_names:
         data = _config_store.get(name, {})
@@ -253,16 +261,12 @@ def list_tables():
 @router.get("/categories")
 def get_categories():
     """返回分类树，含 schema 覆盖统计与一致性信息。"""
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
     return _config_store.get_categories()
 
 
 @router.get("/status")
 def config_status():
     """返回配置中心状态：已加载表、分类一致性、schema 覆盖率与锁状态。"""
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
     return {
         "tables_loaded": len(_config_store.table_names),
         "table_names": _config_store.table_names,
@@ -275,8 +279,6 @@ def config_status():
 @router.get("/tables/{table_name}")
 def get_table(table_name: str):
     """获取指定配置表的完整内容"""
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
     data = _config_store.get(table_name)
     if data is None:
         raise HTTPException(404, f"配置表 {table_name} 不存在")
@@ -290,8 +292,6 @@ class TableUpdateRequest(BaseModel):
 @router.put("/tables/{table_name}")
 def update_table(table_name: str, req: TableUpdateRequest, request: Request):
     """更新指定配置表（写入文件 + 触发热加载）"""
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
 
     # 锁定检查（Task 13.3）
     if _config_store.is_table_locked(table_name):
@@ -330,8 +330,6 @@ def update_table(table_name: str, req: TableUpdateRequest, request: Request):
 @router.post("/validate")
 def validate_all():
     """校验所有配置表"""
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
     from native.validators import ConfigIntegrityValidator
     validator = ConfigIntegrityValidator(str(_config_store._config_dir))
     return validator.validate_all()
@@ -340,8 +338,6 @@ def validate_all():
 @router.post("/validate/{table_name}")
 def validate_table(table_name: str):
     """校验指定配置表"""
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
     data = _config_store.get(table_name)
     if data is None:
         raise HTTPException(404, f"配置表 {table_name} 不存在")
@@ -357,8 +353,6 @@ def validate_all_tables():
     遍历所有已加载表（跳过系统元数据表），调用
     ``validate_table_with_report`` 生成逐表报告，并汇总通过/失败计数。
     """
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
 
     report: Dict[str, Any] = {}
     for table_name, data in _config_store._tables.items():
@@ -387,8 +381,6 @@ def export_all():
 
     返回 ``{version, exported_at, tables: {name: data}}``，跳过系统元数据表。
     """
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
 
     tables: Dict[str, Any] = {}
     for name, data in _config_store._tables.items():
@@ -410,8 +402,6 @@ def import_all(payload: dict):
     先对 envelope 中所有表执行校验与锁检查，任一失败返回 422 且不写入；
     全部通过后逐表写盘并触发 reload。
     """
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
 
     tables = payload.get("tables", {}) if isinstance(payload, dict) else {}
     if not tables:
@@ -473,8 +463,6 @@ def import_all(payload: dict):
 @router.post("/lock/{table_name}")
 def lock_table(table_name: str, reason: str = ""):
     """锁定一张表以阻止编辑。"""
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
     if _config_store.is_table_locked(table_name):
         return {"locked": True, "message": "Already locked",
                 "lock_info": _config_store._locks.get(table_name)}
@@ -485,8 +473,6 @@ def lock_table(table_name: str, reason: str = ""):
 @router.delete("/lock/{table_name}")
 def unlock_table(table_name: str):
     """解锁一张表。"""
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
     was_locked = _config_store.unlock_table(table_name)
     return {"locked": False, "was_locked": was_locked}
 
@@ -496,8 +482,6 @@ def unlock_table(table_name: str):
 @router.post("/reload")
 def trigger_reload():
     """手动触发热加载"""
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
 
     if _hot_reload_manager:
         changed = _hot_reload_manager.check_and_reload()
@@ -538,7 +522,8 @@ def stop_watchdog():
 @router.get("/history/{table_name}")
 def get_config_history(table_name: str, limit: int = 20):
     """获取指定配置表的变更历史"""
-    if not _config_store or not _config_store._storage:
+    storage = _config_store._storage
+    if not storage:
         return {"history": [], "total": 0}
     try:
         history = _config_store._storage.get_config_versions(table_name, limit=limit)
@@ -550,8 +535,6 @@ def get_config_history(table_name: str, limit: int = 20):
 @router.post("/rollback/{version_id}")
 def rollback_config(version_id: str):
     """回滚配置到指定版本"""
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
     if _hot_reload_manager:
         success = _hot_reload_manager.rollback(version_id)
     else:
@@ -566,8 +549,6 @@ def diff_versions(table_name: str, from_version: str = None, to_version: str = N
     ``from_version``/``to_version`` 为版本 ID；为 ``None``/``"current"`` 时取当前表数据。
     返回 ``{table, from_version, to_version, diff: {added, removed, modified}}``。
     """
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
 
     from_data = _get_version_data(_config_store, table_name, from_version)
     to_data = _get_version_data(_config_store, table_name, to_version)
@@ -684,8 +665,6 @@ def _compute_diff(from_data, to_data):
 @router.get("/data-mappings")
 def list_data_mappings():
     """获取所有数据映射"""
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
     mappings = _config_store.get("data_mappings", {}).get("mappings", [])
     return {"mappings": mappings, "total": len(mappings)}
 
@@ -693,8 +672,6 @@ def list_data_mappings():
 @router.get("/data-mappings/{mapping_id}")
 def get_data_mapping(mapping_id: str):
     """获取指定数据映射"""
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
     mappings = _config_store.get("data_mappings", {}).get("mappings", [])
     for m in mappings:
         if m.get("mapping_id") == mapping_id:
@@ -711,8 +688,6 @@ def search_content(q: str, scope: str = "content", limit: int = 100):
     返回命中列表，每项含 ``table/row_key/field/snippet``。
     ``scope=metadata`` 时仅返回空结果（元数据搜索由前端处理）。
     """
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
 
     if not q or len(q) < 1:
         return {"results": [], "total": 0}
@@ -805,8 +780,6 @@ def _make_snippet(text, query, context=30):
 @router.get("/render-config/{type_id}")
 def get_render_config(type_id: str):
     """获取指定类型的渲染配置"""
-    if not _config_store:
-        raise HTTPException(500, "引擎未初始化")
     render_configs = _config_store.get("cell_type_registry", {}).get("render_config", {})
     config = render_configs.get(type_id)
     if not config:

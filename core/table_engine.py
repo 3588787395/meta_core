@@ -58,6 +58,8 @@ class ConfigStore:
         }
         # 表锁定状态（Task 13: .locks.json）
         self._locks: Dict[str, Dict] = {}
+        # 非配置表数据文件缓存（data/ 目录，不参与热加载）
+        self._data_files: Dict[str, Dict] = {}
         # Task 15: EventBus 注入——订阅 ConfigChanged 事件自行重载，
         # load_all() 后发布 ConfigLoaded 事件
         self._bus: Optional[EventBus] = bus
@@ -321,6 +323,46 @@ class ConfigStore:
     def get(self, name: str, default: Any = None) -> Any:
         """获取配置表"""
         return self._tables.get(name, default)
+
+    def get_table(self, name: str) -> Dict[str, Any]:
+        """获取配置表（统一入口，参与热加载）。
+
+        与 ``get()`` 的区别：默认返回空 dict 而非 None，与历史 ``_load_*`` 语义对齐。
+        表未加载时尝试按名递归查找并加载（兼容 ConfigStore 未 ``load_all`` 的场景）。
+
+        硬约束：模块级配置加载 SHALL 通过本方法，禁止直接 ``json.loads`` 绕过热加载。
+        """
+        table = self._tables.get(name)
+        if table is None:
+            # 表未加载：尝试按名递归查找并加载（兼容独立实例/脚本用法）
+            path = self._find_table_path(name)
+            if path is not None:
+                self._load_table(name, path)
+                table = self._tables.get(name, {})
+            else:
+                logger.warning("ConfigStore.get_table: 配置表 %s 未找到，返回空 dict", name)
+                table = {}
+        return table if isinstance(table, dict) else {}
+
+    def get_data_file(self, name: str) -> Dict[str, Any]:
+        """加载 ``data/`` 目录下的 JSON 文件（带缓存，不参与热加载）。
+
+        与 ``get_table`` 的区别：
+        - 路径为 ``data/{name}.json``（非 ``config/``）
+        - 仅缓存，不参与热加载
+        - 文件不存在或解析失败时返回空 dict
+        """
+        if name in self._data_files:
+            return self._data_files[name]
+        data_path = self._config_dir.parent / "data" / f"{name}.json"
+        try:
+            raw = data_path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+        except (OSError, json.JSONDecodeError) as ex:
+            logger.warning("ConfigStore.get_data_file: 加载 %s 失败: %s", name, ex)
+            data = {}
+        self._data_files[name] = data
+        return data
 
     def get_layout(self, layout_id: str) -> Optional[Dict]:
         """获取UI布局配置"""
@@ -613,6 +655,50 @@ class ConfigStore:
     def get_lock_status(self) -> Dict[str, Any]:
         """返回所有表的锁状态。"""
         return dict(self._locks)
+
+
+# ─── 全局 ConfigStore 引用（供模块级函数访问，避免在各模块重复定义 _load_* 帮助函数）───
+
+_global_config_store: Optional["ConfigStore"] = None
+
+
+def set_global_config_store(store: "ConfigStore") -> None:
+    """注入全局 ConfigStore 引用，供无法通过构造函数获取 config_store 的模块级函数使用。
+
+    在 app.py / api.py 初始化 ConfigStore 后调用。
+    """
+    global _global_config_store
+    _global_config_store = store
+
+
+def get_global_config_store() -> Optional["ConfigStore"]:
+    """获取全局 ConfigStore 引用。未注入时返回 None，调用方应处理 None 情形。"""
+    return _global_config_store
+
+
+def load_config_table(name: str) -> Dict[str, Any]:
+    """按表名加载配置表（模块级配置加载统一入口）。
+
+    硬约束：模块级配置加载 SHALL 通过本函数，禁止业务模块直接 ``json.loads``
+    绕过热加载。
+
+    ConfigStore 已初始化时走 ``get_table()``（支持热加载）；
+    未初始化时（模块导入早期）回退到递归查找并直接读取文件。
+    本函数位于 ``table_engine.py``（基础设施层），``json.loads`` 合法使用。
+    """
+    store = get_global_config_store()
+    if store is not None:
+        return store.get_table(name)
+    # 回退：模块导入早期 ConfigStore 未注入，递归查找配置文件
+    config_dir = Path(__file__).parent.parent / "config"
+    for path in config_dir.rglob(f"{name}.json"):
+        if "_archived" in path.parts:
+            continue
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+    return {}
 
 
 # ─── 规则执行引擎 ───────────────────────────────────────────────
@@ -1373,6 +1459,14 @@ class HotReloadManager:
             except Exception:
                 pass
 
+    def _notify_changed(self, changed_tables: List[str]) -> None:
+        if not changed_tables or self._bus is None:
+            return
+        try:
+            self._bus.publish(ConfigChanged(changed_tables=changed_tables))
+        except Exception as ex:
+            logger.warning("HotReload publish ConfigChanged failed: %s", ex)
+
     def set_config_store(self, store) -> None:
         self._config_store = store
 
@@ -1427,11 +1521,8 @@ class HotReloadManager:
                 changed_tables.append(name)
             self._hashes[name] = cur_hash
 
-        if changed_tables and self._bus is not None:
-            try:
-                self._bus.publish(ConfigChanged(changed_tables=changed_tables))
-            except Exception as ex:
-                logger.warning("HotReload 发布 ConfigChanged 事件失败: %s", ex)
+        if changed_tables:
+            self._notify_changed(changed_tables)
 
         return changed_tables
 
@@ -1568,11 +1659,8 @@ class HotReloadManager:
 
         # 事件驱动：发布 ConfigChanged 事件（Task 14）
         # Config 模块订阅后自行重载，Execution 模块订阅后重建 CompiledSchedule
-        if changed and self._bus is not None:
-            try:
-                self._bus.publish(ConfigChanged(changed_tables=changed))
-            except Exception as ex:
-                logger.warning("HotReload 发布 ConfigChanged 事件失败: %s", ex)
+        if changed:
+            self._notify_changed(changed)
 
         return changed
 

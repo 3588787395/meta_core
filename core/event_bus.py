@@ -101,6 +101,20 @@ class Signal:
     hold_days: int = 0
 
 
+@dataclass
+class StockChanged:
+    """Event: node stock list changed (enter/exit).
+
+    Task 12（Event layer）：节点股票列表变更事件（进/出），作为三层正交架构
+    的客观状态变更记录层。SignalDeriver 据此派生 BUY/SELL Signal。
+    """
+
+    node_id: str
+    code: str
+    action: str  # "enter" or "exit"
+    ts: float
+
+
 # === 新增事件类（unify-stockpool-oop-event-driven spec 事件契约表） ===
 
 
@@ -594,6 +608,7 @@ __all__ = [
     "SimulationStep",
     "SnapshotUpdated",
     "StatisticsUpdated",
+    "StockChanged",
     "StockFiltered",
     "TTLDue",
     "TTLExpired",

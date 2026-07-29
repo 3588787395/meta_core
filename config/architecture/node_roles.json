@@ -1,0 +1,22 @@
+{
+  "candidate": {
+    "on_enter": ["mark_out_edges_dirty"],
+    "on_exit": []
+  },
+  "state": {
+    "on_enter": ["mark_out_edges_dirty"],
+    "on_exit": []
+  },
+  "condition": {
+    "on_enter": ["mark_out_edges_dirty"],
+    "on_exit": []
+  },
+  "target": {
+    "on_enter": ["publish_enter_event", "publish_buy_signal"],
+    "on_exit": ["publish_exit_event", "publish_sell_signal"]
+  },
+  "discard": {
+    "on_enter": ["publish_exit_event"],
+    "on_exit": []
+  }
+}

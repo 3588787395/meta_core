@@ -37,11 +37,13 @@ from core.event_bus import (
     OrderPlaced,
     PositionUpdated,
     Signal,
+    StockChanged,
     TTLDue,
     TransferExecuted,
     is_event_bus,
 )
 from core.domain import ActionSpec
+from core.table_engine import get_global_config_store
 
 logger = logging.getLogger(__name__)
 
@@ -56,21 +58,9 @@ _TDXPOOL_DIR = _BASE / "tdxpool"
 _TDX_BLOCK_DIR = _BASE / "data" / "tdx_blocks"
 
 
-def _load_json_cache(attr_name):
-    cache = globals().get(attr_name)
-    if cache is None:
-        try:
-            fname = {'_XML_MAP': 'xml_mapping.json', '_HIST_SCHEMA': 'runtime/history_schema.json', '_ACTION_CFG': 'ui/action_table.json'}[attr_name]
-            with open(_CONFIG / fname, encoding="utf-8-sig" if 'xml' in fname else "utf-8") as f:
-                cache = json.load(f)
-        except Exception:
-            cache = {}
-        globals()[attr_name] = cache
-    return cache
-
-
-_get_history_schema = lambda: _load_json_cache('_HIST_SCHEMA')
-_get_action_table = lambda: _load_json_cache('_ACTION_CFG')
+# Task 9.5: _load_json_cache 已删除，改为通过 ConfigStore.get_table 加载
+_get_history_schema = lambda: (get_global_config_store().get_table("history_schema") if get_global_config_store() else {})
+_get_action_table = lambda: (get_global_config_store().get_table("action_table") if get_global_config_store() else {})
 
 _STOCK_NAMES = {}
 try:
@@ -1222,4 +1212,72 @@ class TradeModule:
             ))
 
 
-__all__ = ["TradeModule"]
+# === Task 13/14: Three-layer orthogonal architecture (Event / Signal / Action) ===
+
+
+class SignalDeriver:
+    """Derives BUY/SELL signals from StockChanged events based on node role.
+
+    Task 13 (Signal layer): reuses event_bus.Signal (field signal_type,
+    not spec draft kind) to stay aligned with existing EventBus Signal
+    subscription chain (TradeModule etc.). Decoupled from ActionDispatcher -
+    this layer only derives event->signal, executes no side effects.
+    """
+
+    def __init__(self, event_bus, node_roles_config: dict):
+        self._bus = event_bus
+        self._roles = node_roles_config
+        self._bus.subscribe(StockChanged, self._on_stock_changed)
+
+    def _on_stock_changed(self, event: StockChanged):
+        """Derive signal from stock change based on node role."""
+        node_id = event.node_id
+        role = self._get_node_role(node_id)
+        role_config = self._roles.get(role, {})
+        if event.action == "enter":
+            actions = role_config.get("on_enter", [])
+            if "publish_buy_signal" in actions:
+                self._bus.publish(Signal(signal_type="BUY", code=event.code, pool_id=node_id, price=0.0, ts=event.ts))
+        elif event.action == "exit":
+            actions = role_config.get("on_exit", [])
+            if "publish_sell_signal" in actions:
+                self._bus.publish(Signal(signal_type="SELL", code=event.code, pool_id=node_id, price=0.0, ts=event.ts))
+
+    def _get_node_role(self, node_id: str) -> str:
+        """Get node role - to be connected to CompiledPool.node_role."""
+        return "state"  # Default, will be overridden
+
+
+class ActionDispatcher:
+    """Dispatches actions from Signal events based on action_table.json.
+
+    Task 14 (Action layer): reuses event_bus.Signal (field signal_type,
+    not spec draft kind). Decoupled from SignalDeriver - this layer only
+    executes signal->action, does not care how signals are derived.
+    """
+
+    def __init__(self, event_bus, action_table: dict):
+        self._bus = event_bus
+        self._action_table = action_table
+        self._bus.subscribe(Signal, self._on_signal)
+
+    def _on_signal(self, signal: Signal):
+        """Execute actions for signal."""
+        actions = self._action_table.get(signal.signal_type, [])
+        for action_name in actions:
+            self._execute_action(action_name, signal)
+
+    def _execute_action(self, action_name: str, signal: Signal):
+        """Execute a single action by name."""
+        _ACTION_FNS = {
+            "play_sound": lambda s: print(f"[SOUND] {s.signal_type} {s.code}"),
+            "show_popup": lambda s: print(f"[POPUP] {s.signal_type} {s.code}"),
+            "save_history": lambda s: print(f"[HISTORY] {s.signal_type} {s.code}"),
+            "update_tdx_board": lambda s: print(f"[TDX] {s.signal_type} {s.code}"),
+        }
+        fn = _ACTION_FNS.get(action_name)
+        if fn:
+            fn(signal)
+
+
+__all__ = ["TradeModule", "SignalDeriver", "ActionDispatcher"]

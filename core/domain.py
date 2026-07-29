@@ -27,9 +27,25 @@ import random
 import re
 import time
 from abc import ABC, abstractmethod
+from collections import namedtuple
 from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type
+
+
+# ════════════════════════════════════════════════════════════════
+# Section: 字段元数据（Task 11.1：_FieldMeta 用于 _NodeBase/_EdgeBase 子类
+# 声明类型特有字段的序列化规则，消除 to_dict / from_dict 手写样板）
+# ════════════════════════════════════════════════════════════════
+# serializer 取值约定：
+#   None          : 普通字段（直接取值 / d.get(name, default)）
+#   "list"        : 列表字段（to_dict 做 list() 拷贝）
+#   "dict"        : 字典字段（to_dict 做 dict() 拷贝）
+#   ("spec", Name): Spec 对象字段（to_dict 调 obj.to_dict() or None；
+#                   from_dict 调 SpecClass.from_dict(v) if v else None）
+#                   Name 为 Spec 类名字符串，运行时经 globals() 解析，
+#                   避免 Node/Edge 类定义早于 Spec 类的前向引用问题。
+_FieldMeta = namedtuple("_FieldMeta", ["name", "default", "serializer"])
 
 
 # ════════════════════════════════════════════════════════════════
@@ -93,10 +109,16 @@ def _norm_pos(pos: Any) -> Tuple[float, float]:
 
 
 class _NodeBase(Node):
-    """Node ABC 的具体基类，处理 6 个公共字段的序列化与工厂分派。"""
+    """Node ABC 的具体基类，处理 6 个公共字段的序列化与工厂分派。
+
+    Task 11.3：基类提供统一的 to_dict / from_dict，遍历子类 _FIELDS
+    自动序列化/反序列化类型特有字段，消除子类手写样板。
+    """
 
     DZH_TYPE: Optional[int] = None
     TDX_TYPE: Optional[int] = None
+    # 子类覆盖：声明类型特有字段的序列化规则（见 _FieldMeta 注释）
+    _FIELDS: Tuple[_FieldMeta, ...] = ()
 
     def __init__(
         self,
@@ -135,12 +157,35 @@ class _NodeBase(Node):
             "attr": d.get("attr", 0),
         }
 
-    def to_dict(self) -> Dict[str, Any]:  # 由子类覆盖
-        return self._common_to_dict()
+    def to_dict(self) -> Dict[str, Any]:
+        """统一序列化：公共字段 + 遍历 _FIELDS 序列化类型特有字段。"""
+        d = self._common_to_dict()
+        for fm in self._FIELDS:
+            val = getattr(self, fm.name)
+            ser = fm.serializer
+            if ser == "list":
+                d[fm.name] = list(val)
+            elif ser == "dict":
+                d[fm.name] = dict(val)
+            elif isinstance(ser, tuple) and ser[0] == "spec":
+                d[fm.name] = val.to_dict() if val else None
+            else:  # None / "plain"
+                d[fm.name] = val
+        return d
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "_NodeBase":  # 由子类覆盖
-        return cls(**cls._common_kwargs(d))
+    def from_dict(cls, d: Dict[str, Any]) -> "_NodeBase":
+        """统一反序列化：公共字段 + 遍历 _FIELDS 解析类型特有字段。"""
+        kwargs = cls._common_kwargs(d)
+        for fm in cls._FIELDS:
+            ser = fm.serializer
+            if isinstance(ser, tuple) and ser[0] == "spec":
+                v = d.get(fm.name)
+                spec_cls = globals()[ser[1]]
+                kwargs[fm.name] = spec_cls.from_dict(v) if v else None
+            else:
+                kwargs[fm.name] = d.get(fm.name, fm.default)
+        return cls(**kwargs)
 
     # ── 工厂方法（表驱动分派，忽略 cls，按 type 查注册表）──
     @classmethod
@@ -170,38 +215,26 @@ class TextLabelNode(_NodeBase):
     """文字标签（DZH type=1），独有 url。"""
 
     DZH_TYPE = 1
+    _FIELDS = (
+        _FieldMeta("url", "", None),
+    )
 
     def __init__(self, url: str = "", **common: Any) -> None:
         super().__init__(**common)
         self.url = url
-
-    def to_dict(self) -> Dict[str, Any]:
-        d = self._common_to_dict()
-        d["url"] = self.url
-        return d
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "TextLabelNode":
-        return cls(url=d.get("url", ""), **cls._common_kwargs(d))
 
 
 class ContainerNode(_NodeBase):
     """容器（DZH type=2），独有 children。"""
 
     DZH_TYPE = 2
+    _FIELDS = (
+        _FieldMeta("children", [], "list"),
+    )
 
     def __init__(self, children: Optional[List[str]] = None, **common: Any) -> None:
         super().__init__(**common)
         self.children = list(children) if children else []
-
-    def to_dict(self) -> Dict[str, Any]:
-        d = self._common_to_dict()
-        d["children"] = list(self.children)
-        return d
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ContainerNode":
-        return cls(children=d.get("children", []), **cls._common_kwargs(d))
 
 
 class StateColumnNode(_NodeBase):
@@ -214,6 +247,12 @@ class DiscardPoolNode(_NodeBase):
     """丢弃池（DZH type=4），StatePoolNode 简化版。"""
 
     DZH_TYPE = 4
+    _FIELDS = (
+        _FieldMeta("enter", {}, "dict"),
+        _FieldMeta("exit", {}, "dict"),
+        _FieldMeta("tradeattr", {}, "dict"),
+        _FieldMeta("psatt", {}, "dict"),
+    )
 
     def __init__(
         self,
@@ -229,36 +268,18 @@ class DiscardPoolNode(_NodeBase):
         self.tradeattr = dict(tradeattr) if tradeattr else {}
         self.psatt = dict(psatt) if psatt else {}
 
-    def to_dict(self) -> Dict[str, Any]:
-        d = self._common_to_dict()
-        d.update({"enter": dict(self.enter), "exit": dict(self.exit),
-                  "tradeattr": dict(self.tradeattr), "psatt": dict(self.psatt)})
-        return d
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "DiscardPoolNode":
-        return cls(enter=d.get("enter", {}), exit=d.get("exit", {}),
-                   tradeattr=d.get("tradeattr", {}), psatt=d.get("psatt", {}),
-                   **cls._common_kwargs(d))
-
 
 class ExecutionOrderNode(_NodeBase):
     """执行顺序节点（DZH type=5），独有 order_type。"""
 
     DZH_TYPE = 5
+    _FIELDS = (
+        _FieldMeta("order_type", "", None),
+    )
 
     def __init__(self, order_type: str = "", **common: Any) -> None:
         super().__init__(**common)
         self.order_type = order_type
-
-    def to_dict(self) -> Dict[str, Any]:
-        d = self._common_to_dict()
-        d["order_type"] = self.order_type
-        return d
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ExecutionOrderNode":
-        return cls(order_type=d.get("order_type", ""), **cls._common_kwargs(d))
 
 
 class FlowArrowNode(_NodeBase):
@@ -272,6 +293,16 @@ class StatePoolNode(_NodeBase):
 
     DZH_TYPE = 200
     TDX_TYPE = 8
+    # Spec 类引用通过 ("spec", "ClassName") 字符串延迟解析，
+    # 避免 Node 类定义早于 Spec 类的前向引用问题。
+    _FIELDS = (
+        _FieldMeta("enter", {}, "dict"),
+        _FieldMeta("exit", {}, "dict"),
+        _FieldMeta("tradeattr", {}, "dict"),
+        _FieldMeta("psatt", {}, "dict"),
+        _FieldMeta("ttl_spec", None, ("spec", "TTLSpec")),
+        _FieldMeta("action_spec", None, ("spec", "ActionSpec")),
+    )
 
     def __init__(
         self,
@@ -291,55 +322,20 @@ class StatePoolNode(_NodeBase):
         self.ttl_spec = ttl_spec
         self.action_spec = action_spec
 
-    def to_dict(self) -> Dict[str, Any]:
-        d = self._common_to_dict()
-        d.update({
-            "enter": dict(self.enter), "exit": dict(self.exit),
-            "tradeattr": dict(self.tradeattr), "psatt": dict(self.psatt),
-            "ttl_spec": self.ttl_spec.to_dict() if self.ttl_spec else None,
-            "action_spec": self.action_spec.to_dict() if self.action_spec else None,
-        })
-        return d
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "StatePoolNode":
-        ttl = d.get("ttl_spec")
-        act = d.get("action_spec")
-        return cls(
-            enter=d.get("enter", {}), exit=d.get("exit", {}),
-            tradeattr=d.get("tradeattr", {}), psatt=d.get("psatt", {}),
-            ttl_spec=TTLSpec.from_dict(ttl) if ttl else None,
-            action_spec=ActionSpec.from_dict(act) if act else None,
-            **cls._common_kwargs(d),
-        )
-
 
 class ResultPoolNode(StatePoolNode):
     """结果池（DZH type=203），StatePoolNode 变体，独有 result_type。"""
 
     DZH_TYPE = 203
     TDX_TYPE = None
+    # 继承 StatePoolNode._FIELDS 并追加 result_type
+    _FIELDS = StatePoolNode._FIELDS + (
+        _FieldMeta("result_type", 0, None),
+    )
 
     def __init__(self, result_type: int = 0, **common: Any) -> None:
         super().__init__(**common)
         self.result_type = result_type
-
-    def to_dict(self) -> Dict[str, Any]:
-        d = super().to_dict()
-        d["result_type"] = self.result_type
-        return d
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ResultPoolNode":
-        kwargs = cls._common_kwargs(d)
-        return cls(
-            result_type=d.get("result_type", 0),
-            enter=d.get("enter", {}), exit=d.get("exit", {}),
-            tradeattr=d.get("tradeattr", {}), psatt=d.get("psatt", {}),
-            ttl_spec=TTLSpec.from_dict(d.get("ttl_spec")) if d.get("ttl_spec") else None,
-            action_spec=ActionSpec.from_dict(d.get("action_spec")) if d.get("action_spec") else None,
-            **kwargs,
-        )
 
 
 class ConditionNode(_NodeBase):
@@ -347,6 +343,12 @@ class ConditionNode(_NodeBase):
 
     DZH_TYPE = 201
     TDX_TYPE = 3
+    _FIELDS = (
+        _FieldMeta("func", {}, "dict"),
+        _FieldMeta("indi", "", None),
+        _FieldMeta("indiparam", [], "list"),
+        _FieldMeta("filter_spec", None, ("spec", "FilterSpec")),
+    )
 
     def __init__(
         self,
@@ -362,31 +364,19 @@ class ConditionNode(_NodeBase):
         self.indiparam = list(indiparam) if indiparam else []
         self.filter_spec = filter_spec or FilterSpec()
 
-    def to_dict(self) -> Dict[str, Any]:
-        d = self._common_to_dict()
-        d.update({
-            "func": dict(self.func), "indi": self.indi,
-            "indiparam": list(self.indiparam),
-            "filter_spec": self.filter_spec.to_dict() if self.filter_spec else None,
-        })
-        return d
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ConditionNode":
-        fs = d.get("filter_spec")
-        return cls(
-            func=d.get("func", {}), indi=d.get("indi", ""),
-            indiparam=d.get("indiparam", []),
-            filter_spec=FilterSpec.from_dict(fs) if fs else None,
-            **cls._common_kwargs(d),
-        )
-
 
 class CandidatePoolNode(_NodeBase):
     """备选池节点（DZH type=202 / TDX type=7），独有 candidate_range。"""
 
     DZH_TYPE = 202
     TDX_TYPE = 7
+    _FIELDS = (
+        _FieldMeta("attrtext", "", None),
+        _FieldMeta("reload", 0, None),
+        _FieldMeta("spinfo", {}, "dict"),
+        _FieldMeta("candidate_range", None, ("spec", "CandidateRange")),
+        _FieldMeta("reload_schedule", None, ("spec", "ReloadSchedule")),
+    )
 
     def __init__(
         self,
@@ -403,28 +393,6 @@ class CandidatePoolNode(_NodeBase):
         self.spinfo = dict(spinfo) if spinfo else {}
         self.candidate_range = candidate_range or CandidateRange()
         self.reload_schedule = reload_schedule
-
-    def to_dict(self) -> Dict[str, Any]:
-        d = self._common_to_dict()
-        d.update({
-            "attrtext": self.attrtext, "reload": self.reload,
-            "spinfo": dict(self.spinfo),
-            "candidate_range": self.candidate_range.to_dict(),
-            "reload_schedule": self.reload_schedule.to_dict() if self.reload_schedule else None,
-        })
-        return d
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "CandidatePoolNode":
-        cr = d.get("candidate_range")
-        rs = d.get("reload_schedule")
-        return cls(
-            attrtext=d.get("attrtext", ""), reload=d.get("reload", 0),
-            spinfo=d.get("spinfo", {}),
-            candidate_range=CandidateRange.from_dict(cr) if cr else None,
-            reload_schedule=ReloadSchedule.from_dict(rs) if rs else None,
-            **cls._common_kwargs(d),
-        )
 
 
 # 表驱动注册表：DZH/TDX type → Node 子类（无 if/elif 链）
@@ -473,7 +441,14 @@ def all_tdx_types() -> List[int]:
 
 
 class _EdgeBase(Edge):
-    """Edge ABC 的具体基类，处理 6 个公共字段的序列化与工厂分派。"""
+    """Edge ABC 的具体基类，处理 6 个公共字段的序列化与工厂分派。
+
+    Task 11.3：基类提供统一的 to_dict / from_dict，遍历子类 _FIELDS
+    自动序列化/反序列化类型特有字段，消除子类手写样板。
+    """
+
+    # 子类覆盖：声明类型特有字段的序列化规则（见 _FieldMeta 注释）
+    _FIELDS: Tuple[_FieldMeta, ...] = ()
 
     def __init__(
         self,
@@ -512,12 +487,35 @@ class _EdgeBase(Edge):
             "size": d.get("size", 1),
         }
 
-    def to_dict(self) -> Dict[str, Any]:  # 由子类覆盖
-        return self._common_to_dict()
+    def to_dict(self) -> Dict[str, Any]:
+        """统一序列化：公共字段 + 遍历 _FIELDS 序列化类型特有字段。"""
+        d = self._common_to_dict()
+        for fm in self._FIELDS:
+            val = getattr(self, fm.name)
+            ser = fm.serializer
+            if ser == "list":
+                d[fm.name] = list(val)
+            elif ser == "dict":
+                d[fm.name] = dict(val)
+            elif isinstance(ser, tuple) and ser[0] == "spec":
+                d[fm.name] = val.to_dict() if val else None
+            else:  # None / "plain"
+                d[fm.name] = val
+        return d
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "_EdgeBase":  # 由子类覆盖
-        return cls(**cls._common_kwargs(d))
+    def from_dict(cls, d: Dict[str, Any]) -> "_EdgeBase":
+        """统一反序列化：公共字段 + 遍历 _FIELDS 解析类型特有字段。"""
+        kwargs = cls._common_kwargs(d)
+        for fm in cls._FIELDS:
+            ser = fm.serializer
+            if isinstance(ser, tuple) and ser[0] == "spec":
+                v = d.get(fm.name)
+                spec_cls = globals()[ser[1]]
+                kwargs[fm.name] = spec_cls.from_dict(v) if v else None
+            else:
+                kwargs[fm.name] = d.get(fm.name, fm.default)
+        return cls(**kwargs)
 
     # ── 工厂方法（表驱动分派）──
     @classmethod
@@ -539,6 +537,17 @@ class _EdgeBase(Edge):
 
 class ConditionalEdge(_EdgeBase):
     """条件转移边：源为备选池/状态池/数据源，含时机/筛选/流转/动作/TTL 规格。"""
+
+    _FIELDS = (
+        _FieldMeta("interval", 0, None),
+        _FieldMeta("begin", 0, None),
+        _FieldMeta("end", 0, None),
+        _FieldMeta("timing_spec", None, ("spec", "TimingSpec")),
+        _FieldMeta("filter_spec", None, ("spec", "FilterSpec")),
+        _FieldMeta("propagate_spec", None, ("spec", "PropagateSpec")),
+        _FieldMeta("action_spec", None, ("spec", "ActionSpec")),
+        _FieldMeta("ttl_spec", None, ("spec", "TTLSpec")),
+    )
 
     def __init__(
         self,
@@ -562,39 +571,13 @@ class ConditionalEdge(_EdgeBase):
         self.action_spec = action_spec
         self.ttl_spec = ttl_spec
 
-    def to_dict(self) -> Dict[str, Any]:
-        d = self._common_to_dict()
-        d.update({
-            "interval": self.interval, "begin": self.begin, "end": self.end,
-            "timing_spec": self.timing_spec.to_dict() if self.timing_spec else None,
-            "filter_spec": self.filter_spec.to_dict() if self.filter_spec else None,
-            "propagate_spec": self.propagate_spec.to_dict() if self.propagate_spec else None,
-            "action_spec": self.action_spec.to_dict() if self.action_spec else None,
-            "ttl_spec": self.ttl_spec.to_dict() if self.ttl_spec else None,
-        })
-        return d
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ConditionalEdge":
-        ck = cls._common_kwargs(d)
-
-        def _opt(spec_cls, key):
-            v = d.get(key)
-            return spec_cls.from_dict(v) if v else None
-
-        return cls(
-            interval=d.get("interval", 0), begin=d.get("begin", 0), end=d.get("end", 0),
-            timing_spec=_opt(TimingSpec, "timing_spec") or TimingSpec(),
-            filter_spec=_opt(FilterSpec, "filter_spec") or FilterSpec(),
-            propagate_spec=_opt(PropagateSpec, "propagate_spec") or PropagateSpec(),
-            action_spec=_opt(ActionSpec, "action_spec"),
-            ttl_spec=_opt(TTLSpec, "ttl_spec"),
-            **ck,
-        )
-
 
 class UnconditionalEdge(_EdgeBase):
     """无条件转移边：源为条件节点，仅含流转规格，无时间属性。"""
+
+    _FIELDS = (
+        _FieldMeta("propagate_spec", None, ("spec", "PropagateSpec")),
+    )
 
     def __init__(
         self,
@@ -603,17 +586,6 @@ class UnconditionalEdge(_EdgeBase):
     ) -> None:
         super().__init__(**common)
         self.propagate_spec = propagate_spec or PropagateSpec()
-
-    def to_dict(self) -> Dict[str, Any]:
-        d = self._common_to_dict()
-        d["propagate_spec"] = self.propagate_spec.to_dict() if self.propagate_spec else None
-        return d
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "UnconditionalEdge":
-        ck = cls._common_kwargs(d)
-        ps = d.get("propagate_spec")
-        return cls(propagate_spec=PropagateSpec.from_dict(ps) if ps else None, **ck)
 
 
 # ════════════════════════════════════════════════════════════
@@ -651,7 +623,9 @@ def all_edge_source_types() -> list:
 
 # ════════════════════════════════════════════════════════════════
 # Section: specs.py — 领域规范对象（Spec）：纯数据 dataclass
-# 每个 Spec 使用 @dataclass，实现 to_dict / from_dict 往返，并提供单位换算辅助方法。
+# 每个 Spec 使用 @dataclass，继承 _SpecBase 获得统一 to_dict / from_dict
+# 往返实现（基于 dataclass 字段内省），并提供单位换算辅助方法。
+# Task 11：_SpecBase 消除 7 个 Spec 子类的 to_dict / from_dict 手写样板。
 # ════════════════════════════════════════════════════════════════
 
 
@@ -687,8 +661,23 @@ def _from_dict_spec(cls, d: Optional[Dict[str, Any]]) -> Any:
     return cls(**kwargs)
 
 
+class _SpecBase:
+    """Spec 类基类，提供基于 dataclass 字段内省的统一 to_dict / from_dict。
+
+    Task 11：所有 @dataclass Spec 子类继承本类，消除手写 to_dict / from_dict 样板。
+    不引入 _FIELDS（dataclass 已有 fields() 内省机制，无需重复声明）。
+    """
+
+    def to_dict(self) -> Dict[str, Any]:
+        return _as_dict(self)
+
+    @classmethod
+    def from_dict(cls, d: Optional[Dict[str, Any]] = None) -> "_SpecBase":
+        return _from_dict_spec(cls, d)
+
+
 @dataclass
-class TimingSpec:
+class TimingSpec(_SpecBase):
     """时机门控规格：starttype(0-7) × cxtype(0-2) 共 24 种组合。"""
 
     starttype: int = 0
@@ -698,20 +687,13 @@ class TimingSpec:
     cxtimetype: int = 0
     jgtime: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
-        return _as_dict(self)
-
-    @classmethod
-    def from_dict(cls, d: Optional[Dict[str, Any]] = None) -> "TimingSpec":
-        return _from_dict_spec(cls, d)
-
 
 # cxtimetype 单位 → 秒换算因子（0=秒, 1=分, 2=时, 3=天）
 _CXTIME_UNIT_TO_SEC: Dict[int, int] = {0: 1, 1: 60, 2: 3600, 3: 86400}
 
 
 @dataclass
-class FilterSpec:
+class FilterSpec(_SpecBase):
     """强弱筛选规格：评估器类型 × nset(0-5) × noperate(0-9)。"""
 
     evaluator_type: str = "indicator"
@@ -721,32 +703,18 @@ class FilterSpec:
     fsecond: Any = 0
     rank_rule: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
-        return _as_dict(self)
-
-    @classmethod
-    def from_dict(cls, d: Optional[Dict[str, Any]] = None) -> "FilterSpec":
-        return _from_dict_spec(cls, d)
-
 
 @dataclass
-class PropagateSpec:
+class PropagateSpec(_SpecBase):
     """状态流转规格：copy/move/overwrite/force_move/output_components。"""
 
     mode: str = "copy"
     tran: int = 0
     emptyps: bool = False
 
-    def to_dict(self) -> Dict[str, Any]:
-        return _as_dict(self)
-
-    @classmethod
-    def from_dict(cls, d: Optional[Dict[str, Any]] = None) -> "PropagateSpec":
-        return _from_dict_spec(cls, d)
-
 
 @dataclass
-class ActionSpec:
+class ActionSpec(_SpecBase):
     """回调副作用规格：6 种副作用（bdel/bsound/btip/bsavehis/bsavetoblock/baimpool）。"""
 
     bsavehis: bool = False
@@ -763,20 +731,13 @@ class ActionSpec:
     bclearblock: bool = False
     nsoundtype: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
-        return _as_dict(self)
-
-    @classmethod
-    def from_dict(cls, d: Optional[Dict[str, Any]] = None) -> "ActionSpec":
-        return _from_dict_spec(cls, d)
-
 
 # TTL 单位 → 秒换算因子（0=天, 1=时, 2=分, 3=秒, 4=秒[DZH 兼容]）
 _TTL_UNIT_TO_SEC: Dict[int, int] = {0: 86400, 1: 3600, 2: 60, 3: 1, 4: 1}
 
 
 @dataclass
-class TTLSpec:
+class TTLSpec(_SpecBase):
     """超时淘汰规格：bdel × ndelnum × ndeltype（5 时间单位）。"""
 
     bdel: bool = False
@@ -787,13 +748,6 @@ class TTLSpec:
     endtime: int = 0
     delstocktype: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
-        return _as_dict(self)
-
-    @classmethod
-    def from_dict(cls, d: Optional[Dict[str, Any]] = None) -> "TTLSpec":
-        return _from_dict_spec(cls, d)
-
     def to_seconds(self) -> int:
         """将 ndelnum × ndeltype 单位换算为总秒数；未启用或非法单位返回 0。"""
         if not self.bdel:
@@ -803,7 +757,7 @@ class TTLSpec:
 
 
 @dataclass
-class CandidateRange:
+class CandidateRange(_SpecBase):
     """备选池范围规格：8 种来源类型（stock/market/self_select/sector/...）。"""
 
     range_type: str = "stock"
@@ -812,28 +766,14 @@ class CandidateRange:
     spinfo_type: int = 0
     attrtext_raw: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
-        return _as_dict(self)
-
-    @classmethod
-    def from_dict(cls, d: Optional[Dict[str, Any]] = None) -> "CandidateRange":
-        return _from_dict_spec(cls, d)
-
 
 @dataclass
-class ReloadSchedule:
+class ReloadSchedule(_SpecBase):
     """备选池重载调度规格：5 种模式（never/on_file_load/on_startup/interval/daily_time）。"""
 
     mode: str = "never"
     interval_sec: int = 0
     daily_time: str = ""
-
-    def to_dict(self) -> Dict[str, Any]:
-        return _as_dict(self)
-
-    @classmethod
-    def from_dict(cls, d: Optional[Dict[str, Any]] = None) -> "ReloadSchedule":
-        return _from_dict_spec(cls, d)
 
 
 # ── DZH 列定义（领域常量，兼容老代码）─────────────────────────────────
@@ -874,8 +814,36 @@ DZH_COL_MAP: Dict[int, Dict[str, str]] = {
 # ════════════════════════════════════════════════════════════════
 
 
+# ════════════════════════════════════════════════════════════════
+# Task 12：Evaluator 注册表（装饰器驱动，消除静态 dict 维护）
+# _EVALUATOR_REGISTRY 由 @register_evaluator 装饰器在子类定义时填充，
+# Evaluator.from_filter_spec 工厂方法查表分派到子类实现。
+# ════════════════════════════════════════════════════════════════
+_EVALUATOR_REGISTRY: Dict[str, Type[Evaluator]] = {}
+
+
+def register_evaluator(evaluator_type: str):
+    """Evaluator 子类注册装饰器：将 (evaluator_type → cls) 写入 _EVALUATOR_REGISTRY。
+
+    用法::
+
+        @register_evaluator("indicator")
+        class IndicatorEvaluator(Evaluator):
+            ...
+    """
+    def decorator(cls: Type[Evaluator]) -> Type[Evaluator]:
+        _EVALUATOR_REGISTRY[evaluator_type] = cls
+        return cls
+    return decorator
+
+
 class Evaluator(ABC):
-    """筛选评估器抽象基类。"""
+    """筛选评估器抽象基类。
+
+    Task 12.3：``from_filter_spec`` 为工厂方法，按 ``filter_spec.evaluator_type``
+    查 ``_EVALUATOR_REGISTRY`` 分派到子类实现的 ``from_filter_spec``。
+    子类需覆盖 ``from_filter_spec`` 完成实际构造。
+    """
 
     nset: int = -1
 
@@ -884,11 +852,15 @@ class Evaluator(ABC):
         """返回 passed 的股票列表（领域层占位，真实逻辑在 core/evaluators.py）。"""
 
     @classmethod
-    @abstractmethod
     def from_filter_spec(cls, filter_spec: FilterSpec) -> "Evaluator":
-        """从 FilterSpec 构造评估器实例。"""
+        """工厂方法：按 filter_spec.evaluator_type 查表分派到子类。"""
+        klass = _EVALUATOR_REGISTRY.get(filter_spec.evaluator_type)
+        if klass is None:
+            raise KeyError(f"未注册的 evaluator_type: {filter_spec.evaluator_type}")
+        return klass.from_filter_spec(filter_spec)
 
 
+@register_evaluator("indicator")
 class IndicatorEvaluator(Evaluator):
     """技术指标评估器（nset=0，DZH 技术指标）。"""
 
@@ -908,6 +880,7 @@ class IndicatorEvaluator(Evaluator):
                    noperate=filter_spec.noperate, fsecond=filter_spec.fsecond)
 
 
+@register_evaluator("condition_formula")
 class ConditionFormulaEvaluator(Evaluator):
     """条件选股公式评估器（nset=1，DZH 条件选股）。"""
 
@@ -924,6 +897,7 @@ class ConditionFormulaEvaluator(Evaluator):
         return cls(formula_ref=filter_spec.formula_ref)
 
 
+@register_evaluator("expert_system")
 class ExpertSystemEvaluator(Evaluator):
     """专家系统评估器（nset=2，DZH 交易系统）。"""
 
@@ -957,6 +931,7 @@ FINANCIAL_INDICATORS: Dict[str, str] = {
 }
 
 
+@register_evaluator("financial_scalar")
 class FinancialScalarEvaluator(Evaluator):
     """最新财务标量评估器（nset=3，DZH 基本面条件，30 财务指标）。"""
 
@@ -986,6 +961,7 @@ MARKET_FIELDS: Dict[str, str] = {
 }
 
 
+@register_evaluator("market_scalar")
 class MarketScalarEvaluator(Evaluator):
     """实时行情标量评估器（nset=4，DZH 动态行情，12 行情字段）。"""
 
@@ -1010,6 +986,7 @@ class MarketScalarEvaluator(Evaluator):
 _SET_OPERATION_MAP: Dict[int, str] = {0: "union", 1: "difference", 2: "intersection"}
 
 
+@register_evaluator("set_operation")
 class SetOperationEvaluator(Evaluator):
     """集合运算评估器（nset=5，DZH 板块成员，并/差/交）。"""
 
@@ -1032,20 +1009,14 @@ class SetOperationEvaluator(Evaluator):
 
 # ════════════════════════════════════════════════════════════
 # 表驱动：evaluator_type → Evaluator 子类（无 if/elif 链）
+# Task 12：注册表由 @register_evaluator 装饰器自动填充，
+# 模块级辅助函数复用 _EVALUATOR_REGISTRY，无需静态 dict。
 # ════════════════════════════════════════════════════════════
-_EVALUATOR_TYPE_REGISTRY: Dict[str, Type[Evaluator]] = {
-    "indicator": IndicatorEvaluator,
-    "condition_formula": ConditionFormulaEvaluator,
-    "expert_system": ExpertSystemEvaluator,
-    "financial_scalar": FinancialScalarEvaluator,
-    "market_scalar": MarketScalarEvaluator,
-    "set_operation": SetOperationEvaluator,
-}
 
 
 def evaluator_from_filter_spec(filter_spec: FilterSpec) -> Evaluator:
     """按 FilterSpec.evaluator_type 路由到对应 Evaluator 子类实例。"""
-    klass = _EVALUATOR_TYPE_REGISTRY.get(filter_spec.evaluator_type)
+    klass = _EVALUATOR_REGISTRY.get(filter_spec.evaluator_type)
     if klass is None:
         raise KeyError(f"未注册的 evaluator_type: {filter_spec.evaluator_type}")
     return klass.from_filter_spec(filter_spec)
@@ -1053,7 +1024,7 @@ def evaluator_from_filter_spec(filter_spec: FilterSpec) -> Evaluator:
 
 def all_evaluator_types() -> List[str]:
     """返回全部已注册的 evaluator_type。"""
-    return list(_EVALUATOR_TYPE_REGISTRY.keys())
+    return list(_EVALUATOR_REGISTRY.keys())
 
 
 # ════════════════════════════════════════════════════════════════

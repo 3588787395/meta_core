@@ -44,6 +44,11 @@ try:
 except ImportError:  # services 作为顶层包导入时回退到绝对导入
     from core.event_bus import EventBus, TickReceived
 
+try:
+    from ..core.table_engine import get_global_config_store
+except ImportError:  # services 作为顶层包导入时回退到绝对导入
+    from core.table_engine import get_global_config_store
+
 logger = logging.getLogger(__name__)
 
 
@@ -829,29 +834,9 @@ class KLineDataCache:
 
 
 # ===========================================================================
-# 配置加载工具（AkShareProvider / DfcfProvider 共用，合并自两文件去重）
+# 配置加载工具：已统一到 ConfigStore.get_table(name)（Task 9.1）
+# 模块级 _load_config 帮助函数已删除，调用方通过 get_global_config_store().get_table(name) 访问
 # ===========================================================================
-
-_CONFIG_CACHE: Dict[str, Any] = {}
-
-
-def _load_config(name: str) -> Dict[str, Any]:
-    """加载 meta_core/config 下的 JSON 配置表（带缓存）。
-
-    合并自 akshare_provider.py 和 dfcf_provider.py 中完全相同的实现。
-    路径已调整：原 parent.parent.parent → parent.parent（合并后少一层目录）。
-    """
-    if name in _CONFIG_CACHE:
-        return _CONFIG_CACHE[name]
-    cfg_path = Path(__file__).resolve().parent.parent / "config" / name
-    try:
-        with open(cfg_path, encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        logger.warning("加载配置 %s 失败: %s", name, e)
-        data = {}
-    _CONFIG_CACHE[name] = data
-    return data
 
 
 # ===========================================================================
@@ -1485,7 +1470,7 @@ class DfcfProvider(DataSourceProvider):
         if not self._ready or not markets:
             return {}
         result = {}
-        mc_cfg = _load_config("market_classifications.json")
+        mc_cfg = get_global_config_store().get_table("market_classifications") if get_global_config_store() else {}
         for market in markets:
             dzh_key = mc_cfg.get("short_to_dzh", {}).get(market, market)
             flt = mc_cfg.get("market_filters", {}).get(dzh_key)
@@ -2622,7 +2607,7 @@ class AkShareProvider(DataSourceProvider):
         if '.' in code:
             return code.split('.')[0]
         # 处理 TDX 格式: SH600000 → 600000, SZ000001 → 000001
-        prefixes = _load_config("market_classifications.json").get("exchange_prefixes", ['SH', 'SZ', 'BJ'])
+        prefixes = (get_global_config_store().get_table("market_classifications") if get_global_config_store() else {}).get("exchange_prefixes", ['SH', 'SZ', 'BJ'])
         if code[:2].upper() in prefixes:
             return code[2:]
         return code
@@ -2633,7 +2618,7 @@ class AkShareProvider(DataSourceProvider):
         code = str(code).strip()
         if not code:
             return code
-        for rule in _load_config("market_classifications.json").get("code_prefix_rules", []):
+        for rule in (get_global_config_store().get_table("market_classifications") if get_global_config_store() else {}).get("code_prefix_rules", []):
             prefix = rule.get("prefix", "")
             market = rule.get("market", "")
             if prefix and market and code.startswith(prefix):
@@ -2690,7 +2675,7 @@ class AkShareProvider(DataSourceProvider):
         if df is None or df.empty:
             return {}
 
-        mc_cfg = _load_config("market_classifications.json")
+        mc_cfg = get_global_config_store().get_table("market_classifications") if get_global_config_store() else {}
         short_to_dzh = mc_cfg.get("short_to_dzh", {})
         market_filters = mc_cfg.get("market_filters", {})
         for market in markets:
@@ -2723,7 +2708,7 @@ class AkShareProvider(DataSourceProvider):
         period = _norm_period(period or '1d')
 
         # AKShare period 映射（由 data_source_routes.json 驱动）
-        routes = _load_config("data_source_routes.json")
+        routes = get_global_config_store().get_table("data_source_routes") if get_global_config_store() else {}
         ak_period_map = routes.get("provider_routes", {}).get("akshare", {}).get("period_map", {})
         ak_period = ak_period_map.get(period, 'daily')
 

@@ -28,7 +28,24 @@ from datetime import datetime, time, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+try:
+    from ..core.table_engine import get_global_config_store
+except ImportError:
+    from core.table_engine import get_global_config_store
+
 logger = logging.getLogger(__name__)
+
+
+def _get_table(filename):
+    """通过 ConfigStore.get_table 加载配置表（Task 9.2 统一入口）。
+
+    替代 SchemaValidator._load_json。空表返回 None（兼容历史 ``is None`` 语义）。
+    filename 可带 .json 后缀（自动剥离），与 ConfigStore 的 stem key 对齐。
+    """
+    name = filename[:-5] if filename.endswith(".json") else filename
+    cs = get_global_config_store()
+    table = cs.get_table(name) if cs else {}
+    return table if table else None
 
 
 # ════════════════════════════════════════════════════════════════
@@ -998,27 +1015,18 @@ class SchemaValidator:
     def _add_error(self, file, entry, field, error):
         self.errors.append({"file": file, "entry": entry, "field": field, "error": error})
 
-    def _load_json(self, filename):
-        path = self.config_dir / filename
-        if not path.exists():
-            return None
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            self._add_error(filename, "", "", f"JSON parse error: {e}")
-            return None
+    # Task 9.2: _load_json 已删除，统一改用模块级 _get_table()（通过 ConfigStore.get_table）
 
     # ──────────────────────────────────────────────
     # 1. field_definitions.json
     # ──────────────────────────────────────────────
 
     def _validate_field_definitions(self):
-        fd = self._load_json("field_definitions.json")
+        fd = _get_table("field_definitions.json")
         if fd is None:
             return
 
-        ui = self._load_json("ui_components.json")
+        ui = _get_table("ui_components.json")
         valid_components = set(ui.get("components", {}).keys()) if ui else set()
 
         # Required sections
@@ -1114,7 +1122,7 @@ class SchemaValidator:
     # ──────────────────────────────────────────────
 
     def _validate_ui_components(self):
-        ui = self._load_json("ui_components.json")
+        ui = _get_table("ui_components.json")
         if ui is None:
             return
 
@@ -1156,7 +1164,7 @@ class SchemaValidator:
     # ──────────────────────────────────────────────
 
     def _validate_behavior_actions(self):
-        ba = self._load_json("behavior_actions.json")
+        ba = _get_table("behavior_actions.json")
         if ba is None:
             return
 
@@ -1198,7 +1206,7 @@ class SchemaValidator:
     # ──────────────────────────────────────────────
 
     def _validate_data_source_mappings(self):
-        dsm = self._load_json("data_source_mappings.json")
+        dsm = _get_table("data_source_mappings.json")
         if dsm is None:
             return
 
@@ -1233,10 +1241,10 @@ class SchemaValidator:
     # ──────────────────────────────────────────────
 
     def _validate_references(self):
-        ba = self._load_json("behavior_actions.json")
+        ba = _get_table("behavior_actions.json")
         action_ids = set(ba.get("actions", {}).keys()) if ba else set()
 
-        fd = self._load_json("field_definitions.json")
+        fd = _get_table("field_definitions.json")
         # Collect all field names from field_definitions.json
         all_field_names = set()
         if fd:
@@ -1246,7 +1254,7 @@ class SchemaValidator:
                     all_field_names.update(fields.keys())
             all_field_names.update(fd.get("flow_fields", {}).keys())
 
-        mod = self._load_json("modules.json")
+        mod = _get_table("modules.json")
         if mod:
             # modules.json handler fields exist in behavior_actions.json
             for module_id, module in mod.get("modules", {}).items():
@@ -1272,7 +1280,7 @@ class SchemaValidator:
                         self._add_error("modules.json", module_id, fname,
                                         f"field '{fname}' not found in field_definitions.json")
 
-        disp = self._load_json("dispatch.json")
+        disp = _get_table("dispatch.json")
         if disp:
             # dispatch.json gateway fields exist in behavior_actions.json
             for rule_key, rule in disp.get("dispatch_rules", {}).items():
@@ -1289,7 +1297,7 @@ class SchemaValidator:
 
     def _validate_property_ownership(self):
         """验证属性所有权配置的完整性和一致性"""
-        po = self._load_json("property_ownership.json")
+        po = _get_table("property_ownership.json")
         if po is None:
             return
 
@@ -1299,7 +1307,7 @@ class SchemaValidator:
                 self._add_error("property_ownership.json", "", "", f"Missing required section: {section}")
 
         # 检查 type_ownership 中的类型是否在 cell_type_registry 中存在
-        cell_types = self._load_json("cell_type_registry.json")
+        cell_types = _get_table("cell_type_registry.json")
         if cell_types:
             registry_types = set(cell_types.get("types", {}).keys())
             for type_key in po.get("type_ownership", {}):
@@ -1343,8 +1351,8 @@ class SchemaValidator:
 
     def _validate_pool_type_consistency(self):
         """验证 cell_type_registry 和 ui_layouts 中 pool_type 的一致性"""
-        cell_types = self._load_json("cell_type_registry.json")
-        ui_layouts = self._load_json("ui_layouts.json")
+        cell_types = _get_table("cell_type_registry.json")
+        ui_layouts = _get_table("ui_layouts.json")
 
         if not cell_types or not ui_layouts:
             return

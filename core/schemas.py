@@ -3,7 +3,7 @@ DZH大智慧完整整数属性模型
 基于 cell_type_registry.json 和 flow_mode_registry.json 定义的全部属性
 """
 from __future__ import annotations
-from typing import Optional, List, Dict, Any, Literal, Union, Set, ClassVar
+from typing import Optional, List, Dict, Any, Literal, Union, Set, ClassVar, Protocol, runtime_checkable
 from pydantic import BaseModel, Field, field_validator, model_validator, PrivateAttr
 import json
 from pathlib import Path
@@ -1273,3 +1273,25 @@ class TdxPoolMetaModel(BaseModel):
         kwargs["cells"] = cells
         kwargs["flows"] = flows
         return cls(**kwargs)
+
+
+# ═══════════════════════════════════════════════════
+# 边执行步骤协议（EdgeExecutor 表驱动步骤化）
+# ═══════════════════════════════════════════════════
+
+class StepResult(BaseModel):
+    """步骤执行结果。"""
+    should_continue: bool = True
+    data: Optional[dict] = None
+
+
+class StepSpec(BaseModel):
+    """步骤规格（编译期产出）。"""
+    step_name: str
+    enabled: bool = True
+
+
+@runtime_checkable
+class EdgeStep(Protocol):
+    """边执行步骤协议。每步实现此接口。"""
+    def run(self, ctx: Any) -> StepResult: ...

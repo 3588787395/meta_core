@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "nset_evaluators": {
+    "all": {"description": "全部股票通过", "params": []},
+    "formula": {"description": "按公式求值", "params": ["formula"]},
+    "condition": {"description": "按条件求值", "params": ["condition"]},
+    "indicator": {"description": "按指标求值", "params": ["indicator"]},
+    "expert": {"description": "专家系统求值", "params": ["expert"]},
+    "realtime": {"description": "实时数据求值", "params": ["realtime"]}
+  },
+  "noperate_operators": {
+    "gt": {"description": "大于", "symbol": ">"},
+    "ge": {"description": "大于等于", "symbol": ">="},
+    "lt": {"description": "小于", "symbol": "<"},
+    "le": {"description": "小于等于", "symbol": "<="},
+    "eq": {"description": "等于", "symbol": "=="},
+    "ne": {"description": "不等于", "symbol": "!="},
+    "top": {"description": "前 N 名", "symbol": "top"},
+    "bottom": {"description": "后 N 名", "symbol": "bottom"},
+    "top_n": {"description": "前 N 名（含并列）", "symbol": "top_n"},
+    "bottom_n": {"description": "后 N 名（含并列）", "symbol": "bottom_n"}
+  }
+}

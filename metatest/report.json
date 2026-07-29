@@ -1,0 +1,96 @@
+{
+  "total_score": 100.0,
+  "passed": true,
+  "threshold": 95.0,
+  "dimensions": [
+    {
+      "name": "module_coverage",
+      "weight": 0.15,
+      "score": 100.0,
+      "details": "17/17 模块已覆盖"
+    },
+    {
+      "name": "test_pass_rate",
+      "weight": 0.2,
+      "score": 100.0,
+      "details": "796/796 通过（跳过计为失败）"
+    },
+    {
+      "name": "assertion_density",
+      "weight": 0.1,
+      "score": 100.0,
+      "details": "1788 断言 / 54 文件 = 33.1/文件 (目标 10)"
+    },
+    {
+      "name": "event_chain_integrity",
+      "weight": 0.15,
+      "score": 100.0,
+      "details": "12/10 类事件出现，链顺序正确"
+    },
+    {
+      "name": "performance_benchmark",
+      "weight": 0.1,
+      "score": 100.0,
+      "details": "0.05s / 1000 tick (门槛 10.0s)"
+    },
+    {
+      "name": "frontend_e2e_pass_rate",
+      "weight": 0.1,
+      "score": 100.0,
+      "details": "5/5 通过"
+    },
+    {
+      "name": "logic_coverage",
+      "weight": 0.1,
+      "score": 100.0,
+      "details": "5/5 项底层逻辑验证通过（水位线/编译-运行分离/三要素/角色表/正交化）"
+    },
+    {
+      "name": "isomorphism_elimination",
+      "weight": 0.1,
+      "score": 100.0,
+      "details": "0 处违规 / 6 项检查（0 违规满分）"
+    }
+  ],
+  "deductions": [],
+  "redo_list": [],
+  "test_summary": {
+    "collected": 796,
+    "passed": 796,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "no_tests": false,
+    "duration_s": 85.37
+  },
+  "test_results": {
+    "modules_covered": 17,
+    "tests_passed": 796,
+    "tests_total": 796,
+    "assertions_count": 1788,
+    "test_files_count": 54,
+    "event_types_seen": [
+      "BarComposed",
+      "DataChanged",
+      "EdgeFired",
+      "FormulaEvaluated",
+      "OrderFilled",
+      "OrderPlaced",
+      "Signal",
+      "StockFiltered",
+      "TickReceived",
+      "TransferExecuted",
+      "ExportCompleted",
+      "ModeChanged"
+    ],
+    "event_chain_correct": true,
+    "sim_1000_tick_time_s": 0.054229100001975894,
+    "frontend_e2e_passed": 5,
+    "frontend_e2e_total": 5,
+    "frontend_e2e_env_missing": false,
+    "logic_coverage_passed": 5,
+    "logic_coverage_total": 5,
+    "isomorphism_violations": 0,
+    "isomorphism_total_checks": 6
+  }
+}

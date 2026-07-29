@@ -16,7 +16,7 @@ import logging
 import os
 import re
 import struct
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from .event_bus import (
     EventBus,
@@ -254,6 +254,125 @@ def _decode_formula(indi_b64: str, ency: int = 0) -> str:
     return clean
 
 
+# ============================================================
+# 表驱动：导入/导出规则表（Task 15: 收敛 9 个同构方法为 2 个表驱动方法）
+# parser/serializer 提取为模块级函数，供 ``_IMPORT_RULES`` / ``_EXPORT_RULES``
+# 引用，消除原 3 个 ``_call_xxx_parser`` + 3 个 ``export_to_xxx`` 同构方法。
+# ============================================================
+
+def _parse_dzh(path: str) -> Dict[str, Any]:
+    """调用 DZH 解析器（converters.parse_dzh_xml）。
+
+    parse_dzh_xml 接收 XML 内容（bytes/str）而非文件路径，
+    需先读取文件内容再传入。返回的 dict 已是 Compiler 兼容的 pool_config
+    结构（含 name/nodes/edges/pool_meta/schedules 等字段）。
+    """
+    try:
+        try:
+            from ..converters import parse_dzh_xml
+        except ImportError:
+            from converters import parse_dzh_xml
+        with open(path, "rb") as f:
+            content = f.read()
+        return parse_dzh_xml(content, filename=path)
+    except Exception as ex:
+        logger.warning("DZH XML 解析失败 path=%s: %s", path, ex, exc_info=True)
+        return {}
+
+
+def _parse_tdx(path: str) -> Dict[str, Any]:
+    """调用 TDX 解析器（converters.parse_tdx_xml + convert_tdx_to_config）。
+
+    parse_tdx_xml 接收文件路径，返回 TdxPoolMetaModel；
+    convert_tdx_to_config 将其转为统一 pool_config dict。
+    """
+    try:
+        try:
+            from ..converters import parse_tdx_xml, convert_tdx_to_config
+        except ImportError:
+            from converters import parse_tdx_xml, convert_tdx_to_config
+        tdx_pool = parse_tdx_xml(path)
+        pool_config = convert_tdx_to_config(tdx_pool)
+        # 补充 name 字段（convert_tdx_to_config 不返回 name）
+        pool_config["name"] = os.path.splitext(os.path.basename(path))[0]
+        return pool_config
+    except Exception as ex:
+        logger.warning("TDX XML 解析失败 path=%s: %s", path, ex, exc_info=True)
+        return {}
+
+
+def _parse_json(path: str) -> Dict[str, Any]:
+    """调用 JSON 解析器（converters.import_pool_from_json）。"""
+    try:
+        try:
+            from ..converters import import_pool_from_json
+        except ImportError:
+            from converters import import_pool_from_json
+        return import_pool_from_json(file_path=path)
+    except Exception as ex:
+        logger.warning("JSON 解析失败 path=%s: %s", path, ex, exc_info=True)
+        return {}
+
+
+def _serialize_dzh(config: Dict[str, Any], out_path: str) -> None:
+    """调用 DZH 序列化器（converters.export_dzh_xml）并写入文件。
+
+    export_dzh_xml 返回 UTF-8 编码的 bytes。
+    """
+    try:
+        try:
+            from ..converters import export_dzh_xml
+        except ImportError:
+            from converters import export_dzh_xml
+        xml_bytes = export_dzh_xml(config)
+        with open(out_path, "wb") as f:
+            f.write(xml_bytes)
+    except Exception as ex:
+        logger.warning("DZH XML 导出失败 path=%s: %s", out_path, ex, exc_info=True)
+        raise
+
+
+def _serialize_tdx(config: Dict[str, Any], out_path: str) -> None:
+    """调用 TDX 序列化器（converters._build_tdx_xml）并写入文件。"""
+    try:
+        try:
+            from ..converters import _build_tdx_xml
+        except ImportError:
+            from converters import _build_tdx_xml
+        _build_tdx_xml(config, out_path)
+    except Exception as ex:
+        logger.warning("TDX XML 导出失败 path=%s: %s", out_path, ex, exc_info=True)
+        raise
+
+
+def _serialize_json(config: Dict[str, Any], out_path: str) -> None:
+    """调用 JSON 序列化器（converters.export_pool_to_json）并写入文件。"""
+    try:
+        try:
+            from ..converters import export_pool_to_json
+        except ImportError:
+            from converters import export_pool_to_json
+        export_pool_to_json(config, file_path=out_path)
+    except Exception as ex:
+        logger.warning("JSON 导出失败 path=%s: %s", out_path, ex, exc_info=True)
+        raise
+
+
+# 导入规则表：format -> (parser_callable, format_name)
+_IMPORT_RULES: Dict[str, Tuple[Callable, str]] = {
+    "dzh": (_parse_dzh, "dzh"),
+    "tdx": (_parse_tdx, "tdx"),
+    "json": (_parse_json, "json"),
+}
+
+# 导出规则表：format -> (serializer_callable, format_name)
+_EXPORT_RULES: Dict[str, Tuple[Callable, str]] = {
+    "dzh": (_serialize_dzh, "dzh"),
+    "tdx": (_serialize_tdx, "tdx"),
+    "json": (_serialize_json, "json"),
+}
+
+
 class ImportExportModule:
     """ImportExport 模块：DZH XML / TDX XML / JSON 三格式导入导出。仅与 EventBus 交互。
 
@@ -283,218 +402,60 @@ class ImportExportModule:
         self._export_count += 1
 
     # ------------------------------------------------------------------
-    # 导入方法（由 API 模块直接调用，非事件订阅）
+    # 导入/导出方法（表驱动，由 API 模块直接调用，非事件订阅）
     # ------------------------------------------------------------------
-    def import_dzh_xml(self, xml_path: str) -> Dict[str, Any]:
-        """导入 DZH XML 文件。
+    def import_pool(self, path: str, format: str) -> bool:
+        """导入股票池文件（表驱动，支持 dzh / tdx / json 三种格式）。
 
-        覆盖 DZH 全部节点类型（type=0/1/2/3/4/5/6/200/201/202/203）、
-        边类型（attr=0/1/4096/8192/8193/20480）、tradeattr 19 字段、
-        reload 5 模式、attrtext 6 类型（通过原 converters.dzh 实现，不重复实现）。
+        流程：查 ``_IMPORT_RULES`` 表 → 发布 ``ImportStarted`` → 调用
+        parser → 成功时发布 ``PoolLoaded`` 并递增计数。
 
         Args:
-            xml_path: DZH XML 文件路径。
+            path: 文件路径。
+            format: 格式名（``"dzh"`` / ``"tdx"`` / ``"json"``）。
 
         Returns:
-            统一 PoolConfig dict（含 name/nodes/edges/pool_meta/schedules 等字段）。
-            失败时返回空 dict。
+            成功导入返回 True，格式不支持或解析失败（空结果）返回 False。
         """
-        self._bus.publish(ImportStarted(format="dzh", path=xml_path))
-        pool_config = self._call_dzh_parser(xml_path)
+        rule = _IMPORT_RULES.get(format)
+        if rule is None:
+            return False
+        parser_fn, format_name = rule
+        self._bus.publish(ImportStarted(format=format_name, path=path))
+        pool_config = parser_fn(path)
         if pool_config:
-            self._bus.publish(PoolLoaded(pool_config=pool_config, source_format="dzh"))
+            self._bus.publish(PoolLoaded(pool_config=pool_config, source_format=format_name))
             self._import_count += 1
-        return pool_config
+            return True
+        return False
 
-    def import_tdx_xml(self, xml_path: str) -> Dict[str, Any]:
-        """导入 TDX XML 文件。
+    def export_pool(self, config: Dict[str, Any], path: str, format: str) -> str:
+        """导出股票池文件（表驱动，支持 dzh / tdx / json 三种格式）。
 
-        覆盖 TDX 全部节点类型（type=0/1/2/3/7/8）、边属性（14 字段）、
-        spinfo 8 种 type、psatt 14 字段、func 16 字段、stk 14 字段
-        （通过原 converters.tdx 实现，不重复实现）。
+        流程：查 ``_EXPORT_RULES`` 表 → 调用 serializer 写文件 → 发布
+        ``ExportCompleted``。
 
         Args:
-            xml_path: TDX XML 文件路径。
+            config: 统一 PoolConfig dict。
+            path: 输出文件路径。
+            format: 格式名（``"dzh"`` / ``"tdx"`` / ``"json"``）。
 
         Returns:
-            统一 PoolConfig dict（含 pool_meta/nodes/edges/name 字段）。
-            失败时返回空 dict。
-        """
-        self._bus.publish(ImportStarted(format="tdx", path=xml_path))
-        pool_config = self._call_tdx_parser(xml_path)
-        if pool_config:
-            self._bus.publish(PoolLoaded(pool_config=pool_config, source_format="tdx"))
-            self._import_count += 1
-        return pool_config
-
-    def import_json(self, json_path: str) -> Dict[str, Any]:
-        """导入 JSON 文件。
-
-        Args:
-            json_path: JSON 文件路径。
-
-        Returns:
-            统一 PoolConfig dict（含 name/pool_type/nodes/edges/pool_meta 字段）。
-            失败时返回空 dict。
-        """
-        self._bus.publish(ImportStarted(format="json", path=json_path))
-        pool_config = self._call_json_parser(json_path)
-        if pool_config:
-            self._bus.publish(PoolLoaded(pool_config=pool_config, source_format="json"))
-            self._import_count += 1
-        return pool_config
-
-    # ------------------------------------------------------------------
-    # 解析器调用（保持向后兼容，包裹 try/except）
-    # ------------------------------------------------------------------
-    def _call_dzh_parser(self, xml_path: str) -> Dict[str, Any]:
-        """调用原 DZH 解析器（converters.dzh.parse_dzh_xml）。
-
-        parse_dzh_xml 接收 XML 内容（bytes/str）而非文件路径，
-        需先读取文件内容再传入。返回的 dict 已是 Compiler 兼容的 pool_config
-        结构（含 name/nodes/edges/pool_meta/schedules 等字段）。
-        """
-        try:
-            try:
-                from ..converters import parse_dzh_xml
-            except ImportError:
-                from converters import parse_dzh_xml
-            with open(xml_path, "rb") as f:
-                content = f.read()
-            return parse_dzh_xml(content, filename=xml_path)
-        except Exception as ex:
-            logger.warning("DZH XML 解析失败 path=%s: %s", xml_path, ex, exc_info=True)
-            return {}
-
-    def _call_tdx_parser(self, xml_path: str) -> Dict[str, Any]:
-        """调用原 TDX 解析器（converters.tdx.parse_tdx_xml + convert_tdx_to_config）。
-
-        parse_tdx_xml 接收文件路径，返回 TdxPoolMetaModel；
-        convert_tdx_to_config 将其转为统一 pool_config dict。
-        """
-        try:
-            try:
-                from ..converters import parse_tdx_xml, convert_tdx_to_config
-            except ImportError:
-                from converters import parse_tdx_xml, convert_tdx_to_config
-            tdx_pool = parse_tdx_xml(xml_path)
-            pool_config = convert_tdx_to_config(tdx_pool)
-            # 补充 name 字段（convert_tdx_to_config 不返回 name）
-            pool_config["name"] = os.path.splitext(os.path.basename(xml_path))[0]
-            return pool_config
-        except Exception as ex:
-            logger.warning("TDX XML 解析失败 path=%s: %s", xml_path, ex, exc_info=True)
-            return {}
-
-    def _call_json_parser(self, json_path: str) -> Dict[str, Any]:
-        """调用原 JSON 解析器（converters.json_xml.import_pool_from_json）。"""
-        try:
-            try:
-                from ..converters import import_pool_from_json
-            except ImportError:
-                from converters import import_pool_from_json
-            return import_pool_from_json(file_path=json_path)
-        except Exception as ex:
-            logger.warning("JSON 解析失败 path=%s: %s", json_path, ex, exc_info=True)
-            return {}
-
-    # ------------------------------------------------------------------
-    # 导出方法（由 API 模块直接调用，非事件订阅）
-    # ------------------------------------------------------------------
-    def export_to_dzh_xml(self, pool_config: Dict[str, Any], out_path: str) -> str:
-        """导出为 DZH XML。
-
-        调用 converters.dzh.export_dzh_xml（返回 XML 字符串），写入文件。
-
-        Args:
-            pool_config: 统一 PoolConfig dict。
-            out_path: 输出文件路径。
-
-        Returns:
-            输出文件路径。
+            输出文件路径；格式不支持时返回空字符串。
 
         Raises:
-            Exception: 导出失败时抛出。
+            Exception: 导出失败时由序列化器透传抛出。
         """
-        try:
-            try:
-                from ..converters import export_dzh_xml
-            except ImportError:
-                from converters import export_dzh_xml
-            xml_bytes = export_dzh_xml(pool_config)
-            # export_dzh_xml 返回 UTF-8 编码的 bytes
-            with open(out_path, "wb") as f:
-                f.write(xml_bytes)
-            self._bus.publish(ExportCompleted(
-                format="dzh", path=out_path,
-                count=len(pool_config.get("nodes", [])),
-            ))
-            return out_path
-        except Exception as ex:
-            logger.warning("DZH XML 导出失败 path=%s: %s", out_path, ex, exc_info=True)
-            raise
-
-    def export_to_tdx_xml(self, pool_config: Dict[str, Any], out_path: str) -> str:
-        """导出为 TDX XML。
-
-        调用 converters.json_xml._build_tdx_xml（接收 dict，直接写入文件），
-        该函数为 TDX XML 表驱动构建器，兼容前端格式与 TDX 原生格式。
-
-        Args:
-            pool_config: 统一 PoolConfig dict。
-            out_path: 输出文件路径。
-
-        Returns:
-            输出文件路径。
-
-        Raises:
-            Exception: 导出失败时抛出。
-        """
-        try:
-            try:
-                from ..converters import _build_tdx_xml
-            except ImportError:
-                from converters import _build_tdx_xml
-            _build_tdx_xml(pool_config, out_path)
-            self._bus.publish(ExportCompleted(
-                format="tdx", path=out_path,
-                count=len(pool_config.get("nodes", [])),
-            ))
-            return out_path
-        except Exception as ex:
-            logger.warning("TDX XML 导出失败 path=%s: %s", out_path, ex, exc_info=True)
-            raise
-
-    def export_to_json(self, pool_config: Dict[str, Any], out_path: str) -> str:
-        """导出为 JSON。
-
-        调用 converters.json_xml.export_pool_to_json（支持三种输入格式，
-        原子写入文件）。
-
-        Args:
-            pool_config: 统一 PoolConfig dict。
-            out_path: 输出文件路径。
-
-        Returns:
-            输出文件路径。
-
-        Raises:
-            Exception: 导出失败时抛出。
-        """
-        try:
-            try:
-                from ..converters import export_pool_to_json
-            except ImportError:
-                from converters import export_pool_to_json
-            export_pool_to_json(pool_config, file_path=out_path)
-            self._bus.publish(ExportCompleted(
-                format="json", path=out_path,
-                count=len(pool_config.get("nodes", [])),
-            ))
-            return out_path
-        except Exception as ex:
-            logger.warning("JSON 导出失败 path=%s: %s", out_path, ex, exc_info=True)
-            raise
+        rule = _EXPORT_RULES.get(format)
+        if rule is None:
+            return ""
+        serializer_fn, format_name = rule
+        serializer_fn(config, path)
+        self._bus.publish(ExportCompleted(
+            format=format_name, path=path,
+            count=len(config.get("nodes", [])),
+        ))
+        return path
 
 
 __all__ = ["ImportExportModule"]

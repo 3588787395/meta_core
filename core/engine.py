@@ -149,6 +149,68 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Task 11: role-action table-driven dispatch (node_roles.json -> _ROLE_ACTIONS)
+# Additive: existing node-type dispatch chains kept; replacement in later task.
+# Structure: {role: {"on_enter": [action_fns], "on_exit": [action_fns]}}
+# ---------------------------------------------------------------------------
+
+_ROLE_ACTIONS: Dict[str, Dict[str, List]] = {}
+
+
+def _resolve_action(action_name: str):
+    """Resolve action name to callable.
+
+    Callable signature: (engine, node_id, code, ts) -> None.
+    Actions bound to engine instance methods at dispatch time.
+    """
+    _ACTION_FNS = {
+        "mark_out_edges_dirty": lambda engine, node_id, code, ts: engine._mark_out_edges_dirty(node_id),
+        "publish_enter_event": lambda engine, node_id, code, ts: engine._publish_enter_event(node_id, code, ts),
+        "publish_exit_event": lambda engine, node_id, code, ts: engine._publish_exit_event(node_id, code, ts),
+        "publish_buy_signal": lambda engine, node_id, code, ts: engine._publish_signal("BUY", code, ts),
+        "publish_sell_signal": lambda engine, node_id, code, ts: engine._publish_signal("SELL", code, ts),
+    }
+    return _ACTION_FNS.get(action_name, lambda *a: None)
+
+
+def _init_role_actions(roles: Optional[Dict[str, Any]] = None):
+    """Initialize role actions from node_roles.json config.
+
+    Prefer passed roles (engine self.tables['node_roles']);
+    fall back to get_global_config_store().get_table('node_roles').
+    Graceful degradation: _ROLE_ACTIONS stays empty if config unavailable.
+    """
+    try:
+        if roles is None:
+            try:
+                from .table_engine import get_global_config_store
+            except ImportError:
+                from core.table_engine import get_global_config_store
+            cs = get_global_config_store()
+            if cs is None:
+                return
+            roles = cs.get_table("node_roles")
+        if not roles:
+            return
+        for role, actions in roles.items():
+            _ROLE_ACTIONS[role] = {
+                "on_enter": [_resolve_action(a) for a in actions.get("on_enter", [])],
+                "on_exit": [_resolve_action(a) for a in actions.get("on_exit", [])],
+            }
+    except Exception:
+        pass
+
+
+def _dispatch_role_action(engine, role, event_type, node_id, code, ts):
+    """Dispatch role-based action via table lookup.
+
+    Look up _ROLE_ACTIONS[role][event_type] for action list, execute in order.
+    No-op if role unregistered or event_type has no actions.
+    """
+    actions = _ROLE_ACTIONS.get(role, {}).get(event_type, [])
+    for action_fn in actions:
+        action_fn(engine, node_id, code, ts)
 
 class CompiledExpression:
     """解析并缓存单个表达式的 AST，提供安全的条件/值求值（ast 受控，禁 eval）。
@@ -568,12 +630,47 @@ class PoolEngineMixin:
         if data_updater is None:
             return
         tick_data = {event.code: event.tick_data}
+        # Task 3: waterline short-circuit - capture tick_table hash before
+        # apply_data (which internally calls tick_table.update via
+        # update_latest_tick). If hash unchanged after apply, waterline did not
+        # rise, skip downstream computation (node dirty marking, etc.).
+        # Additive: existing apply_data / mark_node_dirty logic preserved.
+        _tt = getattr(self.state, 'tick_table', None)
+        _pre_hash = _tt.hash if _tt is not None else None
         data_updater.apply_data(tick_data)
+        if _tt is not None and _pre_hash is not None and _tt.hash == _pre_hash:
+            return  # Waterline did not rise, zero computation
         # 标记源节点脏：边触发 action 需检测源节点脏才会执行筛选
         schedule = self._components.get("schedule")
         if schedule is not None:
             for nid in schedule.source_node_ids:
                 self.state.mark_node_dirty(nid)
+
+    def _execute_edge_3layer(self, edge_id: str, compiled, tick_table, now_ts: float):
+        """3-layer edge execution: trigger_check then filter_eval then propagate_apply.
+
+        Task 9: converges edge execution to 3 layers using pre-compiled specs
+        from CompiledPool (Task 5 cache).
+        """
+        from .execution_module import trigger_check, filter_eval, propagate_apply
+        timing_spec = compiled.edge_timing_spec.get(edge_id, {})
+        filter_spec = compiled.edge_filter_spec.get(edge_id, {})
+        propagate_spec = compiled.edge_propagate_spec.get(edge_id, {})
+        src_id, tgt_id = compiled.edge_endpoints.get(edge_id, (None, None))
+        if not src_id or not tgt_id:
+            return
+        # Layer 1: trigger check
+        node_dirty = True  # Simplified - check node stocks_ts vs latest_tick_ts
+        flow_state = self._edge_flow_state.get(edge_id, {})
+        if not trigger_check(timing_spec, now_ts, flow_state, node_dirty):
+            return
+        # Layer 2: filter eval
+        src_stocks = self.state.node_stocks.get(src_id, [])
+        passed, rejected = filter_eval(src_stocks, filter_spec, tick_table)
+        # Layer 3: propagate apply
+        tgt_stocks = self.state.node_stocks.get(tgt_id, [])
+        new_tgt = propagate_apply(src_stocks, tgt_stocks, passed, propagate_spec)
+        self.state.node_stocks[tgt_id] = new_tgt
 
     def rebuild_timed_specs(self) -> None:
         """清空 EventDriver heap 并用当前 state.time_source 重新注册边触发规格。
@@ -642,6 +739,8 @@ class PoolEngineMixin:
         else:
             # I13：.clear() 而非 = {}，保留 dict 对象身份使 TickTable view 引用稳定
             self.state.latest_tick.clear()
+            # Task 2: clear tick_table watermark
+            self.state.tick_table.update({})
             self.state.bars.clear()
 
         self._init_node_stocks()
@@ -804,10 +903,8 @@ class PoolEngineMixin:
         self.state.first_run = True
 
         # 回放模式进入隔离副本；切换到非回放模式时自动恢复实盘状态
-        if mode_id == "replay":
-            self.state.enter_replay()
-        elif self.state.is_replay_active():
-            self.state.exit_replay()
+        # 表驱动：由 mode_cfg.state_scope 字段决定 enter_replay / exit_replay
+        self.state.set_state_scope(mode_cfg)
 
         try:
             nodes = {n['id']: n for n in self.pool_config.get('nodes', [])}
@@ -972,6 +1069,17 @@ class PoolEngine(PoolEngineMixin):
             self._components["event_bus"].subscribe(DataChanged, self._on_data_changed_event)
         # self._pool_engine 指向 self，使 simulator/replay 中 self._engine._pool_engine 路径保持兼容
         self._pool_engine = self
+        # Task 5: Cache compiled pool for runtime zero-parse.
+        # Additive: existing schedule (Compiler.compile) parsing continues;
+        # CompiledPool provides pre-compiled edge specs for the 3-layer path.
+        self._compiled_pool = None
+        try:
+            from .execution_module import compile as compile_pool
+            self._compiled_pool = compile_pool(pool_config)
+        except Exception as e:
+            logger.warning("CompiledPool cache failed (Task 5): %s", e)
+        # Task 9: reset per-edge flow state for new pool runtime.
+        self._edge_flow_state = {}
 
     @staticmethod
     def _config_signature(pool_config: Dict[str, Any]) -> str:
@@ -2126,6 +2234,11 @@ class PoolEngine(PoolEngineMixin):
         self._pk_rankings: Dict = {}; self._angle_results: Dict = {}; self._dashboard_data: Dict = {}; self._alert_events: list = []; self._alert_queue = asyncio.Queue(); self._alert_cooldown: Dict = {}
         # Task 6: 迁移后新核心引擎实例（延迟创建）
         self._pool_engine: Optional['PoolEngine'] = None
+        # Task 5: CompiledPool cache for runtime zero-parse (additive; existing
+        # schedule-based parsing preserved). Populated in _init_pool_runtime.
+        self._compiled_pool = None
+        # Task 9: per-edge flow state for 3-layer edge execution path.
+        self._edge_flow_state: Dict[str, dict] = {}
         self._post_tick_pipeline = self.tables.get("post_tick_pipeline", {}).get("pipeline", [])
         self._runtime_modes = self.tables.get("runtime_modes", {}).get("modes", {}); self._time_sources = self.tables.get("time_sources", {}).get("time_sources", {}); self._trade_interfaces = self.tables.get("trade_interfaces", {}).get("trade_interfaces", {})
         # 拓扑模式识别器（配置化）
@@ -2146,6 +2259,8 @@ class PoolEngine(PoolEngineMixin):
                               pool_state_cls=_PoolStateCls)
         # ValueExtractor helper：表驱动值提取与路径导航
         self._value_extractor = ValueExtractor(self.tables, self)
+        # Task 11: init role-action registry (node_roles.json -> _ROLE_ACTIONS)
+        _init_role_actions(self.tables.get("node_roles"))
         # Task 24: 若提供 pool_config 则立即初始化池运行时
         if pool_config is not None:
             self._init_pool_runtime(pool_config, subscribe_data_changed)
@@ -2162,6 +2277,22 @@ class PoolEngine(PoolEngineMixin):
         self.ui_renderer = None
         self.ws_publisher = None
 
+    # --- Task 11: role-action helper methods (stubs; later task wires real logic) ---
+    def _mark_out_edges_dirty(self, node_id):
+        """Mark node out-edges dirty (stub: log; later task wires dirty propagation)."""
+        logger.debug("role_action: mark_out_edges_dirty node=%s", node_id)
+
+    def _publish_enter_event(self, node_id, code, ts):
+        """Publish node enter event (stub: log; later task wires EventBus.publish)."""
+        logger.debug("role_action: publish_enter_event node=%s code=%s ts=%s", node_id, code, ts)
+
+    def _publish_exit_event(self, node_id, code, ts):
+        """Publish node exit event (stub: log; later task wires EventBus.publish)."""
+        logger.debug("role_action: publish_exit_event node=%s code=%s ts=%s", node_id, code, ts)
+
+    def _publish_signal(self, kind, code, ts):
+        """Publish buy/sell signal (stub: log; later task wires EventBus.publish(Signal))."""
+        logger.debug("role_action: publish_signal kind=%s code=%s ts=%s", kind, code, ts)
     def _refresh_bar_data(self, mode_cfg, current_bar_data):
         """兼容保留：行情刷新 handler。
 
