@@ -127,10 +127,109 @@ def _compose_attr_int(type_key, data: dict) -> int:
 
 
 # ═══════════════════════════════════════════════════
+# _DualDictAccessMixin — DynamicCellModel/FlowModel 共享的 dict/attr 访问原语
+# ═══════════════════════════════════════════════════
+# 底层运行逻辑洞察（Code = Data + Dispatcher）：两个 Dynamic*Model 共享
+# ``_data + _extra + _present_attrs`` 三字段存储 + 7 个 dunder 访问器 +
+# ``to_dict`` 序列化骨架（``_extra/_data merge + _compose_attr_int + pop bit_fields``）。
+# 提升至 mixin 后子类仅声明 ``_attr_key``（"cell_type" / "flow"）与
+# ``_internal_pop_keys``（序列化需剔除的内部字段），重复行收敛至单一实现。
+
+
+class _DualDictAccessMixin:
+    """dict/attr 双访问 + to_dict 序列化骨架的共享 mixin。
+
+    子类约定：
+      - ``self._data`` / ``self._extra`` / ``self._present_attrs`` 在 __init__ 中初始化
+      - ``self._attr_key``：用于 ``_compose_attr_int`` 的类型 key
+                          （"cell_type" 取 data 值，"flow" 固定字符串）
+      - ``self._internal_pop_keys``：to_dict 末尾需 pop 的内部字段元组
+    """
+
+    # ── dict-style access ──────────────────────────────────────
+
+    def __getitem__(self, key):
+        if key in self._data:
+            return self._data[key]
+        if key in self._extra:
+            return self._extra[key]
+        raise KeyError(key)
+
+    def __setitem__(self, key, value):
+        self._data[key] = value
+
+    def __contains__(self, key):
+        return key in self._data or key in self._extra
+
+    def get(self, key, default=None):
+        if key in self._data:
+            return self._data[key]
+        if key in self._extra:
+            return self._extra[key]
+        return default
+
+    def keys(self):
+        return set(self._data.keys()) | set(self._extra.keys())
+
+    # ── attribute-style access ─────────────────────────────────
+
+    def __getattr__(self, name):
+        if name.startswith('_'):
+            raise AttributeError(name)
+        if name in self._data:
+            return self._data[name]
+        if name in self._extra:
+            return self._extra[name]
+        raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
+
+    def __setattr__(self, name, value):
+        if name.startswith('_'):
+            super().__setattr__(name, value)
+        else:
+            self._data[name] = value
+
+    # ── serialization skeleton ─────────────────────────────────
+
+    def _base_to_dict(self) -> Dict[str, Any]:
+        """to_dict 骨架：merge _extra/_data + 重组 attr + pop bit_fields + pop 内部键。
+
+        ``_attr_key`` 为 ``"cell_type"`` 时从 ``_data`` 取动态类型并额外处理 position；
+        为 ``"flow"`` 时使用固定字符串。``_internal_pop_keys`` 列出每个子类需剔除的
+        内部兼容字段。
+        """
+        result: Dict[str, Any] = {}
+        result.update(self._extra)
+        result.update(self._data)
+
+        attr_key = self._attr_key
+        if attr_key == "cell_type":
+            type_val = self._data.get("cell_type", self._data.get("type", 0))
+            attr_int = _compose_attr_int(type_val, self._data)
+            result["attr"] = attr_int
+            pos = self._data.get("position")
+            if isinstance(pos, PositionModel):
+                result["pos"] = pos.to_pos_str()
+        else:
+            attr_int = _compose_attr_int(attr_key, self._data)
+            result["attr"] = attr_int
+
+        _load_field_defs()
+        bit_fields = _bit_fields_cache.get(
+            str(type_val) if attr_key == "cell_type" else attr_key, {}
+        )
+        for name in bit_fields:
+            result.pop(name, None)
+
+        for key in self._internal_pop_keys:
+            result.pop(key, None)
+        return result
+
+
+# ═══════════════════════════════════════════════════
 # DynamicCellModel — 通用 Cell 模型
 # ═══════════════════════════════════════════════════
 
-class DynamicCellModel:
+class DynamicCellModel(_DualDictAccessMixin):
     """通用 Cell 模型，根据 field_definitions.json 动态加载字段定义。
 
     支持 dict 风格访问 (model['key'], model.get('key')) 和属性访问 (model.key)。
@@ -139,6 +238,8 @@ class DynamicCellModel:
     """
 
     _COMMON_KEYS = {"id", "type", "pos", "clr", "text", "attr"}
+    _attr_key = "cell_type"
+    _internal_pop_keys = ("cell_type",)
 
     def __init__(self):
         self._data: Dict[str, Any] = {}
@@ -232,79 +333,11 @@ class DynamicCellModel:
 
         return obj
 
-    # ── dict-style access ──────────────────────────────────────
-
-    def __getitem__(self, key):
-        if key in self._data:
-            return self._data[key]
-        if key in self._extra:
-            return self._extra[key]
-        raise KeyError(key)
-
-    def __setitem__(self, key, value):
-        self._data[key] = value
-
-    def __contains__(self, key):
-        return key in self._data or key in self._extra
-
-    def get(self, key, default=None):
-        """dict-style get，支持默认值。"""
-        if key in self._data:
-            return self._data[key]
-        if key in self._extra:
-            return self._extra[key]
-        return default
-
-    def keys(self):
-        """返回所有数据键的视图。"""
-        return set(self._data.keys()) | set(self._extra.keys())
-
-    # ── attribute-style access ─────────────────────────────────
-
-    def __getattr__(self, name):
-        if name.startswith('_'):
-            raise AttributeError(name)
-        if name in self._data:
-            return self._data[name]
-        if name in self._extra:
-            return self._extra[name]
-        raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
-
-    def __setattr__(self, name, value):
-        if name.startswith('_'):
-            super().__setattr__(name, value)
-        else:
-            self._data[name] = value
-
     # ── serialization ──────────────────────────────────────────
 
     def to_dict(self) -> Dict[str, Any]:
-        """序列化回字典，将 bit fields 重新组合成 attr int。"""
-        result = {}
-        result.update(self._extra)
-        result.update(self._data)
-
-        cell_type = self._data.get("cell_type", self._data.get("type", 0))
-
-        # 重新组合 attr
-        attr_int = _compose_attr_int(cell_type, self._data)
-        result["attr"] = attr_int
-
-        # 转换 position 回 pos 字符串
-        pos = self._data.get("position")
-        if isinstance(pos, PositionModel):
-            result["pos"] = pos.to_pos_str()
-
-        # 移除展开的 bit fields（已组合到 attr 中）
-        _load_field_defs()
-        bit_fields = _bit_fields_cache.get(str(cell_type), {})
-        for name in bit_fields:
-            result.pop(name, None)
-
-        # 移除内部字段
-        result.pop("cell_type", None)
-
-        return result
+        """序列化回字典，将 bit fields 重新组合成 attr int。委托 mixin 骨架。"""
+        return self._base_to_dict()
 
     def model_dump(self, **kwargs) -> Dict[str, Any]:
         """兼容 Pydantic model_dump() 接口，委托 to_dict()。"""
@@ -421,7 +454,7 @@ _FIELD_ALIASES: Dict[str, List[tuple]] = {
 }
 
 
-class DynamicFlowModel:
+class DynamicFlowModel(_DualDictAccessMixin):
     """通用 Flow 模型，根据 field_definitions.json 的 flow_fields 动态加载字段定义。
 
     支持 dict 风格访问和属性访问。
@@ -430,6 +463,9 @@ class DynamicFlowModel:
 
     _FLOW_KEYS = {"from", "to", "attr", "begin", "begint", "end", "endt",
                   "interval", "clr", "mid", "count"}
+    _attr_key = "flow"
+    _internal_pop_keys = ("from_cell_id", "to_cell_id", "begin_type", "begin_param",
+                          "end_type", "end_param", "interval_sec", "raw_attr")
 
     def __init__(self):
         self._data: Dict[str, Any] = {}
@@ -536,72 +572,13 @@ class DynamicFlowModel:
         """是否为出流（非直通模式）。"""
         return self.mode_name != "pass_through"
 
-    # ── dict-style access ──────────────────────────────────────
-
-    def __getitem__(self, key):
-        if key in self._data:
-            return self._data[key]
-        if key in self._extra:
-            return self._extra[key]
-        raise KeyError(key)
-
-    def __setitem__(self, key, value):
-        self._data[key] = value
-
-    def __contains__(self, key):
-        return key in self._data or key in self._extra
-
-    def get(self, key, default=None):
-        if key in self._data:
-            return self._data[key]
-        if key in self._extra:
-            return self._extra[key]
-        return default
-
-    def keys(self):
-        return set(self._data.keys()) | set(self._extra.keys())
-
-    # ── attribute-style access ─────────────────────────────────
-
-    def __getattr__(self, name):
-        if name.startswith('_'):
-            raise AttributeError(name)
-        if name in self._data:
-            return self._data[name]
-        if name in self._extra:
-            return self._extra[name]
-        raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
-
-    def __setattr__(self, name, value):
-        if name.startswith('_'):
-            super().__setattr__(name, value)
-        else:
-            self._data[name] = value
-
-    # ── serialization ──────────────────────────────────────────
+    # ── dict-style access / attribute-style access / serialization ──
+    # 全部由 _DualDictAccessMixin 提供：__getitem__/__setitem__/__contains__/
+    # get/keys/__getattr__/__setattr__ + _base_to_dict() 骨架。
 
     def to_dict(self) -> Dict[str, Any]:
-        """序列化回字典，将 bit fields 重新组合成 attr int。"""
-        result = {}
-        result.update(self._extra)
-        result.update(self._data)
-
-        # 重新组合 attr
-        attr_int = _compose_attr_int("flow", self._data)
-        result["attr"] = attr_int
-
-        # 移除展开的 bit fields
-        _load_field_defs()
-        bit_fields = _bit_fields_cache.get("flow", {})
-        for name in bit_fields:
-            result.pop(name, None)
-
-        # 移除内部兼容字段
-        for key in ("from_cell_id", "to_cell_id", "begin_type", "begin_param",
-                     "end_type", "end_param", "interval_sec", "raw_attr"):
-            result.pop(key, None)
-
-        return result
+        """序列化回字典，将 bit fields 重新组合成 attr int。委托 mixin 骨架。"""
+        return self._base_to_dict()
 
     def __repr__(self):
         fid = self._data.get("from", "?")
