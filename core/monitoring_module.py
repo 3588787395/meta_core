@@ -332,6 +332,50 @@ class _SnapshotBuilder:
 # === 事件记录适配器（表驱动，无 if/elif 链）===
 # 每个适配器从事件对象提取 details 字段，返回统一记录 dict。
 # event_to_record 按 type(event).__name__ 查表分派。
+#
+# 底层运行逻辑洞察（Code = Data + Dispatcher）：25 个适配器共享
+# ``{"event_type": str, "ts": float, "code"?: str, "details": dict, **extra}``
+# envelope 骨架，差异仅 details 字段映射与 code/ts 取值。提取 3 个公共原语：
+#   - ``_truncate_codes(codes)``：合并 4 处 `",".join(codes[:5]) + "..."` 截断
+#   - ``_envelope(event_type, ts, code="", details=None, **extra)``：合并 envelope 骨架
+#   - ``_payload_adapter(event_type, payload, ts, fields)``：合并 3 处
+#     ``dict(event.X or {})`` + 逐字段 ``.get`` 提取（OrderPlaced/OrderFilled/AlertRaised）
+
+
+def _truncate_codes(codes) -> str:
+    """合并 4 处 codes 截断显示（前 5 + 省略号）。"""
+    codes = list(codes) if codes else []
+    return ",".join(codes[:5]) + ("..." if len(codes) > 5 else "")
+
+
+def _envelope(event_type: str, ts, code: str = "", details: Optional[dict] = None, **extra) -> dict:
+    """统一事件记录 envelope 构造器（合并 ~15 处重复骨架）。
+
+    输出 schema：``{"event_type", "ts", "code"?, "details"?, **extra}``，
+    缺省字段（空 code / None details）不入 record，与原各 adapter 字面量构造语义一致。
+    """
+    record: dict = {"event_type": event_type, "ts": ts}
+    if code:
+        record["code"] = code
+    if details is not None:
+        record["details"] = details
+    if extra:
+        record.update(extra)
+    return record
+
+
+def _payload_adapter(event_type: str, payload_src, ts, payload_fields: List[Tuple[str, str]], code_key: str = "code") -> dict:
+    """合并 OrderPlaced/OrderFilled/AlertRaised 的 ``dict(event.X or {})`` + ``.get`` 提取骨架。
+
+    Args:
+        payload_src: ``event.order`` / ``event.fill`` / ``event.alert`` 等原始 payload（dict 或 None）。
+        payload_fields: ``[(details_key, payload_key), ...]`` 字段映射表。
+        code_key: payload 中 code 字段名（默认 "code"）。
+    """
+    payload = dict(payload_src or {})
+    code = str(payload.get(code_key, "") or "")
+    details = {dk: payload.get(pk, 0 if dk in ("qty", "price") else "") for dk, pk in payload_fields}
+    return _envelope(event_type, ts, code=code, details=details)
 
 
 def _adapter_tick_received(event):
@@ -339,43 +383,23 @@ def _adapter_tick_received(event):
     tick_data = event.tick_data or {}
     if not code and isinstance(tick_data, dict):
         code = tick_data.get("code", "") or tick_data.get("symbol", "")
-    return {
-        "event_type": "TickReceived",
-        "code": code,
-        "ts": event.ts,
-        "details": {
-            "price": tick_data.get("price", 0) if isinstance(tick_data, dict) else 0,
-            "volume": tick_data.get("volume", 0) if isinstance(tick_data, dict) else 0,
-        },
+    details = {
+        "price": tick_data.get("price", 0) if isinstance(tick_data, dict) else 0,
+        "volume": tick_data.get("volume", 0) if isinstance(tick_data, dict) else 0,
     }
+    return _envelope("TickReceived", event.ts, code=code, details=details)
 
 
 def _adapter_data_changed(event):
     codes = list(event.codes) if event.codes else []
-    code_str = ",".join(codes[:5]) + ("..." if len(codes) > 5 else "")
-    return {
-        "event_type": "DataChanged",
-        "code": code_str,
-        "ts": event.ts,
-        "details": {
-            "source": event.source or "",
-            "period": event.period or "",
-            "count": len(codes),
-        },
-    }
+    details = {"source": event.source or "", "period": event.period or "", "count": len(codes)}
+    return _envelope("DataChanged", event.ts, code=_truncate_codes(codes), details=details)
 
 
 def _adapter_bar_composed(event):
     bar = event.bar or {}
-    return {
-        "event_type": "BarComposed",
-        "code": event.code,
-        "ts": event.ts,
-        "details": {
-            "period": event.period,
-            "close": bar.get("close", 0) if isinstance(bar, dict) else 0,
-        },
-    }
+    details = {"period": event.period, "close": bar.get("close", 0) if isinstance(bar, dict) else 0}
+    return _envelope("BarComposed", event.ts, code=event.code, details=details)
 
 
 def _adapter_formula_evaluated(event):
@@ -386,48 +410,22 @@ def _adapter_formula_evaluated(event):
     elif isinstance(result, (list, tuple)):
         result_str = f"len={len(result)}"
     ts = event.ts if hasattr(event, 'ts') and event.ts else time.time()
-    return {
-        "event_type": "FormulaEvaluated",
-        "code": event.code,
-        "ts": ts,
-        "details": {
-            "formula": event.formula_ref,
-            "result": result_str,
-        },
-    }
+    details = {"formula": event.formula_ref, "result": result_str}
+    return _envelope("FormulaEvaluated", ts, code=event.code, details=details)
 
 
 def _adapter_stock_filtered(event):
-    return {
-        "event_type": "StockFiltered",
-        "edge_id": event.eid,
-        "ts": time.time(),
-        "details": {
-            "passed": len(event.passed),
-            "rejected": len(event.rejected),
-            "filter": event.filter_ref,
-        },
-    }
+    details = {"passed": len(event.passed), "rejected": len(event.rejected), "filter": event.filter_ref}
+    return _envelope("StockFiltered", time.time(), edge_id=event.eid, details=details)
 
 
 def _adapter_time_advanced(event):
-    return {
-        "event_type": "TimeAdvanced",
-        "ts": event.ts,
-        "details": {
-            "source": event.source or "",
-        },
-    }
+    return _envelope("TimeAdvanced", event.ts, details={"source": event.source or ""})
 
 
 def _adapter_snapshot_updated(event):
-    return {
-        "event_type": "SnapshotUpdated",
-        "ts": event.ts,
-        "details": {
-            "nodes": len(event.snapshot.get("node_snapshots", {})) if isinstance(event.snapshot, dict) else 0,
-        },
-    }
+    nodes = len(event.snapshot.get("node_snapshots", {})) if isinstance(event.snapshot, dict) else 0
+    return _envelope("SnapshotUpdated", event.ts, details={"nodes": nodes})
 
 
 def _adapter_event_logged(event):
@@ -438,237 +436,137 @@ def _adapter_event_logged(event):
 def _adapter_executed(event):
     d = event.details if isinstance(event.details, dict) else {}
     codes = list(event.entered) if event.entered else []
-    code_str = ",".join(codes[:5]) + ("..." if len(codes) > 5 else "")
-    return {
-        "event_type": "Executed",
-        "code": code_str,
-        "node_id": event.tid,
-        "pool_id": event.tid,
-        "edge_id": event.eid,
-        "ts": d.get("timestamp", time.time()),
-        "details": {
-            "sid": event.sid,
-            "tid": event.tid,
-            "mode": event.mode,
-            "entered": len(event.entered or []),
-            "exited": len(event.exited or []),
-            "target_cleared": len(event.target_cleared or []),
-        },
+    details = {
+        "sid": event.sid, "tid": event.tid, "mode": event.mode,
+        "entered": len(event.entered or []),
+        "exited": len(event.exited or []),
+        "target_cleared": len(event.target_cleared or []),
     }
+    return _envelope(
+        "Executed", d.get("timestamp", time.time()), code=_truncate_codes(codes),
+        node_id=event.tid, pool_id=event.tid, edge_id=event.eid, details=details,
+    )
 
 
 def _adapter_domain_event(event):
-    return {
-        "event_type": event.event_type,
-        "code": event.code,
-        "node_id": event.pool_id,
-        "pool_id": event.pool_id,
-        "ts": time.time(),
-        "details": dict(event.details) if isinstance(event.details, dict) else {},
-    }
+    details = dict(event.details) if isinstance(event.details, dict) else {}
+    return _envelope(
+        event.event_type, time.time(), code=event.code,
+        node_id=event.pool_id, pool_id=event.pool_id, details=details,
+    )
 
 
 def _adapter_pool_loaded(event):
-    return {
-        "event_type": "PoolLoaded",
-        "ts": time.time(),
-        "details": {
-            "format": event.source_format,
-        },
-    }
+    return _envelope("PoolLoaded", time.time(), details={"format": event.source_format})
 
 
 def _adapter_config_loaded(event):
-    return {
-        "event_type": "ConfigLoaded",
-        "ts": time.time(),
-        "details": {
-            "tables": len(event.config_tables) if isinstance(event.config_tables, dict) else 0,
-        },
-    }
+    tables = len(event.config_tables) if isinstance(event.config_tables, dict) else 0
+    return _envelope("ConfigLoaded", time.time(), details={"tables": tables})
 
 
 def _adapter_config_changed(event):
-    return {
-        "event_type": "ConfigChanged",
-        "ts": time.time(),
-        "details": {
-            "changed": event.changed_tables if event.changed_tables else [],
-        },
-    }
+    return _envelope("ConfigChanged", time.time(), details={"changed": event.changed_tables or []})
 
 
 def _adapter_transfer_executed(event):
     codes = list(event.codes) if event.codes else []
-    code_str = ",".join(codes[:5]) + ("..." if len(codes) > 5 else "")
-    return {
-        "event_type": "TransferExecuted",
-        "code": code_str,
-        "node_id": event.tgt,
-        "pool_id": event.tgt,
-        "ts": event.ts,
-        "details": {
-            "src": event.src,
-            "tgt": event.tgt,
-            "mode": event.mode,
-            "count": len(codes),
-        },
-    }
+    details = {"src": event.src, "tgt": event.tgt, "mode": event.mode, "count": len(codes)}
+    return _envelope(
+        "TransferExecuted", event.ts, code=_truncate_codes(codes),
+        node_id=event.tgt, pool_id=event.tgt, details=details,
+    )
 
 
 def _adapter_ttl_expired(event):
     codes = list(event.codes) if event.codes else []
-    code_str = ",".join(codes[:5]) + ("..." if len(codes) > 5 else "")
-    return {
-        "event_type": "TTLExpired",
-        "code": code_str,
-        "node_id": event.node_id,
-        "pool_id": event.node_id,
-        "ts": event.ts,
-        "details": {
-            "node": event.node_id,
-            "count": len(codes),
-        },
-    }
+    details = {"node": event.node_id, "count": len(codes)}
+    return _envelope(
+        "TTLExpired", event.ts, code=_truncate_codes(codes),
+        node_id=event.node_id, pool_id=event.node_id, details=details,
+    )
 
 
 def _adapter_order_placed(event):
-    order = dict(event.order or {})
-    code = order.get("code", "")
-    return {
-        "event_type": "OrderPlaced",
-        "code": code,
-        "ts": event.ts,
-        "details": {
-            "side": order.get("side", ""),
-            "qty": order.get("qty", 0),
-            "price": order.get("price", 0),
-        },
-    }
+    return _payload_adapter(
+        "OrderPlaced", event.order, event.ts,
+        [("side", "side"), ("qty", "qty"), ("price", "price")],
+    )
 
 
 def _adapter_order_filled(event):
-    fill = dict(event.fill or {})
-    code = fill.get("code", "")
-    return {
-        "event_type": "OrderFilled",
-        "code": code,
-        "ts": event.ts,
-        "details": {
-            "side": fill.get("side", ""),
-            "qty": fill.get("qty", 0),
-            "price": fill.get("price", 0),
-        },
-    }
+    return _payload_adapter(
+        "OrderFilled", event.fill, event.ts,
+        [("side", "side"), ("qty", "qty"), ("price", "price")],
+    )
 
 
 def _adapter_alert_raised(event):
     alert = event.alert or {}
-    rule_id = str(alert.get("rule_id", "") or "")
     code = str(alert.get("code", "") or "")
-    return {
-        "event_type": "AlertRaised",
-        "code": code,
-        "ts": float(event.ts or 0.0),
-        "details": {
-            "rule": rule_id,
-            "severity": alert.get("severity", ""),
-            "message": alert.get("message", ""),
-        },
+    details = {
+        "rule": str(alert.get("rule_id", "") or ""),
+        "severity": alert.get("severity", ""),
+        "message": alert.get("message", ""),
     }
+    return _envelope("AlertRaised", float(event.ts or 0.0), code=code, details=details)
 
 
 def _adapter_position_updated(event):
     tracker = event.tracker or {}
     node_id = str(tracker.get("node_id", "") or "")
     code = str(tracker.get("code", "") or "")
-    return {
-        "event_type": "PositionUpdated",
-        "code": code,
-        "node_id": node_id,
-        "pool_id": node_id,
-        "ts": event.ts,
-        "details": {
-            "qty": tracker.get("qty", 0),
-            "entry_price": tracker.get("entry_price", 0),
-            "pnl": round(float(tracker.get("pnl", 0) or 0), 2),
-        },
+    details = {
+        "qty": tracker.get("qty", 0),
+        "entry_price": tracker.get("entry_price", 0),
+        "pnl": round(float(tracker.get("pnl", 0) or 0), 2),
     }
+    return _envelope(
+        "PositionUpdated", event.ts, code=code,
+        node_id=node_id, pool_id=node_id, details=details,
+    )
 
 
 def _adapter_statistics_updated(event):
     stats = dict(event.stats or {})
-    return {
-        "event_type": "StatisticsUpdated",
-        "ts": event.ts,
-        "details": {
-            "total_pnl": round(float(stats.get("total_pnl", 0) or 0), 2),
-            "trade_count": stats.get("trade_count", 0),
-            "win_rate": round(float(stats.get("win_rate", 0) or 0), 1),
-        },
+    details = {
+        "total_pnl": round(float(stats.get("total_pnl", 0) or 0), 2),
+        "trade_count": stats.get("trade_count", 0),
+        "win_rate": round(float(stats.get("win_rate", 0) or 0), 1),
     }
+    return _envelope("StatisticsUpdated", event.ts, details=details)
 
 
 def _adapter_ranking_changed(event):
-    return {
-        "event_type": "RankingChanged",
-        "ts": event.ts,
-        "details": {
-            "dimension": event.dimension,
-        },
-    }
+    return _envelope("RankingChanged", event.ts, details={"dimension": event.dimension})
 
 
 def _adapter_edge_fired(event):
-    return {
-        "event_type": "EdgeFired",
-        "edge_id": event.eid,
-        "eid": event.eid,
-        "code": "",
-        "ts": event.ts,
-        "details": {},
-    }
+    return _envelope("EdgeFired", event.ts, edge_id=event.eid, eid=event.eid, code="", details={})
 
 
 def _adapter_signal(event):
-    return {
-        "event_type": event.signal_type,
-        "code": event.code,
-        "node_id": event.pool_id,
-        "pool_id": event.pool_id,
-        "ts": event.ts,
-        "details": {
-            "signal_type": event.signal_type,
-            "price": event.price,
-            "quantity": event.quantity,
-            "condition": event.condition,
-            "profit_pct": event.profit_pct,
-            "hold_days": event.hold_days,
-        },
+    details = {
+        "signal_type": event.signal_type, "price": event.price,
+        "quantity": event.quantity, "condition": event.condition,
+        "profit_pct": event.profit_pct, "hold_days": event.hold_days,
     }
+    return _envelope(
+        event.signal_type, event.ts, code=event.code,
+        node_id=event.pool_id, pool_id=event.pool_id, details=details,
+    )
 
 
 def _adapter_crossover_detected(event):
-    return {
-        "event_type": "CrossOverDetected",
-        "code": event.code,
-        "ts": event.ts,
-        "details": {
-            "cross_type": event.cross_type,
-            "formula_ref": event.formula_ref,
-        },
-    }
+    details = {"cross_type": event.cross_type, "formula_ref": event.formula_ref}
+    return _envelope("CrossOverDetected", event.ts, code=event.code, details=details)
 
 
 def _adapter_mode_changed(event):
-    return {
-        "event_type": "ModeChanged",
-        "ts": float(time.time()),
-        "details": {
-            "mode_id": event.mode_id,
-            "prev_mode": event.prev_mode,
-        },
-    }
+    return _envelope(
+        "ModeChanged", float(time.time()),
+        details={"mode_id": event.mode_id, "prev_mode": event.prev_mode},
+    )
 
 
 EVENT_RECORD_ADAPTERS: Dict[str, Callable[[Any], dict]] = {

@@ -953,6 +953,18 @@ class _XmlAttrMixin:
                 result[field] = str(val)
         return result
 
+    @classmethod
+    def from_dict(cls, data: Dict) -> "_XmlAttrMixin":
+        """通用 ``from_dict``：按 ``model_fields`` 过滤未知键后构造实例。
+
+        底层运行逻辑洞察（Code = Data + Dispatcher）：5 个 TDX 叶子模型
+        （Func/Psatt/Spinfo/Stk/Flow）的 ``from_dict`` 逐字相同，仅返回类型注解不同。
+        提升至 mixin 后子类零实现 ``from_dict``，新增模型自动获得该能力。
+        ``TdxCellModel`` / ``TdxPoolMetaModel`` 含嵌套解析，保留各自 ``from_dict``。
+        """
+        known = set(cls.model_fields.keys())
+        return cls(**{k: v for k, v in data.items() if k in known})
+
 
 class TdxFuncModel(_XmlAttrMixin, BaseModel):
     nset: int = 1
@@ -979,11 +991,6 @@ class TdxFuncModel(_XmlAttrMixin, BaseModel):
     _XML_FIELDS: ClassVar[List[str]] = ["nset", "ntjindexno", "accode", "nperiod", "nfirst", "cfirst",
                    "noperate", "nsecond", "csecond", "fsecond", "nbeginday", "nendday",
                    "bnost", "bnotp", "bnotq", "nperiodnum"]
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> TdxFuncModel:
-        known = set(cls.model_fields.keys())
-        return cls(**{k: v for k, v in data.items() if k in known})
 
 
 class TdxPsattModel(_XmlAttrMixin, BaseModel):
@@ -1018,11 +1025,6 @@ class TdxPsattModel(_XmlAttrMixin, BaseModel):
         if v not in (0, 1, 2, 3, 4):
             raise ValueError(f'ndeltype must be 0(days)/1(hours)/2(minutes)/3(seconds)/4(seconds_DZH), got {v}')
         return v
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> TdxPsattModel:
-        known = set(cls.model_fields.keys())
-        return cls(**{k: v for k, v in data.items() if k in known})
 
     _XML_FIELDS: ClassVar[List[str]] = ["bdel", "ndelnum", "ndeltype", "baimpool", "bsound", "nsoundtype",
                    "nsyssound", "soundfile", "btip", "bsavetoblock", "blockfile",
@@ -1066,11 +1068,6 @@ class TdxSpinfoModel(_XmlAttrMixin, BaseModel):
             raise ValueError(f"spinfo.type 必须为 {sorted(allowed)} 之一，实际值为 {v}")
         return v
 
-    @classmethod
-    def from_dict(cls, data: Dict) -> TdxSpinfoModel:
-        known = set(cls.model_fields.keys())
-        return cls(**{k: v for k, v in data.items() if k in known})
-
     _XML_FIELDS: ClassVar[List[str]] = ["type", "customblockname", "size", "market", "sector_type"]
 
 
@@ -1107,11 +1104,6 @@ class TdxStkModel(_XmlAttrMixin, BaseModel):
             else:
                 suffix = "SZ"  # default
         return f"{self.code}.{suffix}"
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> TdxStkModel:
-        known = set(cls.model_fields.keys())
-        return cls(**{k: v for k, v in data.items() if k in known})
 
     _XML_FIELDS: ClassVar[List[str]] = ["setcode", "code", "indate", "intime", "inprice", "income", "now",
                    "rise", "volume", "maxrate", "maxperiod", "maxtime", "maxprice", "idaynum"]
@@ -1183,11 +1175,6 @@ class TdxFlowModel(_XmlAttrMixin, BaseModel):
     @property
     def mode_name(self) -> str:
         return "move" if self.tran == 1 else "copy"
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> TdxFlowModel:
-        known = set(cls.model_fields.keys())
-        return cls(**{k: v for k, v in data.items() if k in known})
 
     _XML_FIELDS: ClassVar[List[str]] = ["startid", "endid", "clr", "size", "tran", "emptyps", "starttype",
                    "starttime", "starttimetype", "starttimehms", "cxtype", "cxtime",

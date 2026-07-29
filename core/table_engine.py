@@ -22,6 +22,7 @@ import asyncio
 import json
 import time
 import copy
+import functools
 import hashlib
 import logging
 from pathlib import Path
@@ -1198,6 +1199,12 @@ class PropertyOwnershipManager:
     """属性所有权管理器：基于 property_ownership.json 配置表，
     管理每种节点类型在不同池类型下的属性所有权。
     确保导入DZH配置时禁用TDX独有属性，导入TDX配置时禁用DZH独有属性。
+
+    底层运行逻辑洞察（Code = Data + Dispatcher）：5 个查询方法共享
+    ``if self._bypasses_ownership(pool_type): return <默认值>`` 守卫 + 4 处
+    ``self.ownership.get("pool_type_attrs", {}).get(pool_type, {})`` 查表，
+    统一为 ``_pool_attr`` helper（Dispatcher）+ ``_bypass_or`` 装饰器短路，
+    方法体仅保留差异 Data。
     """
 
     def __init__(self, store: "ConfigStore"):
@@ -1213,6 +1220,33 @@ class PropertyOwnershipManager:
         pool_cfg = self._store.get("pool_types", {}).get("pool_types", {}).get(pool_type, {})
         return bool(pool_cfg.get("bypass_ownership_restrictions", False))
 
+    def _pool_attr(self, pool_type: str, key: str, default: Any = None) -> Any:
+        """从 ownership.pool_type_attrs[pool_type] 取 key（合并 4 处查表副本）。
+
+        property_ownership.json 的 pool_type_attrs 段按 pool_type 索引规则元数据
+        （type_prefix / rules_key / other_pool / bypass_ownership_restrictions），
+        本 helper 消除各方法内重复的 ``self.ownership.get("pool_type_attrs", {})
+        .get(pool_type, {})`` + ``.get(key)`` 两步链。
+        """
+        pool_cfg = self.ownership.get("pool_type_attrs", {}).get(pool_type, {})
+        return pool_cfg.get(key, default)
+
+    @staticmethod
+    def _bypass_or(default_factory: Callable[[], Any]):
+        """装饰器：``_bypasses_ownership(pool_type)`` 为真时短路返回 default_factory()。
+
+        合并 5 处 ``if self._bypasses_ownership(pool_type): return <默认值>`` 守卫，
+        差异（默认值 [] / True / None / data）通过 default_factory 闭包注入。
+        """
+        def decorator(method):
+            @functools.wraps(method)
+            def wrapper(self, pool_type, *args, **kwargs):
+                if self._bypasses_ownership(pool_type):
+                    return default_factory()
+                return method(self, pool_type, *args, **kwargs)
+            return wrapper
+        return decorator
+
     def _resolve_node_type(self, node_type: str, pool_type: str = "dzh") -> str:
         """将节点类型名解析为 type_ownership 中的 key
 
@@ -1225,8 +1259,7 @@ class PropertyOwnershipManager:
         # TDX 池需优先查 tdx_ 前缀 key，因为同一数字类型在 DZH/TDX 含义不同
         # （如 type 3 在 DZH 为状态列、在 TDX 为转移条件），前缀命名空间隔离是
         # property_ownership.json 的结构前提
-        pool_cfg = self.ownership.get("pool_type_attrs", {}).get(pool_type, {})
-        prefix = pool_cfg.get("type_prefix")
+        prefix = self._pool_attr(pool_type, "type_prefix")
         if prefix:
             prefixed_key = f"{prefix}{node_type}"
             if prefixed_key in type_ownership:
@@ -1251,17 +1284,14 @@ class PropertyOwnershipManager:
         """使缓存失效，下次访问时重新加载"""
         self._ownership = None
 
+    @_bypass_or(list)
     def get_blocked_attrs(self, pool_type: str) -> List[str]:
         """获取指定池类型下被封锁的属性列表
 
         绕过所有权限制的池类型（如 custom）没有封锁属性，所有属性均可编辑。
         """
-        if self._bypasses_ownership(pool_type):
-            return []
         rules = self.ownership.get("rules", {})
-        # 表驱动：按 pool_type 查 pool_type_attrs 获取 rules_key，消除 if pool_type == 分支
-        pool_cfg = self.ownership.get("pool_type_attrs", {}).get(pool_type, {})
-        rules_key = pool_cfg.get("rules_key")
+        rules_key = self._pool_attr(pool_type, "rules_key")
         return rules.get(rules_key, {}).get("blocked_attrs", []) if rules_key else []
 
     def is_attr_allowed(self, pool_type: str, node_type: str, attr_name: str) -> bool:
@@ -1297,14 +1327,12 @@ class PropertyOwnershipManager:
 
         return True
 
+    @_bypass_or(lambda: None)
     def get_allowed_attrs(self, pool_type: str, node_type: str) -> Optional[List[str]]:
         """获取指定池类型和节点类型下允许编辑的属性列表
 
         绕过所有权限制的池类型（如 custom）下返回 None（表示所有属性均允许，无限制）。
         """
-        if self._bypasses_ownership(pool_type):
-            return None  # None 表示无限制，所有属性均可编辑
-
         resolved_type = self._resolve_node_type(node_type, pool_type)
         type_ownership = self.ownership.get("type_ownership", {})
         type_info = type_ownership.get(resolved_type)
@@ -1358,6 +1386,7 @@ class PropertyOwnershipManager:
         allowed_set = set(allowed)
         return {k: v for k, v in data.items() if k in allowed_set}
 
+    @_bypass_or(list)
     def get_disabled_fields(self, pool_type: str, node_type: str) -> List[str]:
         """获取指定池类型下应禁用的字段名列表（用于前端灰显）
 
@@ -1368,9 +1397,6 @@ class PropertyOwnershipManager:
         2. 如果另一种池类型的允许属性为 null（该类型在另一种池类型下不存在），
            则使用全局独占属性列表来确定 disabled 字段
         """
-        if self._bypasses_ownership(pool_type):
-            return []
-
         resolved_type = self._resolve_node_type(node_type, pool_type)
         type_ownership = self.ownership.get("type_ownership", {})
         type_info = type_ownership.get(resolved_type)
@@ -1384,8 +1410,7 @@ class PropertyOwnershipManager:
 
         # 表驱动：按 pool_type 查 pool_type_attrs 获取对照池类型 other_pool，消除 if pool_type == 分支
         # 所有权模型是 dzh/tdx 二元对照，需取"另一种"池类型的允许属性来计算差异
-        pool_cfg = self.ownership.get("pool_type_attrs", {}).get(pool_type, {})
-        other_pool = pool_cfg.get("other_pool", "")
+        other_pool = self._pool_attr(pool_type, "other_pool", "")
         other_allowed = type_info.get(other_pool)
 
         if other_allowed is not None:
