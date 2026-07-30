@@ -17,7 +17,7 @@ v6 21 维评分（与 scoring.py v6 对齐）：v5 20 维权重等比降权 4%�
   10. rule_compliance            2.4%   RULES 91-100 Grep 零违规
   11. negative_test_coverage     1.6%   4 类反测试覆盖率
   12. synthesis_e2e              2.4%   合测试通过率
-  13. oop_inheritance_depth      6.4%   BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类 + parse_pool/export_pool 模板方法在基类（v8 6 条件）
+  13. oop_inheritance_depth      6.4%   BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类 + parse_pool/export_pool 模板方法在基类 + 10 钩子 @abstractmethod（v9 7 条件）
   14. polling_zero_tolerance     6.4%   12 处轮询模式 Grep 零匹配 + EventDriver heapq + 前端 setInterval fetch
   15. primitive_convergence      6.4%   三原语覆盖率（时间/分派/继承各 ≥ 95%）
   16. essence_ratio              3.2%   净减行数 / 变更前行数（目标 ≥ 12%，净增 = 0 触发 redo）
@@ -1389,7 +1389,7 @@ def _count_core_lines() -> int:
 
 
 def _collect_oop_inheritance() -> Dict[str, Any]:
-    """采集 OOP 同源继承深度数据（SubTask 27.1；v8 扩展主流程模板方法采集）。
+    """采集 OOP 同源继承深度数据（SubTask 27.1；v8 扩展主流程模板方法采集；v9 扩展钩子 @abstractmethod 采集）。
 
     通过 AST 解析 ``converters.py``，验证：
       (a) ``BasePoolConverter`` 类存在
@@ -1399,6 +1399,9 @@ def _collect_oop_inheritance() -> Dict[str, Any]:
       (d) 子类未重新引入同构方法（无 ``_parse_func_element`` / ``_add_func`` 等）
       (e) ``parse_pool`` 模板方法在 ``BasePoolConverter`` 中定义（v8 主流程上提）
       (f) ``export_pool`` 模板方法在 ``BasePoolConverter`` 中定义（v8 主流程上提）
+      (g) v9：10 个差异钩子使用 ``@abstractmethod`` 装饰（AST 检查
+          ``decorator_list`` 含 ``ast.Name(id='abstractmethod')`` 或
+          ``ast.Attribute(attr='abstractmethod')``，早失败契约执行）
 
     Returns:
         dict 填入 ``test_results["oop_inheritance"]``
@@ -1410,6 +1413,7 @@ def _collect_oop_inheritance() -> Dict[str, Any]:
         "subclasses_only_differential": False,
         "parse_pool_in_base": False,
         "export_pool_in_base": False,
+        "hooks_are_abstract": False,
     }
     tree = _parse_ast(_CONVERTERS_FILE)
     if tree is None:
@@ -1424,6 +1428,24 @@ def _collect_oop_inheritance() -> Dict[str, Any]:
             n.name for n in node.body
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
         }
+        # v9: 记录每个方法的装饰器名集合，用于检查 @abstractmethod
+        decorated_methods: Dict[str, List[str]] = {}
+        for n in node.body:
+            if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            decos: List[str] = []
+            for dec in n.decorator_list:
+                if isinstance(dec, ast.Name):
+                    decos.append(dec.id)
+                elif isinstance(dec, ast.Attribute):
+                    decos.append(dec.attr)
+                elif isinstance(dec, ast.Call):
+                    f = dec.func
+                    if isinstance(f, ast.Name):
+                        decos.append(f.id)
+                    elif isinstance(f, ast.Attribute):
+                        decos.append(f.attr)
+            decorated_methods[n.name] = decos
         base_names = []
         for b in node.bases:
             if isinstance(b, ast.Name):
@@ -1433,6 +1455,7 @@ def _collect_oop_inheritance() -> Dict[str, Any]:
         classes[node.name] = {
             "bases": base_names,
             "methods": method_names,
+            "decorated_methods": decorated_methods,
         }
 
     # (a) BasePoolConverter 存在
@@ -1465,6 +1488,20 @@ def _collect_oop_inheritance() -> Dict[str, Any]:
     # (e)+(f) v8 主流程模板方法 parse_pool / export_pool 在 BasePoolConverter 中定义
     result["parse_pool_in_base"] = "parse_pool" in base_methods
     result["export_pool_in_base"] = "export_pool" in base_methods
+
+    # (g) v9: 10 个差异钩子使用 @abstractmethod 装饰（早失败契约执行）
+    # AST 检查 BasePoolConverter 类体内 10 个钩子方法的 decorator_list 含 abstractmethod
+    hook_names = {
+        "_decode_source", "_extract_pool_meta", "_parse_cells",
+        "_parse_flows", "_build_result", "_create_root",
+        "_serialize_pool_attrs", "_serialize_cells",
+        "_serialize_flows", "_finalize_xml",
+    }
+    base_decorated = classes.get("BasePoolConverter", {}).get("decorated_methods", {})
+    result["hooks_are_abstract"] = all(
+        "abstractmethod" in base_decorated.get(hook, [])
+        for hook in hook_names
+    )
     return result
 
 

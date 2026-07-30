@@ -295,6 +295,8 @@
 
 118. **Converter 主流程必须模板方法化**：`parse_pool` / `export_pool` 模板方法必须在 `BasePoolConverter` 中编排骨架（parse 6 步：`_decode_source` → `ET.fromstring` → `_extract_pool_meta` → `_parse_cells` → `_parse_flows` → `_build_result`；export 5 步：`_create_root` → `_serialize_pool_attrs` → `_serialize_cells` → `_serialize_flows` → `_finalize_xml`），子类（`DzhPoolConverter` / `TdxPoolConverter`）仅覆盖 10 个差异钩子，禁止重新引入模块级并行主流程函数。模块级函数（`parse_dzh_xml` / `parse_tdx_xml` / `export_dzh_xml` / `_build_tdx_xml`）仅作薄包装委托（函数体 ≤ 3 行，委托 `_DZH_CONVERTER` / `_TDX_CONVERTER` 单例的 `parse_pool` / `export_pool`），保留原签名向后兼容。这是 OOP 继承的「主流程编排层」收敛（第八层洞察）：v4 已收敛 4 原子操作（`_parse_element` / `_add_element` / `_decode_pos` / `_decode_xml_bytes`），v8 将两个真正同构的主流程上提为模板方法，闭合「大智慧和通达信只作为继承，所有基础功能用相同代码」的最后一层。
 
+119. **模板方法差异钩子必须 @abstractmethod 早失败**：`BasePoolConverter` 的 10 个差异钩子（`_decode_source` / `_extract_pool_meta` / `_parse_cells` / `_parse_flows` / `_build_result` / `_create_root` / `_serialize_pool_attrs` / `_serialize_cells` / `_serialize_flows` / `_finalize_xml`）必须使用 `@abstractmethod` 装饰（非 `raise NotImplementedError`），实现 construction-time 早失败契约执行——子类未覆盖任一钩子时实例化即报 `TypeError`，优于 invocation-time 晚失败（`raise NotImplementedError` 在钩子被调用时才报错，系统可能静默运行至深层流程才暴露缺口）。这是「极致本质的运行时」的第九层洞察：类型系统级契约执行优于运行时异常契约执行。同时，元模式同构收敛已达上限时须文档化「知止」——v8 已达 DZH/TDX 同构收敛上限，10 钩子方法体是结构同构但数据/派发异构，禁止强行合并（抽象税 > 收益，引入表条目爆炸 + roundtrip 回归风险）。
+
 ---
 
 ## 附：文件路径映射（文档 vs 实际代码）

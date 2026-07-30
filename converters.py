@@ -20,7 +20,7 @@ import operator
 import os
 import random
 import re
-from abc import ABC
+from abc import ABC, abstractmethod
 import sys
 import tempfile
 import threading
@@ -229,6 +229,11 @@ class BasePoolConverter(ABC):
             text = post_process_fn(text)
         return text
 
+    @staticmethod
+    def _resolve_edge_endpoint(raw):
+        """解析 edge 端点为 node_id 字符串（dict 取 node_id，其他 str 化）。"""
+        return raw.get("node_id", "") if isinstance(raw, dict) else str(raw)
+
     # ---- 5. 主流程模板方法（v8：上提 parse/export 编排骨架）----
     def parse_pool(self, source):
         """parse 主流程模板方法：编排 6 步骨架，子类覆盖差异钩子。"""
@@ -247,38 +252,27 @@ class BasePoolConverter(ABC):
         self._serialize_flows(root, config)
         return self._finalize_xml(root)
 
-    # ---- 6. 差异钩子（子类必须覆盖，默认 NotImplementedError）----
-    # parse 钩子
-    def _decode_source(self, source):
-        raise NotImplementedError
-
-    def _extract_pool_meta(self, root, source):
-        raise NotImplementedError
-
-    def _parse_cells(self, root):
-        raise NotImplementedError
-
-    def _parse_flows(self, root):
-        raise NotImplementedError
-
-    def _build_result(self, pool_meta, cells, flows):
-        raise NotImplementedError
-
-    # export 钩子
-    def _create_root(self, config):
-        raise NotImplementedError
-
-    def _serialize_pool_attrs(self, root, config):
-        raise NotImplementedError
-
-    def _serialize_cells(self, root, config):
-        raise NotImplementedError
-
-    def _serialize_flows(self, root, config):
-        raise NotImplementedError
-
-    def _finalize_xml(self, root):
-        raise NotImplementedError
+    # ---- 6. 差异钩子（@abstractmethod 早失败：实例化时即校验，子类必须覆盖）----
+    @abstractmethod
+    def _decode_source(self, source): ...
+    @abstractmethod
+    def _extract_pool_meta(self, root, source): ...
+    @abstractmethod
+    def _parse_cells(self, root): ...
+    @abstractmethod
+    def _parse_flows(self, root): ...
+    @abstractmethod
+    def _build_result(self, pool_meta, cells, flows): ...
+    @abstractmethod
+    def _create_root(self, config): ...
+    @abstractmethod
+    def _serialize_pool_attrs(self, root, config): ...
+    @abstractmethod
+    def _serialize_cells(self, root, config): ...
+    @abstractmethod
+    def _serialize_flows(self, root, config): ...
+    @abstractmethod
+    def _finalize_xml(self, root): ...
 
 
 class DzhPoolConverter(BasePoolConverter):
@@ -672,8 +666,8 @@ class DzhPoolConverter(BasePoolConverter):
                 continue
             src_raw = edge.get("source", "")
             tgt_raw = edge.get("target", "")
-            source_node_id = src_raw.get("node_id", "") if isinstance(src_raw, dict) else str(src_raw)
-            target_node_id = tgt_raw.get("node_id", "") if isinstance(tgt_raw, dict) else str(tgt_raw)
+            source_node_id = self._resolve_edge_endpoint(src_raw)
+            target_node_id = self._resolve_edge_endpoint(tgt_raw)
             source_dzh_id = _find_node_dzh_id(nodes, source_node_id)
             target_dzh_id = _find_node_dzh_id(nodes, target_node_id)
             edge_params = edge.get("params", {})
@@ -1019,8 +1013,8 @@ class TdxPoolConverter(BasePoolConverter):
             # 兼容：source/target 可能是字符串或dict
             so_raw = edge.get("source", "")
             to_raw = edge.get("target", "")
-            so_str = so_raw.get("node_id", "") if isinstance(so_raw, dict) else str(so_raw)
-            to_str = to_raw.get("node_id", "") if isinstance(to_raw, dict) else str(to_raw)
+            so_str = self._resolve_edge_endpoint(so_raw)
+            to_str = self._resolve_edge_endpoint(to_raw)
             # 字符串ID通过映射表转数字ID
             start_id = _str_id_map.get(so_str, so_str) if so_str and not so_str.isdigit() else (so_str or "0")
             end_id = _str_id_map.get(to_str, to_str) if to_str and not to_str.isdigit() else (to_str or "0")

@@ -1,4 +1,4 @@
-# metatest v8 严格正反合量化测试套件
+# metatest v9 严格正反合量化测试套件
 
 ## 概述
 
@@ -23,6 +23,13 @@ v6 在 v5 20 维基础上扩展为 **21 维**加权评分：v5 20 维等比降�
 `export_dzh_xml` / `_build_tdx_xml`）改为薄包装委托，闭合「大智慧和通达信只作为继承，
 所有基础功能用相同代码」的最后一层。
 
+**第九层洞察（@abstractmethod 早失败运行时，契约执行时序前移）**：v8 完成了 Converter 主流程模板方法上提，
+但 10 个差异钩子使用 `raise NotImplementedError` 占位（invocation-time 晚失败——系统静默运行直到未覆盖钩子被调用）。
+v9 将 10 个钩子改为 `@abstractmethod` 装饰（construction-time 早失败——子类实例化即 TypeError），
+将契约执行从调用时前移到实例化时，实现 fail-fast 运行时本质。同时，架构工程师第九层深度调研确认 v8 已达 DZH/TDX
+同构收敛上限——10 个钩子方法体是「结构同构但数据/派发异构」，强行合并会引入表条目爆炸 + roundtrip 回归风险。
+v9 文档化此上限（「知止」纪律），防止后续过度抽象。
+
 门槛：总分 ≥ 95 且 21 维均 ≥ 80 判定 PASS。
 
 ## 21 维评分规则与权重
@@ -45,7 +52,7 @@ v6 在 v5 20 维基础上扩展为 **21 维**加权评分：v5 20 维等比降�
 | 10 | rule_compliance | 2.304% | RULES 91-100 Grep 违规数 / 10，0 违规满分 |
 | 11 | negative_test_coverage | 1.536% | 4 类反测试用例数 / 目标数（每类 ≥ 8）均值 × 100 |
 | 12 | synthesis_e2e | 2.304% | 合测试通过数 / 总数 × 100 |
-| 13 | oop_inheritance_depth | 6.144% | BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类 + 子类仅差异 + parse_pool/export_pool 模板方法在基类（v8 6 条件，各 16.67%） |
+| 13 | oop_inheritance_depth | 6.144% | BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类 + 子类仅差异 + parse_pool/export_pool 模板方法在基类 + 10 钩子 @abstractmethod 装饰（v9 7 条件，各 14.29%） |
 | 14 | polling_zero_tolerance | 6.144% | 12 处轮询模式 Grep 零匹配 + EventDriver heapq 验证 + 前端 setInterval fetch 零匹配 |
 | 15 | primitive_convergence | 6.144% | 三原语覆盖率（时间/分派/继承各 ≥ 95% 满分） |
 | 16 | essence_ratio | 3.072% | 净减行数 / 变更前行数 × 100（目标 ≥ 12%，净增 = 0 触发 redo） |
@@ -227,13 +234,13 @@ python -m metatest.runner
 ```
 metatest/
 ├── conftest.py                              # 共享 pytest 夹具
-├── scoring.py                               # 21 维量化评分引擎（v8）
-├── runner.py                                # 测试运行器 + 21 维数据采集（含 adapter_forward_coverage 等字段）
+├── scoring.py                               # 21 维量化评分引擎（v9）
+├── runner.py                                # 测试运行器 + 21 维数据采集（v9，含 adapter_forward_coverage 等字段）
 ├── test_positive_dispatcher_isomorphism.py  # v5 MetaDispatcher 继承断言
 ├── test_positive_runtime_verification.py     # v5 3 个 in-process 测试全绿
 ├── test_negative_cross_module_import.py     # v5 8 处违规模式零匹配
 ├── test_positive_adapter_isomorphism.py     # v6 adapter 转发表驱动覆盖率断言
-├── test_positive_oop_inheritance.py         # v8 主流程模板方法 + 10 钩子 + 薄包装断言
+├── test_positive_oop_inheritance.py         # v9 主流程模板方法 + 10 钩子 @abstractmethod + 薄包装断言
 ├── test_runtime_replay_heapq.py             # v5 harness（replay）
 ├── test_runtime_simulation_heapq.py         # v5 harness（simulation）
 ├── test_runtime_mode_switch.py              # v5 harness（mode-switch）
@@ -241,7 +248,7 @@ metatest/
 └── report.json                              # 21 维 + meta_unification 结构化报告
 ```
 
-## v8 严格规则总结
+## v9 严格规则总结
 
 - 跳过测试计为失败（不在 passed 分子）
 - 前端 E2E 环境缺失计 `frontend_e2e_passed=0`，给最低达标线 80（非信用分）
@@ -255,3 +262,4 @@ metatest/
 - 运行时验证 harness 禁用 `time.sleep` / `asyncio.sleep` 步进（fire_due 推进硬约束）
 - adapter 转发同构覆盖率 ≥ 90% 才达标（v7 提升至 90%，外部 SDK 适配器表驱动硬约束；4 表 / 4 通用转发器 / 34 方法）
 - Converter 主流程必须模板方法化（v8 新增）：`parse_pool` / `export_pool` 在 `BasePoolConverter` 编排骨架，子类仅覆盖 10 个差异钩子，模块级函数仅作薄包装委托，禁止重新引入模块级并行主流程函数
+- 模板方法差异钩子必须使用 @abstractmethod 装饰（v9 新增）：禁止 raise NotImplementedError 占位，实现 construction-time 早失败契约执行

@@ -19,7 +19,7 @@ v5 20 维权重等比降权 4%（每维 × 0.96），新增 1 维占 4%，权重
   rule_compliance              2.4%   RULES 91-100 Grep 违规数 / 10，0 违规满分
   negative_test_coverage       1.6%   4 类反测试用例数 / 目标数（每类 ≥ 8）均值 * 100
   synthesis_e2e                2.4%   合测试通过数 / 总数 * 100
-  oop_inheritance_depth        6.4%   BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类 + 子类仅差异 + parse_pool/export_pool 模板方法在基类（v8 6 条件）
+  oop_inheritance_depth        6.4%   BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类 + 子类仅差异 + parse_pool/export_pool 模板方法在基类 + 10 钩子 @abstractmethod（v9 7 条件）
   polling_zero_tolerance       6.4%   12 处轮询模式 Grep 零匹配 + EventDriver heapq 验证 + 前端 setInterval fetch 零匹配
   primitive_convergence        6.4%   三原语覆盖率（时间/分派/继承各 ≥ 95% 满分）
   essence_ratio                3.2%   净减行数 / 变更前行数 × 100（目标 ≥ 12%，净增 = 0 触发 redo）
@@ -542,9 +542,9 @@ class ScoringEngine:
     # ------------------------------------------------------------------
 
     def _score_oop_inheritance_depth(self, results: Dict[str, Any]) -> Tuple[float, str]:
-        """OOP 同源继承深度（v4 新增第 13 维；v8 深化为 6 条件）。
+        """OOP 同源继承深度（v4 新增第 13 维；v8 深化为 6 条件；v9 深化为 7 条件）。
 
-        6 条件各占 ~16.67%，全部满足满分 100：
+        7 条件各占 ~14.29%，全部满足满分 100：
           (a) ``BasePoolConverter`` 存在于 converters.py
           (b) ``DzhPoolConverter`` / ``TdxPoolConverter`` 继承自 ``BasePoolConverter``
           (c) 公共方法（``_parse_element`` / ``_add_element`` / ``_decode_pos``
@@ -552,9 +552,14 @@ class ScoringEngine:
           (d) 子类仅含差异方法（无重新引入的同构方法）
           (e) ``parse_pool`` 模板方法在 ``BasePoolConverter`` 中定义（v8 主流程上提）
           (f) ``export_pool`` 模板方法在 ``BasePoolConverter`` 中定义（v8 主流程上提）
+          (g) 10 个差异钩子使用 ``@abstractmethod`` 装饰（v9 早失败契约执行，
+              construction-time 校验优于 invocation-time ``raise NotImplementedError``）
 
         v8 第八层洞察：OOP 继承的真正价值不在原子操作层（v4 已做），
-        而在主流程编排层。本维度深化为 6 条件，使评分体系能驱动主流程收敛。
+        而在主流程编排层。v9 第九层洞察：契约执行时序是运行时本质维度，
+        ``@abstractmethod`` 在实例化时即失败（早失败），优于
+        ``raise NotImplementedError`` 的调用时失败（晚失败）。
+        本维度深化为 7 条件，使评分体系能驱动主流程收敛 + 早失败契约执行。
 
         所有数据由 runner.py 通过 AST/Grep 采集填入
         ``test_results["oop_inheritance"]``，无硬编码信用分。
@@ -568,10 +573,11 @@ class ScoringEngine:
         subclasses_only_differential = bool(oop.get("subclasses_only_differential", False))
         parse_pool_in_base = bool(oop.get("parse_pool_in_base", False))
         export_pool_in_base = bool(oop.get("export_pool_in_base", False))
+        hooks_are_abstract = bool(oop.get("hooks_are_abstract", False))
         met = sum([base_exists, subclasses_inherit,
                    public_methods_in_base, subclasses_only_differential,
-                   parse_pool_in_base, export_pool_in_base])
-        score = (met / 6.0) * 100.0
+                   parse_pool_in_base, export_pool_in_base, hooks_are_abstract])
+        score = (met / 7.0) * 100.0
         parts = [
             f"BasePoolConverter存在={'是' if base_exists else '否'}",
             f"子类继承={'是' if subclasses_inherit else '否'}",
@@ -579,8 +585,9 @@ class ScoringEngine:
             f"子类仅差异={'是' if subclasses_only_differential else '否'}",
             f"parse_pool在基类={'是' if parse_pool_in_base else '否'}",
             f"export_pool在基类={'是' if export_pool_in_base else '否'}",
+            f"hooks_are_abstract={'是' if hooks_are_abstract else '否'}",
         ]
-        detail = f"{'；'.join(parts)}（{met}/6 条件满足）"
+        detail = f"{'；'.join(parts)}（{met}/7 条件满足）"
         return score, detail
 
     def _score_polling_zero_tolerance(self, results: Dict[str, Any]) -> Tuple[float, str]:
