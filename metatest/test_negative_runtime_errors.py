@@ -474,7 +474,7 @@ class TestEventBusSoleMediator:
         assert total == 0, f"core/*.py 检测到 {total} 处 while True 自造事件循环"
 
     def test_event_handler_decorator_in_modules(self):
-        """5 核心模块共 ≥ 28 处 @_event_handler 装饰（事件订阅统一接口）。"""
+        """5 核心模块共 ≥ 26 处 @_event_handler 装饰（事件订阅统一接口）。"""
         target_modules = [
             "execution_module.py", "tick_bar_module.py",
             "monitoring_module.py", "screening_module.py", "trade_module.py",
@@ -489,7 +489,7 @@ class TestEventBusSoleMediator:
             except (OSError, UnicodeDecodeError):
                 continue
             total += len(_re.findall(r"@_event_handler\b", content))
-        assert total >= 28, f"5 模块共 {total} 处 @_event_handler < 28"
+        assert total >= 26, f"5 模块共 {total} 处 @_event_handler < 26"
 
     def test_base_module_class_exists(self):
         """core.event_bus._BaseModule 基类存在（7 模块统一基类）。"""

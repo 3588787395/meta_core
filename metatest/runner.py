@@ -1,31 +1,37 @@
-"""metatest v4 量化测试运行器（16 维 + 三原语收敛度 + 运行时三核 Dispatcher）。
+"""metatest v5 量化测试运行器（20 维 + MetaDispatcher 统一 + 运行时验证 + 跨模块 import 纪律）。
 
 运行 ``metatest/`` 目录下所有 ``test_*.py``，采集真实测试结果与量化数据，
 调用 ``ScoringEngine`` 计算加权总分，输出量化评分报告。
 
-v4 16 维评分（与 scoring.py v4 对齐）：
-   1. module_coverage             7%    覆盖模块数 / 17 * 100
-   2. test_pass_rate             13%    通过测试数 / 总测试数 * 100（跳过计为失败）
-   3. assertion_density           5%    断言数 / (测试文件数 * 20) * 100
-   4. event_chain_integrity       8%    出现事件类型数 / 10 * 100
-   5. performance_benchmark       5%    1000 tick 耗时基准（≤10s 满分）
-   6. frontend_e2e_pass_rate      7%    前端 E2E 真实通过数 / 总数 * 100
-   7. logic_coverage              5%    5 项底层逻辑验证通过数 / 5 * 100
-   8. isomorphism_elimination     9%    40 项同构代码 Grep 检查，0 违规满分
-   9. line_convergence            5%    核心模块总行数 ≤ 22500 满分
-  10. rule_compliance             3%    RULES 91-100 Grep 零违规
-  11. negative_test_coverage      2%    4 类反测试覆盖率
-  12. synthesis_e2e               3%    合测试通过率
-  13. oop_inheritance_depth       8%    BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类
-  14. polling_zero_tolerance      8%    12 处轮询模式 Grep 零匹配 + EventDriver heapq + 前端 setInterval fetch
-  15. primitive_convergence       8%    三原语覆盖率（时间/分派/继承各 ≥ 95%）
-  16. essence_ratio               4%    净减行数 / 变更前行数（目标 ≥ 12%，净增 = 0 触发 redo）
+v5 20 维评分（与 scoring.py v5 对齐）：v4 16 维权重等比降权至 80% + v5 新增 4 维各 5%。
+  --- v4 16 维（降权至 80%）---
+   1. module_coverage            5.6%   覆盖模块数 / 17 * 100
+   2. test_pass_rate            10.4%   通过测试数 / 总测试数 * 100（跳过计为失败）
+   3. assertion_density          4.0%   断言数 / (测试文件数 * 20) * 100
+   4. event_chain_integrity      6.4%   出现事件类型数 / 10 * 100
+   5. performance_benchmark      4.0%   1000 tick 耗时基准（≤10s 满分）
+   6. frontend_e2e_pass_rate     5.6%   前端 E2E 真实通过数 / 总数 * 100
+   7. logic_coverage             4.0%   5 项底层逻辑验证通过数 / 5 * 100
+   8. isomorphism_elimination    7.2%   40 项同构代码 Grep 检查，0 违规满分
+   9. line_convergence           4.0%   核心模块总行数 ≤ 22500 满分
+  10. rule_compliance            2.4%   RULES 91-100 Grep 零违规
+  11. negative_test_coverage     1.6%   4 类反测试覆盖率
+  12. synthesis_e2e              2.4%   合测试通过率
+  13. oop_inheritance_depth      6.4%   BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类
+  14. polling_zero_tolerance     6.4%   12 处轮询模式 Grep 零匹配 + EventDriver heapq + 前端 setInterval fetch
+  15. primitive_convergence      6.4%   三原语覆盖率（时间/分派/继承各 ≥ 95%）
+  16. essence_ratio              3.2%   净减行数 / 变更前行数（目标 ≥ 12%，净增 = 0 触发 redo）
+  --- v5 新增 4 维（各 5%）---
+  17. dispatcher_isomorphism     5.0%   MetaDispatcher 基类 + EventBus/ConfigStore 继承 + EventDriver 独立 + 骨架占比 ≥ 60%
+  18. runtime_verification       5.0%   3 个 in-process 运行时验证测试通过率
+  19. eventtest_regression       5.0%   eventtest 退出码 0 满分
+  20. cross_module_import_discipline 5.0% 8 处跨模块 import 违规模式零匹配
 
-v4 严格规则：
+v5 严格规则：
   - 跳过测试计为失败（不在 passed 分子）
   - 前端 E2E 环境缺失计 frontend_e2e_passed=0，scoring 给予最低达标线 80
-  - 16 维分数均需 ≥ 80 才达标
-  - 总分 ≥ 95 且 16 维均 ≥ 80 判定 PASS
+  - 20 维分数均需 ≥ 80 才达标
+  - 总分 ≥ 95 且 20 维均 ≥ 80 判定 PASS
   - essence_ratio ≤ 0 触发 redo（强制「合并非拆分」硬约束）
 
 数据采集方式（禁止硬编码，所有评分由真实 Grep/AST/行数统计计算）：
@@ -41,12 +47,20 @@ v4 严格规则：
     基类公共方法数 vs 子类同构方法数
   - essence_ratio：基线 24,000 行（Phase 3 基线）→ 当前行数
   - meta_unification：EventBus/EventDriver/ConfigStore 三核唯一性 Grep + meta_purity 计算
+    + v5 新增 4 字段（meta_dispatcher_exists/eventbus_inherits_meta/
+      configstore_inherits_meta/eventdriver_independent）
+  - dispatcher_isomorphism：AST 解析 MetaDispatcher 基类 + EventBus/ConfigStore 继承 +
+    EventDriver 独立 + 公共骨架行数占比
+  - runtime_verification：3 个 in-process 测试文件从 _StatsPlugin.file_stats 采集通过率
+  - eventtest_regression：subprocess 运行 ``python -m eventtest.run_eventtest`` 采集退出码
+  - cross_module_import_discipline：Grep 8 处违规模式（7 业务模块禁 import table_engine +
+    execution 禁 import screening_module）
 
 运行方式：
     python -m metatest.runner
 
 退出码：
-    0 = 总分 ≥ 95 且 16 维均 ≥ 80（PASS）或无测试文件
+    0 = 总分 ≥ 95 且 20 维均 ≥ 80（PASS）或无测试文件
     1 = 总分 < 95 或有维度 < 80（FAIL）或有测试失败
 """
 from __future__ import annotations
@@ -54,6 +68,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -1722,6 +1737,155 @@ def _collect_meta_unification() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# v5 新增 4 维数据采集（MetaDispatcher 统一 + 运行时验证 + eventtest 回归 + 跨模块 import）
+# ---------------------------------------------------------------------------
+
+
+#: v5 7 个业务模块（禁直接 import table_engine）
+_BUSINESS_MODULES_V5: List[str] = [
+    "execution_module.py", "screening_module.py", "formula_module.py",
+    "runtime_mode_module.py", "trade_module.py", "tick_bar_module.py",
+    "monitoring_module.py",
+]
+
+#: v5 3 个 in-process 运行时验证测试文件
+_RUNTIME_TEST_FILES: List[str] = [
+    "test_runtime_replay_heapq.py",
+    "test_runtime_simulation_heapq.py",
+    "test_runtime_mode_switch.py",
+]
+
+
+def _collect_dispatcher_isomorphism() -> Dict[str, Any]:
+    """采集 MetaDispatcher 统一数据（SubTask 16.1）。
+
+    AST 验证：MetaDispatcher 基类存在 + EventBus(MetaDispatcher) +
+    ConfigStoreBase(MetaDispatcher) 继承 + EventDriver 独立 + 公共骨架行数占比。
+
+    骨架占比 = MetaDispatcher 基类行数 / (基类 + EventBus._dispatch_impl +
+    ConfigStore._dispatch_impl) 总行数，目标 ≥ 60% 满分。
+    """
+    event_bus_file = _CORE_DIR / "event_bus.py"
+    table_file = _CORE_DIR / "table_engine.py"
+    exec_file = _CORE_DIR / "execution_module.py"
+
+    def _class_bases(file_path: Path, cls_name: str) -> Tuple[bool, List[str]]:
+        tree = _parse_ast(file_path)
+        if tree is None:
+            return False, []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == cls_name:
+                bases = [b.id for b in node.bases if isinstance(b, ast.Name)]
+                return True, bases
+        return False, []
+
+    def _method_lines(file_path: Path, cls_name: str, method: str) -> int:
+        tree = _parse_ast(file_path)
+        if tree is None:
+            return 0
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.ClassDef) and node.name == cls_name):
+                for sub in node.body:
+                    if (isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef))
+                            and sub.name == method):
+                        end = getattr(sub, "end_lineno", sub.lineno) or sub.lineno
+                        return end - sub.lineno + 1
+        return 0
+
+    def _class_lines(file_path: Path, cls_name: str) -> int:
+        tree = _parse_ast(file_path)
+        if tree is None:
+            return 0
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == cls_name:
+                end = getattr(node, "end_lineno", node.lineno) or node.lineno
+                return end - node.lineno + 1
+        return 0
+
+    meta_exists, _ = _class_bases(event_bus_file, "MetaDispatcher")
+    _, eb_bases = _class_bases(event_bus_file, "EventBus")
+    eventbus_inherits = "MetaDispatcher" in eb_bases
+    _, cs_bases = _class_bases(table_file, "ConfigStoreBase")
+    configstore_inherits = "MetaDispatcher" in cs_bases
+    _, ed_bases = _class_bases(exec_file, "EventDriver")
+    eventdriver_independent = "MetaDispatcher" not in ed_bases
+
+    meta_lines = _class_lines(event_bus_file, "MetaDispatcher")
+    eb_disp = _method_lines(event_bus_file, "EventBus", "_dispatch_impl")
+    cs_disp = _method_lines(table_file, "ConfigStore", "_dispatch_impl")
+    denom = meta_lines + eb_disp + cs_disp
+    skeleton_ratio = (meta_lines / denom) if denom > 0 else 0.0
+
+    return {
+        "meta_dispatcher_exists": meta_exists,
+        "eventbus_inherits_meta": eventbus_inherits,
+        "configstore_inherits_meta": configstore_inherits,
+        "eventdriver_independent": eventdriver_independent,
+        "skeleton_ratio": round(skeleton_ratio, 4),
+        "meta_lines": meta_lines,
+        "eventbus_dispatch_lines": eb_disp,
+        "configstore_dispatch_lines": cs_disp,
+    }
+
+
+def _collect_runtime_verification(stats: "_StatsPlugin") -> Dict[str, Any]:
+    """采集运行时验证 harness 数据（SubTask 16.2）。
+
+    从 ``_StatsPlugin.file_stats`` 采集 3 个 in-process 运行时测试文件的通过率。
+    这些测试已在主 pytest 运行中执行（非阻塞文件），故直接复用 file_stats 真实
+    结果，避免 subprocess 重复运行。每个文件 passed > 0 且 failed/errors == 0
+    计为通过。
+    """
+    passed = 0
+    total = len(_RUNTIME_TEST_FILES)
+    for fname in _RUNTIME_TEST_FILES:
+        fstats = stats.file_stats.get(fname)
+        if fstats is None:
+            continue
+        if fstats.get("passed", 0) > 0 and fstats.get("failed", 0) == 0 \
+                and fstats.get("errors", 0) == 0:
+            passed += 1
+    return {"passed": passed, "total": total, "files": list(_RUNTIME_TEST_FILES)}
+
+
+def _collect_eventtest_regression() -> Dict[str, Any]:
+    """采集 eventtest 回归数据（SubTask 16.3）。
+
+    通过 subprocess 运行 ``python -m eventtest.run_eventtest``，采集退出码。
+    退出码 0 = 全绿；非 0 = 有失败。超时（300s，eventtest 实测 ~155s）视为失败。
+    """
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "eventtest.run_eventtest"],
+            capture_output=True, text=True, timeout=300, cwd=str(_PROJECT_ROOT),
+        )
+        exit_code = proc.returncode
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        exit_code = 1
+    return {"exit_code": exit_code}
+
+
+def _collect_cross_module_import_discipline() -> Dict[str, Any]:
+    """采集跨模块 import 纪律数据（SubTask 16.4）。
+
+    Grep 8 处违规模式：7 业务模块禁 ``from .table_engine import`` +
+    execution_module 禁 ``from .screening_module import``。每处 > 0 匹配计 1 违规。
+    """
+    pattern = r"from\s+\.table_engine\s+import|from\s+core\.table_engine\s+import"
+    violations = 0
+    for mod in _BUSINESS_MODULES_V5:
+        fpath = _CORE_DIR / mod
+        if _grep_count_in_file(pattern, fpath) > 0:
+            violations += 1
+    # 第 8 处：execution_module 禁 from .screening_module import
+    if _grep_count_in_file(
+        r"from\s+\.screening_module\s+import", _CORE_DIR / "execution_module.py"
+    ) > 0:
+        violations += 1
+    return {"violations": violations, "total_patterns": 8}
+
+
+# ---------------------------------------------------------------------------
 # v3 补充维度评分（当 scoring.py 尚未升级到 v3 时使用）
 # ---------------------------------------------------------------------------
 
@@ -1835,10 +1999,10 @@ def _print_report(
     duration: float,
     no_tests: bool,
 ) -> None:
-    """打印 v4 16 维量化评分报告。"""
+    """打印 v5 20 维量化评分报告。"""
     sep = "=" * 60
     print(sep)
-    print("=== metatest v4 量化评分报告（16 维 + 三原语收敛度）===")
+    print("=== metatest v5 量化评分报告（20 维 + MetaDispatcher 统一 + 运行时验证）===")
     print(sep)
     print()
 
@@ -1867,6 +2031,11 @@ def _print_report(
     pz = dim_map.get("polling_zero_tolerance")
     pcv = dim_map.get("primitive_convergence")
     er = dim_map.get("essence_ratio")
+    # v5 新增 4 维
+    di_v5 = dim_map.get("dispatcher_isomorphism")
+    rv_v5 = dim_map.get("runtime_verification")
+    er_v5 = dim_map.get("eventtest_regression")
+    cm_v5 = dim_map.get("cross_module_import_discipline")
 
     modules_covered = test_results.get("modules_covered", 0)
     tests_passed = test_results.get("tests_passed", 0)
@@ -1957,23 +2126,41 @@ def _print_report(
     if se:
         print(f"                → 得分 {se.score:.1f}/100 — {se.details}")
 
-    # --- 4 v4 新增维度（三原语收敛度） ---
+    # --- 4 v4 新增维度（三原语收敛度，v5 降权至 80%） ---
 
-    print(f"OOP 同源继承深度: (权重 8%, BasePoolConverter + 子类继承)")
+    print(f"OOP 同源继承深度: (权重 6.4%, BasePoolConverter + 子类继承)")
     if oi:
         print(f"                → 得分 {oi.score:.1f}/100 — {oi.details}")
 
-    print(f"轮询零容忍:      (权重 8%, 12 处轮询模式零匹配)")
+    print(f"轮询零容忍:      (权重 6.4%, 12 处轮询模式零匹配)")
     if pz:
         print(f"                → 得分 {pz.score:.1f}/100 — {pz.details}")
 
-    print(f"三原语收敛度:    (权重 8%, 时间/分派/继承各 ≥ 95%)")
+    print(f"三原语收敛度:    (权重 6.4%, 时间/分派/继承各 ≥ 95%)")
     if pcv:
         print(f"                → 得分 {pcv.score:.1f}/100 — {pcv.details}")
 
-    print(f"本质比:          (权重 4%, essence_ratio ≥ 12%)")
+    print(f"本质比:          (权重 3.2%, essence_ratio ≥ 12%)")
     if er:
         print(f"                → 得分 {er.score:.1f}/100 — {er.details}")
+
+    # --- 4 v5 新增维度（MetaDispatcher 统一 + 运行时验证 + 跨模块 import） ---
+
+    print(f"MetaDispatcher 统一: (权重 5.0%, 基类+继承+独立+骨架占比 ≥ 60%)")
+    if di_v5:
+        print(f"                → 得分 {di_v5.score:.1f}/100 — {di_v5.details}")
+
+    print(f"运行时验证:      (权重 5.0%, 3 个 in-process 测试通过率)")
+    if rv_v5:
+        print(f"                → 得分 {rv_v5.score:.1f}/100 — {rv_v5.details}")
+
+    print(f"eventtest 回归:  (权重 5.0%, 退出码 0 满分)")
+    if er_v5:
+        print(f"                → 得分 {er_v5.score:.1f}/100 — {er_v5.details}")
+
+    print(f"跨模块 import 纪律: (权重 5.0%, 8 处违规模式零匹配)")
+    if cm_v5:
+        print(f"                → 得分 {cm_v5.score:.1f}/100 — {cm_v5.details}")
 
     # --- 运行时三核 Dispatcher 元统一（第四层洞察根因解释层） ---
     mu = test_results.get("meta_unification", {}) or {}
@@ -1992,6 +2179,11 @@ def _print_report(
               f"Dispatcher 调用 {mu.get('dispatcher_call_lines', 0)} 行 / "
               f"总业务 {mu.get('total_business_lines', 0)} 行）")
         print(f"  禁止第四核:       {'是' if mu.get('no_fourth_dispatcher') else '否'}")
+        # v5 新增 4 字段：MetaDispatcher 统一结构
+        print(f"  MetaDispatcher 基类存在: {'是' if mu.get('meta_dispatcher_exists') else '否'}")
+        print(f"  EventBus 继承 Meta:     {'是' if mu.get('eventbus_inherits_meta') else '否'}")
+        print(f"  ConfigStore 继承 Meta:  {'是' if mu.get('configstore_inherits_meta') else '否'}")
+        print(f"  EventDriver 独立:       {'是' if mu.get('eventdriver_independent') else '否'}")
 
     print()
     print("─" * 40)
@@ -2030,7 +2222,7 @@ def _build_report_dict(
     duration: float,
     no_tests: bool,
 ) -> Dict[str, Any]:
-    """构建 report.json 的字典结构（含 16 维明细 + 总分 + PASS/FAIL + redo_list + meta_unification 根因解释层）。"""
+    """构建 report.json 的字典结构（含 20 维明细 + 总分 + PASS/FAIL + redo_list + meta_unification 根因解释层）。"""
     return {
         "total_score": report.total_score,
         "passed": report.passed,
@@ -2197,7 +2389,19 @@ def main() -> int:
     )
     meta_unification = _collect_meta_unification()
 
-    # 构建 test_results 字典供 ScoringEngine 使用（含 v3/v4 新增字段）
+    # v5 新增 4 维数据采集（MetaDispatcher 统一 + 运行时验证 + eventtest 回归 + 跨模块 import）
+    dispatcher_isomorphism = _collect_dispatcher_isomorphism()
+    runtime_verification = _collect_runtime_verification(stats)
+    eventtest_regression = _collect_eventtest_regression()
+    cross_module_import_discipline = _collect_cross_module_import_discipline()
+
+    # v5: meta_unification 新增 4 字段（从 dispatcher_isomorphism 提取）
+    meta_unification["meta_dispatcher_exists"] = dispatcher_isomorphism["meta_dispatcher_exists"]
+    meta_unification["eventbus_inherits_meta"] = dispatcher_isomorphism["eventbus_inherits_meta"]
+    meta_unification["configstore_inherits_meta"] = dispatcher_isomorphism["configstore_inherits_meta"]
+    meta_unification["eventdriver_independent"] = dispatcher_isomorphism["eventdriver_independent"]
+
+    # 构建 test_results 字典供 ScoringEngine 使用（含 v3/v4/v5 新增字段）
     test_results: Dict[str, Any] = {
         # --- v2 保留字段 ---
         "modules_covered": len(covered_modules),
@@ -2232,6 +2436,11 @@ def main() -> int:
         "essence_baseline_lines": essence_baseline_lines,
         "essence_current_lines": essence_current_lines,
         "meta_unification": meta_unification,
+        # --- v5 新增 4 维字段 ---
+        "dispatcher_isomorphism": dispatcher_isomorphism,
+        "runtime_verification": runtime_verification,
+        "eventtest_regression": eventtest_regression,
+        "cross_module_import_discipline": cross_module_import_discipline,
     }
 
     # 计算评分

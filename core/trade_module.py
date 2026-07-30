@@ -1,18 +1,4 @@
-"""Trade 模块：事件驱动的交易执行 + 模拟交易 + 历史记录。
-
-SubTask 27.5：合并 ``core/trade_executor.py`` + ``services/trading_service.py``
-为统一 ``TradeModule`` 类（Trade 模块唯一入口）。仅与 EventBus 交互，内部持有
-2 个组件实例（不暴露给外部）。
-
-订阅 ``Signal`` 事件，执行买入/卖出（live_order/paper_trade/noop 三接口），
-发布 ``OrderPlaced`` / ``OrderFilled`` / ``PositionUpdated`` 事件。
-支持 DZH tradeattr 19 字段精细交易控制 + TDX psatt 副作用。
-
-原 ``TradeExecutor`` / ``PaperTradeEngine`` 公共方法签名不变，合并后改为
-module-level 私有（``_`` 前缀）保留在本文件内，仍可被其他模块显式 import
-引用（迁移期内）。本模块不调用 ``_TradeExecutor.subscribe()``，避免与
-TradeModule 的事件订阅重复触发。
-"""
+"""Trade 模块：事件驱动的交易执行 + 模拟交易 + 历史记录。"""
 from __future__ import annotations
 
 import json
@@ -50,9 +36,7 @@ from core.domain import get_global_config_store
 logger = logging.getLogger(__name__)
 
 
-# ═══════════════════════════════════════════════════════════════
 # 历史记录管理（原 services/trading_service.py 顶部模块级函数）
-# ═══════════════════════════════════════════════════════════════
 
 _BASE = Path(__file__).parent.parent
 _CONFIG = _BASE / "config"
@@ -277,7 +261,6 @@ def _dispatch_pool_enter_actions(pool_name, node_id, node, new_stocks, saved_cou
     return total
 
 
-# ═══════════════════════════════════════════════════════════════
 # TradeExecutor：交易执行器（原 core/trade_executor.py）
 
 
@@ -389,7 +372,6 @@ class _TradeExecutor:
         return list(self._trades)
 
 
-# ═══════════════════════════════════════════════════════════════
 # 模拟交易（原 services/trading_service.py 中的 PaperTradeEngine）
 
 
@@ -594,9 +576,7 @@ _PSATT_SIDE_EFFECTS: List[Tuple[str, Callable[[ActionSpec, List[str]], List[Any]
 ]
 
 
-# ═══════════════════════════════════════════════════════════════
 # TradeModule：对外统一入口（原 core/trade_module.py）
-# ═══════════════════════════════════════════════════════════════
 
 
 class TradeModule(_BaseModule):

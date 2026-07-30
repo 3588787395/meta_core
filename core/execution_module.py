@@ -1,26 +1,4 @@
-"""Execution 模块：编译 + 核心循环 + 边执行 + 时序驱动 + 边状态。
-
-按 ``unify-stockpool-oop-event-driven`` spec Task 8 实现。
-``ExecutionModule`` 持有原 4 个组件实例（Compiler / PoolEngine / EdgeExecutor /
-EventDriver），外部仅通过 ``EventBus`` 与之交互。
-
-订阅 StockFiltered / DataChanged / TimeAdvanced / ConfigChanged / PoolLoaded 事件，
-执行 gate→filter→propagate→callback→ttl 流水线，
-发布 EdgeFired / TransferExecuted / TTLExpired / Signal 事件。
-
-SubTask 27.1：``core/ttl_helper.py`` 的 ``_do_ttl_check`` 函数与 ``TTLHelper`` 类
-已迁移至本模块（``ttl_helper.py`` 已删除）。
-
-SubTask 27.4：将原 4 个 Execution 模块相关源文件高内聚合并到本文件：
-  - ``core/compiler.py``     → Compiler / CompiledSchedule / Pydantic spec 模型 /
-    节点边解析辅助 / ``build_timed_event_specs``
-  - ``core/edge_executor.py`` → EdgeExecutor / TickTable / gate/filter/propagate
-    表驱动分派辅助
-  - ``core/time_util.py``     → time_at / EventDriver / TimedEventSpec
-    等时序驱动基础设施
-  - ``core/edge_state.py``    → EdgeState / EdgeStateMixin 边级运行时表
-上述 4 个源文件已删除，``core/execution_module.py`` 成为 Execution 模块的唯一入口。
-"""
+"""Execution 模块：编译 + 核心循环 + 边执行 + 时序驱动 + 边状态。"""
 from __future__ import annotations
 
 import asyncio
@@ -86,7 +64,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ===========================================================================
 # 依赖注入协议（避免 execution_module 跨模块引用公式/选股模块）
 
 
@@ -116,7 +93,6 @@ class _FilterEvalDeps:
     bus: Any = None
 
 
-# ---------------------------------------------------------------------------
 # 配置表加载：已统一到 ConfigStore.get_table(name)（Task 9.9）
 
 
@@ -129,21 +105,26 @@ def _get_table(name: str) -> dict:
 _CONFIG_DIR = Path(__file__).parent.parent / "config"
 
 
-# ===========================================================================
 # 时序工具（原 core/time_util.py）
 
 
-# ---------------------------------------------------------------------------
 # TimedEventSpec（统一到时事件规格）— 已下沉至 core/domain.py（纯数据结构）
 
 
-# ---------------------------------------------------------------------------
 # EventDriver — 统一时间驱动器（G1 单一 heapq 优先队列）
-# ---------------------------------------------------------------------------
 
 
 class EventDriver:
-    """统一时间驱动器：所有 TimedEventSpec 注册到单一 heapq 优先队列。"""
+    """统一时间驱动器——时序特化 Dispatcher（保持独立，不继承 MetaDispatcher）。
+
+    与 MetaDispatcher 的 register-store-dispatch 元模式投影不同构：
+    - 存储：heapq 优先队列（按 fire_time 排序），非 Dict[key, value]
+    - 派发：fire_due(now) 弹出堆顶到期项 + 自动续程（periodic reschedule），非 key 查找/扇出
+    - 语义：时序触发，非注册-查找
+
+    强行塞入 MetaDispatcher 会增加抽象税而非降低复杂度，故保持独立。
+    所有 TimedEventSpec 注册到单一 heapq 优先队列。
+    """
 
     # tick 定时器 seq 起始值：足够小的负数，保证同 fire_time 时始终排在边触发/TTL 之前
     _TICK_SEQ_BASE = -10**9
@@ -248,20 +229,13 @@ class EventDriver:
             # 循环：新入队的周期项若仍 <= now 需要继续处理（追回）
 
 
-# ===========================================================================
 # 边级运行时表（原 core/edge_state.py）
 
 
-
-
-
-# ===========================================================================
 # 编译期静态调度表生成器（原 core/compiler.py）
 
 
-# ---------------------------------------------------------------------------
 # Pydantic v2 模型：编译产物 spec
-# ---------------------------------------------------------------------------
 
 
 class EdgeContext(BaseModel):
@@ -413,9 +387,7 @@ class CompiledSchedule(BaseModel):
     steps: List[Any] = Field(default_factory=list)  # List[StepSpec]，编译期从 edge_strategies.json 读取
 
 
-# ---------------------------------------------------------------------------
 # 纯函数辅助：节点/边解析、配置表查询
-# ---------------------------------------------------------------------------
 
 
 def _extract_edge_endpoint(edge: Dict[str, Any], keys: Tuple[str, ...]) -> str:
@@ -693,9 +665,7 @@ def _build_ttl_spec(tid: str, nodes: Dict[str, Any]) -> TTLSpec:
     return TTLSpec(bdel=0, check_type="none", ttl_sec=0)
 
 
-# ---------------------------------------------------------------------------
 # Compiler
-# ---------------------------------------------------------------------------
 
 
 def _normalize_nodes(pool_config: Dict[str, Any]) -> Dict[str, Any]:
@@ -800,9 +770,7 @@ def _build_tdx_func_from_panel(params: Dict[str, Any]) -> Optional[Dict[str, Any
     return tdx_func
 
 
-# ===========================================================================
 # 变更 F：build_spec 提取器统一 — 4 个 _build_xxx_spec 共享「提取 edge.params → 查 config → 构造 Spec」骨架
-# ===========================================================================
 
 def _extract_edge_params(edge: Dict[str, Any]) -> Dict[str, Any]:
     """一次性提取 ``edge.params``（4 个 ``_build_xxx_spec`` 共享的字段提取骨架）。"""
@@ -1045,7 +1013,6 @@ class Compiler:
         )
 
 
-# ===========================================================================
 # 变更 F：_FILTER_SPEC_BUILDERS 表 — 4 个 FilterSpec 构造分支同构合并
 
 
@@ -1135,7 +1102,6 @@ _FILTER_SPEC_BUILDERS: Dict[Tuple[bool, bool, str], Callable[..., FilterSpec]] =
 }
 
 
-# ===========================================================================
 # Task 4：编译-运行分离 — CompiledPool 与 compile 函数
 
 
@@ -1323,7 +1289,6 @@ def compile(pool_config: dict) -> CompiledPool:
     )
 
 
-# ===========================================================================
 # 单条边执行器（原 core/edge_executor.py）
 
 
@@ -1436,7 +1401,6 @@ _NOPERATE_OPERATORS = {
     "bottom_n": lambda v, t: True,
 }
 
-# ---------------------------------------------------------------------------
 # filter_specs.json 描述性 schema（与 timing.json 加载模式一致）
 _FILTER_SPECS_PATH = Path(__file__).parent.parent / "config" / "architecture" / "filter_specs.json"
 _FILTER_SPECS_SCHEMA: Optional[Dict[str, Any]] = None
@@ -1551,9 +1515,7 @@ def _parse_indate_intime(indate: str, intime: str) -> float:
     return dt.timestamp()
 
 
-# ---------------------------------------------------------------------------
 # callback / ttl 作为模块级纯函数，保证 EdgeExecutor 方法数 ≤ 6
-# ---------------------------------------------------------------------------
 
 
 def _init_entry_trackers(
@@ -1604,7 +1566,6 @@ def _init_entry_trackers(
     return prices
 
 
-# ---------------------------------------------------------------------------
 # target_pool_actions 表驱动分派（I20：消除 _run_callback 内 if action == "baimpool"）
 
 def _lookup_edge_cond(pool_config: Dict[str, Any], eid: str) -> str:
@@ -1702,9 +1663,7 @@ def _publish_filter_events(bus: Optional[EventBus], eid: str, passed: List[str],
                                 filter_ref=formula_ref, ts=_now_ts(state)))
 
 
-# ---------------------------------------------------------------------------
 # TTL check_type 表驱动分派（I17：消除 if/else，差异显于注册表内容）
-# ---------------------------------------------------------------------------
 
 _TTLResult = Tuple[List[Any], List[str], int]
 
@@ -1720,9 +1679,7 @@ def _parse_hms_int(hms: int) -> int:
     return int(s[:2]) * 3600 + int(s[2:4]) * 60 + int(s[4:6])
 
 
-# ---------------------------------------------------------------------------
 # 时机门控表驱动：starttype → handler，差异显于注册表内容。
-# ---------------------------------------------------------------------------
 
 _TIMING_CFG_PATH = Path(__file__).parent.parent / "config" / "architecture" / "timing.json"
 _TIMING_CFG: Optional[Dict[str, Any]] = None
@@ -1831,7 +1788,6 @@ def _starttype_gate(spec: "TimingSpec", state: PoolState, eid: str, now_unix: fl
     return handler(spec, state, eid, now_unix, now_sec, cfg)
 
 
-# ---------------------------------------------------------------------------
 # cxtype 后置门控表驱动（I19）：cxtype → handler，与 _STARTTYPE_GATE_HANDLERS 对称。
 
 def _cxtype_forever(spec: "TimingSpec", exec_ctx: Dict[str, Any], now: float) -> bool:
@@ -1861,9 +1817,7 @@ _CXTYPE_POST_GATES: Dict[int, Callable[["TimingSpec", Dict[str, Any], float], bo
 }
 
 
-# ---------------------------------------------------------------------------
 # 股票过滤：bnst(排除ST) / bnotp(排除新股) / bnotq(排除停牌)
-# ---------------------------------------------------------------------------
 
 _STOCK_NAMES_CACHE: Optional[Dict[str, str]] = None
 
@@ -2017,7 +1971,6 @@ def _eval_set_operation(
     return passed, rejected
 
 
-# ---------------------------------------------------------------------------
 # FilterSpec evaluator_type 表驱动分派（I18：消除 _filter if/elif + _eval_formula 双路径）
 
 
@@ -2267,7 +2220,6 @@ _FILTER_EVALUATORS: Dict[str, Callable[..., List[str]]] = {
 }
 
 
-# ---------------------------------------------------------------------------
 # Task 8：条件节点激活模型常量
 _CONDITION_NODE_TYPES: frozenset = frozenset({
     "condition", "transfer_condition", "tdx_condition",
@@ -2291,7 +2243,6 @@ _SET_OP_FUNCS: Dict[str, Callable[[Set[str], Set[str]], Set[str]]] = {
 }
 
 
-# ---------------------------------------------------------------------------
 # PropagateSpec mode 表驱动分派（I17：消除 if/else，4 模式 → 2 策略组合）
 
 
@@ -2912,7 +2863,6 @@ class EdgeExecutor:
         return True
 
 
-# ===========================================================================
 # 边执行步骤（EdgeExecutor 表驱动步骤化）
 
 
@@ -3031,9 +2981,7 @@ STEP_REGISTRY = {
 }
 
 
-# ===========================================================================
 # 统一时间驱动（G1 heapq）：所有到时事件注册到 EventDriver 单一 heapq
-# ===========================================================================
 
 
 def _make_publishing_action(state: Any, bus: Any, event_factory: Callable, pre_check: Optional[Callable] = None) -> Callable[..., None]:
@@ -3213,9 +3161,7 @@ def build_timed_event_specs(
             event_driver.add_spec(spec, first_fire_time=_compute_endtime_fire_time(state, ttl.endtime_sec))
 
 
-# ===========================================================================
 # TTL 兼容入口（SubTask 27.1 从 ttl_helper.py 迁入）
-# ===========================================================================
 
 
 def _should_remove_for_ttl(stock: Any, ttl_spec: "TTLSpec", now_unix: float) -> bool:
@@ -3331,9 +3277,7 @@ class TTLHelper:
         node_stocks[node_id] = list(state.get_pool(node_id).get_stocks())
 
 
-# ===========================================================================
 # ExecutionModule — 对外统一入口
-# ===========================================================================
 
 
 class ExecutionModule(_BaseModule):
@@ -3375,10 +3319,10 @@ class ExecutionModule(_BaseModule):
         (StockFiltered, "_on_stock_filtered"),
         (DataChanged, "_on_data_changed"),
         (TimeAdvanced, "_on_time_advanced"),
-        (ConfigChanged, "_on_config_changed"),
-        (PoolLoaded, "_on_pool_loaded"),
-        (Executed, "_on_executed"),
-        (DomainEvent, "_on_domain_event"),
+        (ConfigChanged, "_recompile"),
+        (PoolLoaded, "_recompile"),
+        (Executed, "_forward_event"),
+        (DomainEvent, "_forward_event"),
         (ModeChanged, "_on_mode_changed"),
     ]
 
@@ -3434,19 +3378,15 @@ class ExecutionModule(_BaseModule):
     # ------------------------------------------------------------------
     # 事件 handler
     # ------------------------------------------------------------------
-    @_event_handler("_on_pool_loaded")
-    def _on_pool_loaded(self, event: PoolLoaded) -> None:
-        """池配置加载触发编译（SubTask 8.4 关联）。"""
-        self._pool_config = event.pool_config or {}
-        self._compiled = Compiler.compile(self._pool_config)
-        self._engine = None  # 重置，下次 _ensure_engine 重建
-
-    @_event_handler("_on_config_changed")
-    def _on_config_changed(self, event: ConfigChanged) -> None:
-        """配置变更触发 CompiledSchedule 重建（SubTask 8.4）。"""
-        if self._pool_config:
+    @_event_handler("_recompile")
+    def _recompile(self, event) -> None:
+        """池配置加载/配置变更触发 CompiledSchedule 重建（合并 _on_pool_loaded / _on_config_changed 同构骨架）。"""
+        is_pool_loaded = isinstance(event, PoolLoaded)
+        if is_pool_loaded:
+            self._pool_config = event.pool_config or {}
+        if is_pool_loaded or self._pool_config:
             self._compiled = Compiler.compile(self._pool_config)
-            self._engine = None  # 配置变更后重建引擎
+            self._engine = None
 
     @_event_handler("_on_stock_filtered")
     def _on_stock_filtered(self, event: StockFiltered) -> None:
@@ -3510,39 +3450,25 @@ class ExecutionModule(_BaseModule):
         """时间推进触发 TTL 检查（SubTask 8.2）。"""
         self._check_ttl_expired(event.ts)
 
-    @_event_handler("_on_executed")
-    def _on_executed(self, event: Executed) -> None:
-        """EdgeExecutor 发布 Executed → 转发为 TransferExecuted（SubTask 8.3）。
+    # 守卫通过则发布派生事件（合并 _on_executed / _on_domain_event 同构转发骨架）
+    _FORWARD_SPECS: ClassVar[Dict[type, Tuple[Callable[[Any], bool], Callable[[Any], Any]]]] = {
+        Executed: (
+            lambda e: e.entered or e.exited,
+            lambda e: TransferExecuted(src=e.sid, tgt=e.tid, codes=list(e.entered), mode=e.mode, ts=time.time()),
+        ),
+        DomainEvent: (
+            lambda e: e.event_type == "TIMEOUT",
+            lambda e: TTLExpired(node_id=e.pool_id, codes=[e.code], ts=time.time()),
+        ),
+    }
 
-        ``_emit_transfer_events`` 的事件化版本：原 ``PoolEngine._emit_transfer_events``
-        在 tick 末尾批量处理 transfer_events，现改为 per-Executed 即时转发，
-        由 Statistics/Monitoring 模块订阅 TransferExecuted 处理。
-        """
-        if event.entered or event.exited:
-            self._bus.publish(TransferExecuted(
-                src=event.sid,
-                tgt=event.tid,
-                codes=list(event.entered),
-                mode=event.mode,
-                ts=time.time(),
-            ))
-
-    @_event_handler("_on_domain_event")
-    def _on_domain_event(self, event: DomainEvent) -> None:
-        """DomainEvent(TIMEOUT) → TTLExpired（SubTask 8.3）。
-
-        TTL 到期由 ``EventDriver.fire_due`` 触发（G1 heapq 弹出），内部 action 发布
-        DomainEvent(TIMEOUT) + Signal(SELL)。此处转发为 TTLExpired 事件，
-        供 Database/Monitoring 模块订阅。其他 DomainEvent 类型（ENTER/EXIT/
-        RANK_CHANGED）不经此转发，保留由原 _on_domain_event 订阅者处理。
-        """
-        if event.event_type != "TIMEOUT":
+    @_event_handler("_forward_event")
+    def _forward_event(self, event) -> None:
+        """通用事件转发：守卫通过则发布派生事件（合并 _on_executed / _on_domain_event）。"""
+        spec = self._FORWARD_SPECS.get(type(event))
+        if spec is None or not spec[0](event):
             return
-        self._bus.publish(TTLExpired(
-            node_id=event.pool_id,
-            codes=[event.code],
-            ts=time.time(),
-        ))
+        self._bus.publish(spec[1](event))
 
     # ------------------------------------------------------------------
     # 核心循环
@@ -3598,7 +3524,7 @@ class ExecutionModule(_BaseModule):
         """TTL 过期检查：委托 EventDriver.fire_due 统一驱动（G1 heapq）。
 
         ``EventDriver`` 内部 action 会发布 DomainEvent(TIMEOUT) + Signal(SELL)，
-        由 ``_on_domain_event`` 订阅者转发为 ``TTLExpired`` 事件。
+        由 ``_forward_event`` 订阅者转发为 ``TTLExpired`` 事件。
         """
         event_driver = self._get_event_driver()
         if event_driver is None:

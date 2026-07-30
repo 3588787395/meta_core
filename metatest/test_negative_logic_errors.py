@@ -740,10 +740,11 @@ def test_no_isomorphism_revival_build_topology_thin():
 
 
 def test_no_isomorphism_revival_event_handler_count():
-    """变更 N: ``@_event_handler`` 装饰器在 5 个核心模块共 ≥ 28 次。
+    """变更 N: ``@_event_handler`` 装饰器在 5 个核心模块共 ≥ 26 次。
 
     execution_module / tick_bar_module / monitoring_module / screening_module /
-    trade_module 共应至少有 28 处 ``@_event_handler`` 装饰（事件总线订阅统一接口）。
+    trade_module 共应至少有 26 处 ``@_event_handler`` 装饰（事件总线订阅统一接口）。
+    基线由 28 降至 26：Task 12 合并 execution_module 4 handler 为 2（_recompile/_forward_event）。
     """
     target_modules = [
         "execution_module.py",
@@ -762,8 +763,8 @@ def test_no_isomorphism_revival_event_handler_count():
         per_module[name] = c
         total += c
 
-    assert total >= 28, (
-        f"变更 N 违规：5 模块共 {total} 处 @_event_handler < 28"
+    assert total >= 26, (
+        f"变更 N 违规：5 模块共 {total} 处 @_event_handler < 26"
         f"（按模块：{per_module}）"
     )
     # 至少每个模块有 ≥ 1 处

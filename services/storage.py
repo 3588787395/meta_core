@@ -397,21 +397,35 @@ class Storage:
     # ------------------------------------------------------------------
     # 事件订阅（unify-stockpool-oop-event-driven spec）
     # ------------------------------------------------------------------
-    def _register_subscribers(self, bus: EventBus) -> None:
-        """向 EventBus 注册事件订阅，将事件映射到对应 insert_*/update_* 方法。
+    _PERSIST_HANDLERS: Dict[type, Tuple[str, Tuple[str, ...], bool]] = {
+        # event_type → (method_name, field_names, skip_if_readonly)
+        TransferExecuted: ("insert_stock_transfer_log", ("src", "tgt", "codes", "mode", "ts"), True),
+        TTLExpired: ("update_node_state_expire", ("node_id", "codes", "ts"), True),
+        OrderPlaced: ("insert_order", ("order", "ts"), True),
+        OrderFilled: ("update_order_fill", ("fill", "ts"), True),
+        EventLogged: ("insert_event_log", ("event", "event_kind", "ts"), False),
+        ConfigChanged: ("insert_config_version", ("changed_tables",), False),
+        ReplayStarted: ("insert_replay_session", ("session",), False),
+    }
 
-        每个 handler 用 try/except 包裹，异常 logger.warning 不向上抛，
-        与 EventBus.publish 的异常隔离风格一致。
-        """
-        bus.subscribe(TransferExecuted, self._on_transfer_executed)
-        bus.subscribe(TTLExpired, self._on_ttl_expired)
-        bus.subscribe(OrderPlaced, self._on_order_placed)
-        bus.subscribe(OrderFilled, self._on_order_filled)
-        bus.subscribe(EventLogged, self._on_event_logged)
-        bus.subscribe(ConfigChanged, self._on_config_changed)
-        bus.subscribe(ReplayStarted, self._on_replay_started)
-        # SubTask 20.4：订阅 ModeChanged 切换副作用范围
+    def _register_subscribers(self, bus: EventBus) -> None:
+        """注册事件订阅：7 个持久化事件表驱动派发 + ModeChanged 单独订阅。"""
+        for event_type in self._PERSIST_HANDLERS:
+            bus.subscribe(event_type, self._persist_event)
         bus.subscribe(ModeChanged, self._on_mode_changed)
+
+    def _persist_event(self, event) -> None:
+        """通用持久化 handler：查表 → 提取字段 → 调用 insert/update 方法。"""
+        spec = self._PERSIST_HANDLERS.get(type(event))
+        if not spec:
+            return
+        method_name, fields, skip_if_readonly = spec
+        if skip_if_readonly and self._side_effects_scope == "readonly":
+            return
+        try:
+            getattr(self, method_name)(*(getattr(event, f) for f in fields))
+        except Exception as ex:
+            logger.warning("Storage 订阅 %s 失败: %s", type(event).__name__, ex)
 
     # ------------------------------------------------------------------
     # SubTask 20.4：ModeChanged → 切换副作用范围
@@ -446,63 +460,6 @@ class Storage:
             )
         except Exception as ex:
             logger.warning("Storage 订阅 ModeChanged 失败: %s", ex)
-
-    def _on_transfer_executed(self, event: TransferExecuted) -> None:
-        # SubTask 20.4：readonly 范围下跳过业务表写入（仅 event_log 保留）
-        if self._side_effects_scope == "readonly":
-            return
-        try:
-            self.insert_stock_transfer_log(
-                event.src, event.tgt, event.codes, event.mode, event.ts
-            )
-        except Exception as ex:
-            logger.warning("Storage 订阅 TransferExecuted 失败: %s", ex)
-
-    def _on_ttl_expired(self, event: TTLExpired) -> None:
-        # SubTask 20.4：readonly 范围下跳过 node_state 业务表写入
-        if self._side_effects_scope == "readonly":
-            return
-        try:
-            self.update_node_state_expire(event.node_id, event.codes, event.ts)
-        except Exception as ex:
-            logger.warning("Storage 订阅 TTLExpired 失败: %s", ex)
-
-    def _on_order_placed(self, event: OrderPlaced) -> None:
-        # SubTask 20.4：readonly 范围下跳过 orders 业务表写入
-        if self._side_effects_scope == "readonly":
-            return
-        try:
-            self.insert_order(event.order, event.ts)
-        except Exception as ex:
-            logger.warning("Storage 订阅 OrderPlaced 失败: %s", ex)
-
-    def _on_order_filled(self, event: OrderFilled) -> None:
-        # SubTask 20.4：readonly 范围下跳过 orders 业务表更新
-        if self._side_effects_scope == "readonly":
-            return
-        try:
-            self.update_order_fill(event.fill, event.ts)
-        except Exception as ex:
-            logger.warning("Storage 订阅 OrderFilled 失败: %s", ex)
-
-    def _on_event_logged(self, event: EventLogged) -> None:
-        # event_log 为模式无关审计日志，所有模式均写入
-        try:
-            self.insert_event_log(event.event, event.event_kind, event.ts)
-        except Exception as ex:
-            logger.warning("Storage 订阅 EventLogged 失败: %s", ex)
-
-    def _on_config_changed(self, event: ConfigChanged) -> None:
-        try:
-            self.insert_config_version(event.changed_tables)
-        except Exception as ex:
-            logger.warning("Storage 订阅 ConfigChanged 失败: %s", ex)
-
-    def _on_replay_started(self, event: ReplayStarted) -> None:
-        try:
-            self.insert_replay_session(event.session)
-        except Exception as ex:
-            logger.warning("Storage 订阅 ReplayStarted 失败: %s", ex)
 
     # ------------------------------------------------------------------
     # 事件驱动写入方法（由事件订阅调用，也可直接调用）

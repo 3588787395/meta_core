@@ -122,28 +122,28 @@
 ## 评审工程师检查点（阶段 5：metatest v5 重建）
 
 ### scoring.py v5（20 维）
-- [ ] v4 16 维权重等比降权至 80%（每维 × 0.8）
-- [ ] 新增第 17 维 `dispatcher_isomorphism`（5%）
-- [ ] 新增第 18 维 `runtime_verification`（5%）
-- [ ] 新增第 19 维 `eventtest_regression`（5%）
-- [ ] 新增第 20 维 `cross_module_import_discipline`（5%）
-- [ ] 20 维权重和 = 100%
-- [ ] PASS 条件：总分 ≥ 95 且 20 维均 ≥ 80
+- [x] v4 16 维权重等比降权至 80%（每维 × 0.8）
+- [x] 新增第 17 维 `dispatcher_isomorphism`（5%）
+- [x] 新增第 18 维 `runtime_verification`（5%）
+- [x] 新增第 19 维 `eventtest_regression`（5%）
+- [x] 新增第 20 维 `cross_module_import_discipline`（5%）
+- [x] 20 维权重和 = 100%
+- [x] PASS 条件：总分 ≥ 95 且 20 维均 ≥ 80
 
 ### runner.py v5 采集
-- [ ] `dispatcher_isomorphism` 数据采集（MetaDispatcher 基类 + EventBus/ConfigStore 继承 + EventDriver 独立 + 公共骨架行数占比）
-- [ ] `runtime_verification` 数据采集（3 个 in-process 测试通过率）
-- [ ] `eventtest_regression` 数据采集（eventtest 退出码）
-- [ ] `cross_module_import_discipline` 数据采集（8 处违规模式计数）
-- [ ] `report.json` 含 20 维明细 + 总分 + PASS/FAIL + redo_list + meta_unification（含 meta_dispatcher_exists 等 4 字段）
+- [x] `dispatcher_isomorphism` 数据采集（MetaDispatcher 基类 + EventBus/ConfigStore 继承 + EventDriver 独立 + 公共骨架行数占比）
+- [x] `runtime_verification` 数据采集（3 个 in-process 测试通过率）
+- [x] `eventtest_regression` 数据采集（eventtest 退出码）
+- [x] `cross_module_import_discipline` 数据采集（8 处违规模式计数）
+- [x] `report.json` 含 20 维明细 + 总分 + PASS/FAIL + redo_list + meta_unification（含 meta_dispatcher_exists 等 4 字段）
 
 ### 正反合测试 v5
-- [ ] `metatest/test_positive_dispatcher_isomorphism.py` 新建并全绿
-- [ ] `metatest/test_positive_runtime_verification.py` 新建并全绿
-- [ ] `metatest/test_negative_cross_module_import.py` 新建并全绿
-- [ ] `metatest/test_positive_oop_inheritance.py` 升级含 MetaDispatcher 继承断言
-- [ ] `metatest/test_negative_polling.py` 升级含自造第四核 Dispatcher 检查
-- [ ] `python -m pytest metatest/ -x` 退出码 0
+- [x] `metatest/test_positive_dispatcher_isomorphism.py` 新建并全绿
+- [x] `metatest/test_positive_runtime_verification.py` 新建并全绿
+- [x] `metatest/test_negative_cross_module_import.py` 新建并全绿
+- [x] `metatest/test_positive_oop_inheritance.py` 升级含 MetaDispatcher 继承断言
+- [x] `metatest/test_negative_polling.py` 升级含自造第四核 Dispatcher 检查
+- [x] `python -m pytest metatest/ -x` 退出码 0
 
 ### metatest/README.md v5 文档
 - [ ] 文档化 20 维评分（v4 16 维 + v5 4 新维）
@@ -154,34 +154,34 @@
 ## 评审工程师检查点（阶段 6：RULES.md 111-115 + 全量回归）
 
 ### RULES.md 111-115
-- [ ] 第 111 条 — MetaDispatcher 统一（EventBus + ConfigStore 继承，EventDriver 独立）
-- [ ] 第 112 条 — 跨模块 import 纪律（7 业务模块禁直接 import table_engine/screening_module）
-- [ ] 第 113 条 — EventDriver action 签名（action(params, fire_time=None)）
-- [ ] 第 114 条 — 运行时验证 harness（in-process + fire_due 推进，禁启动服务/浏览器）
-- [ ] 第 115 条 — handler 表驱动（≥ 3 同构 handler 收敛为表 + 1 通用方法）
+- [x] 第 111 条 — MetaDispatcher 统一（EventBus + ConfigStore 继承，EventDriver 独立）
+- [x] 第 112 条 — 跨模块 import 纪律（7 业务模块禁直接 import table_engine/screening_module）
+- [x] 第 113 条 — EventDriver action 签名（action(params, fire_time=None)）
+- [x] 第 114 条 — 运行时验证 harness（in-process + fire_due 推进，禁启动服务/浏览器）
+- [x] 第 115 条 — handler 表驱动（≥ 3 同构 handler 收敛为表 + 1 通用方法）
 
 ### 全量回归
-- [ ] `python -m pytest metatest/ -x` 全量测试通过
-- [ ] `python -m metatest.runner` 总分 ≥ 95 且 20 维均 ≥ 80 判定 PASS
-- [ ] `python -m eventtest.run_eventtest` 退出码 0（全绿）
-- [ ] 核心模块总行数 ≤ 20,000（v4 基线 20,325 - v5 净减 ≥ 350）
-- [ ] Grep RULES 111-115 对应 5 条违规模式 0 匹配，rule_compliance 维度满分
-- [ ] Grep 8 处跨模块 import 违规模式 0 匹配，cross_module_import_discipline 维度满分
-- [ ] Grep 12 处轮询模式 0 匹配（v4 已达标，v5 保持），polling_zero_tolerance 维度满分
-- [ ] MetaDispatcher 继承结构正确（EventBus + ConfigStore 继承，EventDriver 独立），dispatcher_isomorphism 维度满分
-- [ ] 3 个 in-process 运行时验证测试全绿，runtime_verification 维度满分
-- [ ] eventtest 退出码 0，eventtest_regression 维度满分
-- [ ] essence_ratio ≥ 16%（v4 基线 24,000 → v5 目标 ≤ 20,000）
-- [ ] 启动 replay 验证步进由 EventDriver heapq 调度（in-process 测试替代，闭合 v4 Task 34.12）
-- [ ] 启动 simulation 验证 auto-step 由 EventDriver heapq 调度（in-process 测试替代，闭合 v4 Task 34.13）
-- [ ] 三模式切换后事件链路正常（in-process 测试替代，闭合 v4 Task 34.15）
-- [ ] DZH↔TDX 双格式互转保真验证（v4 已达标，v5 保持）
-- [ ] 无任何变更净增行数（essence_ratio 维度反测试通过）
+- [x] `python -m pytest metatest/ -x` 全量测试通过
+- [x] `python -m metatest.runner` 总分 ≥ 95 且 20 维均 ≥ 80 判定 PASS
+- [x] `python -m eventtest.run_eventtest` 退出码 0（全绿）
+- [x] 核心模块总行数 ≤ 20,000（v4 基线 20,325 - v5 净减 ≥ 350）
+- [x] Grep RULES 111-115 对应 5 条违规模式 0 匹配，rule_compliance 维度满分
+- [x] Grep 8 处跨模块 import 违规模式 0 匹配，cross_module_import_discipline 维度满分
+- [x] Grep 12 处轮询模式 0 匹配（v4 已达标，v5 保持），polling_zero_tolerance 维度满分
+- [x] MetaDispatcher 继承结构正确（EventBus + ConfigStore 继承，EventDriver 独立），dispatcher_isomorphism 维度满分
+- [x] 3 个 in-process 运行时验证测试全绿，runtime_verification 维度满分
+- [x] eventtest 退出码 0，eventtest_regression 维度满分
+- [x] essence_ratio ≥ 16%（v4 基线 24,000 → v5 目标 ≤ 20,000）
+- [x] 启动 replay 验证步进由 EventDriver heapq 调度（in-process 测试替代，闭合 v4 Task 34.12）
+- [x] 启动 simulation 验证 auto-step 由 EventDriver heapq 调度（in-process 测试替代，闭合 v4 Task 34.13）
+- [x] 三模式切换后事件链路正常（in-process 测试替代，闭合 v4 Task 34.15）
+- [x] DZH↔TDX 双格式互转保真验证（v4 已达标，v5 保持）
+- [x] 无任何变更净增行数（essence_ratio 维度反测试通过）
 
 ## 第五层洞察根因检查点（评审工程师最终验收）
 
-- [ ] **MetaDispatcher 公理升级**：`Code = Data + MetaDispatcher`，三核 Dispatcher 成为 MetaDispatcher 的两个特化子类（EventBus 扇出 + ConfigStore 查找）+ 一个独立时序特化（EventDriver）
-- [ ] **register-store-dispatch 元模式投影**：EventBus 的 subscribe/publish 与 ConfigStore 的 load_table/get_table 均为该元模式的投影，差异仅在 dispatch 语义（扇出+副作用 vs 查找+无副作用）
-- [ ] **EventDriver 时序特化独立性**：heapq 优先队列 + fire_time 排序 + 自动续程（periodic reschedule）语义与 MetaDispatcher 不同构，保持独立（强行统一会增加抽象税）
-- [ ] **极致本质运行时最后拼图闭合**：Dispatcher 自身也必须收敛到原语，v5 闭合 v4 残留的「同构 Dispatcher 未统一」缺口
-- [ ] **非新建机制非拆分**：本次迭代核心 = 闭合 v4 残留 4 类缺口，MetaDispatcher 基类净增 ≤ 30 行，handler 表驱动 + try 块收敛 + providers.py 审查净减 ≥ 420 行
+- [x] **MetaDispatcher 公理升级**：`Code = Data + MetaDispatcher`，三核 Dispatcher 成为 MetaDispatcher 的两个特化子类（EventBus 扇出 + ConfigStore 查找）+ 一个独立时序特化（EventDriver）
+- [x] **register-store-dispatch 元模式投影**：EventBus 的 subscribe/publish 与 ConfigStore 的 load_table/get_table 均为该元模式的投影，差异仅在 dispatch 语义（扇出+副作用 vs 查找+无副作用）
+- [x] **EventDriver 时序特化独立性**：heapq 优先队列 + fire_time 排序 + 自动续程（periodic reschedule）语义与 MetaDispatcher 不同构，保持独立（强行统一会增加抽象税）
+- [x] **极致本质运行时最后拼图闭合**：Dispatcher 自身也必须收敛到原语，v5 闭合 v4 残留的「同构 Dispatcher 未统一」缺口
+- [x] **非新建机制非拆分**：本次迭代核心 = 闭合 v4 残留 4 类缺口，MetaDispatcher 基类净增 ≤ 30 行，handler 表驱动 + try 块收敛 + providers.py 审查净减 ≥ 420 行

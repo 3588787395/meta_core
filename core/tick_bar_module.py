@@ -1,12 +1,4 @@
-"""TickBar 模块：事件驱动的 tick 接收 + K 线合成。
-
-合并 core/data_updater.py + core/bar_composer.py + services/minute_aggregator.py
-四个组件为统一 ``TickBarModule`` 类（core/tick_source.py 已在 SubTask 27.1 删除，
-相关 TickSource/MockDataSource 由 core.domain.tick_source 提供）。
-
-仅与 EventBus 交互，内部持有 4 个组件实例（不暴露给外部）。
-向后兼容：原 4 个组件类公共方法签名不变，仍可被其他模块直接调用（迁移期内）。
-"""
+"""TickBar 模块：事件驱动的 tick 接收 + K 线合成。"""
 from __future__ import annotations
 
 import hashlib
@@ -40,17 +32,13 @@ from core._hashing import BarHashMixin, hash_dict_content, hash_tick_aggregate
 
 logger = logging.getLogger(__name__)
 
-# ====================================================================
 # 模块常量
-# ====================================================================
 _DEFAULT_PERIODS = ["1m", "5m", "15m", "30m", "60m"]
 DEFAULT_PERIODS = ["1m", "5m", "15m", "30m", "60m", "1d"]
 _BARS_HISTORY_MAXLEN = 300
 
 
-# ====================================================================
 # data_updater 辅助函数
-# ====================================================================
 def _now() -> float:
     """统一委托 ``time_at("wall")``：data_updater 无 state 上下文，恒用系统墙钟。"""
     return time_at("wall")
@@ -86,9 +74,7 @@ def publish_data_changed(bus, state, source, codes, ts, data=None, period=None, 
                 ))
 
 
-# ====================================================================
 # DataUpdater：行情数据更新器（来自 core/data_updater.py）
-# ====================================================================
 class DataUpdater:
     """行情数据更新器。"""
 
@@ -196,9 +182,7 @@ class DataUpdater:
         return type(self.state)._hash_tick_data(self.state.latest_tick)
 
 
-# ====================================================================
 # bar_composer 辅助函数
-# ====================================================================
 def _to_local_datetime(ts: float) -> datetime:
     """将时间戳转换为本地datetime。"""
     if ts is None:
@@ -316,9 +300,7 @@ def _append_closed_bar(state: Any, period: str, code: str, bar: Dict[str, Any]) 
         del hist[0]
 
 
-# ====================================================================
 # BarComposer：多周期 K 线组合器（来自 core/bar_composer.py）
-# ====================================================================
 class BarComposer:
     """多周期 K 线组合器。"""
 
@@ -463,9 +445,7 @@ def make_bars_history_getter(state: Any, periods: Optional[List[str]] = None) ->
     return getter
 
 
-# ====================================================================
 # Tick / Min1Aggregator：分钟线合成器（来自 services/minute_aggregator.py）
-# ====================================================================
 class Tick(NamedTuple):
     """轻量 Tick 数据结构。"""
 
@@ -631,9 +611,7 @@ class Min1Aggregator:
         return result
 
 
-# ====================================================================
 # TickBarModule 内部状态
-# ====================================================================
 class _InternalState(BarHashMixin):
     """TickBarModule 内部轻量状态，提供 DataUpdater/BarComposer 所需最小接口。"""
 
@@ -676,9 +654,7 @@ class _InternalState(BarHashMixin):
         )
 
 
-# ====================================================================
 # TickBarModule：统一对外入口
-# ====================================================================
 class TickBarModule(_BaseModule):
     """TickBar 模块：最新 tick + K 线合成。仅与 EventBus 交互。"""
 

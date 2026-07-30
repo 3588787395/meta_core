@@ -1,14 +1,4 @@
-"""ImportExport 模块：DZH XML / TDX XML / JSON 三格式导入导出。
-
-按 ``unify-stockpool-oop-event-driven`` spec Task 12 实现。
-``ImportExportModule`` 聚合 ``converters/dzh.py`` / ``converters/tdx.py`` /
-``converters/json_xml.py`` 三模块，通过 HTTP 端点接收导入/导出请求（非事件），
-发布 ``ImportStarted`` / ``PoolLoaded`` / ``ExportCompleted`` 事件。
-
-向后兼容：原 3 个 converters 文件保持不变，本模块内部调用它们。
-导入/导出请求由 API 模块直接调用本模块的公共方法（非事件驱动，因为是同步
-请求/响应）；``PoolLoaded`` 事件触发 Execution 模块编译 + Database 模块持久化。
-"""
+"""ImportExport 模块：DZH XML / TDX XML / JSON 三格式导入导出。"""
 from __future__ import annotations
 
 import importlib
@@ -28,7 +18,6 @@ from .domain import _hms_to_seconds
 logger = logging.getLogger(__name__)
 
 
-# ============================================================
 # 表驱动：导入/导出 converter 统一入口（Task 7 / 变更 C + Task 3 / 变更 P3）
 
 _FORMAT_LOG_LABELS: Dict[str, str] = {"dzh": "DZH XML", "tdx": "TDX XML", "json": "JSON"}

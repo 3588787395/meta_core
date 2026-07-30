@@ -1,20 +1,5 @@
 # -*- coding: utf-8 -*-
-"""core.domain — DZH/TDX 股票池统一 OOP 领域模型（合并自原 core/domain/ 6 文件）。
-
-SubTask 29.1 合并：将原 ``core/domain/`` 包下的 6 个源文件合并为单一模块。
-纯数据模型（含 Evaluator 接口层），仅依赖标准库，可被任意模块 import。
-
-合并来源（按文件内顺序）：
-- base.py: Node / Edge 抽象基类
-- nodes.py: 11 个 Node 子类 + from_dzh_type / from_tdx_type 工厂
-- edges.py: ConditionalEdge / UnconditionalEdge + from_dzh_attr / from_tdx_source_type 工厂
-- specs.py: TimingSpec / FilterSpec / PropagateSpec / ActionSpec / TTLSpec / CandidateRange / ReloadSchedule
-- evaluators.py: Evaluator 层次（nset 0-5）+ FINANCIAL_INDICATORS / MARKET_FIELDS 常量
-- tick_source.py: TickSource / RealTickSource / MockDataSource + 市场代码工具
-
-注意：原 ``core/domain/{base,nodes,edges,specs,evaluators,tick_source}.py`` 中的
-``Path(__file__).parent.parent.parent`` 路径已修正为 ``parent.parent``（文件上移一级）。
-"""
+"""core.domain — DZH/TDX 股票池统一 OOP 领域模型。"""
 from __future__ import annotations
 
 import ast
@@ -45,14 +30,11 @@ def _build_adjacency(node_ids, edges_iter, src_getter, eid_getter) -> Dict[str, 
     return adj
 
 
-# ════════════════════════════════════════════════════════════════
 # Section: 字段元数据（Task 11.1：_FieldMeta 用于 _NodeBase/_EdgeBase 子类
 _FieldMeta = namedtuple("_FieldMeta", ["name", "default", "serializer"])
 
 
-# ════════════════════════════════════════════════════════════════
 # Section: base.py — 领域对象抽象基类：Node 与 Edge
-# ════════════════════════════════════════════════════════════════
 
 
 class Node(ABC):
@@ -161,7 +143,6 @@ class _FieldedBase:
         return klass
 
 
-# ════════════════════════════════════════════════════════════════
 # Section: nodes.py — Node 子类：DZH/TDX 节点类型的统一 OOP 模型
 
 
@@ -377,7 +358,6 @@ def all_tdx_types() -> List[int]:
     return list(_TDX_TYPE_REGISTRY.keys())
 
 
-# ════════════════════════════════════════════════════════════════
 # Section: edges.py — Edge 子类：DZH/TDX 流转边的统一 OOP 模型
 
 
@@ -457,7 +437,6 @@ class UnconditionalEdge(_EdgeBase):
     )
 
 
-# ════════════════════════════════════════════════════════════
 # 表驱动注册表（无 if/elif 链）
 _DZH_ATTR_REGISTRY: Dict[int, Type[Edge]] = {
     8192: ConditionalEdge,
@@ -488,7 +467,6 @@ def all_edge_source_types() -> list:
     return list(_EDGE_SOURCE_TYPE_REGISTRY.keys())
 
 
-# ════════════════════════════════════════════════════════════════
 # Section: specs.py — 领域规范对象（Spec）：纯数据 dataclass
 
 
@@ -660,11 +638,9 @@ DZH_COL_MAP: Dict[int, Dict[str, str]] = {
 }
 
 
-# ════════════════════════════════════════════════════════════════
 # Section: evaluators.py — 筛选评估器层次：按 nset(0-5) 划分的评估器抽象接口 + 数据载体
 
 
-# ════════════════════════════════════════════════════════════════
 # Task 12：Evaluator 注册表（装饰器驱动，消除静态 dict 维护）
 _EVALUATOR_REGISTRY: Dict[str, Type[Evaluator]] = {}
 
@@ -798,7 +774,6 @@ class SetOperationEvaluator(Evaluator):
         return cls(operation=op)
 
 
-# ════════════════════════════════════════════════════════════
 # 表驱动：evaluator_type → Evaluator 子类（无 if/elif 链）
 
 
@@ -815,7 +790,6 @@ def all_evaluator_types() -> List[str]:
     return list(_EVALUATOR_REGISTRY.keys())
 
 
-# ════════════════════════════════════════════════════════════════
 # Task 23.3: 评估器操作函数（从 core/evaluators.py 迁移至 core/domain/ 白名单）
 
 _domain_logger = logging.getLogger("core.evaluators")
@@ -1033,9 +1007,7 @@ def _eval_derived_expr(expr: str, ctx: dict, guard: str | None = None) -> float 
     return _eval_derived_ast(expr_tree, ctx)
 
 
-# ════════════════════════════════════════════════════════════════
 # Section: TDX nperiod → 周期映射（从 screening_module 迁移，供所有模块共用）
-# ════════════════════════════════════════════════════════════════
 
 # TDX nperiod 整数码 → 标准周期字符串映射（项目实例规范）
 _TDX_NPERIOD_TO_PERIOD: Dict[int, str] = {
@@ -1052,9 +1024,7 @@ def _nperiod_to_period(nperiod) -> str:
         return '1d'
 
 
-# ════════════════════════════════════════════════════════════════
 # Section: 交集条件评估器（从 screening_module 迁移，供 execution_module 共用）
-# ════════════════════════════════════════════════════════════════
 
 
 def evaluate_intersection(codes: List[str], state: Any, edge_params: dict) -> List[str]:
@@ -1066,7 +1036,6 @@ def evaluate_intersection(codes: List[str], state: Any, edge_params: dict) -> Li
     return [c for c in codes if c in other_stocks]
 
 
-# ════════════════════════════════════════════════════════════════
 # Section: 内置公式查找（builtin_formulas.json）
 
 _builtin_formulas_cache = None
@@ -1103,13 +1072,11 @@ def _lookup_builtin_formula_info(name: str) -> dict:
     return _BUILTIN_FORMULA_INFO.get(name, {})
 
 
-# ════════════════════════════════════════════════════════════════
 # Section: tick_source.py — 行情 tick 源抽象与实现（领域层白名单模块）
 
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
 # 市场代码工具（SubTask 27.1：从 core/_market_utils.py 迁移至此）
 
 # 注意：合并后 __file__ 为 core/domain.py，需上溯 2 级到项目根
@@ -1208,9 +1175,7 @@ def _code_seed(code: str) -> int:
     return int(digest, 16) % (2 ** 31)
 
 
-# ---------------------------------------------------------------------------
 # TimedEventSpec（统一到时事件规格）— 纯数据结构，下沉至 domain 避免跨模块懒加载
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -1541,9 +1506,7 @@ def _hash_tick(tick: Dict[str, Any]) -> str:
     return hash_dict_content(tick, exclude={"_ts", "_hash"})
 
 
-# ════════════════════════════════════════════════════════════════
 # Section: 公共时间工具函数（从 execution_module 迁移，供所有模块使用）
-# ════════════════════════════════════════════════════════════════
 
 
 def _hms_to_seconds(h: int, m: int, s: int) -> int:
@@ -1605,9 +1568,7 @@ def time_now_unix(state: Any) -> float:
     return sec
 
 
-# ════════════════════════════════════════════════════════════════
 # Section: EdgeState 边级运行时表（从 execution_module 迁移，供所有模块共用）
-# ════════════════════════════════════════════════════════════════
 
 
 class EdgeStateMixin:

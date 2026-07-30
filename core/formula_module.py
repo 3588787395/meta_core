@@ -1,22 +1,4 @@
-"""Formula 模块：公式计算 + 金叉检测。仅与 EventBus 交互。
-
-SubTask 27.3：将 ``core/formula.py`` / ``core/formula_engine.py`` /
-``core/formula_router.py`` 三个文件高内聚合并到本文件。
-``FormulaModule`` 是对外统一入口。
-
-合并前的组件对应关系：
-- ``core/formula_engine.py`` → ``PythonFormulaEngine`` 及其算子/解析器/缓存
-  （``window_op`` / ``shift_op`` / ``cross_op`` / ``CompiledFormula`` / ``_LRUCache`` 等）
-- ``core/formula.py`` → 有状态 ``FormulaEngine``（依赖 ``PoolState``）、
-  ``EvalContext`` 及上下文构造器（``live_context`` / ``replay_context`` / ``simulation_context``）
-- ``core/formula_router.py`` → ``FormulaRouter`` 及 Protocol 接口
-  （``IDataQuery`` / ``IFormulaCache`` / ``IHQChartProvider``）
-- ``core/value_extractor.py`` → ``ValueExtractor``（SubTask 27.1 已迁移）
-
-架构约束：
-- ``FormulaRouter`` 通过构造函数注入 Protocol 接口，不直接 import services。
-- ``FormulaModule`` 仅与 EventBus 交互，外部通过事件订阅/发布与之通信。
-"""
+"""Formula 模块：公式计算 + 金叉检测。仅与 EventBus 交互。"""
 from __future__ import annotations
 
 import asyncio
@@ -53,12 +35,9 @@ from ._hashing import hash_dict_content, hash_object
 logger = logging.getLogger(__name__)
 
 
-# ===========================================================================
 # 来自 core/formula_engine.py — 纯 Python 公式引擎
 
-# ---------------------------------------------------------------------------
 # 字段名 / 函数名映射
-# ---------------------------------------------------------------------------
 _FIELD_MAP = {
     "CLOSE": "close",
     "C": "close",
@@ -81,9 +60,7 @@ _TOKEN_RE = re.compile(
 )
 
 
-# ---------------------------------------------------------------------------
 # 简易 LRU 缓存
-# ---------------------------------------------------------------------------
 _CACHE_MAXSIZE = 1000
 
 
@@ -108,9 +85,7 @@ class _LRUCache:
             self._data.popitem(last=False)
 
 
-# ---------------------------------------------------------------------------
 # 向量化 TDX 函数实现
-# ---------------------------------------------------------------------------
 def _to_series(x: Any) -> pd.Series:
     """将输入统一转为 pd.Series，便于使用 rolling/shift。"""
     if isinstance(x, pd.Series):
@@ -118,7 +93,6 @@ def _to_series(x: Any) -> pd.Series:
     return pd.Series(np.asarray(x, dtype=float))
 
 
-# ---------------------------------------------------------------------------
 # 通用算子（表驱动）：window_op / shift_op / cross_op
 
 
@@ -155,9 +129,7 @@ def cross_op(line1: Any, line2: Any, direction: str = "above") -> pd.Series:
         return (sa.shift(1) >= sb.shift(1)) & (sa < sb)
 
 
-# ---------------------------------------------------------------------------
 # 递推与逐元素算子：EMA / SMA / ABS / MAX / MIN / IF
-# ---------------------------------------------------------------------------
 def _ewm_core(series: Any, n: int, alpha_fn: Callable[[int], float]) -> pd.Series:
     """通用指数加权核心：按 ``alpha_fn(n)`` 计算 alpha，调用 pandas ``ewm``。"""
     s = _to_series(series)
@@ -304,9 +276,7 @@ def _dispatch_func(name: str, args: List[Any], ctx: Optional[Dict[str, Any]] = N
     return handler_func(*extracted_args, **extra_kwargs)
 
 
-# ---------------------------------------------------------------------------
 # 公式分词与表达式解析
-# ---------------------------------------------------------------------------
 def _tokenize(formula: str) -> List[str]:
     """简单分词器：识别标识符、数字、运算符和分隔符。"""
     # 移除注释：{} 块注释 与 // 行注释
@@ -533,9 +503,7 @@ def _parse_statement(stmt: List[str]) -> Tuple[str, Optional[str], Any]:
     return "output", None, compile(expr, "<formula>", "eval")
 
 
-# ---------------------------------------------------------------------------
 # 公式引擎协议（Task 4 / RULES.md 第 85 条）
-# ---------------------------------------------------------------------------
 @runtime_checkable
 class IFormulaEngine(Protocol):
     """公式引擎协议：统一 ``CompiledFormula`` / ``PythonFormulaEngine`` /
@@ -569,9 +537,7 @@ class IFormulaEngine(Protocol):
         ...
 
 
-# ---------------------------------------------------------------------------
 # 编译产物
-# ---------------------------------------------------------------------------
 @dataclass
 class CompiledFormula:
     """已编译的公式，保存按顺序执行的语句（赋值/输出）及其 code 对象。
@@ -689,9 +655,7 @@ class CompiledFormula:
         return result
 
 
-# ---------------------------------------------------------------------------
 # 数据归一化
-# ---------------------------------------------------------------------------
 _FUNC_NAMESPACE = {
     "np": np,
     "_dispatch_func": _dispatch_func,
@@ -734,9 +698,7 @@ def _build_namespace(bars: pd.DataFrame) -> Optional[Dict[str, Any]]:
     return namespace
 
 
-# ---------------------------------------------------------------------------
 # 公式引擎主类
-# ---------------------------------------------------------------------------
 class PythonFormulaEngine:
     """纯 Python 公式引擎（轻量级、numpy/pandas 向量化）。
 
@@ -824,7 +786,6 @@ class PythonFormulaEngine:
                                      lambda c, df, a: c.eval_series(df, a, lookback=lookback), None)
 
 
-# ===========================================================================
 # 来自 core/formula.py — 公式定义（EvalContext + 有状态 FormulaEngine）
 
 
@@ -1140,13 +1101,10 @@ class FormulaEngine:
         return self._eval_formula_core(formula_ref, codes, ctx, spec, lookback=lookback, series=True)
 
 
-# ===========================================================================
 # 来自 core/formula_router.py — 公式路由器
 
 
-# ---------------------------------------------------------------------------
 # Protocol 接口定义（替代跨层 services import，构造函数注入）
-# ---------------------------------------------------------------------------
 class IDataQuery(Protocol):
     """数据查询接口（替代 services.data.DataQuery）。"""
 
@@ -1804,9 +1762,7 @@ class FormulaRouter:
         return None, None
 
 
-# ===========================================================================
 # ValueExtractor（从 core/value_extractor.py 迁移，SubTask 27.1）
-# ===========================================================================
 class ValueExtractor:
     """表驱动值提取器：按 value_extractors 表分派提取原语。
 
@@ -1993,9 +1949,7 @@ class ValueExtractor:
         return cur
 
 
-# ===========================================================================
 # FormulaModule — 对外统一入口
-# ===========================================================================
 class FormulaModule(_BaseModule):
     """Formula 模块：公式计算 + 金叉检测。仅与 EventBus 交互。"""
 
@@ -2193,7 +2147,6 @@ class FormulaModule(_BaseModule):
             return None
 
 
-# ===========================================================================
 # === 公式缓存层（自 services/formula_cache.py 合并）===
 _DEFAULT_TTL_MINUTE = 60
 _DEFAULT_TTL_DAY = 86400

@@ -1,39 +1,5 @@
 # -*- coding: utf-8 -*-
-# === 评估器层（自 core/evaluators.py 合并）===
-"""Screening 模块：股票筛选（强弱对比）+ TDX 条件评估器（单一入口）。
-
-Phase 8 SubTask 28.1：原 core/evaluators.py（470 行）已合并入本文件，
-本文件成为筛选 + 评估的单一入口。
-
-=== Screening 模块（事件驱动实现，Task 7）===
-订阅 FormulaEvaluated 事件，按 nset×noperate 矩阵筛选股票，
-发布 StockFiltered 事件（含 passed/rejected 列表）。
-
-=== 评估器层（自 core/evaluators.py 合并）===
-TDX 条件评估器模块：通用 nset 评估器 + 统一入口 eval_tdx_condition。
-
-表驱动重构说明（Task 1+2+3+4）：
-    - noperate 比较逻辑由 tdx_noperate_rules.json 的 expr/prev_expr/curr_expr/combine
-      字段（表达式字符串）驱动，通用比较器 _eval_op 调 _eval_derived_expr 求值，无 if/elif 分支
-    - nset 0/1/2 合并为 eval_formula_nset，nset 3/4 合并为 eval_scalar_nset，
-      差异由 dispatch.json:nset_dispatch 的 nset_cfg 字段驱动
-    - 排名逻辑由 tdx_noperate_rules.json:rank_modes 表驱动，_resolve_rank 替代 if/elif
-    - 派生字段公式由 data_source_mappings.json:derived_fields 表驱动，
-      _eval_derived_expr 用 ast 受控求值替代 lambda
-
-解耦说明（Task 7）：
-    - nset0/1/2（公式评估）：通过 FormulaRouter.eval_batch() 路由，禁止直接调用 tq_adapter
-    - nset3/4（标量评估）：通过 MarketDataPort 接口获取标量数据，禁止直接调用 tq_adapter
-    - nset3/4 禁止走 _resolve_fallback / pass_through 降级
-    - nset5（集合运算）：纯集合运算，不依赖数据源，保持不变
-
-设计要点（Screening 模块）：
-    - 表驱动：nset → Evaluator 子类 + nset → 筛选策略函数，双重 dict 常量，无 if/elif
-    - 异常隔离：所有事件 handler 用 try/except 包裹 + logger.warning
-    - 实际评估逻辑内联（_apply_noperate_mode / _extract_indicator_scalar 等）
-
-import 白名单：仅 core.event_bus / core.domain + 标准库。
-"""
+"""Screening 模块：股票筛选（强弱对比）+ TDX 条件评估器（单一入口）。"""
 from __future__ import annotations
 
 import ast
@@ -86,9 +52,7 @@ from .domain import (
 logger = logging.getLogger(__name__)
 
 
-# ════════════════════════════════════════════════════════════
 # === 评估器层（自 core/evaluators.py 合并）开始 ===
-# ════════════════════════════════════════════════════════════
 
 # 模块级常量（原 evaluators.py 顶层）
 _lu = load_config_table("tdx_ntjindexno_lookup")
@@ -534,17 +498,12 @@ def eval_tdx_condition(dispatch_key: str, action_inputs: dict) -> list[str]:
 # 此处通过顶部 from .domain import re-export 保持向后兼容。
 
 
-# ════════════════════════════════════════════════════════════
 # === 评估器层（自 core/evaluators.py 合并）结束 ===
-# ════════════════════════════════════════════════════════════
 
 
-# ════════════════════════════════════════════════════════════
 # === Screening 模块（事件驱动筛选）开始 ===
-# ════════════════════════════════════════════════════════════
 
 
-# ════════════════════════════════════════════════════════════
 # 表驱动：nset → 筛选策略函数（无 if/elif 链）
 
 
@@ -830,9 +789,7 @@ class ScreeningModule(_BaseModule):
             return None, []
 
 
-# ════════════════════════════════════════════════════════════
 # === Screening 模块（事件驱动筛选）结束 ===
-# ════════════════════════════════════════════════════════════
 
 
 __all__ = [

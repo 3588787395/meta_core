@@ -1,20 +1,4 @@
-"""
-表驱动架构核心引擎
-==================
-统一驱动所有逻辑与渲染的表解析执行引擎。
-程序主干仅包含通用的表解析与执行逻辑，不含任何领域知识。
-
-核心设计原则：
-1. 所有业务逻辑提取为表中的规则配置
-2. 引擎仅包含通用的表解析与执行逻辑
-3. UI界面完全由配置表决定
-4. 支持热加载与校验
-
-合并说明（SubTask 28.6）：
-    ``services/hot_reload.py`` 已合并至本文件末尾的「热加载层」section，
-    ``HotReloadManager`` 现由 ``core.table_engine`` 统一提供，
-    本文件成为配置存储 + 热加载的单一入口。
-"""
+"""表驱动架构核心引擎：统一驱动逻辑与渲染的表解析执行引擎。"""
 
 # === 热加载层（自 services/hot_reload.py 合并）===
 
@@ -29,7 +13,8 @@ from pathlib import Path
 from datetime import datetime
 from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple
 
-from core.event_bus import ConfigChanged, ConfigLoaded, EventBus
+from core.event_bus import ConfigChanged, ConfigLoaded, EventBus, MetaDispatcher
+from converters_common import safe_int
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +34,8 @@ def _iter_entries(collection) -> Iterator[Tuple[str, Any]]:
         yield from iterate(collection)
 
 
-class ConfigStoreBase:
-    """配置存储基类——热加载与回滚的模板方法（合并双实现）。"""
+class ConfigStoreBase(MetaDispatcher):
+    """配置存储基类——热加载与回滚的模板方法 + MetaDispatcher 查找子类（合并双实现）。"""
 
     def _iter_config_paths(self) -> List[Path]:
         """枚举配置文件（子类可覆盖，默认扫描 config_dir 下 *.json）。"""
@@ -154,6 +139,8 @@ class ConfigStore(ConfigStoreBase):
             config_dir = Path(__file__).parent.parent / "config"
         self._config_dir = Path(config_dir)
         self._tables: Dict[str, Dict] = {}
+        # MetaDispatcher._store alias：指向 _tables（register/dispatch 默认操作对象）
+        self._store = self._tables
         self._hashes: Dict[str, str] = {}  # 文件hash，用于热加载检测
         self._load_times: Dict[str, float] = {}
         self._validators: Dict[str, Callable] = {}
@@ -302,7 +289,8 @@ class ConfigStore(ConfigStoreBase):
             if errors:
                 logger.warning(f"配置表 {name} 校验警告: {errors}")
 
-            self._tables[name] = data
+            # MetaDispatcher register 语义：_tables[name] = data
+            self.register(name, data)
             self._hashes[name] = file_hash
             self._load_times[name] = time.time()
             logger.info(f"配置表 {name} 加载成功 (hash={file_hash[:8]})")
@@ -418,6 +406,14 @@ class ConfigStore(ConfigStoreBase):
     def get(self, name: str, default: Any = None) -> Any:
         """获取配置表"""
         return self._tables.get(name, default)
+
+    def register(self, key, value):
+        """MetaDispatcher register 语义：_tables[key] = value（dict 赋值）。"""
+        self._tables[key] = value
+
+    def _dispatch_impl(self, key, *args, **kwargs):
+        """MetaDispatcher 派发实现：纯查找无副作用（返回 _tables[key] 或 None）。"""
+        return self._tables.get(key)
 
     def get_table(self, name: str) -> Dict[str, Any]:
         """获取配置表（统一入口，参与热加载）。"""
@@ -848,10 +844,7 @@ class DataBinder:
         """解码 TDX 动作十六进制编码为结构化动作字典"""
         if action_int is None or action_int == 0 or action_int == "":
             return None
-        try:
-            action_int = int(action_int)
-        except (ValueError, TypeError):
-            return None
+        action_int = safe_int(action_int, 0)
         if action_int == 0:
             return None
 
@@ -1328,7 +1321,6 @@ class PropertyOwnershipManager:
             return other_exclusive_list
 
 
-# ════════════════════════════════════════════════════════════════════
 # === 热加载层（自 services/hot_reload.py 合并，SubTask 28.6）===
 
 

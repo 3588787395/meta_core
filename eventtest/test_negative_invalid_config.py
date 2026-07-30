@@ -538,16 +538,23 @@ class TestInvalidConfigEvalFormulaPathSource:
         )
 
     def test_event_bus_publish_has_try_except(self):
-        """``EventBus.publish`` 源码含 try/except 包裹 handler 调用。
+        """``EventBus.publish`` 派发路径含 try/except 包裹 handler 调用。
 
         验证 EventBus 不受订阅者异常影响的代码层面证据：
-        - try 块中调用 handler(event)
+        - ``publish`` 委托 ``_dispatch_impl``（MetaDispatcher 派发实现）
+        - ``_dispatch_impl`` try 块中调用 handler(event)
         - except Exception 捕获并记录日志
         """
         from core.event_bus import EventBus
-        src = inspect.getsource(EventBus.publish)
-        assert "try:" in src, "publish 应含 try 块"
-        assert "handler(event)" in src, "try 块中应调用 handler(event)"
-        assert "except Exception" in src, (
-            "publish 应含 except Exception 捕获订阅者异常"
+        publish_src = inspect.getsource(EventBus.publish)
+        assert "_dispatch_impl" in publish_src, (
+            "publish 应委托 _dispatch_impl（MetaDispatcher 派发实现）"
+        )
+        dispatch_src = inspect.getsource(EventBus._dispatch_impl)
+        assert "try:" in dispatch_src, "_dispatch_impl 应含 try 块"
+        assert "handler(event)" in dispatch_src, (
+            "try 块中应调用 handler(event)"
+        )
+        assert "except Exception" in dispatch_src, (
+            "_dispatch_impl 应含 except Exception 捕获订阅者异常"
         )

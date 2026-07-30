@@ -277,6 +277,20 @@
 
 ---
 
+## 十四、v5 元模式收敛（5 条）
+
+111. **MetaDispatcher 统一**：EventBus 与 ConfigStore 必须继承 `MetaDispatcher` 抽象基类（`core/event_bus.py`），覆盖 `_dispatch_impl` 实现各自派发语义（EventBus 扇出+副作用 / ConfigStore 查找无副作用）。EventDriver 因 heapq 时序优先队列 + fire_time 排序 + 自动续程语义特化，保持独立，不继承 MetaDispatcher。公理：`Code = Data + MetaDispatcher`。禁止再造第四核 Dispatcher。
+
+112. **跨模块 import 纪律**：7 个业务模块（execution_module / screening_module / formula_module / runtime_mode_module / trade_module / tick_bar_module / monitoring_module）禁止直接 `from .table_engine import` 或 `from .screening_module import`。跨模块依赖必须经依赖注入（构造函数注入）或下沉到白名单基础模块（`core/domain` re-export `load_config_table` / `get_global_config_store`，`converters_common` 提供 `safe_cast` 等）。函数级延迟 import 仅在依赖模块内部状态时允许。
+
+113. **EventDriver action 签名**：所有 `TimedEventSpec.action` 可调用对象必须接受 `action(params, fire_time=None)` 签名，与 `EventDriver.fire_due` 调用 `spec.action(spec.params, fire_time)` 一致。测试侧 action 函数必须同步此签名，禁止 `action(params)` 单参数形式。
+
+114. **运行时验证 harness**：replay/simulation/mode-switch 必须有 in-process 测试（`metatest/test_runtime_*.py`），通过 `EventDriver.fire_due(now)` 手动推进时间验证 heapq 调度，禁止启动 uvicorn/浏览器/asyncio loop。3 个测试文件：`test_runtime_replay_heapq.py` / `test_runtime_simulation_heapq.py` / `test_runtime_mode_switch.py`，闭合沙箱缺口。
+
+115. **handler 表驱动**：≥ 3 个同构 `_on_*` event handler 必须收敛为 `_HANDLERS: Dict[type, spec]` 表 + 1 个通用方法（如 `_persist_event` / `_forward_event`）。非同构 handler（含特殊控制流）保留。禁止无效抽象（< 3 个同构 handler 不强制表驱动）。
+
+---
+
 ## 附：文件路径映射（文档 vs 实际代码）
 
 > DESIGN0.md / DESIGN.md 中部分文件路径引用已与实际代码脱节，以下为正确映射：

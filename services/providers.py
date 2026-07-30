@@ -79,9 +79,7 @@ class DataSourceProvider:
         self._bus: Optional[EventBus] = bus
         self._config: Dict[str, Any] = config or {}
 
-    # ------------------------------------------------------------------
     # 基础状态
-    # ------------------------------------------------------------------
 
     def is_ready(self) -> bool:  # noqa: D401
         """返回当前提供者是否就绪。默认返回 False。"""
@@ -91,9 +89,7 @@ class DataSourceProvider:
         """返回当前提供者的模式描述字符串。默认返回空字符串。"""
         return ""
 
-    # ------------------------------------------------------------------
     # 事件驱动钩子（Task 4.1）
-    # ------------------------------------------------------------------
 
     def _emit_tick(self, tick_data: Dict, code: str, ts: float) -> None:
         """发布 ``TickReceived`` 事件（受保护方法，供子类调用）。
@@ -113,9 +109,7 @@ class DataSourceProvider:
                 code, ex,
             )
 
-    # ------------------------------------------------------------------
     # 事件化抽象方法（Task 4.1：新增 fetch_tick / fetch_kline，默认空实现）
-    # ------------------------------------------------------------------
 
     def fetch_tick(self, code: str) -> Dict:
         """获取单只股票 tick（事件化抽象方法，默认返回空字典）。
@@ -132,9 +126,7 @@ class DataSourceProvider:
         """
         return []
 
-    # ------------------------------------------------------------------
     # 行情数据
-    # ------------------------------------------------------------------
 
     def resolve_market(self, markets) -> Dict[str, List[str]]:
         """解析市场列表，返回 {市场名: [股票代码]} 映射。默认返回空字典。"""
@@ -148,9 +140,7 @@ class DataSourceProvider:
         """获取实时快照。默认返回空字典。"""
         return {}
 
-    # ------------------------------------------------------------------
     # 板块 / 股票列表
-    # ------------------------------------------------------------------
 
     def get_block_members(self, block_code) -> List[str]:
         """获取板块成员代码列表。默认返回空列表。"""
@@ -168,9 +158,7 @@ class DataSourceProvider:
         """获取板块成分股代码列表。默认返回空列表。"""
         return []
 
-    # ------------------------------------------------------------------
     # 公式评估
-    # ------------------------------------------------------------------
 
     def eval_indicator(self, codes, formula_text, period, sorttype=0) -> Dict:
         """评估指标公式。默认返回空结果的标准格式。"""
@@ -189,9 +177,7 @@ class DataSourceProvider:
         """评估指标公式。默认返回失败的标准格式。"""
         return {"success": False, "result": {}}
 
-    # ------------------------------------------------------------------
     # 板块操作
-    # ------------------------------------------------------------------
 
     def send_user_block(self, block_code, stocks, show=True) -> Dict:
         """保存股票到自定义板块。默认返回失败格式。"""
@@ -205,9 +191,7 @@ class DataSourceProvider:
         """清空板块。默认返回失败格式。"""
         return {"success": False, "message": "not supported"}
 
-    # ------------------------------------------------------------------
     # 财务 / 回放 / 重采样
-    # ------------------------------------------------------------------
 
     def get_financial_data(self, codes, fields) -> Dict:
         """获取财务数据。默认返回空字典。"""
@@ -307,9 +291,7 @@ class DataSourceManager:
             self._default_chain[0] if self._default_chain else None
         )
 
-    # ------------------------------------------------------------------
     # 内部辅助
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _get_full_mock_provider(bus: Optional[EventBus] = None) -> DataSourceProvider:
@@ -324,9 +306,7 @@ class DataSourceManager:
         except Exception:
             return _StubMockProvider(bus=bus)
 
-    # ------------------------------------------------------------------
     # 配置一致性校验
-    # ------------------------------------------------------------------
 
     def _validate_config_consistency(self) -> None:
         """校验配置一致性。
@@ -352,9 +332,7 @@ class DataSourceManager:
         contract = get_default_contract()
         return contract.default_chain
 
-    # ------------------------------------------------------------------
     # 提供者加载
-    # ------------------------------------------------------------------
 
     def _load_providers(self):
         """根据配置动态导入并实例化提供者。"""
@@ -388,9 +366,7 @@ class DataSourceManager:
             except Exception as e:
                 logger.warning("加载数据源提供者 %s 失败: %s", name, e)
 
-    # ------------------------------------------------------------------
     # 公共接口
-    # ------------------------------------------------------------------
 
     @property
     def active_provider(self) -> Optional[DataSourceProvider]:
@@ -444,9 +420,7 @@ class DataSourceManager:
             )
         return method(*args, **kwargs)
 
-    # ------------------------------------------------------------------
     # 便捷代理方法 —— 直接转发到 _call_active
-    # ------------------------------------------------------------------
 
     def is_ready(self) -> bool:
         provider = self.active_provider
@@ -522,16 +496,6 @@ class DataSourceManager:
 # ===========================================================================
 # 公共工具层（自原 services/providers/_common.py 合并）
 # ===========================================================================
-#
-# 数据源提供者公共工具：
-#   - 二进制公式解码：已下沉至 converters_common（decode_formula 等），
-#     本模块 re-export decode_formula 保持向后兼容
-#   - 周期/代码映射（PERIOD_MAP / SORTTYPE_MAP / map_period /
-#     decode_sorttype / normalize_code / to_dzh_code）
-#   - 格式化辅助（_format_timestamp / _format_hold_days / _norm_period）
-#   - K 线缓存（KLineDataCache）
-#   - 配置加载（_load_config / _CONFIG_CACHE，供 AkShareProvider/DfcfProvider 共用）
-# ===========================================================================
 
 PERIOD_MAP = {
     '分笔': 0,
@@ -554,15 +518,9 @@ PERIOD_MAP = {
     'tick': 0,
 }
 
-SORTTYPE_MAP: Dict[str, int] = {}
-
 
 def map_period(cycle: str) -> int:
     return PERIOD_MAP.get(cycle, 6)
-
-
-def decode_sorttype(sorttype: str) -> int:
-    return SORTTYPE_MAP.get(sorttype, 0)
 
 
 def normalize_code(code: str) -> str:
@@ -636,12 +594,6 @@ class KLineDataCache:
 
     def clear(self):
         self._cache.clear()
-
-
-# ===========================================================================
-# 配置加载工具：已统一到 ConfigStore.get_table(name)（Task 9.1）
-# 模块级 _load_config 帮助函数已删除，调用方通过 get_global_config_store().get_table(name) 访问
-# ===========================================================================
 
 
 # ===========================================================================
@@ -868,11 +820,6 @@ _MOCK_MARKET_STOCKS = dict(_FALLBACK_MARKET_STOCKS)
 _MOCK_MARKET_STOCKS.update(_mock_markets_from_cfg)
 
 
-# ══════════════════════════════════════════════════════════════════════
-#  MockProvider
-# ══════════════════════════════════════════════════════════════════════
-
-
 class MockProvider(DataSourceProvider):
     """模拟数据源提供者 — 必须 explicit_only。
 
@@ -890,9 +837,7 @@ class MockProvider(DataSourceProvider):
         self._state = "not_consented"
         self._explicit_consent = False
 
-    # ------------------------------------------------------------------
     # 基础状态
-    # ------------------------------------------------------------------
 
     def is_ready(self) -> bool:
         # 关键契约：未授权时永远不 ready（防止 mock 被自动使用）
@@ -939,9 +884,7 @@ class MockProvider(DataSourceProvider):
         """
         return {"ready": True, "provider": "mock", "explicit_only": True}
 
-    # ------------------------------------------------------------------
     # 行情数据
-    # ------------------------------------------------------------------
 
     def resolve_market(self, markets) -> Dict[str, List[str]]:
         if markets is None:
@@ -1072,9 +1015,7 @@ class MockProvider(DataSourceProvider):
             }
         return result
 
-    # ------------------------------------------------------------------
     # 板块 / 股票列表
-    # ------------------------------------------------------------------
 
     def get_block_members(self, block_code) -> List[str]:
         # 返回与该板块相关的 mock 股票
@@ -1106,9 +1047,7 @@ class MockProvider(DataSourceProvider):
     def get_sector_stocks(self, sector_code, block_type=0) -> List[str]:
         return self.get_block_members(sector_code)
 
-    # ------------------------------------------------------------------
     # 公式评估
-    # ------------------------------------------------------------------
 
     def eval_indicator(self, codes, formula_text, period, sorttype=0) -> Dict:
         if isinstance(codes, str):
@@ -1152,9 +1091,7 @@ class MockProvider(DataSourceProvider):
             result_detail[code] = {'MA1': values, 'MA2': [v * 0.9 for v in values]}
         return {"success": True, "result": result, "result_detail": result_detail}
 
-    # ------------------------------------------------------------------
     # 财务 / 回放 / 重采样
-    # ------------------------------------------------------------------
 
     def get_financial_data(self, codes, fields) -> Dict:
         if isinstance(codes, str):
@@ -1209,9 +1146,7 @@ class MockProvider(DataSourceProvider):
         except Exception:
             return []
 
-    # ------------------------------------------------------------------
     # 内部辅助
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _parse_attrtext(attrtext: str) -> List[str]:
@@ -1247,9 +1182,7 @@ class DfcfProvider(DataSourceProvider):
         except Exception as e:
             logger.warning("DfcfProvider 初始化失败: %s", e)
 
-    # ------------------------------------------------------------------
     # 基础状态
-    # ------------------------------------------------------------------
 
     def is_ready(self) -> bool:
         return self._ready
@@ -1267,9 +1200,7 @@ class DfcfProvider(DataSourceProvider):
             }
         return {"ready": True, "provider": "dfcf"}
 
-    # ------------------------------------------------------------------
     # 行情数据
-    # ------------------------------------------------------------------
 
     def resolve_market(self, markets) -> Dict[str, List[str]]:
         if not self._ready or not markets:
@@ -1412,9 +1343,7 @@ class DfcfProvider(DataSourceProvider):
                 logger.warning("获取 %s 快照失败: %s", code, e)
         return result
 
-    # ------------------------------------------------------------------
     # 板块 / 股票列表
-    # ------------------------------------------------------------------
 
     def get_block_members(self, block_code) -> List[str]:
         # 东方财富板块 API（简化实现）
@@ -1429,9 +1358,7 @@ class DfcfProvider(DataSourceProvider):
     def get_sector_stocks(self, sector_code, block_type=0) -> List[str]:
         return []
 
-    # ------------------------------------------------------------------
     # 公式评估
-    # ------------------------------------------------------------------
 
     def eval_indicator(self, codes, formula_text, period, sorttype=0) -> Dict:
         return {'result': {}, 'inditype': 0}
@@ -1447,9 +1374,7 @@ class DfcfProvider(DataSourceProvider):
                         xsflag=6, start_time='', end_time='') -> Dict:
         return {"success": False, "result": {}}
 
-    # ------------------------------------------------------------------
     # 财务 / 回放 / 重采样
-    # ------------------------------------------------------------------
 
     def get_financial_data(self, codes, fields) -> Dict:
         return {}
@@ -1536,9 +1461,7 @@ class IHQDataImpl:
         """
         self._kline_data = kline_data or {}
 
-    # ------------------------------------------------------------------
     # 代码标准化
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _normalize_to_hqchart(symbol: str) -> str:
@@ -1563,9 +1486,7 @@ class IHQDataImpl:
             return symbol[2:] + '.' + symbol[:2].upper()
         return symbol
 
-    # ------------------------------------------------------------------
     # K 线数据
-    # ------------------------------------------------------------------
 
     def GetKLineData(self, symbol, period, right, jobID):
         """返回 K 线数据，格式为 HQChart 引擎需要的数组字典。
@@ -1626,9 +1547,7 @@ class IHQDataImpl:
     def GetKLineData2(self, symbol, period, right, callInfo, kdataInfo, jobID):
         pass
 
-    # ------------------------------------------------------------------
     # 财务 / 动态数据 (暂不支持)
-    # ------------------------------------------------------------------
 
     def GetFinance(self, symbol, id, period, right, kcount, jobID):
         return False
@@ -1645,9 +1564,7 @@ class IHQDataImpl:
     def GetHisCapital(self, symbol, period, right, kcount, jobID):
         return False
 
-    # ------------------------------------------------------------------
     # 数据分发方法
-    # ------------------------------------------------------------------
 
     def GetDataByNumber(self, symbol, funcName, id, period, right, kcount, jobID):
         if funcName == 'FINANCE':
@@ -1674,9 +1591,7 @@ class IHQDataImpl:
     def GetGPJYValue(self, symbol, args, period, right, kcount, jobID):
         return False
 
-    # ------------------------------------------------------------------
     # 系统指标脚本
-    # ------------------------------------------------------------------
 
     def GetIndexScript(self, name, callInfo, jobID):
         """返回内置系统指标的脚本定义 (JSON 字符串)。"""
@@ -1867,9 +1782,7 @@ class HQChartProvider(DataSourceProvider):
         except Exception as e:
             logger.warning("HQChartProvider 初始化失败: %s", e)
 
-    # ------------------------------------------------------------------
     # 基础状态
-    # ------------------------------------------------------------------
 
     def is_ready(self) -> bool:
         return self._ready
@@ -1903,9 +1816,7 @@ class HQChartProvider(DataSourceProvider):
             }
         return {"ready": True, "provider": "hqchart"}
 
-    # ------------------------------------------------------------------
     # 公式解析工具
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _parse_formula_outvars(formula_text: str) -> List[str]:
@@ -1935,9 +1846,7 @@ class HQChartProvider(DataSourceProvider):
         _PARSE_OUTVARS_CACHE[formula_text] = result
         return result
 
-    # ------------------------------------------------------------------
     # 配置构建
-    # ------------------------------------------------------------------
 
     def _build_config(self, code: str, formula_text: str, period: int,
                       max_count: int = 500) -> Dict[str, Any]:
@@ -1957,9 +1866,7 @@ class HQChartProvider(DataSourceProvider):
             'JobID': 'meta_core_001',
         }
 
-    # ------------------------------------------------------------------
     # 结果解析
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _extract_result_value(result_data) -> float:
@@ -2009,9 +1916,7 @@ class HQChartProvider(DataSourceProvider):
                     result[name] = 0
         return result
 
-    # ------------------------------------------------------------------
     # 指标评估
-    # ------------------------------------------------------------------
 
     def eval_indicator(self, codes, formula_text, period, sorttype=0,
                        kline_data=None) -> Dict:
@@ -2204,9 +2109,7 @@ class HQChartProvider(DataSourceProvider):
             kline_data,
         )
 
-    # ------------------------------------------------------------------
     # 选股公式评估
-    # ------------------------------------------------------------------
 
     def eval_formula_xg(self, formula_name, formula_arg='', stock_list=None,
                         period='1d', count=0, dividend_type=1,
@@ -2260,9 +2163,7 @@ class HQChartProvider(DataSourceProvider):
             logger.debug("eval_formula_xg error: %s", e)
             return {"success": False, "result": {}, "selected_codes": []}
 
-    # ------------------------------------------------------------------
     # 指标公式评估
-    # ------------------------------------------------------------------
 
     def eval_formula_zb(self, formula_name, formula_arg='', stock_list=None,
                         period='1d', count=5, dividend_type=1,
@@ -2382,9 +2283,7 @@ class AkShareProvider(DataSourceProvider):
         except Exception as e:
             logger.warning("AkShareProvider 初始化失败: %s", e)
 
-    # ------------------------------------------------------------------
     # 基础状态
-    # ------------------------------------------------------------------
 
     def is_ready(self) -> bool:
         return self._ready
@@ -2402,9 +2301,7 @@ class AkShareProvider(DataSourceProvider):
             }
         return {"ready": True, "provider": "akshare"}
 
-    # ------------------------------------------------------------------
     # 内部辅助
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _code_to_ak_symbol(code: str) -> str:
@@ -2462,9 +2359,7 @@ class AkShareProvider(DataSourceProvider):
             logger.warning("获取全 A 股实时行情失败: %s", e)
             return None
 
-    # ------------------------------------------------------------------
     # 行情数据
-    # ------------------------------------------------------------------
 
     def resolve_market(self, markets) -> Dict[str, List[str]]:
         """解析市场列表，返回 {市场名: [股票代码]} 映射。
@@ -2644,9 +2539,7 @@ class AkShareProvider(DataSourceProvider):
 
         return result
 
-    # ------------------------------------------------------------------
     # 板块 / 股票列表
-    # ------------------------------------------------------------------
 
     def get_block_members(self, block_code) -> List[str]:
         """获取板块成员（通过 AKShare 板块接口）。"""
@@ -2713,9 +2606,7 @@ class AkShareProvider(DataSourceProvider):
         """获取板块成分股。"""
         return self.get_block_members(sector_code)
 
-    # ------------------------------------------------------------------
     # 公式评估（AkShare 不支持公式评估，返回默认空结果）
-    # ------------------------------------------------------------------
 
     def eval_indicator(self, codes, formula_text, period, sorttype=0) -> Dict:
         return {'result': {}, 'inditype': 0}
@@ -2731,9 +2622,7 @@ class AkShareProvider(DataSourceProvider):
                         xsflag=6, start_time='', end_time='') -> Dict:
         return {"success": False, "result": {}}
 
-    # ------------------------------------------------------------------
     # 财务 / 回放 / 重采样
-    # ------------------------------------------------------------------
 
     def get_financial_data(self, codes, fields) -> Dict:
         """获取财务数据（通过 AKShare 财务接口）。"""
@@ -2891,9 +2780,7 @@ class LocalFileProvider(DataSourceProvider):
         # 探测各客户端安装根目录
         self._homes: Dict[str, str] = self._detect_homes()
 
-    # ------------------------------------------------------------------
     # 配置加载
-    # ------------------------------------------------------------------
 
     def _load_paths_config(self) -> Dict[str, Any]:
         """加载 local_file_paths.json 路径规则配置表。"""
@@ -2904,9 +2791,7 @@ class LocalFileProvider(DataSourceProvider):
             logger.warning("加载本地路径配置 %s 失败: %s", CONFIG_PATH, e)
             return {}
 
-    # ------------------------------------------------------------------
     # 路径探测
-    # ------------------------------------------------------------------
 
     def _detect_homes(self) -> Dict[str, str]:
         """探测各客户端安装根目录。
@@ -2988,9 +2873,7 @@ class LocalFileProvider(DataSourceProvider):
                 continue
         return None
 
-    # ------------------------------------------------------------------
     # 基础状态
-    # ------------------------------------------------------------------
 
     def is_ready(self) -> bool:
         """检测本地配置文件是否存在（通达信/大智慧/同花顺任一可用即就绪）。"""
@@ -3018,9 +2901,7 @@ class LocalFileProvider(DataSourceProvider):
         """返回当前提供者的模式描述字符串。"""
         return "local_file"
 
-    # ------------------------------------------------------------------
     # 文件读取与缓存
-    # ------------------------------------------------------------------
 
     def get_file_mtime(self, path) -> Optional[float]:
         """获取文件修改时间，用于缓存失效判断。文件不存在返回 None。"""
@@ -3120,9 +3001,7 @@ class LocalFileProvider(DataSourceProvider):
         logger.debug("已解析二进制文件: %s", path)
         return result
 
-    # ------------------------------------------------------------------
     # 路径解析辅助
-    # ------------------------------------------------------------------
 
     def _get_file_path(self, client: str, file_key: str) -> Optional[str]:
         """根据配置获取客户端某文件的完整路径。"""
@@ -3157,9 +3036,7 @@ class LocalFileProvider(DataSourceProvider):
                               .replace('{block_name}', block_filename)
         return str(Path(home) / rel_path)
 
-    # ------------------------------------------------------------------
     # 市场映射辅助
-    # ------------------------------------------------------------------
 
     def _market_to_setcode(self, market_field: str, code: str = '') -> Tuple[int, str]:
         """解析市场字段，返回 (setcode, market)。
@@ -3188,9 +3065,7 @@ class LocalFileProvider(DataSourceProvider):
         market = market_map.get(setcode, 'SZ')
         return f"{code}.{market}"
 
-    # ------------------------------------------------------------------
     # 文件解析器
-    # ------------------------------------------------------------------
 
     def _parse_tdx_zxg(self, text: str) -> List[Dict]:
         """解析通达信自选股文件。每行：市场标识+代码（如 1600141 = 600141.SH）。"""
@@ -3441,9 +3316,7 @@ class LocalFileProvider(DataSourceProvider):
         _flush_block()
         return blocks
 
-    # ------------------------------------------------------------------
     # 同花顺 BlockUpdate INI 解析（板块名称 + 成分股）
-    # ------------------------------------------------------------------
 
     # THS BlockUpdate market 代码到市场标识的映射
     # A股：17=SH, 33=SZ, -105=BJ
@@ -4098,9 +3971,7 @@ class LocalFileProvider(DataSourceProvider):
             self._parse_tdx_system_blocks)
         return result or []
 
-    # ------------------------------------------------------------------
     # 通达信 tdxhy.cfg + tdxzs.cfg 解析（行业板块成分股）
-    # ------------------------------------------------------------------
 
     # tdxhy.cfg 行正则：market|code|tdx_industry|||sw_industry
     _TDX_HY_RE = re.compile(r'^([012])\|(\d{6})\|([^|]+)\|\|\|([^|]+)$')
@@ -4189,12 +4060,10 @@ class LocalFileProvider(DataSourceProvider):
             self._parse_tdx_sector_indices)
         return result or []
 
-    # ------------------------------------------------------------------
     # 通达信 infoharbor_block.dat 实时板块成分股解析
     # 格式：头行 #XX_板块名,数量,指数代码,创建日期,更新日期,,
     #       数据行 市场位#6位代码（0=深,1=沪,2=京），逗号分隔
     # 前缀：#GN_=概念, #FG_=风格, #ZS_=指数
-    # ------------------------------------------------------------------
 
     # infoharbor 头行正则：#XX_名称,数量,指数代码,创建日期,更新日期,,
     _TDX_INFOHARBOR_HEAD_RE = re.compile(
@@ -4265,9 +4134,7 @@ class LocalFileProvider(DataSourceProvider):
             self._parse_tdx_infoharbor_block)
         return result or {}
 
-    # ------------------------------------------------------------------
     # 通达信 base.dbf 地区板块成分股解析（DBF 格式）
-    # ------------------------------------------------------------------
 
     def _parse_tdx_base_dbf_region(self, raw: bytes) -> Dict[str, List[str]]:
         """解析 base.dbf 的 DY 字段，返回地区代码→成分股列表映射。
@@ -4362,9 +4229,7 @@ class LocalFileProvider(DataSourceProvider):
             return {}
         return self._parse_tdx_base_dbf_region(raw)
 
-    # ------------------------------------------------------------------
     # 股票名称映射（infoharbor_ex.code）
-    # ------------------------------------------------------------------
 
     def _parse_tdx_stock_names(self, text: str) -> Dict[str, str]:
         """解析 infoharbor_ex.code 文件，返回 {full_code: name} 映射。
@@ -4616,9 +4481,7 @@ class LocalFileProvider(DataSourceProvider):
                 block_names.extend(names)
         return block_names
 
-    # ------------------------------------------------------------------
     # 大智慧 classtree XML 解析（分类树结构）
-    # ------------------------------------------------------------------
 
     # classtree XML 文件名前缀到分类的映射
     _DZH_CLASSTREE_PREFIX_MAP = {
@@ -4731,9 +4594,7 @@ class LocalFileProvider(DataSourceProvider):
                 result.setdefault(category, []).append(entry.name)
         return result
 
-    # ------------------------------------------------------------------
     # 大智慧 full.ABK 解析（板块成分股）
-    # ------------------------------------------------------------------
 
     # full.ABK 条目正则：<板块名><7位数字板块ID>= <空格分隔的代码>
     _DZH_ABK_ENTRY_RE = re.compile(r'^(.+?)(\d{7})?$')
@@ -4885,9 +4746,7 @@ class LocalFileProvider(DataSourceProvider):
                 })
         return sectors
 
-    # ------------------------------------------------------------------
     # 自选股 / 自定义板块接口
-    # ------------------------------------------------------------------
 
     def get_user_sector(self) -> Dict[str, List[Dict]]:
         """解析自选股文件，返回 {'favorites': [...], 'custom_blocks': [...]}。
@@ -5216,9 +5075,7 @@ class LocalFileProvider(DataSourceProvider):
 
         return {'favorites': favorites, 'custom_blocks': custom_blocks}
 
-    # ------------------------------------------------------------------
     # 板块成分股接口
-    # ------------------------------------------------------------------
 
     def get_block_members(self, block_code) -> List[str]:
         """解析板块成分股，返回股票代码列表（如 ['600000.SH', '000001.SZ']）。
@@ -5322,9 +5179,7 @@ class LocalFileProvider(DataSourceProvider):
                                 return members
         return []
 
-    # ------------------------------------------------------------------
     # 板块列表接口
-    # ------------------------------------------------------------------
 
     def get_sector_list(self, list_type=1) -> List[Dict]:
         """返回板块列表。
@@ -5417,10 +5272,8 @@ class LocalFileProvider(DataSourceProvider):
 
         return result
 
-    # ------------------------------------------------------------------
     # 板块指数 / 自定义板块 / 自选股 独立查询接口
     # 三类数据各自独立方法 + 独立 API 端点，不混入 get_system_sectors
-    # ------------------------------------------------------------------
 
     def get_sector_index_list(self, source: Optional[str] = None) -> Dict[str, List[Dict]]:
         """返回各软件的板块指数列表（按数据源分组）。
@@ -5749,9 +5602,7 @@ class LocalFileProvider(DataSourceProvider):
                 flat.setdefault(cat, []).extend(sectors)
         return flat
 
-    # ------------------------------------------------------------------
     # 板块 ↔ 板块指数代码 ↔ 个股 双向映射求解
-    # ------------------------------------------------------------------
 
     def get_members_by_sector_index_code(self, index_code: str,
                                          source: Optional[str] = None) -> Optional[Dict]:
@@ -6250,9 +6101,7 @@ class LocalFileProvider(DataSourceProvider):
                     logger.warning("扫描 THS custom_block 目录失败 %s: %s", block_dir, e)
         return result
 
-    # ------------------------------------------------------------------
     # 按类型获取股票列表
-    # ------------------------------------------------------------------
 
     def get_stock_list_by_type(self, list_type, customblockname='', **kwargs) -> List[Dict]:
         """按类型获取股票列表。
@@ -6293,19 +6142,14 @@ class LocalFileProvider(DataSourceProvider):
 # ===========================================================================
 # TQ 数据源提供者集合（合并自 tq.py）
 # 包含 TqConnector / TqDllProvider / TqSdkBridge / TqSdkProvider / TqProvider
-# 注意：MARKET_ID_MAP / SHORT_NAME_TO_MARKET_ID / DZH_TO_SHORT / SHORT_TO_DZH
-#       _PERIOD_INT_TO_STR / _PERIOD_STR_TO_INT / DZH_COL_MAP / _resolve_market_id
-#       已在上方共享常量区定义，此处不再重复。
 # ===========================================================================
 
 
 # TQ DLL 路径（调整后：原 parents[3] -> parents[2]，因合并后少一层目录）
 DLL_PATH = Path(__file__).resolve().parents[2] / 'TPythClient.dll'
 
-# ---------------------------------------------------------------------------
 # list_type 参数完整映射（参考 tdxdata_test.py 第209-217行）
 # 对应 tq.get_stock_list() 的 list_type 参数，共53种
-# ---------------------------------------------------------------------------
 
 LIST_TYPE_MAP: Dict[int, Dict[str, Any]] = {
     0:  {'name': '自选股',           'desc': '用户自选股列表'},
@@ -6383,7 +6227,6 @@ _SECTOR_NAME_KEYWORD_CATEGORY: Dict[str, str] = {
     '地区': 'region',
     '风格': 'style',
 }
-
 
 
 def _process_formula_arg(formula_arg):
@@ -6703,9 +6546,7 @@ class TqDllProvider(DataSourceProvider):
         self._kline_cache = KLineDataCache()
         self._method_cache: Dict[str, Any] = {}
 
-    # ------------------------------------------------------------------
     # 基础状态
-    # ------------------------------------------------------------------
 
     def is_ready(self) -> bool:
         return self._connector.is_ready()
@@ -6731,9 +6572,7 @@ class TqDllProvider(DataSourceProvider):
             }
         return {"ready": True, "provider": "tq_dll"}
 
-    # ------------------------------------------------------------------
     # 行情数据
-    # ------------------------------------------------------------------
 
     def resolve_market(self, markets) -> Dict[str, List[str]]:
         if markets is None:
@@ -6779,9 +6618,7 @@ class TqDllProvider(DataSourceProvider):
                 result[code] = data
         return result
 
-    # ------------------------------------------------------------------
     # 板块 / 股票列表
-    # ------------------------------------------------------------------
 
     def get_block_members(self, block_code) -> List[str]:
         return self._connector.get_block_members(block_code)
@@ -6826,9 +6663,7 @@ class TqDllProvider(DataSourceProvider):
         self._method_cache[cache_key] = result
         return result
 
-    # ------------------------------------------------------------------
     # 板块扩展接口（异步，支持全部53种list_type）
-    # ------------------------------------------------------------------
 
     async def get_stock_list(self, list_type: int = 0, **kwargs) -> List[Dict]:
         """获取股票列表（支持全部53种list_type参数）。
@@ -7173,9 +7008,7 @@ class TqDllProvider(DataSourceProvider):
             logger.error("send_user_block(block_code='%s'): 发送异常: %s", block_code, e)
             return False
 
-    # ------------------------------------------------------------------
     # 公式评估
-    # ------------------------------------------------------------------
 
     def eval_indicator(self, codes, formula_text, period, sorttype=0) -> Dict:
         if isinstance(formula_text, bytes):
@@ -7265,9 +7098,7 @@ class TqDllProvider(DataSourceProvider):
             "result_detail": result_detail,
         }
 
-    # ------------------------------------------------------------------
     # 板块操作
-    # ------------------------------------------------------------------
 
     def send_user_block(self, block_code, stocks, show=True) -> Dict:
         self._connector.user_block_control(block_code, stocks, "add")
@@ -7281,9 +7112,7 @@ class TqDllProvider(DataSourceProvider):
         self._connector.user_block_control(block_code, [], "clear")
         return {"success": True, "block_code": block_code}
 
-    # ------------------------------------------------------------------
     # 财务 / 回放 / 重采样
-    # ------------------------------------------------------------------
 
     def get_financial_data(self, codes, fields) -> Dict:
         raw = self._connector.get_stock_info(codes)
@@ -7349,9 +7178,7 @@ class TqDllProvider(DataSourceProvider):
         except Exception:
             return []
 
-    # ------------------------------------------------------------------
     # 内部辅助方法
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _infer_sector_category(sector_code: str, sector_name: str) -> str:
@@ -7902,9 +7729,7 @@ class TqSdkProvider(DataSourceProvider):
         self._bridge = TqSdkBridge()
         self._kline_cache = KLineDataCache()
 
-    # ------------------------------------------------------------------
     # 基础状态
-    # ------------------------------------------------------------------
 
     def is_ready(self) -> bool:
         return self._bridge.is_ready()
@@ -7930,9 +7755,7 @@ class TqSdkProvider(DataSourceProvider):
             }
         return {"ready": True, "provider": "tq_sdk"}
 
-    # ------------------------------------------------------------------
     # 行情数据
-    # ------------------------------------------------------------------
 
     def resolve_market(self, markets) -> Dict[str, List[str]]:
         """解析市场列表，返回 {市场名: [股票代码]} 映射。"""
@@ -8134,9 +7957,7 @@ class TqSdkProvider(DataSourceProvider):
                 result[code] = data
         return result
 
-    # ------------------------------------------------------------------
     # 板块 / 股票列表
-    # ------------------------------------------------------------------
 
     def get_block_members(self, block_code) -> List[str]:
         return self._bridge.get_block_members(block_code)
@@ -8223,9 +8044,7 @@ class TqSdkProvider(DataSourceProvider):
     def get_sector_stocks(self, sector_code, block_type=0) -> List[str]:
         return self._bridge.get_stock_list_in_sector(sector_code, block_type=block_type)
 
-    # ------------------------------------------------------------------
     # 公式评估
-    # ------------------------------------------------------------------
 
     def eval_indicator(self, codes, formula_text, period, sorttype=0) -> Dict:
         """评估指标公式。"""
@@ -8319,9 +8138,7 @@ class TqSdkProvider(DataSourceProvider):
             "result_detail": result_detail,
         }
 
-    # ------------------------------------------------------------------
     # 板块操作
-    # ------------------------------------------------------------------
 
     def send_user_block(self, block_code, stocks, show=True) -> Dict:
         result = self._bridge.send_user_block(block_code, stocks, show=show)
@@ -8335,9 +8152,7 @@ class TqSdkProvider(DataSourceProvider):
         result = self._bridge.clear_sector(block_code)
         return result if result else {}
 
-    # ------------------------------------------------------------------
     # 财务 / 回放 / 重采样
-    # ------------------------------------------------------------------
 
     def get_financial_data(self, codes, fields) -> Dict:
         """获取财务数据，委托给 TqSdkBridge.get_stock_info。"""
@@ -8457,9 +8272,7 @@ class TqProvider(DataSourceProvider):
         self._bridge = None
         logger.warning("TqProvider: DLL 不可用")
 
-    # ------------------------------------------------------------------
     # 基础状态
-    # ------------------------------------------------------------------
 
     def is_ready(self) -> bool:
         return self._bridge.is_ready() if self._bridge else False
@@ -8467,9 +8280,7 @@ class TqProvider(DataSourceProvider):
     def get_mode_info(self) -> str:
         return "tq"
 
-    # ------------------------------------------------------------------
     # 行情数据
-    # ------------------------------------------------------------------
 
     def resolve_market(self, markets) -> Dict[str, List[str]]:
         if self._bridge is None:
@@ -8492,9 +8303,7 @@ class TqProvider(DataSourceProvider):
             return {}
         return self._bridge.get_market_snapshot(codes)
 
-    # ------------------------------------------------------------------
     # 板块 / 股票列表
-    # ------------------------------------------------------------------
 
     def get_block_members(self, block_code, **kwargs) -> List[str]:
         if self._bridge is None:
@@ -8531,9 +8340,7 @@ class TqProvider(DataSourceProvider):
             return []
         return self._bridge.get_stock_list_in_sector(sector_code, **kwargs)
 
-    # ------------------------------------------------------------------
     # 公式评估
-    # ------------------------------------------------------------------
 
     def eval_indicator(self, formula_text, stock_list=None, **kwargs) -> Dict:
         if self._bridge is None:
@@ -8562,9 +8369,7 @@ class TqProvider(DataSourceProvider):
                                              count=count, dividend_type=dividend_type,
                                              start_time=start_time, end_time=end_time)
 
-    # ------------------------------------------------------------------
     # 板块操作
-    # ------------------------------------------------------------------
 
     def send_user_block(self, block_code, stocks, show=True) -> Dict:
         if self._bridge is None:
@@ -8581,9 +8386,7 @@ class TqProvider(DataSourceProvider):
             return {"success": False}
         return self._bridge.clear_sector(block_code)
 
-    # ------------------------------------------------------------------
     # 财务 / 回放 / 重采样
-    # ------------------------------------------------------------------
 
     def get_financial_data(self, codes, fields) -> Dict:
         if self._bridge is None:
@@ -8599,11 +8402,6 @@ class TqProvider(DataSourceProvider):
         if self._bridge is None:
             return []
         return self._bridge.resample_kline(kline_data, target_period)
-
-
-# ===========================================================================
-# 模块级 _get_full_mock_provider（兼容历史调用方，原 __init__.py 模块级函数）
-# ===========================================================================
 
 
 def _get_full_mock_provider(bus: Optional[EventBus] = None) -> DataSourceProvider:
@@ -8634,14 +8432,12 @@ __all__ = [
 
     # 公共工具函数
     'decode_formula',
-    'decode_sorttype',
     'map_period',
     'normalize_code',
     'to_dzh_code',
 
     # 公共常量与缓存
     'PERIOD_MAP',
-    'SORTTYPE_MAP',
     'KLineDataCache',
 
     # Provider 实现类

@@ -1,18 +1,4 @@
-"""事件总线：收敛 `_event_queue` / `_signal_queue` 为统一队列（I55/I61 落地）。
-
-按 ``execute-architecture-migration`` 规格 Task 7 实现。
-事件类型收敛为 ``DataChanged`` / ``Executed`` / ``DomainEvent`` / ``Signal`` 四类，
-由 ``EventBus`` 统一订阅、发布与查询。
-
-`_alert_queue` 经 I62 评估为单路径无分裂（builtins → queue → app，无 EventBus
-双路径、无订阅者缺失），不纳入收敛——强行统一为纯间接层，无实际收益。
-
-扩展：按 ``unify-stockpool-oop-event-driven`` spec 事件契约表扩展事件类型，
-原 4 种事件类（``DataChanged`` / ``Executed`` / ``DomainEvent`` / ``Signal``）
-字段保持不变；新增覆盖配置/池/行情/公式/过滤/边/转移/订单/持仓/统计/排名/
-告警/快照/日志/模式/时间/回放/模拟/导入导出等全链路领域事件。``EventBus``
-接口向后兼容：``subscribe`` / ``get_events`` 同时支持事件类与类型名字符串。
-"""
+"""事件总线：统一队列，EventBus 统一订阅、发布与查询。"""
 from __future__ import annotations
 
 import functools
@@ -422,8 +408,34 @@ EVENT_EXPORT_COMPLETED = "ExportCompleted"
 _Event = Any
 
 
-class EventBus:
-    """事件总线。"""
+class MetaDispatcher:
+    """元分派器抽象基类——register-store-dispatch 元模式投影（第五层洞察）。
+
+    EventBus 与 ConfigStore 共享此骨架：
+    - register(key, value) → store[key] = value
+    - dispatch(key, *args, **kwargs) → retrieve / 扇出
+
+    三态特化：
+    - EventBus（扇出子类）：dispatch 遍历多订阅者调用 + 副作用
+    - ConfigStore（查找子类）：dispatch 直接返回 value，无副作用
+    - EventDriver（时序特化，独立）：heapq 优先队列 + fire_time 排序 + 续程，不继承本类
+    """
+
+    def register(self, key, value):
+        """注册 key→value 到存储（子类覆盖以定制存储语义，如 append/merge）。"""
+        self._store[key] = value
+
+    def dispatch(self, key, *args, **kwargs):
+        """按 key 派发（子类覆盖 _dispatch_impl 以定制扇出/查找语义）。"""
+        return self._dispatch_impl(key, *args, **kwargs)
+
+    def _dispatch_impl(self, key, *args, **kwargs):
+        """派发实现钩子（子类必须覆盖）。"""
+        raise NotImplementedError
+
+
+class EventBus(MetaDispatcher):
+    """事件总线——MetaDispatcher 扇出子类（dispatch 遍历多订阅者 + 副作用）。"""
 
     def __init__(self, max_events: int = 5000) -> None:
         self._subscribers: Dict[str, List[Callable[[_Event], None]]] = {}
@@ -465,7 +477,10 @@ class EventBus:
         return getattr(event_type, "__name__", str(event_type))
 
     def subscribe(self, event_type: Any, handler: Callable[[_Event], None]) -> None:
-        """订阅指定事件类型（支持事件类或类型名字符串）。"""
+        """订阅指定事件类型（支持事件类或类型名字符串）。
+
+        register 语义：多订阅者 append（覆盖 MetaDispatcher.register 的默认赋值）。
+        """
         name = self._event_type_name(event_type)
         self._subscribers.setdefault(name, []).append(handler)
 
@@ -479,17 +494,9 @@ class EventBus:
                 pass
         return unsubscribe
 
-    def publish(self, event: _Event) -> None:
-        """同步发布事件：写入日志并通知订阅者。"""
-        self._events.append(event)
-        self._total_published += 1
-        # I96：上限保护，超出时删除最旧事件
-        if len(self._events) > self._max_events:
-            drop_n = len(self._events) - self._max_events
-            del self._events[:drop_n]
-            self._dropped_count += drop_n
-        event_type = type(event).__name__
-        handlers = list(self._subscribers.get(event_type, []))
+    def _dispatch_impl(self, key, event):
+        """MetaDispatcher 派发实现：遍历 _subscribers + _any_subscribers 调用 handler（扇出+副作用）。"""
+        handlers = list(self._subscribers.get(key, []))
         any_handlers = list(self._any_subscribers)
         all_handlers = handlers + any_handlers
         for handler in all_handlers:
@@ -498,8 +505,20 @@ class EventBus:
             except Exception as ex:
                 logger.warning(
                     "EventBus 订阅者异常 (event_type=%s handler=%s): %s",
-                    event_type, getattr(handler, "__name__", repr(handler)), ex,
+                    key, getattr(handler, "__name__", repr(handler)), ex,
                 )
+
+    def publish(self, event: _Event) -> None:
+        """同步发布事件：写入日志并通知订阅者（委托 _dispatch_impl 扇出）。"""
+        self._events.append(event)
+        self._total_published += 1
+        # I96：上限保护，超出时删除最旧事件
+        if len(self._events) > self._max_events:
+            drop_n = len(self._events) - self._max_events
+            del self._events[:drop_n]
+            self._dropped_count += drop_n
+        event_type = type(event).__name__
+        self._dispatch_impl(event_type, event)
 
     def get_events(self, event_type: Any = None) -> List[_Event]:
         """读取已发布事件；``event_type`` 可为事件类/类型名字符串，None 返回全部。"""
@@ -600,6 +619,7 @@ __all__ = [
     "ExportCompleted",
     "FormulaEvaluated",
     "ImportStarted",
+    "MetaDispatcher",
     "ModeChanged",
     "OrderFilled",
     "OrderPlaced",

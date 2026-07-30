@@ -1,25 +1,4 @@
-"""RuntimeMode 模块：实盘/回放/仿真三模式事件驱动入口（SubTask 27.7 合并）。
-
-SubTask 27.7：将原 ``core/replay.py``（KLineReplayEngine + K 线合成器）与
-``core/simulator.py``（RuntimeSimulator）合并至本文件，使
-``core/runtime_mode_module.py`` 成为 RuntimeMode 模块的唯一入口。
-
-对外导出：
-  - ``RuntimeModeModule``：模式切换 / 事件发布统一入口
-  - ``KLineReplayEngine``：K 线回放引擎（向后兼容，原 ``core/replay.py``）
-  - ``RuntimeSimulator``：仿真器（向后兼容，原 ``core/simulator.py``）
-
-仅与 EventBus 交互：
-  - 模式切换时发布 ``ModeChanged`` 事件
-  - 实盘模式订阅 ``TickReceived`` 发布 ``TimeAdvanced`` 事件（wall_clock）
-  - 回放模式发布 ``ReplayStarted`` / ``ReplayStep`` 事件
-  - 仿真模式发布 ``SimulationStep`` 事件
-
-支持手动步进 / 自动步进 / 速度调节（0.5x~20x）。
-
-import 白名单：``core.event_bus`` / ``core.domain`` / ``core.engine`` /
-``core.schemas`` / 标准库 / 第三方库。
-"""
+"""RuntimeMode 模块：实盘/回放/仿真三模式事件驱动入口。"""
 from __future__ import annotations
 
 # === 合并自 core/runtime.py ===
@@ -43,6 +22,7 @@ import pandas as pd
 from core.domain import DZH_COL_MAP, MockDataSource, _hash_tick, _normalize_to_fz, _stock_code, time_at, _safe_timestamp, EdgeState, _build_adjacency, TimedEventSpec
 from core.domain import get_global_config_store
 from core._hashing import BarHashMixin, hash_dict_content, hash_tick_aggregate
+from converters_common import safe_float, safe_int
 
 if TYPE_CHECKING:
     from core.engine import PoolEngine
@@ -83,9 +63,7 @@ _CONFIG_FILES = {
     "trade_interfaces": "trade_interfaces",
 }
 
-# =====================================================================
 # 回放引擎常量（原 core/replay.py）
-# =====================================================================
 DEFAULT_CODES = ["SH600000", "SZ000001", "SH600519", "SZ000858"]
 
 SPEED_MAP: Dict = {1: 1.0, 2: 2.0, 5: 5.0, 10: 10.0, 100: 100.0, "MAX": 1000000.0}
@@ -142,9 +120,7 @@ def _parse_bar_dt(s: str) -> Optional[datetime]:
     return None
 
 
-# =====================================================================
 # 仿真器辅助函数与数据类（原 core/simulator.py）
-# =====================================================================
 def _scode(s):
     if isinstance(s, dict):
         return s.get("code", s.get("label", ""))
@@ -247,7 +223,6 @@ class StatePool:
         )
 
 
-# =====================================================================
 # K 线回放引擎（原 core/replay.py: KLineReplayEngine）
 def _run_coro_sync(coro, loop_holder, loop_attr="_sim_loop"):
     """复用持久事件循环同步执行协程：复用 loop → run_until_complete → 运行中降级线程。"""
@@ -562,10 +537,7 @@ class KLineReplayEngine:
             if isinstance(params, dict):
                 if "tran" in params and "mode" not in params:
                     tran_val = params["tran"]
-                    try:
-                        tran_int = int(tran_val)
-                    except (ValueError, TypeError):
-                        tran_int = 0
+                    tran_int = safe_int(tran_val, 0)
                     params["mode"] = "move" if tran_int == 1 else "copy"
 
                 if 'starttype' in params and 'begin' not in params:
@@ -953,10 +925,7 @@ class KLineReplayEngine:
         """
         current_price = float(snap.get('current_price', snap.get('latest_price', 0)) or 0)
         enter_price_raw = info.get('p') or info.get('enter_price') or snap.get('enter_price')
-        try:
-            enter_price = float(enter_price_raw) if enter_price_raw not in (None, '', '-') else 0.0
-        except (TypeError, ValueError):
-            enter_price = 0.0
+        enter_price = safe_float(enter_price_raw, 0.0)
         profit_pct = round((current_price - enter_price) / enter_price * 100, 2) if enter_price > 0 else 0
         max_profit = round(profit_pct * 1.2, 2) if enter_price > 0 else float(snap.get('max_profit', 0) or 0)
 
@@ -990,9 +959,7 @@ class KLineReplayEngine:
         return row
 
 
-# =====================================================================
 # K线合成器（原 core/replay.py 末尾，原 services/kline_synthesizer.py）
-# =====================================================================
 
 PERIOD_MAP: Dict[str, int] = {
     "1min": 1,
@@ -1125,9 +1092,7 @@ def synthesize_kline(bars: List[Dict], source_period: str, target_period: str) -
     return bars
 
 
-# =====================================================================
 # 仿真器（原 core/simulator.py: RuntimeSimulator）
-# =====================================================================
 class RuntimeSimulator:
     def __init__(
         self,
@@ -1246,10 +1211,7 @@ class RuntimeSimulator:
                 rise = (price - entry) / entry * 100
             else:
                 rise = 0
-        try:
-            change_pct = float(rise or 0)
-        except (TypeError, ValueError):
-            change_pct = 0.0
+        change_pct = safe_float(rise, 0.0)
         _market = d.get("market", "FZ" if code.startswith("fz") else "SH")
         return MockStock(
             code=code,
@@ -2188,9 +2150,7 @@ class RuntimeSimulator:
         return b
 
 
-# =====================================================================
 # RuntimeMode 模块统一入口
-# =====================================================================
 class RuntimeModeModule(_BaseModule):
     """RuntimeMode 模块：实盘/回放/仿真三模式。仅与 EventBus 交互。"""
 
@@ -2408,7 +2368,6 @@ class RuntimeModeModule(_BaseModule):
         return dict(self._replay_session)
 
 
-# =====================================================================
 # === 合并自 core/runtime.py ===
 
 # SubTask 29.6: _hash_tick 已上移至文件顶部（engine import 之前），此处删除原重复定义。

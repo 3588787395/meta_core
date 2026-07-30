@@ -1,11 +1,4 @@
-"""统一核心引擎：PoolEngine（Task 24 合并 MetaEngine + PoolEngine）。
-
-按 ``unify-stockpool-oop-event-driven`` 规格 Task 24 实现：
-- ``PoolEngine`` 持有编译期 ``CompiledSchedule``、``PoolState``、``EdgeExecutor``，
-  执行事件驱动的 tick 循环。
-- 原 ``MetaEngine`` 的配置加载与运行时辅助方法已合并入此类，消除双重引擎结构。
-- ``CompiledExpression`` 已从 ``_compat.py`` 迁移至本模块顶部（SubTask 27.1）。
-"""
+"""统一核心引擎：PoolEngine。"""
 from __future__ import annotations
 
 import json
@@ -65,7 +58,6 @@ from .domain import (
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
 # Task 11: role-action table-driven dispatch (node_roles.json -> _ROLE_ACTIONS)
 
 _ROLE_ACTIONS: Dict[str, Dict[str, List]] = {}
@@ -155,7 +147,6 @@ class CompiledExpression:
         return True, expr.evaluate(ctx)
 
 
-# ---------------------------------------------------------------------------
 # Protocol 接口：替代 services.* 跨层 import（SubTask 8.5）
 
 

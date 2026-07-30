@@ -1,14 +1,4 @@
-"""前端展示态格式化：把事件、计时器队列、运行时时间等复杂计算收敛到后端。
-
-按 ``specify-frontend-improvement`` Task 1 要求：
-- 事件分类（category）
-- 时间戳归一化 / 仿真时间换算
-- TTL / fire_at 计算
-- 计时器状态、触发类型、剩余时间
-- 运行时当前展示时间
-
-全部由本模块输出为可直接渲染的字段，前端 ``event-panel.js`` 只负责展示。
-"""
+"""前端展示态格式化：把事件、计时器队列、运行时时间等复杂计算收敛到后端。"""
 from __future__ import annotations
 
 import math

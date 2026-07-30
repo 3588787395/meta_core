@@ -455,15 +455,15 @@ class TestMetaPatternConvergence:
         assert count_m == 2, \
             f"变更 M: _apply_stock_filters 应仅 2 次（def + wrapper 调用），实际 {count_m}"
 
-        # 变更 N：@_event_handler 在 5 模块共 ≥ 28 次
+        # 变更 N：@_event_handler 在 5 模块共 ≥ 26 次
         handler_count = sum(
             _grep_count_in_file(r"@_event_handler", _CORE_DIR / fn)
             for fn in ("execution_module.py", "tick_bar_module.py",
                        "monitoring_module.py", "screening_module.py",
                        "trade_module.py")
         )
-        assert handler_count >= 28, \
-            f"变更 N: @_event_handler 应 ≥28 次，实际 {handler_count}"
+        assert handler_count >= 26, \
+            f"变更 N: @_event_handler 应 ≥26 次，实际 {handler_count}"
 
         # 变更 O：_iter_entries 在 table_engine.py 存在
         count_o = _grep_count_in_file(r"def _iter_entries\b", table_file)

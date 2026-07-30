@@ -1,21 +1,4 @@
-"""Monitoring 模块：事件驱动的监控记录 + 浮窗 + 看盘面板 + 告警 + 交易统计。
-
-合并原 ``core/event_panel.py`` + ``core/snapshot_builder.py`` + dashboard/alerts
-为统一 ``MonitoringModule`` 类。仅与 EventBus 交互，订阅所有事件类型，构建
-节点股票快照、事件列表、看盘面板、告警，发布 ``SnapshotUpdated`` /
-``EventLogged`` / ``AlertRaised`` 事件。
-
-向后兼容：原 ``EventPanel`` / ``SnapshotBuilder`` 已合并为本模块内的私有
-``_EventPanel`` / ``_SnapshotBuilder`` 类；公共方法签名不变，仍可被其他模块直接
-导入使用（迁移期）。本模块内部组合这两个组件实例（不暴露给外部），由
-MonitoringModule 统一注册新事件类型订阅；旧组件仍订阅旧事件类型
-（DataChanged/DomainEvent/Executed）以兼容存量 UI 渲染路径。
-
-SubTask 28.2：原 ``core/statistics_module.py`` 已合并入本文件，作为
-``StatisticsModule`` 类内联（见文件末尾「统计模块层」段）。本文件现作为
-监控 + 统计的单一入口文件；``from core.statistics_module import StatisticsModule``
-引用须改为 ``from core.monitoring_module import StatisticsModule``。
-"""
+"""Monitoring 模块：事件驱动的监控记录 + 浮窗 + 看盘面板 + 告警 + 交易统计。"""
 from __future__ import annotations
 
 import json

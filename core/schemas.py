@@ -9,9 +9,7 @@ import json
 from pathlib import Path
 
 
-# ═══════════════════════════════════════════════════
 # 注册表动态加载辅助函数
-# ═══════════════════════════════════════════════════
 
 
 class ConfigLoadError(RuntimeError):
@@ -37,9 +35,7 @@ def _load_registry() -> Dict[str, Any]:
     return _registry_cache
 
 
-# ═══════════════════════════════════════════════════
 # field_definitions.json 动态加载
-# ═══════════════════════════════════════════════════
 
 _field_defs_cache: Optional[Dict[str, Any]] = None
 _bit_fields_cache: Optional[Dict[str, Any]] = None
@@ -103,7 +99,6 @@ def _compose_attr_int(type_key, data: dict) -> int:
     return v
 
 
-# ═══════════════════════════════════════════════════
 # _DualDictAccessMixin — DynamicCellModel/FlowModel 共享的 dict/attr 访问原语
 
 
@@ -184,9 +179,7 @@ class _DualDictAccessMixin:
         return result
 
 
-# ═══════════════════════════════════════════════════
 # DynamicCellModel — 通用 Cell 模型
-# ═══════════════════════════════════════════════════
 
 class DynamicCellModel(_DualDictAccessMixin):
     """通用 Cell 模型，根据 field_definitions.json 动态加载字段定义。"""
@@ -293,13 +286,9 @@ class DynamicCellModel(_DualDictAccessMixin):
         return f"<DynamicCellModel type={ct} id={cid}>"
 
 
-# ═══════════════════════════════════════════════════
 # DynamicFlowModel — 通用 Flow 模型
-# ═══════════════════════════════════════════════════
 
-# ═══════════════════════════════════════════════════
 # flow_mode_registry.json 动态加载
-# ═══════════════════════════════════════════════════
 
 _flow_mode_registry_cache: Optional[Dict[str, Any]] = None
 
@@ -365,7 +354,6 @@ def _resolve_flow_mode_from_bits(data: Dict[str, Any]) -> str:
     return "pass_through"
 
 
-# ═══════════════════════════════════════════════════
 # 字段别名归一化表（DynamicFlowModel.from_dict 表驱动）
 _FIELD_ALIASES: Dict[str, List[tuple]] = {
     "from_cell_id": [("from", False), ("source", True)],
@@ -519,9 +507,7 @@ StateColumnModel = DynamicCellModel
 ArrowCellModel = DynamicCellModel
 
 
-# ═══════════════════════════════════════════════════
 # CellNNNAttrBitsModel 兼容类
-# ═══════════════════════════════════════════════════
 
 class _CellAttrBitsCompat:
     """兼容旧 Cell200AttrBitsModel / Cell201AttrBitsModel 接口的适配器。
@@ -571,9 +557,7 @@ class Cell202AttrBitsModel(_CellAttrBitsCompat):
     _CELL_TYPE = 202
 
 
-# ═══════════════════════════════════════════════════
 # 基础模型（保留）
-# ═══════════════════════════════════════════════════
 
 class PositionModel(BaseModel):
     x: int = 0
@@ -684,9 +668,7 @@ class StockSnapshotModel(BaseModel):
 StkEntry = StockSnapshotModel
 
 
-# ═══════════════════════════════════════════════════
 # CellType 与 parse_cell（全部使用 DynamicCellModel）
-# ═══════════════════════════════════════════════════
 
 CellType = DynamicCellModel
 
@@ -743,9 +725,7 @@ def parse_cell(data: Dict[str, Any]) -> CellType:
     return DynamicCellModel.from_dict(data)
 
 
-# ═══════════════════════════════════════════════════
 # PoolMetaModel（更新为使用 DynamicFlowModel）
-# ═══════════════════════════════════════════════════
 
 class PoolMetaModel(_DictConstructible, BaseModel):
     pool_type: str = "ss-pool"
@@ -811,9 +791,7 @@ class PoolMetaModel(_DictConstructible, BaseModel):
         return kws
 
 
-# ═══════════════════════════════════════════════════
 # TDX (通达信) 股票池数据模型
-# ═══════════════════════════════════════════════════
 
 def _get_setcode_map():
     scm = _load_defaults().get("setcode_map", {})
@@ -827,7 +805,6 @@ SETCODE_REVERSE = {v: k for k, v in SETCODE_MAP.items()}
 # 读取统一通过 ConfigStore.get_table("dzh_type_map")（见 converters.py 等调用方）。
 
 
-# ═══════════════════════════════════════════════════
 # 表驱动 to_xml_attrs 通用 Mixin
 class _XmlAttrMixin(_DictConstructible):
     _XML_FIELDS: ClassVar[List[str]] = []
@@ -958,7 +935,6 @@ class TdxStkModel(_XmlAttrMixin, BaseModel):
                    "rise", "volume", "maxrate", "maxperiod", "maxtime", "maxprice", "idaynum"]
 
 
-# ═══════════════════════════════════════════════════
 # 嵌套模型解析表（DynamicCellModel.from_dict 表驱动）
 _NESTED_MODELS: Dict[str, tuple] = {
     "tdx_psatt": (TdxPsattModel, False),
@@ -1044,9 +1020,7 @@ class TdxPoolMetaModel(_DictConstructible, BaseModel):
         return kws
 
 
-# ═══════════════════════════════════════════════════
 # 边执行步骤协议（EdgeExecutor 表驱动步骤化）
-# ═══════════════════════════════════════════════════
 
 class StepResult(BaseModel):
     """步骤执行结果。"""

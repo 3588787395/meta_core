@@ -1,31 +1,37 @@
-"""metatest v4 16 维量化评分引擎（三原语收敛度 + OOP 同源继承 + 轮询零容忍）。
+"""metatest v5 20 维量化评分引擎（MetaDispatcher 统一 + 运行时验证 + 跨模块 import 纪律）。
 
-按「converge-meta-essence-v4-oop-event-driven」spec 实现 16 维加权评分，
-所有评分完全由 ``test_results`` 字段计算，禁止硬编码信用分。v4 在 v3 12 维
-基础上新增 4 维（oop_inheritance_depth / polling_zero_tolerance /
-primitive_convergence / essence_ratio），权重重新分配至总和 = 1.0。
+按「converge-meta-essence-v5-dispatcher-unification」spec 实现 20 维加权评分，
+所有评分完全由 ``test_results`` 字段计算，禁止硬编码信用分。v5 在 v4 16 维基础上
+新增 4 维（dispatcher_isomorphism / runtime_verification / eventtest_regression /
+cross_module_import_discipline），v4 16 维权重等比降权至 80%（每维 × 0.8），
+新增 4 维各占 5%，权重重新分配至总和 = 1.0。
 
   维度                         权重    评分逻辑
   ─────────────────────────── ────── ──────────────────────────────────────
-  module_coverage               7%    覆盖模块数 / 17 * 100
-  test_pass_rate               13%    通过数 / 总数 * 100（跳过计为失败）
-  assertion_density             5%    断言数 / (测试文件数 * 20) * 100
-  event_chain_integrity         8%    出现事件类型数 / 10 * 100（链顺序错误扣 20%）
-  performance_benchmark         5%    1000 tick 耗时 ≤10s 满分，线性衰减
-  frontend_e2e_pass_rate        7%    前端 E2E 真实通过数 / 总数 * 100（环境缺失给最低达标线 80）
-  logic_coverage                5%    5 项底层逻辑验证通过数 / 5 * 100
-  isomorphism_elimination       9%    40 项同构代码 Grep 检查，0 违规满分
-  line_convergence              5%    核心模块总行数 ≤ 22500 满分，线性衰减
-  rule_compliance               3%    RULES 91-100 Grep 违规数 / 10，0 违规满分
-  negative_test_coverage        2%    4 类反测试用例数 / 目标数（每类 ≥ 8）均值 * 100
-  synthesis_e2e                 3%    合测试通过数 / 总数 * 100
-  oop_inheritance_depth         8%    BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类 + 子类仅差异
-  polling_zero_tolerance        8%    12 处轮询模式 Grep 零匹配 + EventDriver heapq 验证 + 前端 setInterval fetch 零匹配
-  primitive_convergence         8%    三原语覆盖率（时间/分派/继承各 ≥ 95% 满分）
-  essence_ratio                 4%    净减行数 / 变更前行数 × 100（目标 ≥ 12%，净增 = 0 触发 redo）
+  module_coverage              5.6%   覆盖模块数 / 17 * 100
+  test_pass_rate              10.4%   通过数 / 总数 * 100（跳过计为失败）
+  assertion_density            4.0%   断言数 / (测试文件数 * 20) * 100
+  event_chain_integrity        6.4%   出现事件类型数 / 10 * 100（链顺序错误扣 20%）
+  performance_benchmark        4.0%   1000 tick 耗时 ≤10s 满分，线性衰减
+  frontend_e2e_pass_rate       5.6%   前端 E2E 真实通过数 / 总数 * 100（环境缺失给最低达标线 80）
+  logic_coverage               4.0%   5 项底层逻辑验证通过数 / 5 * 100
+  isomorphism_elimination      7.2%   40 项同构代码 Grep 检查，0 违规满分
+  line_convergence             4.0%   核心模块总行数 ≤ 22500 满分，线性衰减
+  rule_compliance              2.4%   RULES 91-100 Grep 违规数 / 10，0 违规满分
+  negative_test_coverage       1.6%   4 类反测试用例数 / 目标数（每类 ≥ 8）均值 * 100
+  synthesis_e2e                2.4%   合测试通过数 / 总数 * 100
+  oop_inheritance_depth        6.4%   BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类 + 子类仅差异
+  polling_zero_tolerance       6.4%   12 处轮询模式 Grep 零匹配 + EventDriver heapq 验证 + 前端 setInterval fetch 零匹配
+  primitive_convergence        6.4%   三原语覆盖率（时间/分派/继承各 ≥ 95% 满分）
+  essence_ratio                3.2%   净减行数 / 变更前行数 × 100（目标 ≥ 12%，净增 = 0 触发 redo）
+  --- v5 新增 4 维 ---
+  dispatcher_isomorphism       5.0%   MetaDispatcher 基类 + EventBus/ConfigStore 继承 + EventDriver 独立 + 公共骨架行数占比 ≥ 60%
+  runtime_verification         5.0%   3 个 in-process 运行时验证测试通过率（replay/simulation/mode-switch）
+  eventtest_regression         5.0%   eventtest 退出码 0（全绿）满分，否则 0 分
+  cross_module_import_discipline 5.0% 8 处跨模块 import 违规模式 Grep 零匹配
 
 权重总和 = 1.0。总分 = Σ(维度得分 × 权重)。
-门槛：总分 ≥ 95 且 16 维均 ≥ 80（redo_list 为空）判定 PASS。
+门槛：总分 ≥ 95 且 20 维均 ≥ 80（redo_list 为空）判定 PASS。
 跳过测试计为失败；前端 E2E 环境缺失给予最低达标线 80（环境问题非代码问题）；无任何硬编码信用分。
 """
 from __future__ import annotations
@@ -63,9 +69,9 @@ class ScoreReport:
     """评分报告。
 
     Attributes:
-        dimensions: 16 个维度的评分明细列表
+        dimensions: 20 个维度的评分明细列表
         total_score: 加权总分（0-100）
-        passed: 总分是否 ≥ 门槛（95）且 16 维均 ≥ 80
+        passed: 总分是否 ≥ 门槛（95）且 20 维均 ≥ 80
         deductions: 扣分项描述列表
         redo_list: 需重做的维度名列表（得分 < 80）
     """
@@ -126,17 +132,18 @@ NEGATIVE_TEST_CATEGORIES: Tuple[str, ...] = (
 
 
 class ScoringEngine:
-    """16 维加权评分引擎。
+    """20 维加权评分引擎。
 
-    ``calculate(test_results)`` 接收测试结果字典，计算 16 维加权总分，
-    返回 ``ScoreReport``。总分 ≥ 95 且 16 维均 ≥ 80（redo_list 为空）判定 PASS。
+    ``calculate(test_results)`` 接收测试结果字典，计算 20 维加权总分，
+    返回 ``ScoreReport``。总分 ≥ 95 且 20 维均 ≥ 80（redo_list 为空）判定 PASS。
 
-    v4 严格规则：
+    v5 严格规则：
       - 所有评分完全由 ``test_results`` 字段计算，无硬编码信用分
       - 跳过测试计为失败（分子不含 skipped）
       - 前端 E2E 环境缺失给予最低达标线 80（环境问题非代码问题，不跌穿门槛）
-      - 16 维分数均需 ≥ 80 才达标（redo_list 为空）
+      - 20 维分数均需 ≥ 80 才达标（redo_list 为空）
       - essence_ratio 净增 = 0 触发 redo（强制「合并非拆分」硬约束）
+      - v4 16 维权重等比降权至 80%（每维 × 0.8），v5 新增 4 维各占 5%
 
     使用方式::
 
@@ -177,39 +184,60 @@ class ScoringEngine:
             "essence_ratio": 12.0,
             "essence_baseline_lines": 24000,
             "essence_current_lines": 21000,
+            # --- v5 新增 4 维字段 ---
+            "dispatcher_isomorphism": {
+                "meta_dispatcher_exists": True,
+                "eventbus_inherits_meta": True,
+                "configstore_inherits_meta": True,
+                "eventdriver_independent": True,
+                "skeleton_ratio": 0.60,
+            },
+            "runtime_verification": {
+                "passed": 3, "total": 3,
+                "files": ["test_runtime_replay_heapq.py",
+                          "test_runtime_simulation_heapq.py",
+                          "test_runtime_mode_switch.py"],
+            },
+            "eventtest_regression": {"exit_code": 0},
+            "cross_module_import_discipline": {
+                "violations": 0, "total_patterns": 8,
+            },
         })
         print(report.total_score, report.passed)
     """
 
-    #: 16 维度定义：(维度名, 权重) — 权重总和 = 1.0
-    #: v3 12 维降权（66%→72%，+6% 重分配以容纳 4 新维且总和=100%）
-    #: + oop_inheritance_depth 8% + polling_zero_tolerance 8%
-    #: + primitive_convergence 8% + essence_ratio 4% = 28%
+    #: 20 维度定义：(维度名, 权重) — 权重总和 = 1.0
+    #: v5: v4 16 维权重等比降权至 80%（每维 × 0.8），新增 4 维各占 5%
     DIMENSIONS: List[Tuple[str, float]] = [
-        ("module_coverage", 0.07),            # 模块覆盖率（v3 10%→7%）
-        ("test_pass_rate", 0.13),             # 测试通过率（v3 18%→13%，跳过计为失败）
-        ("assertion_density", 0.05),          # 断言密度（v3 8%→5%）
-        ("event_chain_integrity", 0.08),      # 事件链完整性（v3 10%→8%）
-        ("performance_benchmark", 0.05),      # 性能基准（v3 8%→5%）
-        ("frontend_e2e_pass_rate", 0.07),     # 前端 E2E 真实通过率（v3 10%→7%）
-        ("logic_coverage", 0.05),             # 底层逻辑覆盖度（v3 8%→5%）
-        ("isomorphism_elimination", 0.09),    # 同构代码消除度（v3 12%→9%，40 项）
-        ("line_convergence", 0.05),           # 核心模块行数收敛（v3 8%→5%，目标 22500）
-        ("rule_compliance", 0.03),            # RULES 91-100 合规（v3 4%→3%）
-        ("negative_test_coverage", 0.02),     # 4 类反测试覆盖度（v3 2%→2%）
-        ("synthesis_e2e", 0.03),             # 合测试通过率（v3 2%→3%）
-        # --- v4 新增 4 维 ---
-        ("oop_inheritance_depth", 0.08),      # OOP 同源继承深度（BasePoolConverter + Dzh/Tdx 子类）
-        ("polling_zero_tolerance", 0.08),     # 轮询零容忍（12 处轮询模式 Grep 零匹配）
-        ("primitive_convergence", 0.08),      # 三原语收敛度（时间/分派/继承各 ≥ 95%）
-        ("essence_ratio", 0.04),              # 本质比（净减行数 / 变更前行数，目标 ≥ 12%）
+        ("module_coverage", 0.056),           # 模块覆盖率（v4 7%→5.6%）
+        ("test_pass_rate", 0.104),            # 测试通过率（v4 13%→10.4%，跳过计为失败）
+        ("assertion_density", 0.04),          # 断言密度（v4 5%→4%）
+        ("event_chain_integrity", 0.064),     # 事件链完整性（v4 8%→6.4%）
+        ("performance_benchmark", 0.04),      # 性能基准（v4 5%→4%）
+        ("frontend_e2e_pass_rate", 0.056),    # 前端 E2E 真实通过率（v4 7%→5.6%）
+        ("logic_coverage", 0.04),             # 底层逻辑覆盖度（v4 5%→4%）
+        ("isomorphism_elimination", 0.072),   # 同构代码消除度（v4 9%→7.2%，40 项）
+        ("line_convergence", 0.04),           # 核心模块行数收敛（v4 5%→4%，目标 22500）
+        ("rule_compliance", 0.024),           # RULES 91-100 合规（v4 3%→2.4%）
+        ("negative_test_coverage", 0.016),    # 4 类反测试覆盖度（v4 2%→1.6%）
+        ("synthesis_e2e", 0.024),            # 合测试通过率（v4 3%→2.4%）
+        # --- v4 新增 4 维（v5 降权至 80%）---
+        ("oop_inheritance_depth", 0.064),     # OOP 同源继承深度（v4 8%→6.4%）
+        ("polling_zero_tolerance", 0.064),    # 轮询零容忍（v4 8%→6.4%）
+        ("primitive_convergence", 0.064),     # 三原语收敛度（v4 8%→6.4%）
+        ("essence_ratio", 0.032),             # 本质比（v4 4%→3.2%）
+        # --- v5 新增 4 维（各 5%）---
+        ("dispatcher_isomorphism", 0.05),     # MetaDispatcher 统一（基类+继承+独立+骨架占比）
+        ("runtime_verification", 0.05),       # 运行时验证 harness（3 个 in-process 测试通过率）
+        ("eventtest_regression", 0.05),       # eventtest 回归（退出码 0 满分）
+        ("cross_module_import_discipline", 0.05),  # 跨模块 import 纪律（8 处违规模式零匹配）
     ]
 
     #: 通过门槛：总分 ≥ 95 判定 PASS
     THRESHOLD: float = 95.0
 
     def calculate(self, test_results: Dict[str, Any]) -> ScoreReport:
-        """计算 16 维加权总分。
+        """计算 20 维加权总分。
 
         Args:
             test_results: 测试结果字典，包含以下键：
@@ -244,9 +272,15 @@ class ScoringEngine:
                 - essence_ratio: float (净减行数 / 变更前行数 × 100)
                 - essence_baseline_lines: int (基线行数)
                 - essence_current_lines: int (当前行数)
+                - dispatcher_isomorphism: Dict (meta_dispatcher_exists/
+                  eventbus_inherits_meta/configstore_inherits_meta/
+                  eventdriver_independent/skeleton_ratio)
+                - runtime_verification: Dict (passed/total/files)
+                - eventtest_regression: Dict (exit_code)
+                - cross_module_import_discipline: Dict (violations/total_patterns)
 
         Returns:
-            ScoreReport: 评分报告（含 16 维明细、总分、PASS/FAIL、扣分项、重做列表）
+            ScoreReport: 评分报告（含 20 维明细、总分、PASS/FAIL、扣分项、重做列表）
         """
         dimensions: List[ScoreDimension] = []
         deductions: List[str] = []
@@ -267,7 +301,7 @@ class ScoringEngine:
                 redo_list.append(name)
 
         total_score = self._weighted_total(dimensions)
-        # v4: PASS 需总分 ≥ 95 且 16 维均 ≥ 80（redo_list 为空）
+        # v5: PASS 需总分 ≥ 95 且 20 维均 ≥ 80（redo_list 为空）
         passed = total_score >= self.THRESHOLD and len(redo_list) == 0
 
         return ScoreReport(
@@ -656,6 +690,107 @@ class ScoringEngine:
             score = max(0.0, (ratio / 12.0) * 100.0)
         detail = (f"essence_ratio={ratio:.2f}%（基线 {baseline} → 当前 {current}，"
                   f"目标 ≥ 12%）")
+        return score, detail
+
+    # ------------------------------------------------------------------
+    # v5 新增 4 维评分逻辑
+    # ------------------------------------------------------------------
+
+    def _score_dispatcher_isomorphism(self, results: Dict[str, Any]) -> Tuple[float, str]:
+        """MetaDispatcher 统一（v5 新增第 17 维，权重 5%）。
+
+        5 条件评分（满分 100）：
+          (a) MetaDispatcher 基类存在 — 20 分
+          (b) EventBus(MetaDispatcher) 继承 — 20 分
+          (c) ConfigStoreBase(MetaDispatcher) 继承 — 20 分
+          (d) EventDriver 独立（不继承 MetaDispatcher）— 20 分
+          (e) 公共骨架行数占比 ≥ 60% — 20 分（线性衰减：ratio/60 × 20）
+
+        所有数据由 runner.py 通过 AST/Grep 采集填入
+        ``test_results["dispatcher_isomorphism"]``，无硬编码信用分。
+        """
+        di = results.get("dispatcher_isomorphism", {}) or {}
+        if not isinstance(di, dict):
+            return 0.0, "dispatcher_isomorphism 数据缺失或类型错误"
+        meta_exists = bool(di.get("meta_dispatcher_exists", False))
+        eventbus_inherits = bool(di.get("eventbus_inherits_meta", False))
+        configstore_inherits = bool(di.get("configstore_inherits_meta", False))
+        eventdriver_indep = bool(di.get("eventdriver_independent", False))
+        ratio = float(di.get("skeleton_ratio", 0.0) or 0.0)
+        score = sum([meta_exists, eventbus_inherits,
+                     configstore_inherits, eventdriver_indep]) * 20.0
+        # 公共骨架行数占比 ≥ 60% 满分 20 分，线性衰减
+        score += min(20.0, (ratio / 0.60) * 20.0) if ratio > 0 else 0.0
+        score = min(100.0, score)
+        detail = (f"基类存在={'是' if meta_exists else '否'}；"
+                  f"EventBus 继承={'是' if eventbus_inherits else '否'}；"
+                  f"ConfigStore 继承={'是' if configstore_inherits else '否'}；"
+                  f"EventDriver 独立={'是' if eventdriver_indep else '否'}；"
+                  f"骨架占比={ratio * 100:.1f}%（目标 ≥ 60%）")
+        return score, detail
+
+    def _score_runtime_verification(self, results: Dict[str, Any]) -> Tuple[float, str]:
+        """运行时验证 harness（v5 新增第 18 维，权重 5%）。
+
+        3 个 in-process 测试通过率（replay/simulation/mode-switch）：
+          score = passed / total × 100
+
+        所有数据由 runner.py 通过运行 ``pytest metatest/test_runtime_*.py``
+        采集填入 ``test_results["runtime_verification"]``，无硬编码信用分。
+        """
+        rv = results.get("runtime_verification", {}) or {}
+        if not isinstance(rv, dict):
+            return 0.0, "runtime_verification 数据缺失或类型错误"
+        passed = int(rv.get("passed", 0) or 0)
+        total = int(rv.get("total", 3) or 3)
+        if total <= 0:
+            return 0.0, "无运行时验证测试（total=0）"
+        score = min(100.0, (passed / total) * 100.0)
+        detail = f"{passed}/{total} 运行时验证测试通过（replay/simulation/mode-switch）"
+        return score, detail
+
+    def _score_eventtest_regression(self, results: Dict[str, Any]) -> Tuple[float, str]:
+        """eventtest 回归（v5 新增第 19 维，权重 5%）。
+
+        eventtest 退出码 0（全绿）满分 100，否则 0 分（零容忍）。
+
+        所有数据由 runner.py 通过运行 ``python -m eventtest.run_eventtest``
+        采集退出码填入 ``test_results["eventtest_regression"]``，无硬编码信用分。
+        """
+        er = results.get("eventtest_regression", {}) or {}
+        if not isinstance(er, dict):
+            return 0.0, "eventtest_regression 数据缺失或类型错误"
+        # 注意：exit_code=0 是成功值，不可用 `or 1`（0 or 1 == 1 会误判成功为失败）
+        exit_code_raw = er.get("exit_code", 1)
+        try:
+            exit_code = int(exit_code_raw)
+        except (TypeError, ValueError):
+            exit_code = 1
+        if exit_code == 0:
+            return 100.0, "eventtest 退出码 0（全绿）"
+        return 0.0, f"eventtest 退出码 {exit_code}（非 0，零容忍失败）"
+
+    def _score_cross_module_import_discipline(
+        self, results: Dict[str, Any]
+    ) -> Tuple[float, str]:
+        """跨模块 import 纪律（v5 新增第 20 维，权重 5%）。
+
+        8 处违规模式 Grep 零匹配满分，每项违规扣 100/8 = 12.5 分。
+
+        8 处模式：7 业务模块（execution/screening/formula/runtime_mode/trade/
+        tick_bar/monitoring）禁直接 import table_engine + execution 禁 import
+        screening_module。所有数据由 runner.py 通过 Grep 采集填入
+        ``test_results["cross_module_import_discipline"]``，无硬编码信用分。
+        """
+        cm = results.get("cross_module_import_discipline", {}) or {}
+        if not isinstance(cm, dict):
+            return 0.0, "cross_module_import_discipline 数据缺失或类型错误"
+        violations = int(cm.get("violations", 0) or 0)
+        total = int(cm.get("total_patterns", 8) or 8)
+        if total <= 0:
+            return 0.0, "total_patterns 配置为 0"
+        score = max(0.0, 100.0 - (violations * (100.0 / total)))
+        detail = f"{violations} 处违规 / {total} 项检查（0 违规满分）"
         return score, detail
 
     # ------------------------------------------------------------------
