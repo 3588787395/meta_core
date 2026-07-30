@@ -47,7 +47,7 @@ from .event_bus import (
     FormulaEvaluated,
     PoolLoaded,
 )
-from .table_engine import load_config_table
+from .domain import load_config_table
 from ._hashing import hash_dict_content, hash_object
 
 logger = logging.getLogger(__name__)

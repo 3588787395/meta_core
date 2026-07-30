@@ -240,19 +240,18 @@ class TestChangeHModeHandlerTable:
                 f"_MODE_HANDLERS[{mode_name}] 应为可调用 handler"
 
     def test_apply_noperate_mode_series_exists(self):
-        """_apply_noperate_mode_series 函数存在（execution_module 经表驱动分派）。"""
-        import re
-        exec_path = _CORE_DIR / "execution_module.py"
-        src = exec_path.read_text(encoding="utf-8")
-        # execution_module 从 screening_module 导入 _apply_noperate_mode_series
-        assert "_apply_noperate_mode_series" in src, \
-            "execution_module 应引用 _apply_noperate_mode_series（变更 H 表驱动）"
+        """_eval_formula_path 经 _build_op_ctx/_eval_op 表驱动分派（公式与筛选分离）。"""
+        import inspect
+        from core.execution_module import _eval_formula_path
+        src = inspect.getsource(_eval_formula_path)
+        assert "_build_op_ctx" in src and "_eval_op" in src and "_SERIES_FILTERS" in src, \
+            "_eval_formula_path 应经 _build_op_ctx/_eval_op + _SERIES_FILTERS 表驱动分派"
 
     def test_apply_noperate_mode_series_importable(self):
-        """_apply_noperate_mode_series 可从 screening_module 导入。"""
-        from core.screening_module import _apply_noperate_mode_series
-        assert callable(_apply_noperate_mode_series), \
-            "_apply_noperate_mode_series 应为可调用函数"
+        """_build_op_ctx/_eval_op 可从 domain 导入（白名单，公式与筛选分离真值源）。"""
+        from core.domain import _build_op_ctx, _eval_op
+        assert callable(_build_op_ctx) and callable(_eval_op), \
+            "_build_op_ctx/_eval_op 应为可调用函数"
 
     def test_no_if_mode_inflection_rank_in_execution_module(self):
         """Grep 验证：execution_module.py 中 if mode == "inflection"/"rank" = 0。"""

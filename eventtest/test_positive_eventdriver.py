@@ -57,7 +57,7 @@ def test_edge_fire_due_pops_and_pushes_next(pool_engine, event_collector):
     driver._heap.clear()
     driver._seq = 0
 
-    def action(params):
+    def action(params, fire_time=None):
         test_bus.publish(EdgeFired(eid="test_edge", ts=_FIRE_TIME))
 
     spec = TimedEventSpec(action=action, params={}, interval=_EDGE_INTERVAL)
@@ -103,7 +103,7 @@ def test_ttl_one_shot_does_not_reregister(pool_engine, event_collector, fz_stock
     # 从 fixture 动态取一只 fz 股票代码，避免硬编码
     code = fz_stocks(1)[0]
 
-    def ttl_action(params):
+    def ttl_action(params, fire_time=None):
         test_bus.publish(TTLDue(node_id="pool_C", code=code, ts=_FIRE_TIME))
 
     # interval=None 表示一次性触发，不注册下次

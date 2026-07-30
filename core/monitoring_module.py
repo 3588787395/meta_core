@@ -44,7 +44,7 @@ from core.event_bus import (
     SnapshotUpdated,
     StatisticsUpdated,
 )
-from core.table_engine import get_global_config_store
+from core.domain import get_global_config_store
 
 logger = logging.getLogger(__name__)
 

@@ -531,6 +531,28 @@ def is_event_bus(bus: Any) -> bool:
     return isinstance(bus, EventBus)
 
 
+def _publish_tick_batch(
+    bus: Any,
+    tick_data: Optional[Dict[str, Any]],
+    ts: Optional[float],
+    *,
+    ts_fallback: float = 0.0,
+) -> None:
+    """统一批量发布 TickReceived 事件（无 state 依赖，供 tick_bar/runtime_mode 共用）。"""
+    if not tick_data or not isinstance(tick_data, dict):
+        return
+    for code, tick in tick_data.items():
+        if not code or not isinstance(tick, dict):
+            continue
+        try:
+            tick_copy = dict(tick)
+            tick_copy["code"] = str(code)
+            ts_use = ts if ts is not None else float(tick.get("_ts", ts_fallback))
+            bus.publish(TickReceived(tick_data=tick_copy, code=str(code), ts=ts_use))
+        except Exception as ex:
+            logger.warning("TickReceived publish failed for %s: %s", code, ex)
+
+
 __all__ = [
     "AlertRaised",
     "BarComposed",
@@ -598,5 +620,6 @@ __all__ = [
     "TickReceived",
     "TimeAdvanced",
     "TransferExecuted",
+    "_publish_tick_batch",
     "is_event_bus",
 ]

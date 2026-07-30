@@ -41,7 +41,7 @@ from typing import Any, Callable, ClassVar, Dict, Iterable, List, NamedTuple, Op
 import pandas as pd
 
 from core.domain import DZH_COL_MAP, MockDataSource, _hash_tick, _normalize_to_fz, _stock_code, time_at, _safe_timestamp, EdgeState, _build_adjacency, TimedEventSpec
-from core.table_engine import get_global_config_store
+from core.domain import get_global_config_store
 from core._hashing import BarHashMixin, hash_dict_content, hash_tick_aggregate
 
 if TYPE_CHECKING:
@@ -57,6 +57,7 @@ from core.event_bus import (
     SimulationStep,
     TickReceived,
     TimeAdvanced,
+    _publish_tick_batch,
 )
 from core.schemas import (
     ConditionCellModel,
@@ -65,9 +66,7 @@ from core.schemas import (
     StatePoolCellModel,
     StockSnapshotModel,
 )
-# Task 3：从 tick_bar_module 导入统一批量发布工具，消除 _step_once_impl 内
-# TickReceived 发布循环样板（_publish_tick_batch 无 state 依赖，无循环导入风险）。
-from core.tick_bar_module import _publish_tick_batch
+# _publish_tick_batch 已下沉至 event_bus（白名单），消除 runtime_mode→tick_bar_module 跨 business 依赖。
 from core.tick_table import TickTable
 
 logger = logging.getLogger(__name__)

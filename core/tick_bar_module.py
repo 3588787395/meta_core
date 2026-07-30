@@ -21,6 +21,7 @@ import pandas as pd
 from core.event_bus import (
     _BaseModule,
     _event_handler,
+    _publish_tick_batch,
     EVENT_DATA_CHANGED,
     BarComposed,
     DataChanged,
@@ -83,30 +84,6 @@ def publish_data_changed(bus, state, source, codes, ts, data=None, period=None, 
                 bus.publish(BarComposed(
                     bar=dict(bar), period=period, code=code, ts=ts,
                 ))
-
-
-def _publish_tick_batch(
-    bus: Any,
-    tick_data: Optional[Dict[str, Any]],
-    ts: Optional[float],
-    *,
-    ts_fallback: float = 0.0,
-) -> None:
-    """统一批量发布 TickReceived 事件。"""
-    if not tick_data or not isinstance(tick_data, dict):
-        return
-    for code, tick in tick_data.items():
-        if not code or not isinstance(tick, dict):
-            continue
-        try:
-            tick_copy = dict(tick)
-            tick_copy["code"] = str(code)
-            ts_use = ts if ts is not None else float(tick.get("_ts", ts_fallback))
-            bus.publish(TickReceived(
-                tick_data=tick_copy, code=str(code), ts=ts_use,
-            ))
-        except Exception as ex:
-            logger.warning("TickReceived publish failed for %s: %s", code, ex)
 
 
 # ====================================================================

@@ -32,7 +32,7 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type
 
-from .table_engine import load_config_table
+from .table_engine import load_config_table, get_global_config_store
 
 
 def _build_adjacency(node_ids, edges_iter, src_getter, eid_getter) -> Dict[str, List[str]]:

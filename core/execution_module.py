@@ -69,22 +69,16 @@ from .domain import (
     anchor_to_today,
     _lookup_builtin_formula_info,
     time_now_unix,
-    # TDX nperiod → period 映射（已迁移至 domain 白名单）
     _nperiod_to_period,
-    # 交集条件评估器（已迁移至 domain 白名单）
     evaluate_intersection,
-    # EdgeState 边级运行时表（已迁移至 domain 白名单）
     EdgeState,
     EdgeStateMixin,
-    # TimedEventSpec 已下沉至 domain（纯数据结构），经此模块级 import 引入并 re-export
-    # （见 __all__），避免 core/domain 反向函数级懒加载本模块（模块零引用约束）。
     TimedEventSpec,
+    # 公式与筛选分离：_build_op_ctx/_eval_op 列比较 + _resolve_rank 排名 + 真值源
+    _build_op_ctx, _eval_op, _resolve_rank, _RANK_MODES, _NOPERATE_RULES,
 )
 from .schemas import StepResult
-from .table_engine import get_global_config_store, load_config_table
-# Task 3：向量 mode 分派（rank/inflection/compare）下沉至 screening_module，与标量版共用
-# _NOPERATE_RULES + _MODE_HANDLERS_SERIES 真值源，消除本模块 mode 硬编码分支。
-from .screening_module import _apply_noperate_mode_series, _resolve_series_lookback
+from .domain import get_global_config_store, load_config_table
 
 if TYPE_CHECKING:
     from .runtime_mode_module import PoolState
@@ -2075,7 +2069,7 @@ def _eval_formula_path(
         ctx = eval_deps.live_ctx_fn(state, period=period)
         ctx.period = period
         noperate = spec.noperate
-        lookback = _resolve_series_lookback(noperate)
+        lookback = 5 if _NOPERATE_RULES.get(str(noperate), {}).get("mode") == "inflection" else 3
         series_results = formula_engine.eval_series(spec, codes, ctx, lookback=lookback)
     except Exception as ex:
         logger.warning("公式序列求值失败 %s: %s", spec.formula_ref, ex)
@@ -2123,11 +2117,46 @@ def _eval_formula_path(
                     passed.append(code)
         return passed
 
-    passed = _apply_noperate_mode_series(
-        series_results, codes, noperate, fsecond,
-        cfirst, nfirst, csecond, nsecond, _extract_line_from_series,
-    )
-    return passed
+    # 公式与筛选分离：eval_series 添加列，_build_op_ctx→_eval_op 列比较（compare/inflection），rank→_resolve_rank
+    rule = _NOPERATE_RULES.get(str(noperate), {})
+
+    def _rank_filter():
+        ranked = []
+        for code in codes:
+            line1 = _extract_line_from_series(series_results.get(code), cfirst, nfirst)
+            if line1 and len(line1) > 0 and line1[-1] is not None:
+                try:
+                    ranked.append((code, float(line1[-1])))
+                except (TypeError, ValueError):
+                    continue
+        return _resolve_rank(ranked, fsecond, _RANK_MODES.get(str(noperate), {}))
+
+    def _compare_filter():
+        passed = []
+        for code in codes:
+            sres = series_results.get(code)
+            if sres is None:
+                continue
+            line1 = _extract_line_from_series(sres, cfirst, nfirst)
+            if line1 is None or len(line1) == 0:
+                continue
+            line2 = _extract_line_from_series(sres, csecond, nsecond) if (nsecond >= 0 and csecond) else None
+            if line2 is None:
+                line2 = [fsecond] * len(line1)
+            min_len = min(len(line1), len(line2))
+            if min_len == 0:
+                continue
+            op_ctx = _build_op_ctx(line1[-min_len:], line2[-min_len:], rule.get("params", {}))
+            try:
+                result = _eval_op(rule, op_ctx)
+                if result is not None and not isinstance(result, list) and bool(result):
+                    passed.append(code)
+            except (IndexError, TypeError, KeyError, ValueError):
+                continue
+        return passed
+
+    _SERIES_FILTERS = {"rank": _rank_filter, "compare": _compare_filter, "inflection": _compare_filter}
+    return _SERIES_FILTERS.get(rule.get("mode", "compare"), _compare_filter)()
 
 
 def _eval_scalar_path(

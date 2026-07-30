@@ -70,7 +70,7 @@ _CORE_DIR = _PROJECT_ROOT / "core"
 
 # 白名单：business 模块允许直接 import 的 core.* 子模块
 _WHITELIST_CORE_SUBMODULES: frozenset = frozenset({
-    "event_bus", "domain", "schemas",
+    "event_bus", "domain", "schemas", "_hashing", "tick_table",
 })
 
 # 黑名单：business 模块禁止直接互相 import 的 core.* 子模块

@@ -62,7 +62,7 @@ from .domain import (
     SetOperationEvaluator,
 )
 from .event_bus import _BaseModule, _event_handler, EventBus, FormulaEvaluated, PoolLoaded, StockFiltered
-from .table_engine import load_config_table
+from .domain import load_config_table
 
 # 表驱动：noperate 操作符规则配置（config/tdx_noperate_rules.json）
 # Task 23.3: _noperate_data / _NOPERATE_RULES / _RANK_MODES / _COMBINE_OPS 已迁移至
@@ -348,7 +348,7 @@ def _mode_compare(scalars, noperate, fsecond, prev_lookup, nset_label, eval_fiel
     return passed
 
 
-# 表驱动：标量 mode 分派表，与 _MODE_HANDLERS_SERIES 共用 _NOPERATE_RULES 真值源。
+# 表驱动：标量 mode 分派表，共用 _NOPERATE_RULES 真值源（向量变体已收敛至 execution_module._eval_formula_path）。
 _MODE_HANDLERS = {"inflection": _mode_inflection, "rank": _mode_rank, "compare": _mode_compare}
 
 
@@ -359,71 +359,6 @@ def _apply_noperate_mode(scalars: dict, noperate: int, fsecond: float,
     rule = _NOPERATE_RULES.get(str(noperate), {})
     handler = _MODE_HANDLERS.get(rule.get("mode", "compare"), _mode_compare)
     return handler(scalars, noperate, fsecond, prev_lookup, nset_label, eval_field)
-
-
-def _mode_rank_series(codes, series_results, noperate, fsecond, cfirst, nfirst, csecond, nsecond, line_extractor):
-    """向量排名：按 codes 顺序提取 line1 末值，复用 _resolve_rank（与标量 _mode_rank 共用内核）。"""
-    ranked: List[Tuple[str, float]] = []
-    for code in codes:
-        line1 = line_extractor(series_results.get(code), cfirst, nfirst)
-        if line1 and len(line1) > 0 and line1[-1] is not None:
-            try:
-                ranked.append((code, float(line1[-1])))
-            except (TypeError, ValueError):
-                continue
-    return _resolve_rank(ranked, fsecond, _RANK_MODES.get(str(noperate), {}))
-
-
-def _mode_compare_series(codes, series_results, noperate, fsecond, cfirst, nfirst, csecond, nsecond, line_extractor):
-    """向量比较/拐点：提取 line1/line2 序列用 _eval_op；拐点经 prev/curr 自动处理，故 inflection 复用本 handler。"""
-    rule = _NOPERATE_RULES.get(str(noperate), {})
-    passed = []
-    for code in codes:
-        sres = series_results.get(code)
-        if sres is None:
-            continue
-        line1 = line_extractor(sres, cfirst, nfirst)
-        if line1 is None or len(line1) == 0:
-            continue
-        if nsecond >= 0 and csecond:
-            line2 = line_extractor(sres, csecond, nsecond)
-            if line2 is None:
-                line2 = [fsecond] * len(line1)
-        else:
-            line2 = [fsecond] * len(line1)
-        min_len = min(len(line1), len(line2))
-        if min_len == 0:
-            continue
-        op_ctx = _build_op_ctx(line1[-min_len:], line2[-min_len:], rule.get("params", {}))
-        try:
-            result = _eval_op(rule, op_ctx)
-            if result is not None and not isinstance(result, list):
-                try:
-                    if bool(result):
-                        passed.append(code)
-                except (TypeError, ValueError):
-                    pass
-        except (IndexError, TypeError, KeyError) as ex:
-            logger.debug("noperate求值异常 code=%s noperate=%d: %s", code, noperate, ex)
-            continue
-    return passed
-
-
-# 表驱动：向量 mode 分派表，与 _MODE_HANDLERS 共用 _NOPERATE_RULES 真值源；inflection 复用 compare。
-_MODE_HANDLERS_SERIES = {"inflection": _mode_compare_series, "rank": _mode_rank_series, "compare": _mode_compare_series}
-
-
-def _resolve_series_lookback(noperate: int) -> int:
-    """序列求值回看长度：拐点模式 5 根（需 prev/curr 两点），其余 3 根。"""
-    return 5 if _NOPERATE_RULES.get(str(noperate), {}).get("mode") == "inflection" else 3
-
-
-def _apply_noperate_mode_series(series_results, codes, noperate, fsecond,
-                                cfirst, nfirst, csecond, nsecond, line_extractor):
-    """nset 向量评估的 mode 分派内核：经 _MODE_HANDLERS_SERIES 分派，被 execution_module._eval_formula_path 调用。"""
-    rule = _NOPERATE_RULES.get(str(noperate), {})
-    handler = _MODE_HANDLERS_SERIES.get(rule.get("mode", "compare"), _mode_compare_series)
-    return handler(codes, series_results, noperate, fsecond, cfirst, nfirst, csecond, nsecond, line_extractor)
 
 
 def _eval_nset0_result(result: dict, noperate: int, fsecond: float,
@@ -911,11 +846,8 @@ __all__ = [
     "evaluate_intersection",
     # 评估器层（向后兼容 re-export，原 core.evaluators 私有但被外部 import）
     "_apply_noperate_mode",
-    # Task 3：mode 分派真值源（标量 + 向量），execution_module 经此共用 _NOPERATE_RULES
+    # mode 分派真值源（标量），execution_module 经此共用 _NOPERATE_RULES
     "_MODE_HANDLERS",
-    "_MODE_HANDLERS_SERIES",
-    "_apply_noperate_mode_series",
-    "_resolve_series_lookback",
     "_extract_indicator_scalar",
     "_lookup_builtin_script",
     "_lookup_builtin_formula_info",

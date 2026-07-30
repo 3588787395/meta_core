@@ -207,7 +207,7 @@ def test_fire_due_no_infinite_loop_with_interval():
     driver = EventDriver(state=None, bus=None)
     call_count = 0
 
-    def action(params: Any) -> None:
+    def action(params: Any, fire_time=None) -> None:
         nonlocal call_count
         call_count += 1
 
@@ -252,7 +252,7 @@ def test_fire_due_no_infinite_loop_with_catch_up():
     driver = EventDriver(state=None, bus=None)
     call_count = 0
 
-    def action(params: Any) -> None:
+    def action(params: Any, fire_time=None) -> None:
         nonlocal call_count
         call_count += 1
 
