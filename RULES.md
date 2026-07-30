@@ -289,6 +289,8 @@
 
 115. **handler 表驱动**：≥ 3 个同构 `_on_*` event handler 必须收敛为 `_HANDLERS: Dict[type, spec]` 表 + 1 个通用方法（如 `_persist_event` / `_forward_event`）。非同构 handler（含特殊控制流）保留。禁止无效抽象（< 3 个同构 handler 不强制表驱动）。
 
+116. **外部 SDK 适配器转发同构表驱动**：≥ 5 个同构转发方法（如 `if self._bridge is None: return DEFAULT → return self._bridge.METHOD(args)` 或 `if not self._tq: return None → try: SDK 调用 → except: return None`）必须收敛为声明式表 + 通用转发器：`_FORWARD_SPECS` + `_forward`（TqProvider 转发）、`_CACHED_TQ_CALLS` + `_call_cached`（带缓存 SDK 调用）、`_SIMPLE_TQ_CALLS` + `_call_simple`（无缓存 SDK 调用）。参数转发签名差异过大使表条目复杂度 > 方法体的，保留现状（避免抽象税负收益）。这是 MetaDispatcher 之外「声明 Data + Dispatcher 通用转发器」元模式投影（第六层洞察）。
+
 ---
 
 ## 附：文件路径映射（文档 vs 实际代码）

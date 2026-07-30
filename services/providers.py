@@ -7572,27 +7572,29 @@ class TqSdkBridge:
                 pass
         return all_data
 
-    def get_block_list(self) -> List[str]:
-        cache_key = 'block_list'
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-        try:
-            result = self._tq.get_sector_list()
-            self._cache[cache_key] = result
-            return result
-        except Exception:
-            return []
+    _CACHED_TQ_CALLS: Dict[str, Tuple[str, str, Any]] = {
+        "get_block_list": ("block_list", "get_sector_list", []),
+        "get_block_members": ("block_members", "get_stock_list_in_sector", []),
+        "get_sector_list": ("sector_list", "get_sector_list", []),
+        "get_stock_list_in_sector": ("stock_list_in_sector", "get_stock_list_in_sector", []),
+    }
 
-    def get_block_members(self, block_code: str) -> List[str]:
-        cache_key = f'block_members_{block_code}'
+    def _call_cached(self, method_name, key_args=(), *sdk_args, **sdk_kwargs):
+        cache_prefix, sdk_method, default = self._CACHED_TQ_CALLS[method_name]
+        cache_key = cache_prefix + "".join(f"_{a}" for a in key_args)
         if cache_key in self._cache:
             return self._cache[cache_key]
+        if not self._tq:
+            return default
         try:
-            result = self._tq.get_stock_list_in_sector(block_code=block_code)
-            self._cache[cache_key] = result
-            return result
-        except Exception:
-            return []
+            return self._cache.setdefault(cache_key, getattr(self._tq, sdk_method)(*sdk_args, **sdk_kwargs))
+        except Exception as e:
+            logger.debug("TqSdkBridge.%s failed: %s", method_name, e)
+            return default
+    def get_block_list(self) -> List[str]:
+        return self._call_cached("get_block_list")
+    def get_block_members(self, block_code: str) -> List[str]:
+        return self._call_cached("get_block_members", (block_code,), block_code=block_code)
 
     def eval_formula(self, formula_text: str, codes: List[str], period: int) -> Dict:
         if not codes:
@@ -7639,82 +7641,42 @@ class TqSdkBridge:
         return all_data
 
     def get_sector_list(self, list_type=1) -> List[Dict]:
-        cache_key = f'sector_list_{list_type}'
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-        if not self._tq:
-            return []
-        try:
-            result = self._tq.get_sector_list(list_type=list_type)
-            self._cache[cache_key] = result
-            return result
-        except Exception as e:
-            logger.debug("TqSdkBridge.get_sector_list failed: %s", e)
-            return []
-
+        return self._call_cached("get_sector_list", (list_type,), list_type=list_type)
     def get_stock_list_in_sector(self, sector_code, block_type=0, **kwargs) -> List[str]:
-        cache_key = f'stock_list_in_sector_{sector_code}_{block_type}'
-        if cache_key in self._cache:
-            return self._cache[cache_key]
+        return self._call_cached("get_stock_list_in_sector", (sector_code, block_type),
+                                 sector_code, block_type=block_type, **kwargs)
+
+    _SIMPLE_TQ_CALLS: Dict[str, str] = {
+        "send_user_block": "send_user_block",
+        "create_sector": "create_sector",
+        "clear_sector": "clear_sector",
+        "formula_process_mul_xg": "formula_process_mul_xg",
+        "formula_process_mul_zb": "formula_process_mul_zb",
+    }
+
+    def _call_simple(self, method_name, **kwargs):
         if not self._tq:
-            return []
+            return None
         try:
-            result = self._tq.get_stock_list_in_sector(sector_code, block_type=block_type, **kwargs)
-            self._cache[cache_key] = result
-            return result
+            return getattr(self._tq, self._SIMPLE_TQ_CALLS[method_name])(**kwargs)
         except Exception as e:
-            logger.debug("TqSdkBridge.get_stock_list_in_sector failed: %s", e)
-            return []
+            logger.debug("TqSdkBridge.%s failed: %s", method_name, e)
+            return None
 
     def send_user_block(self, block_code, stocks, show=True):
-        if not self._tq:
-            return None
-        try:
-            result = self._tq.send_user_block(block_code=block_code, stocks=stocks, show=show)
-            return result
-        except Exception as e:
-            logger.debug("TqSdkBridge.send_user_block failed: %s", e)
-            return None
+        return self._call_simple("send_user_block", block_code=block_code, stocks=stocks, show=show)
 
     def create_sector(self, block_code, block_name):
-        if not self._tq:
-            return None
-        try:
-            result = self._tq.create_sector(block_code=block_code, block_name=block_name)
-            return result
-        except Exception as e:
-            logger.debug("TqSdkBridge.create_sector failed: %s", e)
-            return None
+        return self._call_simple("create_sector", block_code=block_code, block_name=block_name)
 
     def clear_sector(self, block_code):
-        if not self._tq:
-            return None
-        try:
-            result = self._tq.clear_sector(block_code=block_code)
-            return result
-        except Exception as e:
-            logger.debug("TqSdkBridge.clear_sector failed: %s", e)
-            return None
+        return self._call_simple("clear_sector", block_code=block_code)
 
     def formula_process_mul_xg(self, **kwargs):
-        if not self._tq:
-            return None
-        try:
-            result = self._tq.formula_process_mul_xg(**kwargs)
-            return result
-        except Exception as e:
-            logger.debug("TqSdkBridge.formula_process_mul_xg failed: %s", e)
-            return None
+        return self._call_simple("formula_process_mul_xg", **kwargs)
 
     def formula_process_mul_zb(self, **kwargs):
-        if not self._tq:
-            return None
-        try:
-            result = self._tq.formula_process_mul_zb(**kwargs)
-            return result
-        except Exception as e:
-            logger.debug("TqSdkBridge.formula_process_mul_zb failed: %s", e)
-            return None
+        return self._call_simple("formula_process_mul_zb", **kwargs)
 
 
 # ===========================================================================
@@ -8280,128 +8242,90 @@ class TqProvider(DataSourceProvider):
     def get_mode_info(self) -> str:
         return "tq"
 
-    # 行情数据
+    _FORWARD_SPECS: Dict[str, Tuple[Any, Tuple[str, ...]]] = {
+        "resolve_market": ({}, ()), "get_snapshot": ({}, ()), "get_market_snapshot": ({}, ()),
+        "get_kline_data": ({}, ()), "get_block_members": ([], ()), "get_stock_list_by_type": ([], ()),
+        "get_stock_list": ([], ()), "get_stock_info": ({}, ()), "get_sector_list": ([], ()),
+        "get_sector_stocks": ([], ()), "get_stock_list_in_sector": ([], ()), "eval_indicator": ({}, ()),
+        "send_user_block": ({"success": False}, ()), "create_sector": ({"success": False}, ()),
+        "clear_sector": ({"success": False}, ()), "get_financial_data": ({}, ()),
+        "get_replay_data": ({}, ()), "resample_kline": ([], ()),
+        "eval_formula_zb": ({"success": False, "result": {}, "result_detail": {}}, ()),
+        "eval_formula_xg": ({"success": False, "result": {}, "selected_codes": []}, ()),
+    }
+
+    def _forward(self, method_name: str, *args, **kwargs):
+        if self._bridge is None:
+            return self._FORWARD_SPECS[method_name][0]
+        return getattr(self._bridge, method_name)(*args, **kwargs)
 
     def resolve_market(self, markets) -> Dict[str, List[str]]:
-        if self._bridge is None:
-            return {}
-        return self._bridge.resolve_market(markets)
+        return self._forward("resolve_market", markets)
 
     def get_kline_data(self, codes, period=None, start_date=None, end_date=None, **kwargs) -> Dict:
-        if self._bridge is None:
-            return {}
-        return self._bridge.get_kline_data(codes, period=period,
-                                            start_date=start_date, end_date=end_date, **kwargs)
+        return self._forward("get_kline_data", codes, period=period, start_date=start_date,
+                             end_date=end_date, **kwargs)
 
     def get_snapshot(self, codes) -> Dict[str, Dict]:
-        if self._bridge is None:
-            return {}
-        return self._bridge.get_snapshot(codes)
+        return self._forward("get_snapshot", codes)
 
     def get_market_snapshot(self, codes) -> Dict[str, Dict]:
-        if self._bridge is None:
-            return {}
-        return self._bridge.get_market_snapshot(codes)
-
-    # 板块 / 股票列表
+        return self._forward("get_market_snapshot", codes)
 
     def get_block_members(self, block_code, **kwargs) -> List[str]:
-        if self._bridge is None:
-            return []
-        return self._bridge.get_block_members(block_code, **kwargs)
+        return self._forward("get_block_members", block_code, **kwargs)
 
     def get_stock_list_by_type(self, list_type, **kwargs) -> List[str]:
-        if self._bridge is None:
-            return []
-        return self._bridge.get_stock_list_by_type(list_type, **kwargs)
+        return self._forward("get_stock_list_by_type", list_type, **kwargs)
 
     def get_stock_list(self, market_id, **kwargs) -> List[str]:
-        if self._bridge is None:
-            return []
-        return self._bridge.get_stock_list(market_id, **kwargs)
+        return self._forward("get_stock_list", market_id, **kwargs)
 
     def get_stock_info(self, codes) -> Dict:
-        if self._bridge is None:
-            return {}
-        return self._bridge.get_stock_info(codes)
+        return self._forward("get_stock_info", codes)
 
     def get_sector_list(self, list_type=0, **kwargs) -> List:
-        if self._bridge is None:
-            return []
-        return self._bridge.get_sector_list(list_type=list_type, **kwargs)
+        return self._forward("get_sector_list", list_type=list_type, **kwargs)
 
     def get_sector_stocks(self, sector_code, **kwargs) -> List:
-        if self._bridge is None:
-            return []
-        return self._bridge.get_sector_stocks(sector_code, **kwargs)
+        return self._forward("get_sector_stocks", sector_code, **kwargs)
 
     def get_stock_list_in_sector(self, sector_code, **kwargs) -> List:
-        if self._bridge is None:
-            return []
-        return self._bridge.get_stock_list_in_sector(sector_code, **kwargs)
-
-    # 公式评估
+        return self._forward("get_stock_list_in_sector", sector_code, **kwargs)
 
     def eval_indicator(self, formula_text, stock_list=None, **kwargs) -> Dict:
-        if self._bridge is None:
-            return {}
-        return self._bridge.eval_indicator(formula_text, stock_list=stock_list, **kwargs)
+        return self._forward("eval_indicator", formula_text, stock_list=stock_list, **kwargs)
 
-    def eval_formula_zb(self, formula_name, formula_arg='', stock_list=None,
-                        period='1d', count=5, dividend_type=1,
-                        return_count=1, return_date=False,
-                        xsflag=6, start_time='', end_time='') -> Dict:
-        if self._bridge is None:
-            return {"success": False, "result": {}, "result_detail": {}}
-        return self._bridge.eval_formula_zb(formula_name, formula_arg=formula_arg,
-                                             stock_list=stock_list, period=period,
-                                             count=count, dividend_type=dividend_type,
-                                             return_count=return_count, return_date=return_date,
-                                             xsflag=xsflag, start_time=start_time, end_time=end_time)
-
-    def eval_formula_xg(self, formula_name, formula_arg='', stock_list=None,
-                        period='1d', count=0, dividend_type=1,
+    def eval_formula_zb(self, formula_name, formula_arg='', stock_list=None, period='1d', count=5,
+                        dividend_type=1, return_count=1, return_date=False, xsflag=6,
                         start_time='', end_time='') -> Dict:
-        if self._bridge is None:
-            return {"success": False, "result": {}, "selected_codes": []}
-        return self._bridge.eval_formula_xg(formula_name, formula_arg=formula_arg,
-                                             stock_list=stock_list, period=period,
-                                             count=count, dividend_type=dividend_type,
-                                             start_time=start_time, end_time=end_time)
+        return self._forward("eval_formula_zb", formula_name, formula_arg=formula_arg, stock_list=stock_list,
+                             period=period, count=count, dividend_type=dividend_type, return_count=return_count,
+                             return_date=return_date, xsflag=xsflag, start_time=start_time, end_time=end_time)
 
-    # 板块操作
+    def eval_formula_xg(self, formula_name, formula_arg='', stock_list=None, period='1d', count=0,
+                        dividend_type=1, start_time='', end_time='') -> Dict:
+        return self._forward("eval_formula_xg", formula_name, formula_arg=formula_arg, stock_list=stock_list,
+                             period=period, count=count, dividend_type=dividend_type,
+                             start_time=start_time, end_time=end_time)
 
     def send_user_block(self, block_code, stocks, show=True) -> Dict:
-        if self._bridge is None:
-            return {"success": False}
-        return self._bridge.send_user_block(block_code, stocks, show=show)
+        return self._forward("send_user_block", block_code, stocks, show=show)
 
     def create_sector(self, block_code, block_name) -> Dict:
-        if self._bridge is None:
-            return {"success": False}
-        return self._bridge.create_sector(block_code, block_name)
+        return self._forward("create_sector", block_code, block_name)
 
     def clear_sector(self, block_code) -> Dict:
-        if self._bridge is None:
-            return {"success": False}
-        return self._bridge.clear_sector(block_code)
-
-    # 财务 / 回放 / 重采样
+        return self._forward("clear_sector", block_code)
 
     def get_financial_data(self, codes, fields) -> Dict:
-        if self._bridge is None:
-            return {}
-        return self._bridge.get_financial_data(codes, fields)
+        return self._forward("get_financial_data", codes, fields)
 
     def get_replay_data(self, codes, current_time, period='1min') -> Dict[str, List[Dict]]:
-        if self._bridge is None:
-            return {}
-        return self._bridge.get_replay_data(codes, current_time, period=period)
+        return self._forward("get_replay_data", codes, current_time, period=period)
 
     def resample_kline(self, kline_data, target_period) -> List[Dict]:
-        if self._bridge is None:
-            return []
-        return self._bridge.resample_kline(kline_data, target_period)
+        return self._forward("resample_kline", kline_data, target_period)
 
 
 def _get_full_mock_provider(bus: Optional[EventBus] = None) -> DataSourceProvider:

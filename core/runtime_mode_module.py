@@ -1190,20 +1190,16 @@ class RuntimeSimulator:
         for k in ("close", "price", "p", "now", "inprice"):
             v = d.get(k)
             if v not in _INVALID:
-                try:
-                    price = float(v)
+                if (p := safe_float(v, None)) is not None:
+                    price = p
                     break
-                except (TypeError, ValueError):
-                    continue
         if not price:
             for k in ("current_price", "entry_price"):
                 v = tracker.get(k)
                 if v:
-                    try:
-                        price = float(v)
+                    if (p := safe_float(v, None)) is not None:
+                        price = p
                         break
-                    except (TypeError, ValueError):
-                        continue
         rise = d.get("rise", d.get("change_pct"))
         if rise in _INVALID:
             entry = tracker.get("entry_price", 0)
@@ -2016,10 +2012,9 @@ class RuntimeSimulator:
         if not s:
             raise ValueError("时间表达不能为空")
         # 1) 纯数字 → 直接当作秒数
-        try:
-            return float(s)
-        except (TypeError, ValueError):
-            pass
+        r = safe_float(s, None)
+        if r is not None:
+            return r
         # 2) 替换分隔符后解析
         normalized = s.replace("/", "-").replace("T", " ").replace("_", " ")
         # 3) "HH:MM:SS" 或 "HH:MM"

@@ -1,9 +1,9 @@
-"""metatest v5 量化测试运行器（20 维 + MetaDispatcher 统一 + 运行时验证 + 跨模块 import 纪律）。
+"""metatest v6 量化测试运行器（21 维 + MetaDispatcher 统一 + 运行时验证 + 跨模块 import + adapter 转发同构）。
 
 运行 ``metatest/`` 目录下所有 ``test_*.py``，采集真实测试结果与量化数据，
 调用 ``ScoringEngine`` 计算加权总分，输出量化评分报告。
 
-v5 20 维评分（与 scoring.py v5 对齐）：v4 16 维权重等比降权至 80% + v5 新增 4 维各 5%。
+v6 21 维评分（与 scoring.py v6 对齐）：v5 20 维权重等比降权 4%（每维 × 0.96）+ v6 新增第 21 维 adapter_isomorphism 占 4%。
   --- v4 16 维（降权至 80%）---
    1. module_coverage            5.6%   覆盖模块数 / 17 * 100
    2. test_pass_rate            10.4%   通过测试数 / 总测试数 * 100（跳过计为失败）
@@ -26,12 +26,14 @@ v5 20 维评分（与 scoring.py v5 对齐）：v4 16 维权重等比降权至 8
   18. runtime_verification       5.0%   3 个 in-process 运行时验证测试通过率
   19. eventtest_regression       5.0%   eventtest 退出码 0 满分
   20. cross_module_import_discipline 5.0% 8 处跨模块 import 违规模式零匹配
+  --- v6 新增 1 维（v5 20 维降权 4%）---
+  21. adapter_isomorphism        4.0%   TqProvider/TqSdkBridge 转发方法表驱动覆盖率 ≥ 80% 满分，线性衰减
 
-v5 严格规则：
+v6 严格规则：
   - 跳过测试计为失败（不在 passed 分子）
   - 前端 E2E 环境缺失计 frontend_e2e_passed=0，scoring 给予最低达标线 80
-  - 20 维分数均需 ≥ 80 才达标
-  - 总分 ≥ 95 且 20 维均 ≥ 80 判定 PASS
+  - 21 维分数均需 ≥ 80 才达标
+  - 总分 ≥ 95 且 21 维均 ≥ 80 判定 PASS
   - essence_ratio ≤ 0 触发 redo（强制「合并非拆分」硬约束）
 
 数据采集方式（禁止硬编码，所有评分由真实 Grep/AST/行数统计计算）：
@@ -55,12 +57,14 @@ v5 严格规则：
   - eventtest_regression：subprocess 运行 ``python -m eventtest.run_eventtest`` 采集退出码
   - cross_module_import_discipline：Grep 8 处违规模式（7 业务模块禁 import table_engine +
     execution 禁 import screening_module）
+  - adapter_isomorphism：Grep 3 通用转发器（_forward/_call_cached/_call_simple）+
+    AST 统计 _FORWARD_SPECS/_CACHED_TQ_CALLS/_SIMPLE_TQ_CALLS 三表条目数 → 表驱动覆盖率
 
 运行方式：
     python -m metatest.runner
 
 退出码：
-    0 = 总分 ≥ 95 且 20 维均 ≥ 80（PASS）或无测试文件
+    0 = 总分 ≥ 95 且 21 维均 ≥ 80（PASS）或无测试文件
     1 = 总分 < 95 或有维度 < 80（FAIL）或有测试失败
 """
 from __future__ import annotations
@@ -1886,6 +1890,65 @@ def _collect_cross_module_import_discipline() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# v6 新增 1 维数据采集（adapter 转发同构：TqProvider/TqSdkBridge 表驱动覆盖率）
+# ---------------------------------------------------------------------------
+
+
+def _count_class_table_entries(file_path: Path, table_name: str) -> int:
+    """AST 统计类级表（AnnAssign dict 字面量）的条目数。
+
+    用于 ``_FORWARD_SPECS`` / ``_CACHED_TQ_CALLS`` / ``_SIMPLE_TQ_CALLS`` 三表
+    条目计数——这些表以 ``_NAME: Dict[...] = {...}`` 形式定义于类体，AST 解析
+    AnnAssign.value 为 ast.Dict 时返回其键数。
+    """
+    tree = _parse_ast(file_path)
+    if tree is None:
+        return 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for stmt in node.body:
+            if (isinstance(stmt, ast.AnnAssign)
+                    and isinstance(stmt.target, ast.Name)
+                    and stmt.target.id == table_name
+                    and isinstance(stmt.value, ast.Dict)):
+                return len(stmt.value.keys)
+    return 0
+
+
+def _collect_adapter_isomorphism() -> Dict[str, Any]:
+    """采集 adapter 转发同构数据（SubTask 8.1）。
+
+    Grep 3 个通用转发器方法（``_forward`` / ``_call_cached`` / ``_call_simple``）
+    定义数 + AST 统计三表条目数 → 表驱动覆盖率。仅当对应通用转发器存在时，
+    该表条目计为已表驱动覆盖；覆盖率 = 已覆盖 / 总转发方法数 × 100。
+    """
+    providers_file = _SERVICES_DIR / "providers.py"
+    fwd = _grep_count_in_file(r"def _forward\b", providers_file)
+    cached_m = _grep_count_in_file(r"def _call_cached\b", providers_file)
+    simple_m = _grep_count_in_file(r"def _call_simple\b", providers_file)
+    forward_n = _count_class_table_entries(providers_file, "_FORWARD_SPECS")
+    cached_n = _count_class_table_entries(providers_file, "_CACHED_TQ_CALLS")
+    simple_n = _count_class_table_entries(providers_file, "_SIMPLE_TQ_CALLS")
+    covered = (
+        (forward_n if fwd else 0)
+        + (cached_n if cached_m else 0)
+        + (simple_n if simple_m else 0)
+    )
+    total = forward_n + cached_n + simple_n
+    coverage = (covered / total * 100.0) if total > 0 else 0.0
+    return {
+        "generic_method_count": fwd + cached_m + simple_m,
+        "forward_specs_entries": forward_n,
+        "cached_tq_calls_entries": cached_n,
+        "simple_tq_calls_entries": simple_n,
+        "total_forward_methods": total,
+        "covered_methods": covered,
+        "coverage": round(coverage, 2),
+    }
+
+
+# ---------------------------------------------------------------------------
 # v3 补充维度评分（当 scoring.py 尚未升级到 v3 时使用）
 # ---------------------------------------------------------------------------
 
@@ -1999,10 +2062,10 @@ def _print_report(
     duration: float,
     no_tests: bool,
 ) -> None:
-    """打印 v5 20 维量化评分报告。"""
+    """打印 v6 21 维量化评分报告。"""
     sep = "=" * 60
     print(sep)
-    print("=== metatest v5 量化评分报告（20 维 + MetaDispatcher 统一 + 运行时验证）===")
+    print("=== metatest v6 量化评分报告（21 维 + MetaDispatcher 统一 + 运行时验证 + adapter 转发同构）===")
     print(sep)
     print()
 
@@ -2162,6 +2225,12 @@ def _print_report(
     if cm_v5:
         print(f"                → 得分 {cm_v5.score:.1f}/100 — {cm_v5.details}")
 
+    # --- v6 新增 1 维（adapter 转发同构） ---
+    ai_v6 = dim_map.get("adapter_isomorphism")
+    print(f"adapter 转发同构: (权重 4.0%, TqProvider/TqSdkBridge 表驱动覆盖率 ≥ 80%)")
+    if ai_v6:
+        print(f"                → 得分 {ai_v6.score:.1f}/100 — {ai_v6.details}")
+
     # --- 运行时三核 Dispatcher 元统一（第四层洞察根因解释层） ---
     mu = test_results.get("meta_unification", {}) or {}
     if mu:
@@ -2184,6 +2253,9 @@ def _print_report(
         print(f"  EventBus 继承 Meta:     {'是' if mu.get('eventbus_inherits_meta') else '否'}")
         print(f"  ConfigStore 继承 Meta:  {'是' if mu.get('configstore_inherits_meta') else '否'}")
         print(f"  EventDriver 独立:       {'是' if mu.get('eventdriver_independent') else '否'}")
+        # v6 新增字段：adapter 转发覆盖率
+        print(f"  adapter 转发覆盖率:     {mu.get('adapter_forward_coverage', 0.0):.1f}%"
+              f"（目标 ≥ 80%）")
 
     print()
     print("─" * 40)
@@ -2222,7 +2294,7 @@ def _build_report_dict(
     duration: float,
     no_tests: bool,
 ) -> Dict[str, Any]:
-    """构建 report.json 的字典结构（含 20 维明细 + 总分 + PASS/FAIL + redo_list + meta_unification 根因解释层）。"""
+    """构建 report.json 的字典结构（含 21 维明细 + 总分 + PASS/FAIL + redo_list + meta_unification 根因解释层）。"""
     return {
         "total_score": report.total_score,
         "passed": report.passed,
@@ -2270,10 +2342,10 @@ def _write_report_json(report_dict: Dict[str, Any], path: Path) -> None:
 
 
 def main() -> int:
-    """运行 metatest 测试套件并输出 v4 16 维量化评分报告。
+    """运行 metatest 测试套件并输出 v6 21 维量化评分报告。
 
     Returns:
-        0 = 总分 ≥ 95 且 16 维均 ≥ 80（PASS）或无测试文件；1 = FAIL。
+        0 = 总分 ≥ 95 且 21 维均 ≥ 80（PASS）或无测试文件；1 = FAIL。
     """
     metatest_dir = Path(__file__).resolve().parent
     test_files = _discover_test_files(metatest_dir)
@@ -2395,11 +2467,16 @@ def main() -> int:
     eventtest_regression = _collect_eventtest_regression()
     cross_module_import_discipline = _collect_cross_module_import_discipline()
 
+    # v6 新增 1 维数据采集（adapter 转发同构：TqProvider/TqSdkBridge 表驱动覆盖率）
+    adapter_isomorphism = _collect_adapter_isomorphism()
+
     # v5: meta_unification 新增 4 字段（从 dispatcher_isomorphism 提取）
     meta_unification["meta_dispatcher_exists"] = dispatcher_isomorphism["meta_dispatcher_exists"]
     meta_unification["eventbus_inherits_meta"] = dispatcher_isomorphism["eventbus_inherits_meta"]
     meta_unification["configstore_inherits_meta"] = dispatcher_isomorphism["configstore_inherits_meta"]
     meta_unification["eventdriver_independent"] = dispatcher_isomorphism["eventdriver_independent"]
+    # v6: meta_unification 新增 adapter 转发覆盖率（从 adapter_isomorphism 提取）
+    meta_unification["adapter_forward_coverage"] = adapter_isomorphism["coverage"]
 
     # 构建 test_results 字典供 ScoringEngine 使用（含 v3/v4/v5 新增字段）
     test_results: Dict[str, Any] = {
@@ -2441,6 +2518,8 @@ def main() -> int:
         "runtime_verification": runtime_verification,
         "eventtest_regression": eventtest_regression,
         "cross_module_import_discipline": cross_module_import_discipline,
+        # --- v6 新增 1 维字段 ---
+        "adapter_isomorphism": adapter_isomorphism,
     }
 
     # 计算评分
@@ -2483,7 +2562,7 @@ def main() -> int:
     _write_report_json(report_dict, report_path)
     print(f"报告已写入: {report_path}")
 
-    # 退出码：PASS（总分 ≥ 95 且 16 维均 ≥ 80）或无测试文件返回 0，否则返回 1
+    # 退出码：PASS（总分 ≥ 95 且 21 维均 ≥ 80）或无测试文件返回 0，否则返回 1
     if no_tests:
         return 0
     return 0 if report.passed else 1

@@ -1,58 +1,65 @@
-# metatest v5 严格正反合量化测试套件
+# metatest v6 严格正反合量化测试套件
 
 ## 概述
 
-metatest v5 是股票池平台的严格正反合量化测试套件，覆盖前端与后端所有模块。
-v5 在 v4 16 维基础上扩展为 **20 维**加权评分：v4 16 维等比降权至 80%（每维 × 0.8），
-新增 4 维各 5%（dispatcher_isomorphism / runtime_verification / eventtest_regression /
-cross_module_import_discipline），权重重新分配至总和 = 100%。
+metatest v6 是股票池平台的严格正反合量化测试套件，覆盖前端与后端所有模块。
+v6 在 v5 20 维基础上扩展为 **21 维**加权评分：v5 20 维等比降权 4%（每维 × 0.96），
+新增第 21 维 adapter_isomorphism 占 4%（TqProvider/TqSdkBridge 转发方法表驱动覆盖率），
+权重重新分配至总和 = 100%。
 
-**第五层洞察（MetaDispatcher 统一，DDD 元模式投影）**：v4 第四层洞察提出
-`Code = Data + Dispatcher` 三核（EventBus / EventDriver / ConfigStore），v5 进一步
-抽取 `MetaDispatcher` 抽象基类，将 EventBus（扇出子类）与 ConfigStore（查找子类）
-统一为 `register-store-dispatch` 元模式投影，EventDriver 因 heapq 时序特化保持独立。
-公理升级为 `Code = Data + MetaDispatcher`。
+**第六层洞察（adapter 转发同构，外部 SDK 适配器元模式投影）**：TqProvider/TqSdkBridge
+转发同构本质是 MetaDispatcher 之外的「声明 Data（方法名→默认值映射）+ Dispatcher
+（通用转发器）」元模式投影。v6 将 20 个 TqProvider 转发方法收敛为 `_FORWARD_SPECS` 表 +
+`_forward` 通用器，4 个 A 组缓存方法收敛为 `_CACHED_TQ_CALLS` 表 + `_call_cached` 通用器，
+5 个 B 组简单方法收敛为 `_SIMPLE_TQ_CALLS` 表 + `_call_simple` 通用器（共 29 方法 / 3 通用器），
+闭合 v5 SubTask 14.5 未竟目标，是元模式收敛的「最后一公里」。
 
-门槛：总分 ≥ 95 且 20 维均 ≥ 80 判定 PASS。
+门槛：总分 ≥ 95 且 21 维均 ≥ 80 判定 PASS。
 
-## 20 维评分规则与权重
+## 21 维评分规则与权重
 
 权重总和 = 100%，总分 = Σ（维度得分 × 权重）。
 
-### v4 16 维（等比降权至 80%，每维 × 0.8）
+### v4 16 维（v6 等比降权至 96%，每维 × 0.96）
 
 | 序号 | 维度 | 权重 | 评分逻辑 |
 |---|---|---|---|
-| 1 | module_coverage | 5.6% | 覆盖模块数 / 17 × 100 |
-| 2 | test_pass_rate | 10.4% | 通过数 / 总数 × 100（跳过计为失败） |
-| 3 | assertion_density | 4.0% | 断言数 / (测试文件数 × 20) × 100 |
-| 4 | event_chain_integrity | 6.4% | 出现事件类型数 / 10 × 100（链顺序错误扣 20%） |
-| 5 | performance_benchmark | 4.0% | 1000 tick 耗时 ≤ 10s 满分，线性衰减 |
-| 6 | frontend_e2e_pass_rate | 5.6% | 前端 E2E 真实通过数 / 总数 × 100（环境缺失给最低达标线 80） |
-| 7 | logic_coverage | 4.0% | 5 项底层逻辑验证通过数 / 5 × 100 |
-| 8 | isomorphism_elimination | 7.2% | 40 项同构代码 Grep 检查，0 违规满分 |
-| 9 | line_convergence | 4.0% | 核心模块总行数 ≤ 22500 满分，线性衰减 |
-| 10 | rule_compliance | 2.4% | RULES 91-100 Grep 违规数 / 10，0 违规满分 |
-| 11 | negative_test_coverage | 1.6% | 4 类反测试用例数 / 目标数（每类 ≥ 8）均值 × 100 |
-| 12 | synthesis_e2e | 2.4% | 合测试通过数 / 总数 × 100 |
-| 13 | oop_inheritance_depth | 6.4% | BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类 + 子类仅差异 |
-| 14 | polling_zero_tolerance | 6.4% | 12 处轮询模式 Grep 零匹配 + EventDriver heapq 验证 + 前端 setInterval fetch 零匹配 |
-| 15 | primitive_convergence | 6.4% | 三原语覆盖率（时间/分派/继承各 ≥ 95% 满分） |
-| 16 | essence_ratio | 3.2% | 净减行数 / 变更前行数 × 100（目标 ≥ 12%，净增 = 0 触发 redo） |
+| 1 | module_coverage | 5.376% | 覆盖模块数 / 17 × 100 |
+| 2 | test_pass_rate | 9.984% | 通过数 / 总数 × 100（跳过计为失败） |
+| 3 | assertion_density | 3.84% | 断言数 / (测试文件数 × 20) × 100 |
+| 4 | event_chain_integrity | 6.144% | 出现事件类型数 / 10 × 100（链顺序错误扣 20%） |
+| 5 | performance_benchmark | 3.84% | 1000 tick 耗时 ≤ 10s 满分，线性衰减 |
+| 6 | frontend_e2e_pass_rate | 5.376% | 前端 E2E 真实通过数 / 总数 × 100（环境缺失给最低达标线 80） |
+| 7 | logic_coverage | 3.84% | 5 项底层逻辑验证通过数 / 5 × 100 |
+| 8 | isomorphism_elimination | 6.912% | 40 项同构代码 Grep 检查，0 违规满分 |
+| 9 | line_convergence | 3.84% | 核心模块总行数 ≤ 22500 满分，线性衰减 |
+| 10 | rule_compliance | 2.304% | RULES 91-100 Grep 违规数 / 10，0 违规满分 |
+| 11 | negative_test_coverage | 1.536% | 4 类反测试用例数 / 目标数（每类 ≥ 8）均值 × 100 |
+| 12 | synthesis_e2e | 2.304% | 合测试通过数 / 总数 × 100 |
+| 13 | oop_inheritance_depth | 6.144% | BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类 + 子类仅差异 |
+| 14 | polling_zero_tolerance | 6.144% | 12 处轮询模式 Grep 零匹配 + EventDriver heapq 验证 + 前端 setInterval fetch 零匹配 |
+| 15 | primitive_convergence | 6.144% | 三原语覆盖率（时间/分派/继承各 ≥ 95% 满分） |
+| 16 | essence_ratio | 3.072% | 净减行数 / 变更前行数 × 100（目标 ≥ 12%，净增 = 0 触发 redo） |
 
-### v5 新增 4 维（各 5%）
+### v5 新增 4 维（v6 降权至 96%，各 4.8%）
 
 | 序号 | 维度 | 权重 | 评分逻辑 |
 |---|---|---|---|
-| 17 | dispatcher_isomorphism | 5.0% | MetaDispatcher 基类存在（25%）+ EventBus 继承（25%）+ ConfigStore 继承（25%）+ EventDriver 独立 + 公共骨架行数占比 ≥ 60%（25%）；详见 §MetaDispatcher 统一 |
-| 18 | runtime_verification | 5.0% | 3 个 in-process 运行时验证测试通过率（replay/simulation/mode-switch），全绿 = 100，否则 0；详见 §运行时验证 harness |
-| 19 | eventtest_regression | 5.0% | `python -m eventtest.run_eventtest` 退出码 0（全绿）= 100，否则 0 |
-| 20 | cross_module_import_discipline | 5.0% | 8 处跨模块 import 违规模式 Grep 零匹配 = 100，每违规扣 12.5；详见 §跨模块 import 纪律 |
+| 17 | dispatcher_isomorphism | 4.8% | MetaDispatcher 基类存在（25%）+ EventBus 继承（25%）+ ConfigStore 继承（25%）+ EventDriver 独立 + 公共骨架行数占比 ≥ 60%（25%）；详见 §MetaDispatcher 统一 |
+| 18 | runtime_verification | 4.8% | 3 个 in-process 运行时验证测试通过率（replay/simulation/mode-switch），全绿 = 100，否则 0；详见 §运行时验证 harness |
+| 19 | eventtest_regression | 4.8% | `python -m eventtest.run_eventtest` 退出码 0（全绿）= 100，否则 0 |
+| 20 | cross_module_import_discipline | 4.8% | 8 处跨模块 import 违规模式 Grep 零匹配 = 100，每违规扣 12.5；详见 §跨模块 import 纪律 |
+
+### v6 新增 1 维（4%，v5 20 维降权 4% 释放）
+
+| 序号 | 维度 | 权重 | 评分逻辑 |
+|---|---|---|---|
+| 21 | adapter_isomorphism | 4.0% | TqProvider/TqSdkBridge 转发方法表驱动覆盖率 ≥ 80% 满分，线性衰减；覆盖率 = 表驱动覆盖方法数 / 总转发方法数 × 100（_FORWARD_SPECS + _CACHED_TQ_CALLS + _SIMPLE_TQ_CALLS 三表条目 / 总数，3 通用转发器 _forward/_call_cached/_call_simple 各覆盖其表）；详见 §adapter 转发同构 |
 
 ### PASS 条件
 
 - 总分 ≥ 95
-- 20 维均 ≥ 80（redo_list 为空）
+- 21 维均 ≥ 80（redo_list 为空）
 - 严格规则：跳过测试计为失败；前端 E2E 环境缺失给最低达标线 80（环境问题非代码问题）；无任何硬编码信用分
 
 ## MetaDispatcher 统一（第五层洞察，`dispatcher_isomorphism` 维度）
@@ -105,13 +112,30 @@ v5 阶段 2 闭合 v4 沙箱缺口 34.12（replay 步进）/ 34.13（simulation 
 
 反测试 `test_negative_cross_module_import.py` 断言 8 处违规模式 0 匹配。
 
+## adapter 转发同构（第六层洞察，`adapter_isomorphism` 维度）
+
+TqProvider / TqSdkBridge 转发同构本质是 MetaDispatcher 之外的「声明 Data（方法名→默认值
+映射）+ Dispatcher（通用转发器）」元模式投影。v6 将三组同构转发方法收敛为表 + 通用器：
+
+| 通用转发器 | 表 | 覆盖方法数 | 表条目（method→default/sdk 映射） |
+|---|---|---|---|
+| `_forward` | `_FORWARD_SPECS` | 20 | TqProvider 20 个转发方法 → (default, kw 参数元组) |
+| `_call_cached` | `_CACHED_TQ_CALLS` | 4 | TqSdkBridge A 组缓存方法 → (cache_key 模板, sdk 方法, 默认值) |
+| `_call_simple` | `_SIMPLE_TQ_CALLS` | 5 | TqSdkBridge B 组简单方法 → sdk 方法名 |
+
+覆盖率 = 表驱动覆盖方法数 / 总转发方法数 × 100 = 29 / 29 × 100 = 100%（3 通用转发器
+均存在时三表条目计为已覆盖）。覆盖率 ≥ 80% 满分，线性衰减。
+
+正测试 `test_positive_adapter_isomorphism.py` 断言：三表存在且条目数达标 +
+三通用转发器方法定义 + 覆盖率 ≥ 80%。
+
 ## 运行方式与退出码
 
 ```bash
 python -m metatest.runner
 ```
 
-- 退出码 0 = 总分 ≥ 95 且 20 维均 ≥ 80（PASS）或无测试文件
+- 退出码 0 = 总分 ≥ 95 且 21 维均 ≥ 80（PASS）或无测试文件
 - 退出码 1 = 总分 < 95 或有维度 < 80（FAIL）或有测试失败
 
 ## 目录结构
@@ -119,27 +143,29 @@ python -m metatest.runner
 ```
 metatest/
 ├── conftest.py                              # 共享 pytest 夹具
-├── scoring.py                               # 20 维量化评分引擎（v5）
-├── runner.py                                # 测试运行器 + 4 维数据采集（含 meta_dispatcher_exists / eventbus_inherits_meta 等字段）
+├── scoring.py                               # 21 维量化评分引擎（v6）
+├── runner.py                                # 测试运行器 + 21 维数据采集（含 adapter_forward_coverage 等字段）
 ├── test_positive_dispatcher_isomorphism.py  # v5 MetaDispatcher 继承断言
 ├── test_positive_runtime_verification.py     # v5 3 个 in-process 测试全绿
 ├── test_negative_cross_module_import.py     # v5 8 处违规模式零匹配
+├── test_positive_adapter_isomorphism.py     # v6 adapter 转发表驱动覆盖率断言
 ├── test_runtime_replay_heapq.py             # v5 harness（replay）
 ├── test_runtime_simulation_heapq.py         # v5 harness（simulation）
 ├── test_runtime_mode_switch.py              # v5 harness（mode-switch）
 ├── test_positive_*.py / test_negative_*.py / test_synthesis_*.py  # v3/v4 正反合
-└── report.json                              # 20 维 + meta_unification 结构化报告
+└── report.json                              # 21 维 + meta_unification 结构化报告
 ```
 
-## v5 严格规则总结
+## v6 严格规则总结
 
 - 跳过测试计为失败（不在 passed 分子）
 - 前端 E2E 环境缺失计 `frontend_e2e_passed=0`，给最低达标线 80（非信用分）
-- 20 维分数均需 ≥ 80 才达标（redo_list 为空）
-- 总分 ≥ 95 且 20 维均 ≥ 80 判定 PASS
+- 21 维分数均需 ≥ 80 才达标（redo_list 为空）
+- 总分 ≥ 95 且 21 维均 ≥ 80 判定 PASS
 - 所有评分由真实测试结果 / Grep / AST / 行数统计计算，无硬编码信用分
 - essence_ratio 净增 = 0 触发 redo（强制「合并非拆分」硬约束）
 - 任一轮询模式 > 5 匹配直接判 0 分（polling 零容忍硬约束）
 - 三原语覆盖率 ≥ 95% 当且仅当 meta_purity ≥ 90%（根因一致性）
 - EventDriver 因 heapq 时序特化保持独立，不继承 MetaDispatcher（dispatcher 同构硬约束）
 - 运行时验证 harness 禁用 `time.sleep` / `asyncio.sleep` 步进（fire_due 推进硬约束）
+- adapter 转发同构覆盖率 ≥ 80% 才达标（v6 新增，外部 SDK 适配器表驱动硬约束）

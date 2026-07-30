@@ -1,10 +1,9 @@
-"""metatest v5 20 维量化评分引擎（MetaDispatcher 统一 + 运行时验证 + 跨模块 import 纪律）。
+"""metatest v6 21 维量化评分引擎（MetaDispatcher 统一 + 运行时验证 + 跨模块 import + adapter 转发同构）。
 
-按「converge-meta-essence-v5-dispatcher-unification」spec 实现 20 维加权评分，
-所有评分完全由 ``test_results`` 字段计算，禁止硬编码信用分。v5 在 v4 16 维基础上
-新增 4 维（dispatcher_isomorphism / runtime_verification / eventtest_regression /
-cross_module_import_discipline），v4 16 维权重等比降权至 80%（每维 × 0.8），
-新增 4 维各占 5%，权重重新分配至总和 = 1.0。
+按「converge-meta-essence-v6-adapter-forwarding」spec 实现 21 维加权评分，
+所有评分完全由 ``test_results`` 字段计算，禁止硬编码信用分。v6 在 v5 20 维基础上
+新增第 21 维 adapter_isomorphism（TqProvider/TqSdkBridge 转发表驱动覆盖率），
+v5 20 维权重等比降权 4%（每维 × 0.96），新增 1 维占 4%，权重总和 = 1.0。
 
   维度                         权重    评分逻辑
   ─────────────────────────── ────── ──────────────────────────────────────
@@ -29,9 +28,11 @@ cross_module_import_discipline），v4 16 维权重等比降权至 80%（每维 
   runtime_verification         5.0%   3 个 in-process 运行时验证测试通过率（replay/simulation/mode-switch）
   eventtest_regression         5.0%   eventtest 退出码 0（全绿）满分，否则 0 分
   cross_module_import_discipline 5.0% 8 处跨模块 import 违规模式 Grep 零匹配
+  --- v6 新增 1 维（v5 20 维降权 4%）---
+  adapter_isomorphism           4.0%   TqProvider/TqSdkBridge 转发方法表驱动覆盖率 ≥ 80% 满分，线性衰减
 
 权重总和 = 1.0。总分 = Σ(维度得分 × 权重)。
-门槛：总分 ≥ 95 且 20 维均 ≥ 80（redo_list 为空）判定 PASS。
+门槛：总分 ≥ 95 且 21 维均 ≥ 80（redo_list 为空）判定 PASS。
 跳过测试计为失败；前端 E2E 环境缺失给予最低达标线 80（环境问题非代码问题）；无任何硬编码信用分。
 """
 from __future__ import annotations
@@ -69,9 +70,9 @@ class ScoreReport:
     """评分报告。
 
     Attributes:
-        dimensions: 20 个维度的评分明细列表
+        dimensions: 21 个维度的评分明细列表
         total_score: 加权总分（0-100）
-        passed: 总分是否 ≥ 门槛（95）且 20 维均 ≥ 80
+        passed: 总分是否 ≥ 门槛（95）且 21 维均 ≥ 80
         deductions: 扣分项描述列表
         redo_list: 需重做的维度名列表（得分 < 80）
     """
@@ -132,16 +133,16 @@ NEGATIVE_TEST_CATEGORIES: Tuple[str, ...] = (
 
 
 class ScoringEngine:
-    """20 维加权评分引擎。
+    """21 维加权评分引擎。
 
-    ``calculate(test_results)`` 接收测试结果字典，计算 20 维加权总分，
-    返回 ``ScoreReport``。总分 ≥ 95 且 20 维均 ≥ 80（redo_list 为空）判定 PASS。
+    ``calculate(test_results)`` 接收测试结果字典，计算 21 维加权总分，
+    返回 ``ScoreReport``。总分 ≥ 95 且 21 维均 ≥ 80（redo_list 为空）判定 PASS。
 
     v5 严格规则：
       - 所有评分完全由 ``test_results`` 字段计算，无硬编码信用分
       - 跳过测试计为失败（分子不含 skipped）
       - 前端 E2E 环境缺失给予最低达标线 80（环境问题非代码问题，不跌穿门槛）
-      - 20 维分数均需 ≥ 80 才达标（redo_list 为空）
+      - 21 维分数均需 ≥ 80 才达标（redo_list 为空）
       - essence_ratio 净增 = 0 触发 redo（强制「合并非拆分」硬约束）
       - v4 16 维权重等比降权至 80%（每维 × 0.8），v5 新增 4 维各占 5%
 
@@ -206,38 +207,40 @@ class ScoringEngine:
         print(report.total_score, report.passed)
     """
 
-    #: 20 维度定义：(维度名, 权重) — 权重总和 = 1.0
-    #: v5: v4 16 维权重等比降权至 80%（每维 × 0.8），新增 4 维各占 5%
+    #: 21 维度定义：(维度名, 权重) — 权重总和 = 1.0
+    #: v6: v5 20 维权重等比降权 4%（每维 × 0.96），新增第 21 维 adapter_isomorphism 占 4%
     DIMENSIONS: List[Tuple[str, float]] = [
-        ("module_coverage", 0.056),           # 模块覆盖率（v4 7%→5.6%）
-        ("test_pass_rate", 0.104),            # 测试通过率（v4 13%→10.4%，跳过计为失败）
-        ("assertion_density", 0.04),          # 断言密度（v4 5%→4%）
-        ("event_chain_integrity", 0.064),     # 事件链完整性（v4 8%→6.4%）
-        ("performance_benchmark", 0.04),      # 性能基准（v4 5%→4%）
-        ("frontend_e2e_pass_rate", 0.056),    # 前端 E2E 真实通过率（v4 7%→5.6%）
-        ("logic_coverage", 0.04),             # 底层逻辑覆盖度（v4 5%→4%）
-        ("isomorphism_elimination", 0.072),   # 同构代码消除度（v4 9%→7.2%，40 项）
-        ("line_convergence", 0.04),           # 核心模块行数收敛（v4 5%→4%，目标 22500）
-        ("rule_compliance", 0.024),           # RULES 91-100 合规（v4 3%→2.4%）
-        ("negative_test_coverage", 0.016),    # 4 类反测试覆盖度（v4 2%→1.6%）
-        ("synthesis_e2e", 0.024),            # 合测试通过率（v4 3%→2.4%）
-        # --- v4 新增 4 维（v5 降权至 80%）---
-        ("oop_inheritance_depth", 0.064),     # OOP 同源继承深度（v4 8%→6.4%）
-        ("polling_zero_tolerance", 0.064),    # 轮询零容忍（v4 8%→6.4%）
-        ("primitive_convergence", 0.064),     # 三原语收敛度（v4 8%→6.4%）
-        ("essence_ratio", 0.032),             # 本质比（v4 4%→3.2%）
-        # --- v5 新增 4 维（各 5%）---
-        ("dispatcher_isomorphism", 0.05),     # MetaDispatcher 统一（基类+继承+独立+骨架占比）
-        ("runtime_verification", 0.05),       # 运行时验证 harness（3 个 in-process 测试通过率）
-        ("eventtest_regression", 0.05),       # eventtest 回归（退出码 0 满分）
-        ("cross_module_import_discipline", 0.05),  # 跨模块 import 纪律（8 处违规模式零匹配）
+        ("module_coverage", 0.05376),         # 模块覆盖率（v5 5.6%→5.376%）
+        ("test_pass_rate", 0.09984),          # 测试通过率（v5 10.4%→9.984%，跳过计为失败）
+        ("assertion_density", 0.0384),        # 断言密度（v5 4%→3.84%）
+        ("event_chain_integrity", 0.06144),   # 事件链完整性（v5 6.4%→6.144%）
+        ("performance_benchmark", 0.0384),    # 性能基准（v5 4%→3.84%）
+        ("frontend_e2e_pass_rate", 0.05376),  # 前端 E2E 真实通过率（v5 5.6%→5.376%）
+        ("logic_coverage", 0.0384),           # 底层逻辑覆盖度（v5 4%→3.84%）
+        ("isomorphism_elimination", 0.06912), # 同构代码消除度（v5 7.2%→6.912%，40 项）
+        ("line_convergence", 0.0384),         # 核心模块行数收敛（v5 4%→3.84%，目标 22500）
+        ("rule_compliance", 0.02304),         # RULES 91-100 合规（v5 2.4%→2.304%）
+        ("negative_test_coverage", 0.01536),  # 4 类反测试覆盖度（v5 1.6%→1.536%）
+        ("synthesis_e2e", 0.02304),           # 合测试通过率（v5 2.4%→2.304%）
+        # --- v4 新增 4 维（v6 降权至 96%）---
+        ("oop_inheritance_depth", 0.06144),   # OOP 同源继承深度（v5 6.4%→6.144%）
+        ("polling_zero_tolerance", 0.06144),  # 轮询零容忍（v5 6.4%→6.144%）
+        ("primitive_convergence", 0.06144),   # 三原语收敛度（v5 6.4%→6.144%）
+        ("essence_ratio", 0.03072),           # 本质比（v5 3.2%→3.072%）
+        # --- v5 新增 4 维（v6 降权至 96%，各 4.8%）---
+        ("dispatcher_isomorphism", 0.048),    # MetaDispatcher 统一（基类+继承+独立+骨架占比）
+        ("runtime_verification", 0.048),      # 运行时验证 harness（3 个 in-process 测试通过率）
+        ("eventtest_regression", 0.048),      # eventtest 回归（退出码 0 满分）
+        ("cross_module_import_discipline", 0.048),  # 跨模块 import 纪律（8 处违规模式零匹配）
+        # --- v6 新增 1 维（4%）---
+        ("adapter_isomorphism", 0.04),        # adapter 转发同构（TqProvider/TqSdkBridge 表驱动覆盖率 ≥ 80%）
     ]
 
     #: 通过门槛：总分 ≥ 95 判定 PASS
     THRESHOLD: float = 95.0
 
     def calculate(self, test_results: Dict[str, Any]) -> ScoreReport:
-        """计算 20 维加权总分。
+        """计算 21 维加权总分。
 
         Args:
             test_results: 测试结果字典，包含以下键：
@@ -278,9 +281,11 @@ class ScoringEngine:
                 - runtime_verification: Dict (passed/total/files)
                 - eventtest_regression: Dict (exit_code)
                 - cross_module_import_discipline: Dict (violations/total_patterns)
+                - adapter_isomorphism: Dict (coverage/total_forward_methods/
+                  covered_methods/generic_method_count)
 
         Returns:
-            ScoreReport: 评分报告（含 20 维明细、总分、PASS/FAIL、扣分项、重做列表）
+            ScoreReport: 评分报告（含 21 维明细、总分、PASS/FAIL、扣分项、重做列表）
         """
         dimensions: List[ScoreDimension] = []
         deductions: List[str] = []
@@ -301,7 +306,7 @@ class ScoringEngine:
                 redo_list.append(name)
 
         total_score = self._weighted_total(dimensions)
-        # v5: PASS 需总分 ≥ 95 且 20 维均 ≥ 80（redo_list 为空）
+        # v6: PASS 需总分 ≥ 95 且 21 维均 ≥ 80（redo_list 为空）
         passed = total_score >= self.THRESHOLD and len(redo_list) == 0
 
         return ScoreReport(
@@ -791,6 +796,34 @@ class ScoringEngine:
             return 0.0, "total_patterns 配置为 0"
         score = max(0.0, 100.0 - (violations * (100.0 / total)))
         detail = f"{violations} 处违规 / {total} 项检查（0 违规满分）"
+        return score, detail
+
+    # ------------------------------------------------------------------
+    # v6 新增 1 维评分逻辑
+    # ------------------------------------------------------------------
+
+    def _score_adapter_isomorphism(self, results: Dict[str, Any]) -> Tuple[float, str]:
+        """adapter 转发同构（v6 新增第 21 维，权重 4%）。
+
+        TqProvider/TqSdkBridge 转发方法表驱动覆盖率 ≥ 80% 满分，线性衰减。
+        覆盖率 = 表驱动覆盖方法数 / 总转发方法数 × 100（三通用转发器
+        ``_forward`` / ``_call_cached`` / ``_call_simple`` 各覆盖其表条目）。
+        所有数据由 runner.py 通过 Grep + AST 采集填入
+        ``test_results["adapter_isomorphism"]``，无硬编码信用分。
+        """
+        ai = results.get("adapter_isomorphism", {}) or {}
+        if not isinstance(ai, dict):
+            return 0.0, "adapter_isomorphism 数据缺失或类型错误"
+        coverage = float(ai.get("coverage", 0.0) or 0.0)
+        total = int(ai.get("total_forward_methods", 0) or 0)
+        covered = int(ai.get("covered_methods", 0) or 0)
+        generic = int(ai.get("generic_method_count", 0) or 0)
+        if total <= 0:
+            return 0.0, "无转发方法（total_forward_methods=0）"
+        # 覆盖率 ≥ 80% 满分，线性衰减
+        score = 100.0 if coverage >= 80.0 else max(0.0, coverage / 80.0 * 100.0)
+        detail = (f"覆盖率={coverage:.1f}%（{covered}/{total} 方法表驱动，"
+                  f"3 通用转发器存在 {generic}/3）")
         return score, detail
 
     # ------------------------------------------------------------------

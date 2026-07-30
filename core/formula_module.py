@@ -31,6 +31,7 @@ from .event_bus import (
 )
 from .domain import load_config_table
 from ._hashing import hash_dict_content, hash_object
+from converters_common import safe_float
 
 logger = logging.getLogger(__name__)
 
@@ -843,11 +844,7 @@ def _get_period_bars(state: Any, period: str = "1d") -> Dict[str, Any]:
                 tick = state_tick.get(code)
                 if isinstance(tick, dict):
                     tick_close = tick.get("close")
-                    if tick_close is not None:
-                        try:
-                            current["close"] = float(tick_close)
-                        except (TypeError, ValueError):
-                            pass
+                    current["close"] = safe_float(tick_close, current.get("close"))
             bars_list.append(current)
         if bars_list:
             result[code] = bars_list
