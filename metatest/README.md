@@ -1,18 +1,22 @@
-# metatest v6 严格正反合量化测试套件
+# metatest v7 严格正反合量化测试套件
 
 ## 概述
 
-metatest v6 是股票池平台的严格正反合量化测试套件，覆盖前端与后端所有模块。
+metatest v7 是股票池平台的严格正反合量化测试套件，覆盖前端与后端所有模块。
 v6 在 v5 20 维基础上扩展为 **21 维**加权评分：v5 20 维等比降权 4%（每维 × 0.96），
 新增第 21 维 adapter_isomorphism 占 4%（TqProvider/TqSdkBridge 转发方法表驱动覆盖率），
-权重重新分配至总和 = 100%。
+权重重新分配至总和 = 100%。v7 在 v6 21 维结构基础上，新增 per-code 循环表
+（`_PER_CODE_TQ_CALLS`）+ 通用器（`_call_cached_per_code`），收敛 get_stock_list
+双签名为双 `_call_cached` 调用，第 21 维覆盖率阈值从 80% 提升至 90%。
 
 **第六层洞察（adapter 转发同构，外部 SDK 适配器元模式投影）**：TqProvider/TqSdkBridge
 转发同构本质是 MetaDispatcher 之外的「声明 Data（方法名→默认值映射）+ Dispatcher
 （通用转发器）」元模式投影。v6 将 20 个 TqProvider 转发方法收敛为 `_FORWARD_SPECS` 表 +
 `_forward` 通用器，4 个 A 组缓存方法收敛为 `_CACHED_TQ_CALLS` 表 + `_call_cached` 通用器，
 5 个 B 组简单方法收敛为 `_SIMPLE_TQ_CALLS` 表 + `_call_simple` 通用器（共 29 方法 / 3 通用器），
-闭合 v5 SubTask 14.5 未竟目标，是元模式收敛的「最后一公里」。
+闭合 v5 SubTask 14.5 未竟目标，是元模式收敛的「最后一公里」。v7 新增 `_PER_CODE_TQ_CALLS`
+表（3 条目）+ `_call_cached_per_code` 通用器，并将 get_stock_list 双签名收敛为双
+`_call_cached` 调用（4 表 / 4 通用器 / 34 方法），完成 per-code 循环与双签名遗留收敛。
 
 门槛：总分 ≥ 95 且 21 维均 ≥ 80 判定 PASS。
 
@@ -54,7 +58,7 @@ v6 在 v5 20 维基础上扩展为 **21 维**加权评分：v5 20 维等比降�
 
 | 序号 | 维度 | 权重 | 评分逻辑 |
 |---|---|---|---|
-| 21 | adapter_isomorphism | 4.0% | TqProvider/TqSdkBridge 转发方法表驱动覆盖率 ≥ 80% 满分，线性衰减；覆盖率 = 表驱动覆盖方法数 / 总转发方法数 × 100（_FORWARD_SPECS + _CACHED_TQ_CALLS + _SIMPLE_TQ_CALLS 三表条目 / 总数，3 通用转发器 _forward/_call_cached/_call_simple 各覆盖其表）；详见 §adapter 转发同构 |
+| 21 | adapter_isomorphism | 4.0% | TqProvider/TqSdkBridge 转发方法表驱动覆盖率 ≥ 90% 满分，线性衰减；覆盖率 = 表驱动覆盖方法数 / 总转发方法数 × 100（_FORWARD_SPECS + _CACHED_TQ_CALLS + _SIMPLE_TQ_CALLS + _PER_CODE_TQ_CALLS 四表条目 / 总数 = 34，4 通用转发器 _forward/_call_cached/_call_simple/_call_cached_per_code 各覆盖其表）；详见 §adapter 转发同构 |
 
 ### PASS 条件
 
@@ -115,19 +119,58 @@ v5 阶段 2 闭合 v4 沙箱缺口 34.12（replay 步进）/ 34.13（simulation 
 ## adapter 转发同构（第六层洞察，`adapter_isomorphism` 维度）
 
 TqProvider / TqSdkBridge 转发同构本质是 MetaDispatcher 之外的「声明 Data（方法名→默认值
-映射）+ Dispatcher（通用转发器）」元模式投影。v6 将三组同构转发方法收敛为表 + 通用器：
+映射）+ Dispatcher（通用转发器）」元模式投影。v6 将三组同构转发方法收敛为表 + 通用器，
+v7 在 v6 基础上新增 per-code 循环表（`_PER_CODE_TQ_CALLS`）+ 通用器（`_call_cached_per_code`），
+并将 get_stock_list 双签名收敛为双 `_call_cached` 调用，闭合 per-code 转发与双签名遗留缺口：
 
 | 通用转发器 | 表 | 覆盖方法数 | 表条目（method→default/sdk 映射） |
 |---|---|---|---|
 | `_forward` | `_FORWARD_SPECS` | 20 | TqProvider 20 个转发方法 → (default, kw 参数元组) |
-| `_call_cached` | `_CACHED_TQ_CALLS` | 4 | TqSdkBridge A 组缓存方法 → (cache_key 模板, sdk 方法, 默认值) |
+| `_call_cached` | `_CACHED_TQ_CALLS` | 6 | TqSdkBridge A 组缓存方法 → (cache_key 模板, sdk 方法, 默认值)；v7 追加 get_stock_list_by_type / get_stock_list 双签名条目（4 → 6） |
 | `_call_simple` | `_SIMPLE_TQ_CALLS` | 5 | TqSdkBridge B 组简单方法 → sdk 方法名 |
+| `_call_cached_per_code` | `_PER_CODE_TQ_CALLS` | 3 | TqSdkBridge per-code 缓存方法 → (cache_prefix, sdk_method, cache_only_if_truthy) |
 
-覆盖率 = 表驱动覆盖方法数 / 总转发方法数 × 100 = 29 / 29 × 100 = 100%（3 通用转发器
-均存在时三表条目计为已覆盖）。覆盖率 ≥ 80% 满分，线性衰减。
+覆盖率 = 表驱动覆盖方法数 / 总转发方法数 × 100 = 34 / 34 × 100 = 100%（4 通用转发器
+均存在时四表条目计为已覆盖）。覆盖率 ≥ 90% 满分，线性衰减。
 
-正测试 `test_positive_adapter_isomorphism.py` 断言：三表存在且条目数达标 +
-三通用转发器方法定义 + 覆盖率 ≥ 80%。
+### per-code 循环表驱动（v7 新增）
+
+`_PER_CODE_TQ_CALLS` 表（3 条目）将 per-code 循环转发方法收敛为表 + 通用器，
+映射方法名 → `(cache_prefix, sdk_method, cache_only_if_truthy)`：
+
+| 方法名 | cache_prefix | sdk_method | cache_only_if_truthy |
+|---|---|---|---|
+| get_snapshot | snapshot | get_snapshot | False |
+| get_stock_info | stock_info | get_stock_info | False |
+| get_report_data | report_data | get_report_data | True |
+
+`_call_cached_per_code(self, method_name, codes)` 通用方法承担 per-code 循环转发：
+
+1. **per-code 循环**：遍历 `codes` 列表，逐 code 调用底层 SDK
+2. **cache_key 构建**：`f"{cache_prefix}:{code}"`（per-code 维度隔离缓存）
+3. **缓存检查**：命中则直接返回，跳过 SDK 调用
+4. **SDK 调用**：未命中时 `getattr(self._sdk, sdk_method)(code)` 调用底层 SDK
+5. **条件缓存写入**：`cache_only_if_truthy=True` 时仅当 `if data:` 真值判断通过才写入缓存（保留 get_report_data 原有 `if data:` 行为，空快照不污染缓存）
+6. **异常兜底**：SDK 抛异常时返回 None / 空结果，不向上传播
+
+`cache_only_if_truthy` 标志语义：get_report_data 的空快照（None / 空对象）既不写入缓存，
+也不出现在结果字典中，避免空数据污染下游；get_snapshot / get_stock_info 始终缓存（False）。
+
+### get_stock_list 双签名收敛（v7 新增）
+
+get_stock_list 方法存在新旧两种调用签名，v7 将方法体重构为双 `_call_cached` 调用，
+按签名分流到 `_CACHED_TQ_CALLS` 不同条目：
+
+| 签名 | 触发条件 | 路由条目 | kwargs 透传 |
+|---|---|---|---|
+| 新签名 | `list_type` kwarg 存在 | `get_stock_list_by_type` 条目 | `**kwargs` 透传（含 list_type） |
+| 旧签名 | `list_type` kwarg 缺失 | `get_stock_list` 条目 | `market=str(market_id)` 关键字形式 |
+
+旧签名 `market=str(market_id)` 关键字形式与新签名 `**kwargs` 透传保留，确保调用方兼容。
+两条目均纳入 `_CACHED_TQ_CALLS` 表（v7 追加，使该表从 4 条目扩至 6 条目）。
+
+正测试 `test_positive_adapter_isomorphism.py` 断言：四表存在且条目数达标 +
+四通用转发器方法定义 + 覆盖率 ≥ 90%。
 
 ## 运行方式与退出码
 
@@ -143,7 +186,7 @@ python -m metatest.runner
 ```
 metatest/
 ├── conftest.py                              # 共享 pytest 夹具
-├── scoring.py                               # 21 维量化评分引擎（v6）
+├── scoring.py                               # 21 维量化评分引擎（v7）
 ├── runner.py                                # 测试运行器 + 21 维数据采集（含 adapter_forward_coverage 等字段）
 ├── test_positive_dispatcher_isomorphism.py  # v5 MetaDispatcher 继承断言
 ├── test_positive_runtime_verification.py     # v5 3 个 in-process 测试全绿
@@ -156,7 +199,7 @@ metatest/
 └── report.json                              # 21 维 + meta_unification 结构化报告
 ```
 
-## v6 严格规则总结
+## v7 严格规则总结
 
 - 跳过测试计为失败（不在 passed 分子）
 - 前端 E2E 环境缺失计 `frontend_e2e_passed=0`，给最低达标线 80（非信用分）
@@ -168,4 +211,4 @@ metatest/
 - 三原语覆盖率 ≥ 95% 当且仅当 meta_purity ≥ 90%（根因一致性）
 - EventDriver 因 heapq 时序特化保持独立，不继承 MetaDispatcher（dispatcher 同构硬约束）
 - 运行时验证 harness 禁用 `time.sleep` / `asyncio.sleep` 步进（fire_due 推进硬约束）
-- adapter 转发同构覆盖率 ≥ 80% 才达标（v6 新增，外部 SDK 适配器表驱动硬约束）
+- adapter 转发同构覆盖率 ≥ 90% 才达标（v7 提升至 90%，外部 SDK 适配器表驱动硬约束；4 表 / 4 通用转发器 / 34 方法）

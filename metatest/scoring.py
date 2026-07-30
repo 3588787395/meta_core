@@ -29,7 +29,7 @@ v5 20 维权重等比降权 4%（每维 × 0.96），新增 1 维占 4%，权重
   eventtest_regression         5.0%   eventtest 退出码 0（全绿）满分，否则 0 分
   cross_module_import_discipline 5.0% 8 处跨模块 import 违规模式 Grep 零匹配
   --- v6 新增 1 维（v5 20 维降权 4%）---
-  adapter_isomorphism           4.0%   TqProvider/TqSdkBridge 转发方法表驱动覆盖率 ≥ 80% 满分，线性衰减
+  adapter_isomorphism           4.0%   TqProvider/TqSdkBridge 转发方法表驱动覆盖率 ≥ 90% 满分，线性衰减
 
 权重总和 = 1.0。总分 = Σ(维度得分 × 权重)。
 门槛：总分 ≥ 95 且 21 维均 ≥ 80（redo_list 为空）判定 PASS。
@@ -233,7 +233,7 @@ class ScoringEngine:
         ("eventtest_regression", 0.048),      # eventtest 回归（退出码 0 满分）
         ("cross_module_import_discipline", 0.048),  # 跨模块 import 纪律（8 处违规模式零匹配）
         # --- v6 新增 1 维（4%）---
-        ("adapter_isomorphism", 0.04),        # adapter 转发同构（TqProvider/TqSdkBridge 表驱动覆盖率 ≥ 80%）
+        ("adapter_isomorphism", 0.04),        # adapter 转发同构（TqProvider/TqSdkBridge 表驱动覆盖率 ≥ 90%）
     ]
 
     #: 通过门槛：总分 ≥ 95 判定 PASS
@@ -805,9 +805,11 @@ class ScoringEngine:
     def _score_adapter_isomorphism(self, results: Dict[str, Any]) -> Tuple[float, str]:
         """adapter 转发同构（v6 新增第 21 维，权重 4%）。
 
-        TqProvider/TqSdkBridge 转发方法表驱动覆盖率 ≥ 80% 满分，线性衰减。
-        覆盖率 = 表驱动覆盖方法数 / 总转发方法数 × 100（三通用转发器
-        ``_forward`` / ``_call_cached`` / ``_call_simple`` 各覆盖其表条目）。
+        TqProvider/TqSdkBridge 转发方法表驱动覆盖率 ≥ 90% 满分，线性衰减。
+        覆盖率 = 表驱动覆盖方法数 / 总转发方法数 × 100（四通用转发器
+        ``_forward`` / ``_call_cached`` / ``_call_simple`` / ``_call_cached_per_code``
+        各覆盖其表条目）。v6 阈值 80%，v7 收尾闭合后阈值提升至 90%（v6 已 100%、
+        v7 仍 100%，阈值提升确保未来回归被捕获）。
         所有数据由 runner.py 通过 Grep + AST 采集填入
         ``test_results["adapter_isomorphism"]``，无硬编码信用分。
         """
@@ -820,10 +822,10 @@ class ScoringEngine:
         generic = int(ai.get("generic_method_count", 0) or 0)
         if total <= 0:
             return 0.0, "无转发方法（total_forward_methods=0）"
-        # 覆盖率 ≥ 80% 满分，线性衰减
-        score = 100.0 if coverage >= 80.0 else max(0.0, coverage / 80.0 * 100.0)
+        # 覆盖率 ≥ 90% 满分，线性衰减（v7 阈值从 80 提升至 90）
+        score = 100.0 if coverage >= 90.0 else max(0.0, coverage / 90.0 * 100.0)
         detail = (f"覆盖率={coverage:.1f}%（{covered}/{total} 方法表驱动，"
-                  f"3 通用转发器存在 {generic}/3）")
+                  f"4 通用转发器存在 {generic}/4）")
         return score, detail
 
     # ------------------------------------------------------------------

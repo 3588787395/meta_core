@@ -12,14 +12,14 @@
     {
       "name": "test_pass_rate",
       "weight": 0.09984,
-      "score": 96.85341519570223,
-      "details": "1262/1303 通过（跳过计为失败）"
+      "score": 96.85823754789273,
+      "details": "1264/1305 通过（跳过计为失败）"
     },
     {
       "name": "assertion_density",
       "weight": 0.0384,
       "score": 100.0,
-      "details": "2930 断言 / 74 文件 = 39.6/文件 (目标 20)"
+      "details": "2938 断言 / 74 文件 = 39.7/文件 (目标 20)"
     },
     {
       "name": "event_chain_integrity",
@@ -31,7 +31,7 @@
       "name": "performance_benchmark",
       "weight": 0.0384,
       "score": 100.0,
-      "details": "0.06s / 1000 tick (门槛 10.0s)"
+      "details": "0.04s / 1000 tick (门槛 10.0s)"
     },
     {
       "name": "frontend_e2e_pass_rate",
@@ -127,30 +127,30 @@
       "name": "adapter_isomorphism",
       "weight": 0.04,
       "score": 100.0,
-      "details": "覆盖率=100.0%（29/29 方法表驱动，3 通用转发器存在 3/3）"
+      "details": "覆盖率=100.0%（34/34 方法表驱动，4 通用转发器存在 4/4）"
     }
   ],
   "deductions": [
-    "test_pass_rate: 96.9/100 — 1262/1303 通过（跳过计为失败）",
+    "test_pass_rate: 96.9/100 — 1264/1305 通过（跳过计为失败）",
     "frontend_e2e_pass_rate: 80.0/100 — 0/72 通过（环境缺失，给予最低达标线 80 分）",
     "synthesis_e2e: 94.7/100 — 125/132 合测试通过",
     "前端 E2E 环境未就绪（浏览器/服务器缺失，给予最低达标线 80 分）"
   ],
   "redo_list": [],
   "test_summary": {
-    "collected": 1303,
-    "passed": 1262,
+    "collected": 1305,
+    "passed": 1264,
     "failed": 0,
     "errors": 0,
     "skipped": 46,
     "no_tests": false,
-    "duration_s": 39.37
+    "duration_s": 57.88
   },
   "test_results": {
     "modules_covered": 17,
-    "tests_passed": 1262,
-    "tests_total": 1303,
-    "assertions_count": 2930,
+    "tests_passed": 1264,
+    "tests_total": 1305,
+    "assertions_count": 2938,
     "test_files_count": 74,
     "event_types_seen": [
       "BarComposed",
@@ -168,7 +168,7 @@
       "ModeChanged"
     ],
     "event_chain_correct": true,
-    "sim_1000_tick_time_s": 0.05858131899731234,
+    "sim_1000_tick_time_s": 0.03841122399899177,
     "frontend_e2e_passed": 0,
     "frontend_e2e_total": 72,
     "frontend_e2e_env_missing": true,
@@ -240,7 +240,9 @@
       "eventbus_inherits_meta": true,
       "configstore_inherits_meta": true,
       "eventdriver_independent": true,
-      "adapter_forward_coverage": 100.0
+      "adapter_forward_coverage": 100.0,
+      "per_code_table_entries": 3,
+      "dual_signature_converged": true
     },
     "dispatcher_isomorphism": {
       "meta_dispatcher_exists": true,
@@ -269,13 +271,15 @@
       "total_patterns": 8
     },
     "adapter_isomorphism": {
-      "generic_method_count": 3,
+      "generic_method_count": 4,
       "forward_specs_entries": 20,
-      "cached_tq_calls_entries": 4,
+      "cached_tq_calls_entries": 6,
       "simple_tq_calls_entries": 5,
-      "total_forward_methods": 29,
-      "covered_methods": 29,
-      "coverage": 100.0
+      "per_code_tq_calls_entries": 3,
+      "total_forward_methods": 34,
+      "covered_methods": 34,
+      "coverage": 100.0,
+      "dual_signature_converged": true
     }
   },
   "meta_unification": {
@@ -296,6 +300,8 @@
     "eventbus_inherits_meta": true,
     "configstore_inherits_meta": true,
     "eventdriver_independent": true,
-    "adapter_forward_coverage": 100.0
+    "adapter_forward_coverage": 100.0,
+    "per_code_table_entries": 3,
+    "dual_signature_converged": true
   }
 }

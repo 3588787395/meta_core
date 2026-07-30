@@ -291,6 +291,8 @@
 
 116. **外部 SDK 适配器转发同构表驱动**：≥ 5 个同构转发方法（如 `if self._bridge is None: return DEFAULT → return self._bridge.METHOD(args)` 或 `if not self._tq: return None → try: SDK 调用 → except: return None`）必须收敛为声明式表 + 通用转发器：`_FORWARD_SPECS` + `_forward`（TqProvider 转发）、`_CACHED_TQ_CALLS` + `_call_cached`（带缓存 SDK 调用）、`_SIMPLE_TQ_CALLS` + `_call_simple`（无缓存 SDK 调用）。参数转发签名差异过大使表条目复杂度 > 方法体的，保留现状（避免抽象税负收益）。这是 MetaDispatcher 之外「声明 Data + Dispatcher 通用转发器」元模式投影（第六层洞察）。
 
+117. **外部 SDK 适配器 per-code 循环调用必须表驱动**：≥ 3 个同构 per-code 方法（per-code 循环 + cache_key 构建 + 缓存检查 + SDK 调用 + 缓存写入 + 异常兜底）必须收敛为 `_PER_CODE_TQ_CALLS` 表（映射方法名 → (cache_prefix, sdk_method, cache_only_if_truthy)）+ 通用 `_call_cached_per_code` 方法。`cache_only_if_truthy` 标志保留真值判断行为差异（如 get_report_data 的 `if data:` 空快照不污染缓存）。双签名同构方法（如 get_stock_list 新/旧签名两分支）必须收敛为 `_CACHED_TQ_CALLS` 多条目 + if/else 双调用。禁止重新引入独立 per-code 循环方法或双签名过程式展开。
+
 ---
 
 ## 附：文件路径映射（文档 vs 实际代码）

@@ -57,8 +57,9 @@ v6 严格规则：
   - eventtest_regression：subprocess 运行 ``python -m eventtest.run_eventtest`` 采集退出码
   - cross_module_import_discipline：Grep 8 处违规模式（7 业务模块禁 import table_engine +
     execution 禁 import screening_module）
-  - adapter_isomorphism：Grep 3 通用转发器（_forward/_call_cached/_call_simple）+
-    AST 统计 _FORWARD_SPECS/_CACHED_TQ_CALLS/_SIMPLE_TQ_CALLS 三表条目数 → 表驱动覆盖率
+  - adapter_isomorphism：Grep 4 通用转发器（_forward/_call_cached/_call_simple/
+    _call_cached_per_code）+ AST 统计 _FORWARD_SPECS/_CACHED_TQ_CALLS/
+    _SIMPLE_TQ_CALLS/_PER_CODE_TQ_CALLS 四表条目数 → 表驱动覆盖率
 
 运行方式：
     python -m metatest.runner
@@ -1897,9 +1898,9 @@ def _collect_cross_module_import_discipline() -> Dict[str, Any]:
 def _count_class_table_entries(file_path: Path, table_name: str) -> int:
     """AST 统计类级表（AnnAssign dict 字面量）的条目数。
 
-    用于 ``_FORWARD_SPECS`` / ``_CACHED_TQ_CALLS`` / ``_SIMPLE_TQ_CALLS`` 三表
-    条目计数——这些表以 ``_NAME: Dict[...] = {...}`` 形式定义于类体，AST 解析
-    AnnAssign.value 为 ast.Dict 时返回其键数。
+    用于 ``_FORWARD_SPECS`` / ``_CACHED_TQ_CALLS`` / ``_SIMPLE_TQ_CALLS`` /
+    ``_PER_CODE_TQ_CALLS`` 四表条目计数——这些表以 ``_NAME: Dict[...] = {...}``
+    形式定义于类体，AST 解析 AnnAssign.value 为 ast.Dict 时返回其键数。
     """
     tree = _parse_ast(file_path)
     if tree is None:
@@ -1916,35 +1917,80 @@ def _count_class_table_entries(file_path: Path, table_name: str) -> int:
     return 0
 
 
+def _get_class_table_keys(file_path: Path, table_name: str) -> List[str]:
+    """AST 提取类级表（AnnAssign dict 字面量）的字符串 key 列表。
+
+    用于 ``_CACHED_TQ_CALLS`` / ``_PER_CODE_TQ_CALLS`` 表 key 集合校验
+    （v7 双签名收敛 + per_code truthy flag 检查）。仅返回 key 为 ast.Constant
+    字符串字面量的 key 值；非字符串 key 跳过。
+    """
+    tree = _parse_ast(file_path)
+    if tree is None:
+        return []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for stmt in node.body:
+            if (isinstance(stmt, ast.AnnAssign)
+                    and isinstance(stmt.target, ast.Name)
+                    and stmt.target.id == table_name
+                    and isinstance(stmt.value, ast.Dict)):
+                keys: List[str] = []
+                for k in stmt.value.keys:
+                    if (isinstance(k, ast.Constant)
+                            and isinstance(k.value, str)):
+                        keys.append(k.value)
+                return keys
+    return []
+
+
 def _collect_adapter_isomorphism() -> Dict[str, Any]:
     """采集 adapter 转发同构数据（SubTask 8.1）。
 
-    Grep 3 个通用转发器方法（``_forward`` / ``_call_cached`` / ``_call_simple``）
-    定义数 + AST 统计三表条目数 → 表驱动覆盖率。仅当对应通用转发器存在时，
-    该表条目计为已表驱动覆盖；覆盖率 = 已覆盖 / 总转发方法数 × 100。
+    Grep 4 个通用转发器方法（``_forward`` / ``_call_cached`` / ``_call_simple`` /
+    ``_call_cached_per_code``）定义数 + AST 统计四表条目数 → 表驱动覆盖率。
+    仅当对应通用转发器存在时，该表条目计为已表驱动覆盖；
+    覆盖率 = 已覆盖 / 总转发方法数 × 100。
+
+    v7 收尾闭合：新增 ``_PER_CODE_TQ_CALLS`` 表（3 条目）+ ``_call_cached_per_code``
+    通用转发器；``_CACHED_TQ_CALLS`` 追加 ``get_stock_list_by_type`` /
+    ``get_stock_list`` 双签名收敛至 6 条目。总表驱动方法数 =
+    ``_FORWARD_SPECS``（20）+ ``_CACHED_TQ_CALLS``（6）+ ``_SIMPLE_TQ_CALLS``（5）
+    + ``_PER_CODE_TQ_CALLS``（3）= 34。
     """
     providers_file = _SERVICES_DIR / "providers.py"
     fwd = _grep_count_in_file(r"def _forward\b", providers_file)
     cached_m = _grep_count_in_file(r"def _call_cached\b", providers_file)
     simple_m = _grep_count_in_file(r"def _call_simple\b", providers_file)
+    per_code_m = _grep_count_in_file(r"def _call_cached_per_code\b", providers_file)
     forward_n = _count_class_table_entries(providers_file, "_FORWARD_SPECS")
     cached_n = _count_class_table_entries(providers_file, "_CACHED_TQ_CALLS")
     simple_n = _count_class_table_entries(providers_file, "_SIMPLE_TQ_CALLS")
+    per_code_n = _count_class_table_entries(providers_file, "_PER_CODE_TQ_CALLS")
     covered = (
         (forward_n if fwd else 0)
         + (cached_n if cached_m else 0)
         + (simple_n if simple_m else 0)
+        + (per_code_n if per_code_m else 0)
     )
-    total = forward_n + cached_n + simple_n
+    total = forward_n + cached_n + simple_n + per_code_n
     coverage = (covered / total * 100.0) if total > 0 else 0.0
+    # v7 双签名收敛：_CACHED_TQ_CALLS 含 get_stock_list_by_type + get_stock_list 两个 key
+    cached_keys = set(_get_class_table_keys(providers_file, "_CACHED_TQ_CALLS"))
+    dual_signature_converged = (
+        "get_stock_list_by_type" in cached_keys
+        and "get_stock_list" in cached_keys
+    )
     return {
-        "generic_method_count": fwd + cached_m + simple_m,
+        "generic_method_count": fwd + cached_m + simple_m + per_code_m,
         "forward_specs_entries": forward_n,
         "cached_tq_calls_entries": cached_n,
         "simple_tq_calls_entries": simple_n,
+        "per_code_tq_calls_entries": per_code_n,
         "total_forward_methods": total,
         "covered_methods": covered,
         "coverage": round(coverage, 2),
+        "dual_signature_converged": dual_signature_converged,
     }
 
 
@@ -2227,7 +2273,7 @@ def _print_report(
 
     # --- v6 新增 1 维（adapter 转发同构） ---
     ai_v6 = dim_map.get("adapter_isomorphism")
-    print(f"adapter 转发同构: (权重 4.0%, TqProvider/TqSdkBridge 表驱动覆盖率 ≥ 80%)")
+    print(f"adapter 转发同构: (权重 4.0%, TqProvider/TqSdkBridge 表驱动覆盖率 ≥ 90%)")
     if ai_v6:
         print(f"                → 得分 {ai_v6.score:.1f}/100 — {ai_v6.details}")
 
@@ -2255,7 +2301,12 @@ def _print_report(
         print(f"  EventDriver 独立:       {'是' if mu.get('eventdriver_independent') else '否'}")
         # v6 新增字段：adapter 转发覆盖率
         print(f"  adapter 转发覆盖率:     {mu.get('adapter_forward_coverage', 0.0):.1f}%"
-              f"（目标 ≥ 80%）")
+              f"（目标 ≥ 90%）")
+        # v7 新增字段：per_code 表条目数 + 双签名收敛标记
+        print(f"  per_code 表条目数:      {mu.get('per_code_table_entries', 0)}"
+              f"（_PER_CODE_TQ_CALLS，目标 ≥ 3）")
+        print(f"  双签名收敛:             {'是' if mu.get('dual_signature_converged') else '否'}"
+              f"（_CACHED_TQ_CALLS 含 get_stock_list_by_type + get_stock_list）")
 
     print()
     print("─" * 40)
@@ -2477,6 +2528,9 @@ def main() -> int:
     meta_unification["eventdriver_independent"] = dispatcher_isomorphism["eventdriver_independent"]
     # v6: meta_unification 新增 adapter 转发覆盖率（从 adapter_isomorphism 提取）
     meta_unification["adapter_forward_coverage"] = adapter_isomorphism["coverage"]
+    # v7: meta_unification 新增 per_code 表条目数 + 双签名收敛标记
+    meta_unification["per_code_table_entries"] = adapter_isomorphism["per_code_tq_calls_entries"]
+    meta_unification["dual_signature_converged"] = adapter_isomorphism["dual_signature_converged"]
 
     # 构建 test_results 字典供 ScoringEngine 使用（含 v3/v4/v5 新增字段）
     test_results: Dict[str, Any] = {

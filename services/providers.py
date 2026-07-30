@@ -7510,29 +7510,8 @@ class TqSdkBridge:
 
     def get_stock_list(self, market_id, **kwargs) -> List[str]:
         if kwargs.get('list_type') is not None:
-            # 新签名: get_stock_list(list_type, list_type=1)
-            cache_key = f'stock_list_by_type_{market_id}'
-            if cache_key in self._cache:
-                return self._cache[cache_key]
-            if not self._tq:
-                return []
-            try:
-                result = self._tq.get_stock_list(market_id, **kwargs)
-                self._cache[cache_key] = result
-                return result
-            except Exception as e:
-                logger.debug("TqSdkBridge.get_stock_list(by_type) failed: %s", e)
-                return []
-        # 旧签名: get_stock_list(market_id: int)
-        cache_key = f'stock_list_{market_id}'
-        if cache_key in self._cache:
-            return self._cache[cache_key]
-        try:
-            result = self._tq.get_stock_list(market=str(market_id))
-            self._cache[cache_key] = result
-            return result
-        except Exception:
-            return []
+            return self._call_cached("get_stock_list_by_type", (market_id,), market_id, **kwargs)
+        return self._call_cached("get_stock_list", (market_id,), market=str(market_id))
 
     def get_kline_data(self, codes: List[str], period: int, count: int) -> Dict:
         if not codes:
@@ -7556,29 +7535,21 @@ class TqSdkBridge:
             return {}
 
     def get_snapshot(self, codes: List[str]) -> Dict:
-        if not codes:
-            return {}
-        all_data = {}
-        for code in codes:
-            cache_key = f'snapshot_{code}'
-            if cache_key in self._cache:
-                all_data[code] = self._cache[cache_key]
-                continue
-            try:
-                data = self._tq.get_market_snapshot(stock_code=code)
-                self._cache[cache_key] = data
-                all_data[code] = data
-            except Exception:
-                pass
-        return all_data
+        return self._call_cached_per_code("get_snapshot", codes)
 
     _CACHED_TQ_CALLS: Dict[str, Tuple[str, str, Any]] = {
         "get_block_list": ("block_list", "get_sector_list", []),
         "get_block_members": ("block_members", "get_stock_list_in_sector", []),
         "get_sector_list": ("sector_list", "get_sector_list", []),
         "get_stock_list_in_sector": ("stock_list_in_sector", "get_stock_list_in_sector", []),
+        "get_stock_list_by_type": ("stock_list_by_type", "get_stock_list", []),
+        "get_stock_list": ("stock_list", "get_stock_list", []),
     }
-
+    _PER_CODE_TQ_CALLS: Dict[str, Tuple[str, str, bool]] = {
+        "get_snapshot": ("snapshot", "get_market_snapshot", False),
+        "get_stock_info": ("stock_info", "get_stock_info", False),
+        "get_report_data": ("report", "get_market_snapshot", True),
+    }
     def _call_cached(self, method_name, key_args=(), *sdk_args, **sdk_kwargs):
         cache_prefix, sdk_method, default = self._CACHED_TQ_CALLS[method_name]
         cache_key = cache_prefix + "".join(f"_{a}" for a in key_args)
@@ -7591,6 +7562,24 @@ class TqSdkBridge:
         except Exception as e:
             logger.debug("TqSdkBridge.%s failed: %s", method_name, e)
             return default
+    def _call_cached_per_code(self, method_name, codes):
+        cache_prefix, sdk_method, cache_only_if_truthy = self._PER_CODE_TQ_CALLS[method_name]
+        if not codes:
+            return {}
+        all_data = {}
+        for code in codes:
+            cache_key = cache_prefix + f"_{code}"
+            if cache_key in self._cache:
+                all_data[code] = self._cache[cache_key]
+                continue
+            try:
+                data = getattr(self._tq, sdk_method)(stock_code=code)
+                if not cache_only_if_truthy or data:
+                    self._cache[cache_key] = data
+                    all_data[code] = data
+            except Exception:
+                pass
+        return all_data
     def get_block_list(self) -> List[str]:
         return self._call_cached("get_block_list")
     def get_block_members(self, block_code: str) -> List[str]:
@@ -7606,39 +7595,10 @@ class TqSdkBridge:
             return {}
 
     def get_stock_info(self, codes: List[str]) -> Dict:
-        if not codes:
-            return {}
-        all_data = {}
-        for code in codes:
-            cache_key = f'stock_info_{code}'
-            if cache_key in self._cache:
-                all_data[code] = self._cache[cache_key]
-                continue
-            try:
-                data = self._tq.get_stock_info(stock_code=code)
-                self._cache[cache_key] = data
-                all_data[code] = data
-            except Exception:
-                pass
-        return all_data
+        return self._call_cached_per_code("get_stock_info", codes)
 
     def get_report_data(self, codes: List[str]) -> Dict:
-        if not codes:
-            return {}
-        all_data = {}
-        for code in codes:
-            cache_key = f'report_{code}'
-            if cache_key in self._cache:
-                all_data[code] = self._cache[cache_key]
-                continue
-            try:
-                data = self._tq.get_market_snapshot(stock_code=code)
-                if data:
-                    self._cache[cache_key] = data
-                    all_data[code] = data
-            except Exception:
-                pass
-        return all_data
+        return self._call_cached_per_code("get_report_data", codes)
 
     def get_sector_list(self, list_type=1) -> List[Dict]:
         return self._call_cached("get_sector_list", (list_type,), list_type=list_type)
