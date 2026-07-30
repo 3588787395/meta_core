@@ -293,6 +293,8 @@
 
 117. **外部 SDK 适配器 per-code 循环调用必须表驱动**：≥ 3 个同构 per-code 方法（per-code 循环 + cache_key 构建 + 缓存检查 + SDK 调用 + 缓存写入 + 异常兜底）必须收敛为 `_PER_CODE_TQ_CALLS` 表（映射方法名 → (cache_prefix, sdk_method, cache_only_if_truthy)）+ 通用 `_call_cached_per_code` 方法。`cache_only_if_truthy` 标志保留真值判断行为差异（如 get_report_data 的 `if data:` 空快照不污染缓存）。双签名同构方法（如 get_stock_list 新/旧签名两分支）必须收敛为 `_CACHED_TQ_CALLS` 多条目 + if/else 双调用。禁止重新引入独立 per-code 循环方法或双签名过程式展开。
 
+118. **Converter 主流程必须模板方法化**：`parse_pool` / `export_pool` 模板方法必须在 `BasePoolConverter` 中编排骨架（parse 6 步：`_decode_source` → `ET.fromstring` → `_extract_pool_meta` → `_parse_cells` → `_parse_flows` → `_build_result`；export 5 步：`_create_root` → `_serialize_pool_attrs` → `_serialize_cells` → `_serialize_flows` → `_finalize_xml`），子类（`DzhPoolConverter` / `TdxPoolConverter`）仅覆盖 10 个差异钩子，禁止重新引入模块级并行主流程函数。模块级函数（`parse_dzh_xml` / `parse_tdx_xml` / `export_dzh_xml` / `_build_tdx_xml`）仅作薄包装委托（函数体 ≤ 3 行，委托 `_DZH_CONVERTER` / `_TDX_CONVERTER` 单例的 `parse_pool` / `export_pool`），保留原签名向后兼容。这是 OOP 继承的「主流程编排层」收敛（第八层洞察）：v4 已收敛 4 原子操作（`_parse_element` / `_add_element` / `_decode_pos` / `_decode_xml_bytes`），v8 将两个真正同构的主流程上提为模板方法，闭合「大智慧和通达信只作为继承，所有基础功能用相同代码」的最后一层。
+
 ---
 
 ## 附：文件路径映射（文档 vs 实际代码）

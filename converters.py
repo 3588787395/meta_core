@@ -229,11 +229,65 @@ class BasePoolConverter(ABC):
             text = post_process_fn(text)
         return text
 
+    # ---- 5. 主流程模板方法（v8：上提 parse/export 编排骨架）----
+    def parse_pool(self, source):
+        """parse 主流程模板方法：编排 6 步骨架，子类覆盖差异钩子。"""
+        text = self._decode_source(source)
+        root = ET.fromstring(text)
+        pool_meta = self._extract_pool_meta(root, source)
+        cells = self._parse_cells(root)
+        flows = self._parse_flows(root)
+        return self._build_result(pool_meta, cells, flows)
+
+    def export_pool(self, config):
+        """export 主流程模板方法：编排 5 步骨架，子类覆盖差异钩子。"""
+        root = self._create_root(config)
+        self._serialize_pool_attrs(root, config)
+        self._serialize_cells(root, config)
+        self._serialize_flows(root, config)
+        return self._finalize_xml(root)
+
+    # ---- 6. 差异钩子（子类必须覆盖，默认 NotImplementedError）----
+    # parse 钩子
+    def _decode_source(self, source):
+        raise NotImplementedError
+
+    def _extract_pool_meta(self, root, source):
+        raise NotImplementedError
+
+    def _parse_cells(self, root):
+        raise NotImplementedError
+
+    def _parse_flows(self, root):
+        raise NotImplementedError
+
+    def _build_result(self, pool_meta, cells, flows):
+        raise NotImplementedError
+
+    # export 钩子
+    def _create_root(self, config):
+        raise NotImplementedError
+
+    def _serialize_pool_attrs(self, root, config):
+        raise NotImplementedError
+
+    def _serialize_cells(self, root, config):
+        raise NotImplementedError
+
+    def _serialize_flows(self, root, config):
+        raise NotImplementedError
+
+    def _finalize_xml(self, root):
+        raise NotImplementedError
+
 
 class DzhPoolConverter(BasePoolConverter):
     """DZH 股票池转换器：GB18030 优先解码 + DZH pos(dict) + 编码声明清洗。"""
 
     encoding_priority = ("gb18030", "gbk")
+
+    # v8 表驱动：ency/warning/system 三段 if/elif 收敛为单循环
+    _OPTIONAL_POOL_ATTRS = ("ency", "warning", "system")
 
     @staticmethod
     def _post_process_xml(text):
@@ -248,6 +302,430 @@ class DzhPoolConverter(BasePoolConverter):
 
     def parse_pos(self, pos_str):
         return self._decode_pos(pos_str, as_dict=True)
+
+    # ---- v8 parse 钩子（原 parse_dzh_xml 编排逻辑原封移入）----
+    def _decode_source(self, source):
+        return self.decode_xml_content(source)
+
+    def _extract_pool_meta(self, root, source):
+        filename = getattr(self, "_current_filename", None)
+        if filename:
+            name = os.path.splitext(os.path.basename(filename))[0]
+        else:
+            name = "unknown"
+        pool_attr_names = {"type", "ver", "mode", "nextid", "backcolor", "ency", "warning", "system"}
+        pool_present_attrs = {k for k in root.attrib if k in pool_attr_names}
+        pool_meta = {
+            "type": root.get("type", "ss-pool"),
+            "ver": root.get("ver", "1.0"),
+            "mode": root.get("mode", "1"),
+            "nextid": safe_int(root.get("nextid"), 0),
+            "backcolor": safe_int(root.get("backcolor"), 0),
+            "ency": root.get("ency"),
+            "warning": root.get("warning"),
+            "system": root.get("system"),
+            "_has_trades": root.find(".//trades") is not None,
+            "_has_opentrades": root.find(".//opentrades") is not None,
+            "_present_attrs": pool_present_attrs,
+        }
+        self._name = name
+        self._pool_meta = pool_meta
+        self._root = root
+        return pool_meta
+
+    def _parse_cells(self, root):
+        pool_meta = self._pool_meta
+        raw_cells = {}
+        for cell_elem in root.findall(".//cell"):
+            cid = cell_elem.get("id", "")
+            if not cid:
+                continue
+            _known_cell_attrs = {
+                "id", "type", "attr", "pos", "clr", "text", "hold", "col",
+                "width", "enter", "exit", "histana", "wizd", "deltype",
+                "endtime", "delstocktype", "staattr", "stocknum", "tmpl",
+                "inditype", "crc", "indi", "sorttype", "indiparam",
+                "attrtext", "reload", "lastload", "url", "intersection_status",
+                "stk_list", "setcode",
+                "formula", "order", "top_n",
+                "op_type", "source_nodes",
+                "result_type",
+                "line_type", "color", "style",
+            }
+            _present_attrs = {k for k in cell_elem.attrib if k in _known_cell_attrs}
+            _orig_text = cell_elem.get("text")
+            raw_cells[cid] = {
+                "id": cid,
+                "type": safe_int(cell_elem.get("type"), 0),
+                "attr": cell_elem.get("attr", "0"),
+                "pos": cell_elem.get("pos", ""),
+                "clr": cell_elem.get("clr", ""),
+                "text": cell_elem.get("text", ""),
+                "_orig_text": _orig_text,
+                "hold": cell_elem.get("hold"),
+                "col": cell_elem.get("col"),
+                "width": cell_elem.get("width"),
+                "enter": cell_elem.get("enter"),
+                "exit": cell_elem.get("exit"),
+                "histana": cell_elem.get("histana"),
+                "wizd": cell_elem.get("wizd"),
+                "deltype": cell_elem.get("deltype"),
+                "endtime": cell_elem.get("endtime"),
+                "delstocktype": cell_elem.get("delstocktype"),
+                "staattr": cell_elem.get("staattr"),
+                "stocknum": cell_elem.get("stocknum"),
+                "tmpl": cell_elem.get("tmpl"),
+                "inditype": cell_elem.get("inditype"),
+                "crc": cell_elem.get("crc"),
+                "indi": cell_elem.get("indi"),
+                "sorttype": cell_elem.get("sorttype"),
+                "indiparam": cell_elem.get("indiparam"),
+                "attrtext": cell_elem.get("attrtext"),
+                "reload": cell_elem.get("reload"),
+                "lastload": cell_elem.get("lastload"),
+                "url": cell_elem.get("url"),
+                "intersection_status": cell_elem.get("intersection_status"),
+                "result_type": cell_elem.get("result_type"),
+                "_present_attrs": _present_attrs,
+            }
+            ct_val = safe_int(cell_elem.get("type"), 0)
+            if ct_val in (102, 103, 104, 200, 203):
+                raw_cells[cid]["stocks"] = _parse_stk_children(cell_elem)
+                raw_cells[cid]["anas"] = _parse_ana_children(cell_elem)
+                raw_cells[cid]["tradeattr"] = _parse_tradeattr(cell_elem)
+
+        node_id_map = {}
+        nodes = []
+
+        for cid, rc in raw_cells.items():
+            if cid.startswith('m_'):
+                node_id_map[cid] = cid
+            else:
+                node_id_map[cid] = "m_%s" % cid
+
+        for cid, rc in raw_cells.items():
+            ct = rc["type"]
+            new_id = node_id_map[cid]
+            pos = _parse_pos(rc["pos"])
+            label = rc["text"] or ""
+            attr_int = safe_int(rc["attr"], 0)
+
+            node = _parse_cell_element(ct, rc, cid, new_id, pos, label, attr_int, safe_int(pool_meta.get("ency"), 0))
+            if node is not None:
+                nodes.append(node)
+        self._node_id_map = node_id_map
+        return nodes
+
+    def _parse_flows(self, root):
+        node_id_map = self._node_id_map
+        raw_flows = []
+        for order_idx, flow_elem in enumerate(root.findall(".//flow")):
+            _has_timing = {k for k in ["begin", "begint", "end", "endt", "interval"] if flow_elem.get(k) is not None}
+            _flow_present_attrs = {k for k in flow_elem.attrib if k in {
+                "from", "to", "attr", "clr", "count", "begin", "begint",
+                "end", "endt", "interval", "mid",
+                "cst", "cet", "cstt", "cett", "c周期", "c_period",
+            }}
+            raw_flows.append({
+                "from": flow_elem.get("from", ""),
+                "to": flow_elem.get("to", ""),
+                "attr": flow_elem.get("attr", "0"),
+                "clr": flow_elem.get("clr", ""),
+                "count": flow_elem.get("count"),
+                "begin": flow_elem.get("begin"),
+                "begint": flow_elem.get("begint"),
+                "end": flow_elem.get("end"),
+                "endt": flow_elem.get("endt"),
+                "interval": flow_elem.get("interval"),
+                "mid": flow_elem.get("mid"),
+                "cst": flow_elem.get("cst"),
+                "cet": flow_elem.get("cet"),
+                "cstt": flow_elem.get("cstt"),
+                "cett": flow_elem.get("cett"),
+                "c_period": flow_elem.get("c_period") or flow_elem.get("c周期"),
+                "_order": order_idx,
+                "_has_timing": _has_timing,
+                "_present_attrs": _flow_present_attrs,
+            })
+
+        edges = []
+        schedules = []
+
+        for rf in raw_flows:
+            src_id = rf["from"]
+            tgt_id = rf["to"]
+            if not src_id or not tgt_id:
+                continue
+
+            src_mapped = node_id_map.get(src_id, src_id if src_id.startswith('m_') else "m_%s" % src_id)
+            tgt_mapped = node_id_map.get(tgt_id, tgt_id if tgt_id.startswith('m_') else "m_%s" % tgt_id)
+
+            attr_val = safe_int(rf.get("attr", "0"), 0)
+            decoded = _decode_flow_attr(attr_val)
+            begin_val = safe_int(rf.get("begin"), 0)
+            begint_val = rf.get("begint", "0") or "0"
+            end_val = safe_int(rf.get("end"), 0)
+            endt_val = rf.get("endt", "0") or "0"
+            interval_val = safe_int(rf.get("interval"), 60)
+            mid_val = rf.get("mid")
+
+            edge_params = {
+                "dzh_attr": attr_val,
+                "delete_source": decoded["delete_source"],
+                "keep_source": decoded["keep_source"],
+                "clear_dest_first": decoded["clear_dest_first"],
+                "output_constituent": decoded["output_constituent"],
+                "force_move": decoded["force_move"],
+                "begin": begin_val,
+                "begint": begint_val,
+                "begint_format": "hhmmss" if begin_val in BEGINT_HHMMSS_MODES else "seconds",
+                "end": end_val,
+                "endt": endt_val,
+                "interval_sec": interval_val,
+                "mid": mid_val,
+                "clr": rf.get("clr", "-1"),
+                "count": rf.get("count"),
+                "cst": rf.get("cst"),
+                "cet": rf.get("cet"),
+                "cstt": rf.get("cstt"),
+                "cett": rf.get("cett"),
+                "c_period": rf.get("c_period"),
+                "_order": rf["_order"],
+                "_has_timing": rf.get("_has_timing", set()),
+                "_present_attrs": rf.get("_present_attrs", set()),
+            }
+
+            if begin_val != 0:
+                time_str = _parse_time_str(begint_val)
+                mode = BEGIN_MODE_MAP.get(begin_val, "specified_time")
+                schedule_id = "sch_%s" % uuid.uuid4().hex[:6]
+                edge_params["schedule_id"] = schedule_id
+                schedules.append({
+                    "id": schedule_id,
+                    "mode": mode,
+                    "time": time_str,
+                    "begin_value": begin_val,
+                    "begint_raw": begint_val,
+                    "end_value": end_val,
+                    "endt_raw": endt_val,
+                    "interval_sec": interval_val,
+                    "from_node": src_mapped,
+                    "to_node": tgt_mapped,
+                })
+
+            edges.append({
+                "id": "e_%s" % uuid.uuid4().hex[:8],
+                "source": {"node_id": src_mapped},
+                "target": {"node_id": tgt_mapped},
+                "params": edge_params,
+            })
+        self._schedules = schedules
+        return edges
+
+    def _build_result(self, pool_meta, nodes, edges):
+        root = self._root
+        name = self._name
+        schedules = self._schedules
+
+        # trades / opentrades：合并双重解析循环为单一采集器
+        def _collect_trades(xpath, attr_names):
+            out = []
+            for el in root.findall(xpath):
+                d = {}
+                for attr_name in attr_names:
+                    val = el.get(attr_name)
+                    if val is not None:
+                        d[attr_name] = val
+                if d:
+                    out.append(d)
+            return out
+
+        raw_trades = _collect_trades(".//trades/trade", [
+            "code", "name", "market", "price", "volume",
+            "buyprice", "sellprice", "direction", "tradetime",
+            "accountno", "tradetype", "rate", "fee"])
+        raw_opentrades = _collect_trades(".//opentrades/trade", [
+            "code", "name", "market", "targetprice",
+            "orderprice", "volume", "direction",
+            "tradetype", "accountno", "condition"])
+
+        _STOCK_HOLDER_TYPES = {"stock_state_pool", "result_pool"}
+        for n in nodes:
+            if n.get("type") in _STOCK_HOLDER_TYPES:
+                orig_stks = n.get("params", {}).get("stocks")
+                n["params"]["_orig_stks"] = list(orig_stks) if orig_stks else []
+
+        propagated = _propagate_stocks_to_downstream_pools(nodes, edges)
+
+        # Task 23.4: 注入 DZH 全局配置（market_mappings / reload_schedule）到 pool_config，
+        # 供下游 services/candidate_pool.py 通过 PoolLoaded 事件订阅获取，消除跨层 import
+        return _assemble_pool_result(
+            nodes, edges, pool_meta=pool_meta, propagated=propagated, name=name,
+            schedules=schedules, trades=raw_trades, opentrades=raw_opentrades,
+            market_mappings=load_dzh_market_mappings(), reload_schedule=_DZH_RELOAD_SCHEDULE)
+
+    # ---- v8 export 钩子（原 export_dzh_xml 编排逻辑原封移入）----
+    def _create_root(self, config):
+        pool_meta = config.get("pool_meta", {})
+        nodes = config.get("nodes", [])
+        edges = config.get("edges", [])
+
+        pool_present = pool_meta.get("_present_attrs", set())
+
+        pool_type = pool_meta.get("type", _EXPORT_DEFAULTS.get("pool_type", "ss-pool"))
+        pool_ver = pool_meta.get("ver", _EXPORT_DEFAULTS.get("pool_ver", "1.0"))
+        pool_mode = pool_meta.get("mode", _EXPORT_DEFAULTS.get("pool_mode", 1))
+        pool_backcolor = pool_meta.get("backcolor", _EXPORT_DEFAULTS.get("pool_backcolor", _DEFAULT_BACKCOLOR))
+
+        root = ET.Element("pool")
+        root.set("type", pool_type)
+        root.set("ver", pool_ver)
+        root.set("mode", str(pool_mode))
+        root.set("backcolor", str(pool_backcolor))
+        self._pool_meta = pool_meta
+        self._nodes = nodes
+        self._edges = edges
+        self._pool_present = pool_present
+        self._config = config
+        return root
+
+    def _serialize_pool_attrs(self, root, config):
+        pool_meta = self._pool_meta
+        pool_present = self._pool_present
+        for attr_name in self._OPTIONAL_POOL_ATTRS:
+            val = pool_meta.get(attr_name)
+            if val is None:
+                continue
+            if (not pool_present or attr_name in pool_present) or (val != '' and val != 0):
+                root.set(attr_name, str(val))
+
+    def _serialize_cells(self, root, config):
+        nodes = self._nodes
+        cells_elem = ET.SubElement(root, "cells")
+
+        all_cell_ids = set()
+        for node in nodes:
+            dzh_id = _get_dzh_cell_id(node)
+            try:
+                all_cell_ids.add(int(dzh_id))
+            except (ValueError, TypeError):
+                pass
+
+        # 表驱动：从 dzh_type_map.json export_dispatch 加载节点类型→构建函数映射
+        _dzh_tm = get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}
+        _export_dispatch = _dzh_tm.get('export_dispatch', {})
+        _type_map = _dzh_tm.get('type_map', {})
+
+        for node in nodes:
+            node_type = node.get("type", "")
+            dzh_cell_type = node.get("dzh_cell_type")
+
+            if node.get("_visual_only"):
+                continue
+
+            cell = ET.SubElement(cells_elem, "cell")
+            dzh_id = _get_dzh_cell_id(node)
+            cell.set("id", dzh_id)
+
+            # 表驱动：先按 node_type 查表，再按 dzh_cell_type 反查 type_map
+            dispatch_entry = _export_dispatch.get(node_type)
+            if dispatch_entry is None and dzh_cell_type is not None:
+                resolved_type = _type_map.get(str(dzh_cell_type))
+                dispatch_entry = _export_dispatch.get(resolved_type) if resolved_type else None
+
+            if dispatch_entry:
+                type_rule = dict(dispatch_entry)
+                # 200/203 子类型分发：sub_type_dispatch 处理 203/4 子类型
+                sub_dispatch = type_rule.get("sub_type_dispatch")
+                if sub_dispatch and dzh_cell_type is not None:
+                    sub_rule = sub_dispatch.get(str(dzh_cell_type))
+                    if sub_rule:
+                        if "override" in sub_rule:
+                            # 子类型覆盖为另一规则（如 200→4 走 discard_pool）
+                            type_rule = dict(_export_dispatch.get(sub_rule["override"], {}))
+                        else:
+                            if "force_type" in sub_rule:
+                                type_rule["force_type"] = sub_rule["force_type"]
+                            if "export_fields_add" in sub_rule:
+                                type_rule["export_fields"] = list(type_rule.get("export_fields", [])) + sub_rule["export_fields_add"]
+                # handler=null 的类型（如 flow_arrow）走内联逻辑
+                if node_type == "flow_arrow" or dzh_cell_type == 6:
+                    _build_flow_arrow_cell(cell, node)
+                else:
+                    _build_cell(cell, node, type_rule, dzh_cell_type)
+            else:
+                logger.warning("DZH导出: 未匹配的节点类型 node_type=%s dzh_cell_type=%s", node_type, dzh_cell_type)
+        self._all_cell_ids = all_cell_ids
+
+    def _serialize_flows(self, root, config):
+        edges = self._edges
+        nodes = self._nodes
+        flows_elem = ET.SubElement(root, "flows")
+
+        sorted_edges = sorted(
+            [e for e in edges if isinstance(e, dict)],
+            key=lambda e: e.get("params", {}).get("_order", e.get("params", {}).get("exec_order", 999)),
+        )
+
+        for edge in sorted_edges:
+            if not isinstance(edge, dict):
+                continue
+            src_raw = edge.get("source", "")
+            tgt_raw = edge.get("target", "")
+            source_node_id = src_raw.get("node_id", "") if isinstance(src_raw, dict) else str(src_raw)
+            target_node_id = tgt_raw.get("node_id", "") if isinstance(tgt_raw, dict) else str(tgt_raw)
+            source_dzh_id = _find_node_dzh_id(nodes, source_node_id)
+            target_dzh_id = _find_node_dzh_id(nodes, target_node_id)
+            edge_params = edge.get("params", {})
+
+            flow = ET.SubElement(flows_elem, "flow")
+            flow.set("from", source_dzh_id)
+            flow.set("to", target_dzh_id)
+            flow.set("attr", _encode_flow_attr(edge_params))
+            if _should_export_attr(edge_params, "clr"):
+                flow.set("clr", str(edge_params.get("clr", "-1")))
+            _add_timing_attrs(flow, edge_params)
+
+            if _should_export_attr(edge_params, "count"):
+                count = edge_params.get("count")
+                if count is not None:
+                    flow.set("count", str(count))
+
+    def _finalize_xml(self, root):
+        config = self._config
+        pool_meta = self._pool_meta
+        all_cell_ids = self._all_cell_ids
+
+        # trades / opentrades：合并双重 if/elif 块为单一容器发射器
+        def _emit_trade_container(tag, items, has_flag):
+            if has_flag or items:
+                container = ET.SubElement(root, tag)
+                for it in (items or []):
+                    te = ET.SubElement(container, "trade")
+                    for key, val in it.items():
+                        te.set(key, str(val))
+
+        _emit_trade_container("trades", config.get("trades"),
+                              pool_meta.get("_has_trades", False))
+        _emit_trade_container("opentrades", config.get("opentrades"),
+                              pool_meta.get("_has_opentrades", False))
+
+        max_cell_id = max(all_cell_ids) if all_cell_ids else 0
+        original_nextid = pool_meta.get("nextid")
+        if original_nextid is not None:
+            root.set("nextid", str(original_nextid))
+        else:
+            root.set("nextid", str(max_cell_id + 1))
+
+        xml_str = ET.tostring(root, encoding="utf-8").decode("utf-8")
+        xml_str = xml_str.replace("&#10;", "&#xA;")
+        xml_str = xml_str.replace("&#13;", "\r")
+        xml_str = xml_str.replace("__DZH_NEWLINE__", "&#xA;")
+        xml_str = xml_str.replace("__DZH_TAB__", "\t")
+        xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>'
+        print("[META_CORE EXPORTER] Using UTF-8 encoding")
+        full_xml = xml_declaration + "\n" + xml_str
+        return full_xml.encode("utf-8")
 
 
 class TdxPoolConverter(BasePoolConverter):
@@ -318,6 +796,254 @@ class TdxPoolConverter(BasePoolConverter):
 
     def parse_tdx_pos(self, pos_str):
         return self._decode_pos(pos_str, as_dict=False)
+
+    # ---- v8 parse 钩子（原 parse_tdx_xml 编排逻辑原封移入）----
+    def _decode_source(self, source):
+        with open(source, "rb") as f:
+            raw_bytes = f.read()
+        return self.decode_tdx_xml(raw_bytes)
+
+    def _extract_pool_meta(self, root, source):
+        filepath = source
+        # 版本自动检测
+        xml_version = detect_xml_version(root)
+
+        # 兼容：<pool> 可能是根元素（TDX原生格式）或子元素
+        if root.tag == "pool":
+            pool_elem = root
+        else:
+            pool_elem = root.find("pool")
+        if pool_elem is None:
+            raise ValueError(f"No <pool> element found in TDX XML: {filepath}")
+
+        # 解析 pool 级别属性
+        nextid = safe_int(pool_elem.get("nextid"), 0)
+        backcolor = safe_int(pool_elem.get("backcolor"), 16777216)
+        self._xml_version = xml_version
+        self._pool_elem = pool_elem
+        return {"nextid": nextid, "backcolor": backcolor}
+
+    def _parse_cells(self, root):
+        xml_version = self._xml_version
+        pool_elem = self._pool_elem
+        # 解析 cells
+        cells: List[TdxCellModel] = []
+        cells_elem = pool_elem.find("cells")
+        if cells_elem is not None:
+            for cell_elem in cells_elem.findall("cell"):
+                cid = safe_int(cell_elem.get("id"), 0)
+                ctype = safe_int(cell_elem.get("type"), 0)
+                cattr = safe_int(cell_elem.get("attr"), 0)
+                cclr = safe_int(cell_elem.get("clr"), -1)
+                cclrtext = safe_int(cell_elem.get("clrtext"), 0)
+                csolid = safe_int(cell_elem.get("solid"), 0)
+                ctext = cell_elem.get("text", "")
+
+                # V7.x 新增: cell.setcode 属性 (0=深圳SZ, 1=上海SH, 2=北交所BJ)
+                csetcode = cell_elem.get("setcode")
+                if csetcode is not None:
+                    csetcode = safe_int(csetcode, None)  # 保持原始值或 None
+                else:
+                    csetcode = None  # 未指定市场（兼容旧版）
+
+                # V8.x 新增: disabled / show_row_num 标志
+                cdisabled = cell_elem.get("disabled")
+                if cdisabled is not None:
+                    cdisabled = safe_int(cdisabled, 0)
+                    cdisabled = True if cdisabled != 0 else False
+                else:
+                    cdisabled = False
+
+                cshowrownum = cell_elem.get("show_row_num")  # 尝试多种可能的XML属性名
+                if cshowrownum is None:
+                    cshowrownum = cell_elem.get("showrownum")  # 备选命名
+                if cshowrownum is not None:
+                    cshowrownum = safe_int(cshowrownum, 0)
+                    cshowrownum = True if cshowrownum != 0 else False
+                else:
+                    cshowrownum = False
+
+                pos_x, pos_y, width, height = _parse_tdx_pos(cell_elem.get("pos", ""))
+
+                cell_data: Dict[str, Any] = {
+                    "id": cid,
+                    "type": ctype,
+                    "attr": cattr,
+                    "pos_x": pos_x,
+                    "pos_y": pos_y,
+                    "width": width,
+                    "height": height,
+                    "clr": cclr,
+                    "clrtext": cclrtext,
+                    "solid": csolid,
+                    "text": ctext,
+                    "setcode": csetcode,       # V7.x: 市场代码
+                    "disabled": cdisabled,           # V8.x: 停止运算标志
+                    "show_row_num": cshowrownum,     # V8.x: 显示行号标志
+                    "xml_version": xml_version, # 版本标识
+                }
+
+                # 子元素：func（条件 type=3）
+                func_elem = cell_elem.find("func")
+                if func_elem is not None:
+                    cell_data["func"] = _parse_func_element(func_elem)
+
+                # 子元素：psatt（状态池 type=8）
+                psatt_elem = cell_elem.find("psatt")
+                if psatt_elem is not None:
+                    cell_data["psatt"] = _parse_psatt_element(psatt_elem)
+
+                # 子元素：spinfo（候选池 type=7）
+                spinfo_elem = cell_elem.find("spinfo")
+                if spinfo_elem is not None:
+                    cell_data["spinfo"] = _parse_spinfo_element(spinfo_elem)
+
+                # 子元素：stk（股票列表）
+                stks = _parse_stk_elements(cell_elem)
+                if stks:
+                    cell_data["stks"] = stks
+
+                cells.append(TdxCellModel.from_dict(cell_data))
+        return cells
+
+    def _parse_flows(self, root):
+        pool_elem = self._pool_elem
+        # 解析 flows
+        flows: List[TdxFlowModel] = []
+        flows_elem = pool_elem.find("flows")
+        if flows_elem is not None:
+            for flow_elem in flows_elem.findall("flow"):
+                flow_data: Dict[str, Any] = {}
+                for k, v in flow_elem.attrib.items():
+                    flow_data[k] = safe_int(v, 0)
+                flows.append(TdxFlowModel.from_dict(flow_data))
+        return flows
+
+    def _build_result(self, pool_meta, cells, flows):
+        nextid = pool_meta["nextid"]
+        backcolor = pool_meta["backcolor"]
+        return TdxPoolMetaModel(nextid=nextid, backcolor=backcolor, cells=cells, flows=flows)
+
+    # ---- v8 export 钩子（原 _build_tdx_xml 编排逻辑原封移入）----
+    def _create_root(self, config):
+        pool_data = config
+        mapping = _get_xml_mapping()
+        self._tdx_pool_cfg, self._tdx_cell_cfg, self._tdx_flow_cfg = mapping['pool'], mapping['cell'], mapping['flow']
+        _type_map = get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}
+        self._tdx_dzh_to_tdx = {int(k): v for k, v in _type_map.get("dzh_to_tdx", {}).items()}
+        # 表驱动：前端类型名 → TDX数字类型
+        self._tdx_frontend_to_tdx = _type_map.get("frontend_to_tdx", {})
+        root = ET.Element(self._tdx_pool_cfg['root_element'])
+        pool_el = ET.SubElement(root, self._tdx_pool_cfg['pool_element'])
+        self._tdx_pool_el = pool_el
+        self._tdx_containers = {cd['element']: ET.SubElement(pool_el, cd['element']) for cd in self._tdx_pool_cfg['pool_children']}
+        # 表驱动：建立字符串ID→数字ID映射（TDX XML要求数字ID）
+        nodes_list = pool_data.get("nodes", [])
+        self._tdx_str_id_map = {}
+        for idx, node in enumerate(nodes_list):
+            nid = node.get("id", "")
+            if nid and not str(nid).isdigit():
+                self._tdx_str_id_map[nid] = str(idx + 1)
+        return root
+
+    def _serialize_pool_attrs(self, root, config):
+        pool_data = config
+        pool_el = self._tdx_pool_el
+        pool_cfg = self._tdx_pool_cfg
+        for ad in pool_cfg['pool_attributes']:
+            pool_el.set(ad['attr'], str(_resolve_field(pool_data, ad['field'], ad.get('default'))))
+
+    def _serialize_cells(self, root, config):
+        pool_data = config
+        cell_cfg = self._tdx_cell_cfg
+        containers = self._tdx_containers
+        dzh_to_tdx = self._tdx_dzh_to_tdx
+        frontend_to_tdx = self._tdx_frontend_to_tdx
+        _str_id_map = self._tdx_str_id_map
+        nodes_list = pool_data.get("nodes", [])
+        for node in nodes_list:
+            params, pos = node.get("params", {}) or {}, node.get("position", {})
+            # 类型解析优先级：dzh_cell_type > type(前端名) > 0
+            raw_type = node.get("dzh_cell_type")
+            if raw_type is None:
+                ftype = node.get("type", "")
+                raw_type = frontend_to_tdx.get(ftype) if ftype else 0
+            tdx_type = dzh_to_tdx.get(int(raw_type), int(raw_type)) if raw_type is not None else 0
+            # ID解析：字符串ID查表，数字ID直接用，否则自增
+            nid = node.get("id", "0")
+            cell_id = _str_id_map.get(nid, nid) if not str(nid).isdigit() else nid
+            x1 = int(pos.get("x", 0)) if pos else 0
+            y1 = int(pos.get("y", 0)) if pos else 0
+            w = int(pos.get("width", 120)) if pos else 120
+            h = int(pos.get("height", 64)) if pos else 64
+            ctx = {
+                '_tdx_type': tdx_type,
+                '_pos': f"{x1},{y1},{x1 + w},{y1 + h}",
+                '_text': params.get("text", node.get("text", node.get("label", ""))),
+                'params': params,
+                'node': node,
+            }
+            el = ET.SubElement(containers['cells'], cell_cfg['element'])
+            el.set('id', str(cell_id))
+            for ad in cell_cfg['attributes']:
+                if ad.get('attr') == 'id':
+                    continue  # 已在上面设置
+                val = _apply_attr_defaults(_resolve_attr_tdx(ad['field'], ad, ctx), ad, tdx_type)
+                if val is not None:
+                    el.set(ad['attr'], str(val))
+                elif 'default' in ad:
+                    el.set(ad['attr'], str(ad['default']))
+            for cd in cell_cfg.get('children_by_type', {}).get(str(tdx_type), []):
+                src = _resolve_field(node, cd['field']) or (_resolve_field(node, cd['alt_field']) if cd.get('alt_field') else None)
+                if cd['mode'] == 'dict_attrs' and isinstance(src, dict) and src:
+                    ch = ET.SubElement(el, cd['element'])
+                    for k, v in src.items():
+                        ch.set(k, str(v))
+                elif cd['mode'] == 'list_of_dicts' and isinstance(src, list):
+                    for item in src:
+                        # 兼容：stocks可能是纯字符串列表，自动转为{code: xxx}格式
+                        if isinstance(item, str):
+                            item = {'code': item}
+                        if isinstance(item, dict):
+                            ie = ET.SubElement(el, cd['element'])
+                            for ia in cd.get('item_attrs', []):
+                                ie.set(ia['attr'], str(item.get(ia['field'], ia.get('default', ''))))
+
+    def _serialize_flows(self, root, config):
+        pool_data = config
+        flow_cfg = self._tdx_flow_cfg
+        containers = self._tdx_containers
+        _str_id_map = self._tdx_str_id_map
+        for edge in pool_data.get("edges", []):
+            ep = edge.get("params", {}) or {}
+            # 兼容：source/target 可能是字符串或dict
+            so_raw = edge.get("source", "")
+            to_raw = edge.get("target", "")
+            so_str = so_raw.get("node_id", "") if isinstance(so_raw, dict) else str(so_raw)
+            to_str = to_raw.get("node_id", "") if isinstance(to_raw, dict) else str(to_raw)
+            # 字符串ID通过映射表转数字ID
+            start_id = _str_id_map.get(so_str, so_str) if so_str and not so_str.isdigit() else (so_str or "0")
+            end_id = _str_id_map.get(to_str, to_str) if to_str and not to_str.isdigit() else (to_str or "0")
+            ctx = {
+                'params': ep,
+                'edge': edge,
+                'source.node_id': start_id,
+                'target.node_id': end_id,
+            }
+            fe = ET.SubElement(containers['flows'], flow_cfg['element'])
+            for ad in flow_cfg['attributes']:
+                val = _apply_attr_defaults(_resolve_attr_tdx(ad['field'], ad, ctx), ad)
+                if val is not None:
+                    fe.set(ad['attr'], str(val))
+                elif 'default' in ad:
+                    fe.set(ad['attr'], str(ad['default']))
+
+    def _finalize_xml(self, root):
+        _indent_xml(root)
+        filepath = self._current_filepath
+        with open(filepath, 'wb') as fh:
+            fh.write(b'<?xml version="1.0" encoding="GBK"?>\n')
+            fh.write(ET.tostring(root, encoding='gbk', xml_declaration=False))
 
 
 # 模块级单例
@@ -1767,248 +2493,8 @@ def _assemble_pool_result(cells, flows, *, pool_meta=None, propagated=None, **ex
 
 
 def parse_dzh_xml(xml_content, filename=None):
-    text = _decode_xml_content(xml_content)
-    root = ET.fromstring(text)
-
-    if filename:
-        name = os.path.splitext(os.path.basename(filename))[0]
-    else:
-        name = "unknown"
-
-    pool_attr_names = {"type", "ver", "mode", "nextid", "backcolor", "ency", "warning", "system"}
-    pool_present_attrs = {k for k in root.attrib if k in pool_attr_names}
-
-    pool_meta = {
-        "type": root.get("type", "ss-pool"),
-        "ver": root.get("ver", "1.0"),
-        "mode": root.get("mode", "1"),
-        "nextid": safe_int(root.get("nextid"), 0),
-        "backcolor": safe_int(root.get("backcolor"), 0),
-        "ency": root.get("ency"),
-        "warning": root.get("warning"),
-        "system": root.get("system"),
-        "_has_trades": root.find(".//trades") is not None,
-        "_has_opentrades": root.find(".//opentrades") is not None,
-        "_present_attrs": pool_present_attrs,
-    }
-
-    raw_cells = {}
-    for cell_elem in root.findall(".//cell"):
-        cid = cell_elem.get("id", "")
-        if not cid:
-            continue
-        _known_cell_attrs = {
-            "id", "type", "attr", "pos", "clr", "text", "hold", "col",
-            "width", "enter", "exit", "histana", "wizd", "deltype",
-            "endtime", "delstocktype", "staattr", "stocknum", "tmpl",
-            "inditype", "crc", "indi", "sorttype", "indiparam",
-            "attrtext", "reload", "lastload", "url", "intersection_status",
-            "stk_list", "setcode",
-            "formula", "order", "top_n",
-            "op_type", "source_nodes",
-            "result_type",
-            "line_type", "color", "style",
-        }
-        _present_attrs = {k for k in cell_elem.attrib if k in _known_cell_attrs}
-        _orig_text = cell_elem.get("text")
-        raw_cells[cid] = {
-            "id": cid,
-            "type": safe_int(cell_elem.get("type"), 0),
-            "attr": cell_elem.get("attr", "0"),
-            "pos": cell_elem.get("pos", ""),
-            "clr": cell_elem.get("clr", ""),
-            "text": cell_elem.get("text", ""),
-            "_orig_text": _orig_text,
-            "hold": cell_elem.get("hold"),
-            "col": cell_elem.get("col"),
-            "width": cell_elem.get("width"),
-            "enter": cell_elem.get("enter"),
-            "exit": cell_elem.get("exit"),
-            "histana": cell_elem.get("histana"),
-            "wizd": cell_elem.get("wizd"),
-            "deltype": cell_elem.get("deltype"),
-            "endtime": cell_elem.get("endtime"),
-            "delstocktype": cell_elem.get("delstocktype"),
-            "staattr": cell_elem.get("staattr"),
-            "stocknum": cell_elem.get("stocknum"),
-            "tmpl": cell_elem.get("tmpl"),
-            "inditype": cell_elem.get("inditype"),
-            "crc": cell_elem.get("crc"),
-            "indi": cell_elem.get("indi"),
-            "sorttype": cell_elem.get("sorttype"),
-            "indiparam": cell_elem.get("indiparam"),
-            "attrtext": cell_elem.get("attrtext"),
-            "reload": cell_elem.get("reload"),
-            "lastload": cell_elem.get("lastload"),
-            "url": cell_elem.get("url"),
-            "intersection_status": cell_elem.get("intersection_status"),
-            "result_type": cell_elem.get("result_type"),
-            "_present_attrs": _present_attrs,
-        }
-        ct_val = safe_int(cell_elem.get("type"), 0)
-        if ct_val in (102, 103, 104, 200, 203):
-            raw_cells[cid]["stocks"] = _parse_stk_children(cell_elem)
-            raw_cells[cid]["anas"] = _parse_ana_children(cell_elem)
-            raw_cells[cid]["tradeattr"] = _parse_tradeattr(cell_elem)
-
-    raw_flows = []
-    for order_idx, flow_elem in enumerate(root.findall(".//flow")):
-        _has_timing = {k for k in ["begin", "begint", "end", "endt", "interval"] if flow_elem.get(k) is not None}
-        _flow_present_attrs = {k for k in flow_elem.attrib if k in {
-            "from", "to", "attr", "clr", "count", "begin", "begint",
-            "end", "endt", "interval", "mid",
-            "cst", "cet", "cstt", "cett", "c周期", "c_period",
-        }}
-        raw_flows.append({
-            "from": flow_elem.get("from", ""),
-            "to": flow_elem.get("to", ""),
-            "attr": flow_elem.get("attr", "0"),
-            "clr": flow_elem.get("clr", ""),
-            "count": flow_elem.get("count"),
-            "begin": flow_elem.get("begin"),
-            "begint": flow_elem.get("begint"),
-            "end": flow_elem.get("end"),
-            "endt": flow_elem.get("endt"),
-            "interval": flow_elem.get("interval"),
-            "mid": flow_elem.get("mid"),
-            "cst": flow_elem.get("cst"),
-            "cet": flow_elem.get("cet"),
-            "cstt": flow_elem.get("cstt"),
-            "cett": flow_elem.get("cett"),
-            "c_period": flow_elem.get("c_period") or flow_elem.get("c周期"),
-            "_order": order_idx,
-            "_has_timing": _has_timing,
-            "_present_attrs": _flow_present_attrs,
-        })
-
-    node_id_map = {}
-    nodes = []
-
-    for cid, rc in raw_cells.items():
-        if cid.startswith('m_'):
-            node_id_map[cid] = cid
-        else:
-            node_id_map[cid] = "m_%s" % cid
-
-    for cid, rc in raw_cells.items():
-        ct = rc["type"]
-        new_id = node_id_map[cid]
-        pos = _parse_pos(rc["pos"])
-        label = rc["text"] or ""
-        attr_int = safe_int(rc["attr"], 0)
-
-        node = _parse_cell_element(ct, rc, cid, new_id, pos, label, attr_int, safe_int(pool_meta.get("ency"), 0))
-        if node is not None:
-            nodes.append(node)
-
-    edges = []
-    schedules = []
-
-    for rf in raw_flows:
-        src_id = rf["from"]
-        tgt_id = rf["to"]
-        if not src_id or not tgt_id:
-            continue
-
-        src_mapped = node_id_map.get(src_id, src_id if src_id.startswith('m_') else "m_%s" % src_id)
-        tgt_mapped = node_id_map.get(tgt_id, tgt_id if tgt_id.startswith('m_') else "m_%s" % tgt_id)
-
-        attr_val = safe_int(rf.get("attr", "0"), 0)
-        decoded = _decode_flow_attr(attr_val)
-        begin_val = safe_int(rf.get("begin"), 0)
-        begint_val = rf.get("begint", "0") or "0"
-        end_val = safe_int(rf.get("end"), 0)
-        endt_val = rf.get("endt", "0") or "0"
-        interval_val = safe_int(rf.get("interval"), 60)
-        mid_val = rf.get("mid")
-
-        edge_params = {
-            "dzh_attr": attr_val,
-            "delete_source": decoded["delete_source"],
-            "keep_source": decoded["keep_source"],
-            "clear_dest_first": decoded["clear_dest_first"],
-            "output_constituent": decoded["output_constituent"],
-            "force_move": decoded["force_move"],
-            "begin": begin_val,
-            "begint": begint_val,
-            "begint_format": "hhmmss" if begin_val in BEGINT_HHMMSS_MODES else "seconds",
-            "end": end_val,
-            "endt": endt_val,
-            "interval_sec": interval_val,
-            "mid": mid_val,
-            "clr": rf.get("clr", "-1"),
-            "count": rf.get("count"),
-            "cst": rf.get("cst"),
-            "cet": rf.get("cet"),
-            "cstt": rf.get("cstt"),
-            "cett": rf.get("cett"),
-            "c_period": rf.get("c_period"),
-            "_order": rf["_order"],
-            "_has_timing": rf.get("_has_timing", set()),
-            "_present_attrs": rf.get("_present_attrs", set()),
-        }
-
-        if begin_val != 0:
-            time_str = _parse_time_str(begint_val)
-            mode = BEGIN_MODE_MAP.get(begin_val, "specified_time")
-            schedule_id = "sch_%s" % uuid.uuid4().hex[:6]
-            edge_params["schedule_id"] = schedule_id
-            schedules.append({
-                "id": schedule_id,
-                "mode": mode,
-                "time": time_str,
-                "begin_value": begin_val,
-                "begint_raw": begint_val,
-                "end_value": end_val,
-                "endt_raw": endt_val,
-                "interval_sec": interval_val,
-                "from_node": src_mapped,
-                "to_node": tgt_mapped,
-            })
-
-        edges.append({
-            "id": "e_%s" % uuid.uuid4().hex[:8],
-            "source": {"node_id": src_mapped},
-            "target": {"node_id": tgt_mapped},
-            "params": edge_params,
-        })
-
-    # trades / opentrades：合并双重解析循环为单一采集器
-    def _collect_trades(xpath, attr_names):
-        out = []
-        for el in root.findall(xpath):
-            d = {}
-            for attr_name in attr_names:
-                val = el.get(attr_name)
-                if val is not None:
-                    d[attr_name] = val
-            if d:
-                out.append(d)
-        return out
-
-    raw_trades = _collect_trades(".//trades/trade", [
-        "code", "name", "market", "price", "volume",
-        "buyprice", "sellprice", "direction", "tradetime",
-        "accountno", "tradetype", "rate", "fee"])
-    raw_opentrades = _collect_trades(".//opentrades/trade", [
-        "code", "name", "market", "targetprice",
-        "orderprice", "volume", "direction",
-        "tradetype", "accountno", "condition"])
-
-    _STOCK_HOLDER_TYPES = {"stock_state_pool", "result_pool"}
-    for n in nodes:
-        if n.get("type") in _STOCK_HOLDER_TYPES:
-            orig_stks = n.get("params", {}).get("stocks")
-            n["params"]["_orig_stks"] = list(orig_stks) if orig_stks else []
-
-    propagated = _propagate_stocks_to_downstream_pools(nodes, edges)
-
-    # Task 23.4: 注入 DZH 全局配置（market_mappings / reload_schedule）到 pool_config，
-    # 供下游 services/candidate_pool.py 通过 PoolLoaded 事件订阅获取，消除跨层 import
-    return _assemble_pool_result(
-        nodes, edges, pool_meta=pool_meta, propagated=propagated, name=name,
-        schedules=schedules, trades=raw_trades, opentrades=raw_opentrades,
-        market_mappings=load_dzh_market_mappings(), reload_schedule=_DZH_RELOAD_SCHEDULE)
+    _DZH_CONVERTER._current_filename = filename
+    return _DZH_CONVERTER.parse_pool(xml_content)
 
 
 _CELL_TYPE_MAP = {
@@ -3420,156 +3906,7 @@ def _find_node_dzh_id(nodes, node_id):
 
 
 def export_dzh_xml(config):
-    pool_meta = config.get("pool_meta", {})
-    nodes = config.get("nodes", [])
-    edges = config.get("edges", [])
-
-    pool_present = pool_meta.get("_present_attrs", set())
-
-    pool_type = pool_meta.get("type", _EXPORT_DEFAULTS.get("pool_type", "ss-pool"))
-    pool_ver = pool_meta.get("ver", _EXPORT_DEFAULTS.get("pool_ver", "1.0"))
-    pool_mode = pool_meta.get("mode", _EXPORT_DEFAULTS.get("pool_mode", 1))
-    pool_backcolor = pool_meta.get("backcolor", _EXPORT_DEFAULTS.get("pool_backcolor", _DEFAULT_BACKCOLOR))
-
-    root = ET.Element("pool")
-    root.set("type", pool_type)
-    root.set("ver", pool_ver)
-    root.set("mode", str(pool_mode))
-    root.set("backcolor", str(pool_backcolor))
-
-    _enc_val = pool_meta.get("ency")
-    if (not pool_present or "ency" in pool_present) and _enc_val is not None:
-        root.set("ency", str(_enc_val))
-    elif _enc_val is not None and _enc_val != '' and _enc_val != 0:
-        root.set("ency", str(_enc_val))
-
-    _warn_val = pool_meta.get("warning")
-    if (not pool_present or "warning" in pool_present) and _warn_val is not None:
-        root.set("warning", str(_warn_val))
-    elif _warn_val is not None and _warn_val != '':
-        root.set("warning", str(_warn_val))
-
-    _sys_val = pool_meta.get("system")
-    if (not pool_present or "system" in pool_present) and _sys_val is not None:
-        root.set("system", str(_sys_val))
-    elif _sys_val is not None and _sys_val != '':
-        root.set("system", str(_sys_val))
-
-    cells_elem = ET.SubElement(root, "cells")
-    flows_elem = ET.SubElement(root, "flows")
-
-    all_cell_ids = set()
-    for node in nodes:
-        dzh_id = _get_dzh_cell_id(node)
-        try:
-            all_cell_ids.add(int(dzh_id))
-        except (ValueError, TypeError):
-            pass
-
-    # 表驱动：从 dzh_type_map.json export_dispatch 加载节点类型→构建函数映射
-    _dzh_tm = get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}
-    _export_dispatch = _dzh_tm.get('export_dispatch', {})
-    _type_map = _dzh_tm.get('type_map', {})
-
-    for node in nodes:
-        node_type = node.get("type", "")
-        dzh_cell_type = node.get("dzh_cell_type")
-
-        if node.get("_visual_only"):
-            continue
-
-        cell = ET.SubElement(cells_elem, "cell")
-        dzh_id = _get_dzh_cell_id(node)
-        cell.set("id", dzh_id)
-
-        # 表驱动：先按 node_type 查表，再按 dzh_cell_type 反查 type_map
-        dispatch_entry = _export_dispatch.get(node_type)
-        if dispatch_entry is None and dzh_cell_type is not None:
-            resolved_type = _type_map.get(str(dzh_cell_type))
-            dispatch_entry = _export_dispatch.get(resolved_type) if resolved_type else None
-
-        if dispatch_entry:
-            type_rule = dict(dispatch_entry)
-            # 200/203 子类型分发：sub_type_dispatch 处理 203/4 子类型
-            sub_dispatch = type_rule.get("sub_type_dispatch")
-            if sub_dispatch and dzh_cell_type is not None:
-                sub_rule = sub_dispatch.get(str(dzh_cell_type))
-                if sub_rule:
-                    if "override" in sub_rule:
-                        # 子类型覆盖为另一规则（如 200→4 走 discard_pool）
-                        type_rule = dict(_export_dispatch.get(sub_rule["override"], {}))
-                    else:
-                        if "force_type" in sub_rule:
-                            type_rule["force_type"] = sub_rule["force_type"]
-                        if "export_fields_add" in sub_rule:
-                            type_rule["export_fields"] = list(type_rule.get("export_fields", [])) + sub_rule["export_fields_add"]
-            # handler=null 的类型（如 flow_arrow）走内联逻辑
-            if node_type == "flow_arrow" or dzh_cell_type == 6:
-                _build_flow_arrow_cell(cell, node)
-            else:
-                _build_cell(cell, node, type_rule, dzh_cell_type)
-        else:
-            logger.warning("DZH导出: 未匹配的节点类型 node_type=%s dzh_cell_type=%s", node_type, dzh_cell_type)
-
-    sorted_edges = sorted(
-        [e for e in edges if isinstance(e, dict)],
-        key=lambda e: e.get("params", {}).get("_order", e.get("params", {}).get("exec_order", 999)),
-    )
-
-    for edge in sorted_edges:
-        if not isinstance(edge, dict):
-            continue
-        src_raw = edge.get("source", "")
-        tgt_raw = edge.get("target", "")
-        source_node_id = src_raw.get("node_id", "") if isinstance(src_raw, dict) else str(src_raw)
-        target_node_id = tgt_raw.get("node_id", "") if isinstance(tgt_raw, dict) else str(tgt_raw)
-        source_dzh_id = _find_node_dzh_id(nodes, source_node_id)
-        target_dzh_id = _find_node_dzh_id(nodes, target_node_id)
-        edge_params = edge.get("params", {})
-
-        flow = ET.SubElement(flows_elem, "flow")
-        flow.set("from", source_dzh_id)
-        flow.set("to", target_dzh_id)
-        flow.set("attr", _encode_flow_attr(edge_params))
-        if _should_export_attr(edge_params, "clr"):
-            flow.set("clr", str(edge_params.get("clr", "-1")))
-        _add_timing_attrs(flow, edge_params)
-
-        if _should_export_attr(edge_params, "count"):
-            count = edge_params.get("count")
-            if count is not None:
-                flow.set("count", str(count))
-
-    # trades / opentrades：合并双重 if/elif 块为单一容器发射器
-    def _emit_trade_container(tag, items, has_flag):
-        if has_flag or items:
-            container = ET.SubElement(root, tag)
-            for it in (items or []):
-                te = ET.SubElement(container, "trade")
-                for key, val in it.items():
-                    te.set(key, str(val))
-
-    _emit_trade_container("trades", config.get("trades"),
-                          pool_meta.get("_has_trades", False))
-    _emit_trade_container("opentrades", config.get("opentrades"),
-                          pool_meta.get("_has_opentrades", False))
-
-    max_cell_id = max(all_cell_ids) if all_cell_ids else 0
-    original_nextid = pool_meta.get("nextid")
-    if original_nextid is not None:
-        root.set("nextid", str(original_nextid))
-    else:
-        root.set("nextid", str(max_cell_id + 1))
-
-    xml_str = ET.tostring(root, encoding="utf-8").decode("utf-8")
-    xml_str = xml_str.replace("&#10;", "&#xA;")
-    xml_str = xml_str.replace("&#13;", "\r")
-    xml_str = xml_str.replace("__DZH_NEWLINE__", "&#xA;")
-    xml_str = xml_str.replace("__DZH_TAB__", "\t")
-    xml_declaration = '<?xml version="1.0" encoding="UTF-8"?>'
-    print("[META_CORE EXPORTER] Using UTF-8 encoding")
-    full_xml = xml_declaration + "\n" + xml_str
-    return full_xml.encode("utf-8")
+    return _DZH_CONVERTER.export_pool(config)
 
 
 def export_meta_to_dzh_xml_bytes(pool_config):
@@ -4143,129 +4480,7 @@ def _get_element_sector_type_map(element: str) -> Dict[str, int]:
 
 
 def parse_tdx_xml(filepath: str) -> TdxPoolMetaModel:
-    """
-    解析 TDX 股票池 XML 文件，返回 TdxPoolMetaModel。
-
-    支持 V6.x 和 V7.x 双版本自动检测与兼容解析。
-
-    Args:
-        filepath: TDX XML 文件路径。
-
-    Returns:
-        TdxPoolMetaModel 实例，包含解析后的 cells 和 flows。
-        模型附带 xml_version 属性标识检测到的版本 ('v6' 或 'v7')。
-    """
-    with open(filepath, "rb") as f:
-        raw_bytes = f.read()
-
-    text = _decode_tdx_xml(raw_bytes)
-    root = ET.fromstring(text)
-
-    # 版本自动检测
-    xml_version = detect_xml_version(root)
-
-    # 兼容：<pool> 可能是根元素（TDX原生格式）或子元素
-    if root.tag == "pool":
-        pool_elem = root
-    else:
-        pool_elem = root.find("pool")
-    if pool_elem is None:
-        raise ValueError(f"No <pool> element found in TDX XML: {filepath}")
-
-    # 解析 pool 级别属性
-    nextid = safe_int(pool_elem.get("nextid"), 0)
-    backcolor = safe_int(pool_elem.get("backcolor"), 16777216)
-
-    # 解析 cells
-    cells: List[TdxCellModel] = []
-    cells_elem = pool_elem.find("cells")
-    if cells_elem is not None:
-        for cell_elem in cells_elem.findall("cell"):
-            cid = safe_int(cell_elem.get("id"), 0)
-            ctype = safe_int(cell_elem.get("type"), 0)
-            cattr = safe_int(cell_elem.get("attr"), 0)
-            cclr = safe_int(cell_elem.get("clr"), -1)
-            cclrtext = safe_int(cell_elem.get("clrtext"), 0)
-            csolid = safe_int(cell_elem.get("solid"), 0)
-            ctext = cell_elem.get("text", "")
-
-            # V7.x 新增: cell.setcode 属性 (0=深圳SZ, 1=上海SH, 2=北交所BJ)
-            csetcode = cell_elem.get("setcode")
-            if csetcode is not None:
-                csetcode = safe_int(csetcode, None)  # 保持原始值或 None
-            else:
-                csetcode = None  # 未指定市场（兼容旧版）
-
-            # V8.x 新增: disabled / show_row_num 标志
-            cdisabled = cell_elem.get("disabled")
-            if cdisabled is not None:
-                cdisabled = safe_int(cdisabled, 0)
-                cdisabled = True if cdisabled != 0 else False
-            else:
-                cdisabled = False
-
-            cshowrownum = cell_elem.get("show_row_num")  # 尝试多种可能的XML属性名
-            if cshowrownum is None:
-                cshowrownum = cell_elem.get("showrownum")  # 备选命名
-            if cshowrownum is not None:
-                cshowrownum = safe_int(cshowrownum, 0)
-                cshowrownum = True if cshowrownum != 0 else False
-            else:
-                cshowrownum = False
-
-            pos_x, pos_y, width, height = _parse_tdx_pos(cell_elem.get("pos", ""))
-
-            cell_data: Dict[str, Any] = {
-                "id": cid,
-                "type": ctype,
-                "attr": cattr,
-                "pos_x": pos_x,
-                "pos_y": pos_y,
-                "width": width,
-                "height": height,
-                "clr": cclr,
-                "clrtext": cclrtext,
-                "solid": csolid,
-                "text": ctext,
-                "setcode": csetcode,       # V7.x: 市场代码
-                "disabled": cdisabled,           # V8.x: 停止运算标志
-                "show_row_num": cshowrownum,     # V8.x: 显示行号标志
-                "xml_version": xml_version, # 版本标识
-            }
-
-            # 子元素：func（条件 type=3）
-            func_elem = cell_elem.find("func")
-            if func_elem is not None:
-                cell_data["func"] = _parse_func_element(func_elem)
-
-            # 子元素：psatt（状态池 type=8）
-            psatt_elem = cell_elem.find("psatt")
-            if psatt_elem is not None:
-                cell_data["psatt"] = _parse_psatt_element(psatt_elem)
-
-            # 子元素：spinfo（候选池 type=7）
-            spinfo_elem = cell_elem.find("spinfo")
-            if spinfo_elem is not None:
-                cell_data["spinfo"] = _parse_spinfo_element(spinfo_elem)
-
-            # 子元素：stk（股票列表）
-            stks = _parse_stk_elements(cell_elem)
-            if stks:
-                cell_data["stks"] = stks
-
-            cells.append(TdxCellModel.from_dict(cell_data))
-
-    # 解析 flows
-    flows: List[TdxFlowModel] = []
-    flows_elem = pool_elem.find("flows")
-    if flows_elem is not None:
-        for flow_elem in flows_elem.findall("flow"):
-            flow_data: Dict[str, Any] = {}
-            for k, v in flow_elem.attrib.items():
-                flow_data[k] = safe_int(v, 0)
-            flows.append(TdxFlowModel.from_dict(flow_data))
-
-    return TdxPoolMetaModel(nextid=nextid, backcolor=backcolor, cells=cells, flows=flows)
+    return _TDX_CONVERTER.parse_pool(filepath)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -5684,102 +5899,9 @@ def _apply_attr_defaults(val, attr_def, tdx_type=None):
 
 
 def _build_tdx_xml(pool_data: dict, filepath: str) -> None:
-    """表驱动构建TDX XML。兼容两种格式：
-      - 前端格式: nodes[i].id=字符串, type='tdx_candidate', edges[j].source/target=字符串
-      - TDX格式:  nodes[i].id=数字, dzh_cell_type=数字, edges[j].source/target={node_id:N}
-    """
-    mapping = _get_xml_mapping()
-    pool_cfg, cell_cfg, flow_cfg = mapping['pool'], mapping['cell'], mapping['flow']
-    _type_map = get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}
-    dzh_to_tdx = {int(k): v for k, v in _type_map.get("dzh_to_tdx", {}).items()}
-    # 表驱动：前端类型名 → TDX数字类型
-    frontend_to_tdx = _type_map.get("frontend_to_tdx", {})
-    root = ET.Element(pool_cfg['root_element'])
-    pool_el = ET.SubElement(root, pool_cfg['pool_element'])
-    for ad in pool_cfg['pool_attributes']:
-        pool_el.set(ad['attr'], str(_resolve_field(pool_data, ad['field'], ad.get('default'))))
-    containers = {cd['element']: ET.SubElement(pool_el, cd['element']) for cd in pool_cfg['pool_children']}
-    # 表驱动：建立字符串ID→数字ID映射（TDX XML要求数字ID）
-    nodes_list = pool_data.get("nodes", [])
-    _str_id_map = {}
-    for idx, node in enumerate(nodes_list):
-        nid = node.get("id", "")
-        if nid and not str(nid).isdigit():
-            _str_id_map[nid] = str(idx + 1)
-    for node in nodes_list:
-        params, pos = node.get("params", {}) or {}, node.get("position", {})
-        # 类型解析优先级：dzh_cell_type > type(前端名) > 0
-        raw_type = node.get("dzh_cell_type")
-        if raw_type is None:
-            ftype = node.get("type", "")
-            raw_type = frontend_to_tdx.get(ftype) if ftype else 0
-        tdx_type = dzh_to_tdx.get(int(raw_type), int(raw_type)) if raw_type is not None else 0
-        # ID解析：字符串ID查表，数字ID直接用，否则自增
-        nid = node.get("id", "0")
-        cell_id = _str_id_map.get(nid, nid) if not str(nid).isdigit() else nid
-        x1 = int(pos.get("x", 0)) if pos else 0
-        y1 = int(pos.get("y", 0)) if pos else 0
-        w = int(pos.get("width", 120)) if pos else 120
-        h = int(pos.get("height", 64)) if pos else 64
-        ctx = {
-            '_tdx_type': tdx_type,
-            '_pos': f"{x1},{y1},{x1 + w},{y1 + h}",
-            '_text': params.get("text", node.get("text", node.get("label", ""))),
-            'params': params,
-            'node': node,
-        }
-        el = ET.SubElement(containers['cells'], cell_cfg['element'])
-        el.set('id', str(cell_id))
-        for ad in cell_cfg['attributes']:
-            if ad.get('attr') == 'id':
-                continue  # 已在上面设置
-            val = _apply_attr_defaults(_resolve_attr_tdx(ad['field'], ad, ctx), ad, tdx_type)
-            if val is not None:
-                el.set(ad['attr'], str(val))
-            elif 'default' in ad:
-                el.set(ad['attr'], str(ad['default']))
-        for cd in cell_cfg.get('children_by_type', {}).get(str(tdx_type), []):
-            src = _resolve_field(node, cd['field']) or (_resolve_field(node, cd['alt_field']) if cd.get('alt_field') else None)
-            if cd['mode'] == 'dict_attrs' and isinstance(src, dict) and src:
-                ch = ET.SubElement(el, cd['element'])
-                for k, v in src.items():
-                    ch.set(k, str(v))
-            elif cd['mode'] == 'list_of_dicts' and isinstance(src, list):
-                for item in src:
-                    # 兼容：stocks可能是纯字符串列表，自动转为{code: xxx}格式
-                    if isinstance(item, str):
-                        item = {'code': item}
-                    if isinstance(item, dict):
-                        ie = ET.SubElement(el, cd['element'])
-                        for ia in cd.get('item_attrs', []):
-                            ie.set(ia['attr'], str(item.get(ia['field'], ia.get('default', ''))))
-    for edge in pool_data.get("edges", []):
-        ep = edge.get("params", {}) or {}
-        # 兼容：source/target 可能是字符串或dict
-        so_raw = edge.get("source", "")
-        to_raw = edge.get("target", "")
-        so_str = so_raw.get("node_id", "") if isinstance(so_raw, dict) else str(so_raw)
-        to_str = to_raw.get("node_id", "") if isinstance(to_raw, dict) else str(to_raw)
-        # 字符串ID通过映射表转数字ID
-        start_id = _str_id_map.get(so_str, so_str) if so_str and not so_str.isdigit() else (so_str or "0")
-        end_id = _str_id_map.get(to_str, to_str) if to_str and not to_str.isdigit() else (to_str or "0")
-        ctx = {
-            'params': ep,
-            'edge': edge,
-            'source.node_id': start_id,
-            'target.node_id': end_id,
-        }
-        fe = ET.SubElement(containers['flows'], flow_cfg['element'])
-        for ad in flow_cfg['attributes']:
-            val = _apply_attr_defaults(_resolve_attr_tdx(ad['field'], ad, ctx), ad)
-            if val is not None:
-                fe.set(ad['attr'], str(val))
-            elif 'default' in ad:
-                fe.set(ad['attr'], str(ad['default']))
-    _indent_xml(root)
-    with open(filepath, 'wb') as fh:
-        fh.write(b'<?xml version="1.0" encoding="GBK"?>\n')
-        fh.write(ET.tostring(root, encoding='gbk', xml_declaration=False))
+    """表驱动构建TDX XML（薄包装：委托 _TDX_CONVERTER.export_pool 模板方法）。"""
+    _TDX_CONVERTER._current_filepath = filepath
+    return _TDX_CONVERTER.export_pool(pool_data)
 
 
 _TRANSFORMS = {

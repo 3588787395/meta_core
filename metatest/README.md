@@ -1,22 +1,27 @@
-# metatest v7 严格正反合量化测试套件
+# metatest v8 严格正反合量化测试套件
 
 ## 概述
 
-metatest v7 是股票池平台的严格正反合量化测试套件，覆盖前端与后端所有模块。
+metatest v8 是股票池平台的严格正反合量化测试套件，覆盖前端与后端所有模块。
 v6 在 v5 20 维基础上扩展为 **21 维**加权评分：v5 20 维等比降权 4%（每维 × 0.96），
 新增第 21 维 adapter_isomorphism 占 4%（TqProvider/TqSdkBridge 转发方法表驱动覆盖率），
 权重重新分配至总和 = 100%。v7 在 v6 21 维结构基础上，新增 per-code 循环表
 （`_PER_CODE_TQ_CALLS`）+ 通用器（`_call_cached_per_code`），收敛 get_stock_list
-双签名为双 `_call_cached` 调用，第 21 维覆盖率阈值从 80% 提升至 90%。
+双签名为双 `_call_cached` 调用，第 21 维覆盖率阈值从 80% 提升至 90%。**v8 在 v7 21 维
+结构基础上深化第 13 维 oop_inheritance_depth：4 条件升级为 6 条件，新增 `parse_pool` /
+`export_pool` 模板方法在 `BasePoolConverter` 中定义的检查，使评分体系能驱动主流程收敛。**
 
-**第六层洞察（adapter 转发同构，外部 SDK 适配器元模式投影）**：TqProvider/TqSdkBridge
-转发同构本质是 MetaDispatcher 之外的「声明 Data（方法名→默认值映射）+ Dispatcher
-（通用转发器）」元模式投影。v6 将 20 个 TqProvider 转发方法收敛为 `_FORWARD_SPECS` 表 +
-`_forward` 通用器，4 个 A 组缓存方法收敛为 `_CACHED_TQ_CALLS` 表 + `_call_cached` 通用器，
-5 个 B 组简单方法收敛为 `_SIMPLE_TQ_CALLS` 表 + `_call_simple` 通用器（共 29 方法 / 3 通用器），
-闭合 v5 SubTask 14.5 未竟目标，是元模式收敛的「最后一公里」。v7 新增 `_PER_CODE_TQ_CALLS`
-表（3 条目）+ `_call_cached_per_code` 通用器，并将 get_stock_list 双签名收敛为双
-`_call_cached` 调用（4 表 / 4 通用器 / 34 方法），完成 per-code 循环与双签名遗留收敛。
+**第八层洞察（Converter 主流程模板方法上提，OOP 继承的最后一层）**：OOP 继承的真正价值
+不在原子操作层（v4 已做：`_parse_element` / `_add_element` / `_decode_pos` /
+`_decode_xml_bytes` 4 原子方法上提），而在**主流程编排层**。v7 `oop_inheritance_depth`
+维度 = 100 但只检查原子操作 4 条件，**无法识别主流程未进入继承体系这一缺口**——这是评分
+体系的盲区。v8 将 `parse_pool` / `export_pool` 模板方法上提到 `BasePoolConverter`，编排
+6 步 parse 骨架（`_decode_source` → `ET.fromstring` → `_extract_pool_meta` →
+`_parse_cells` → `_parse_flows` → `_build_result`）与 5 步 export 骨架（`_create_root`
+→ `_serialize_pool_attrs` → `_serialize_cells` → `_serialize_flows` → `_finalize_xml`），
+子类仅覆盖 10 个差异钩子，模块级函数（`parse_dzh_xml` / `parse_tdx_xml` /
+`export_dzh_xml` / `_build_tdx_xml`）改为薄包装委托，闭合「大智慧和通达信只作为继承，
+所有基础功能用相同代码」的最后一层。
 
 门槛：总分 ≥ 95 且 21 维均 ≥ 80 判定 PASS。
 
@@ -40,7 +45,7 @@ v6 在 v5 20 维基础上扩展为 **21 维**加权评分：v5 20 维等比降�
 | 10 | rule_compliance | 2.304% | RULES 91-100 Grep 违规数 / 10，0 违规满分 |
 | 11 | negative_test_coverage | 1.536% | 4 类反测试用例数 / 目标数（每类 ≥ 8）均值 × 100 |
 | 12 | synthesis_e2e | 2.304% | 合测试通过数 / 总数 × 100 |
-| 13 | oop_inheritance_depth | 6.144% | BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类 + 子类仅差异 |
+| 13 | oop_inheritance_depth | 6.144% | BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类 + 子类仅差异 + parse_pool/export_pool 模板方法在基类（v8 6 条件，各 16.67%） |
 | 14 | polling_zero_tolerance | 6.144% | 12 处轮询模式 Grep 零匹配 + EventDriver heapq 验证 + 前端 setInterval fetch 零匹配 |
 | 15 | primitive_convergence | 6.144% | 三原语覆盖率（时间/分派/继承各 ≥ 95% 满分） |
 | 16 | essence_ratio | 3.072% | 净减行数 / 变更前行数 × 100（目标 ≥ 12%，净增 = 0 触发 redo） |
@@ -172,6 +177,42 @@ get_stock_list 方法存在新旧两种调用签名，v7 将方法体重构为�
 正测试 `test_positive_adapter_isomorphism.py` 断言：四表存在且条目数达标 +
 四通用转发器方法定义 + 覆盖率 ≥ 90%。
 
+## Converter 主流程模板方法上提（第八层洞察，`oop_inheritance_depth` 维度 v8 深化）
+
+v8 第八层洞察：OOP 继承的真正价值不在原子操作层（v4 已做：4 原子方法
+`_parse_element` / `_add_element` / `_decode_pos` / `_decode_xml_bytes` 上提），
+而在**主流程编排层**。v7 `oop_inheritance_depth` = 100 但只检查原子操作 4 条件，
+无法识别主流程未进入继承体系这一缺口。
+
+v8 将两个真正同构的**主流程**从模块级并行函数上提为 `BasePoolConverter` 模板方法：
+
+| 模板方法 | 编排骨架 | 子类覆盖差异钩子 |
+|---|---|---|
+| `parse_pool(self, source)` | 6 步：`_decode_source` → `ET.fromstring` → `_extract_pool_meta` → `_parse_cells` → `_parse_flows` → `_build_result` | 5 parse 钩子 |
+| `export_pool(self, config)` | 5 步：`_create_root` → `_serialize_pool_attrs` → `_serialize_cells` → `_serialize_flows` → `_finalize_xml` | 5 export 钩子 |
+
+**10 个差异钩子**（默认 `raise NotImplementedError`，子类必须覆盖）：
+- parse 钩子：`_decode_source` / `_extract_pool_meta` / `_parse_cells` / `_parse_flows` / `_build_result`
+- export 钩子：`_create_root` / `_serialize_pool_attrs` / `_serialize_cells` / `_serialize_flows` / `_finalize_xml`
+
+**薄包装委托**：4 个模块级函数保留原签名（向后兼容，不 BREAKING），改为委托单例：
+- `parse_dzh_xml` → `_DZH_CONVERTER.parse_pool(source)`
+- `parse_tdx_xml` → `_TDX_CONVERTER.parse_pool(source)`
+- `export_dzh_xml` → `_DZH_CONVERTER.export_pool(config)`
+- `_build_tdx_xml` → `_TDX_CONVERTER.export_pool(config)`
+
+**oop_inheritance_depth 维度深化（v8 6 条件，各 16.67%）**：
+1. `BasePoolConverter` 存在
+2. `DzhPoolConverter` / `TdxPoolConverter` 继承自 `BasePoolConverter`
+3. 4 原子方法定义在基类
+4. 子类仅含差异方法（无重新引入的同构方法）
+5. `parse_pool` 模板方法在基类定义（v8 新增）
+6. `export_pool` 模板方法在基类定义（v8 新增）
+
+正测试 `test_positive_oop_inheritance.py` 断言：6 条件全满足 + 10 钩子在基类定义 +
+Dzh/TdxPoolConverter 各覆盖 10 钩子 + 4 模块级函数为薄包装（函数体 ≤ 3 行）+
+薄包装委托 `_DZH_CONVERTER` / `_TDX_CONVERTER` 的 `parse_pool` / `export_pool`。
+
 ## 运行方式与退出码
 
 ```bash
@@ -186,12 +227,13 @@ python -m metatest.runner
 ```
 metatest/
 ├── conftest.py                              # 共享 pytest 夹具
-├── scoring.py                               # 21 维量化评分引擎（v7）
+├── scoring.py                               # 21 维量化评分引擎（v8）
 ├── runner.py                                # 测试运行器 + 21 维数据采集（含 adapter_forward_coverage 等字段）
 ├── test_positive_dispatcher_isomorphism.py  # v5 MetaDispatcher 继承断言
 ├── test_positive_runtime_verification.py     # v5 3 个 in-process 测试全绿
 ├── test_negative_cross_module_import.py     # v5 8 处违规模式零匹配
 ├── test_positive_adapter_isomorphism.py     # v6 adapter 转发表驱动覆盖率断言
+├── test_positive_oop_inheritance.py         # v8 主流程模板方法 + 10 钩子 + 薄包装断言
 ├── test_runtime_replay_heapq.py             # v5 harness（replay）
 ├── test_runtime_simulation_heapq.py         # v5 harness（simulation）
 ├── test_runtime_mode_switch.py              # v5 harness（mode-switch）
@@ -199,7 +241,7 @@ metatest/
 └── report.json                              # 21 维 + meta_unification 结构化报告
 ```
 
-## v7 严格规则总结
+## v8 严格规则总结
 
 - 跳过测试计为失败（不在 passed 分子）
 - 前端 E2E 环境缺失计 `frontend_e2e_passed=0`，给最低达标线 80（非信用分）
@@ -212,3 +254,4 @@ metatest/
 - EventDriver 因 heapq 时序特化保持独立，不继承 MetaDispatcher（dispatcher 同构硬约束）
 - 运行时验证 harness 禁用 `time.sleep` / `asyncio.sleep` 步进（fire_due 推进硬约束）
 - adapter 转发同构覆盖率 ≥ 90% 才达标（v7 提升至 90%，外部 SDK 适配器表驱动硬约束；4 表 / 4 通用转发器 / 34 方法）
+- Converter 主流程必须模板方法化（v8 新增）：`parse_pool` / `export_pool` 在 `BasePoolConverter` 编排骨架，子类仅覆盖 10 个差异钩子，模块级函数仅作薄包装委托，禁止重新引入模块级并行主流程函数

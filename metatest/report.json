@@ -1,6 +1,6 @@
 {
-  "total_score": 98.49,
-  "passed": true,
+  "total_score": 74.92,
+  "passed": false,
   "threshold": 95.0,
   "dimensions": [
     {
@@ -12,26 +12,26 @@
     {
       "name": "test_pass_rate",
       "weight": 0.09984,
-      "score": 96.85823754789273,
-      "details": "1264/1305 通过（跳过计为失败）"
+      "score": 0.0,
+      "details": "0/1039 通过（跳过计为失败）"
     },
     {
       "name": "assertion_density",
       "weight": 0.0384,
       "score": 100.0,
-      "details": "2938 断言 / 74 文件 = 39.7/文件 (目标 20)"
+      "details": "2399 断言 / 55 文件 = 43.6/文件 (目标 20)"
     },
     {
       "name": "event_chain_integrity",
       "weight": 0.06144,
-      "score": 100.0,
-      "details": "13/10 类事件出现，链顺序正确"
+      "score": 0.0,
+      "details": "0/10 类事件出现，链顺序不正确（扣 20%）"
     },
     {
       "name": "performance_benchmark",
       "weight": 0.0384,
       "score": 100.0,
-      "details": "0.04s / 1000 tick (门槛 10.0s)"
+      "details": "0.01s / 1000 tick (门槛 10.0s)"
     },
     {
       "name": "frontend_e2e_pass_rate",
@@ -42,8 +42,8 @@
     {
       "name": "logic_coverage",
       "weight": 0.0384,
-      "score": 100.0,
-      "details": "5/5 项底层逻辑验证通过（水位线/编译-运行分离/三要素/角色表/正交化）"
+      "score": 80.0,
+      "details": "4/5 项底层逻辑验证通过（水位线/编译-运行分离/三要素/角色表/正交化）"
     },
     {
       "name": "isomorphism_elimination",
@@ -72,14 +72,14 @@
     {
       "name": "synthesis_e2e",
       "weight": 0.02304,
-      "score": 94.6969696969697,
-      "details": "125/132 合测试通过"
+      "score": 0.0,
+      "details": "无合测试用例（synthesis_total=0）"
     },
     {
       "name": "oop_inheritance_depth",
       "weight": 0.06144,
       "score": 100.0,
-      "details": "BasePoolConverter存在=是；子类继承=是；公共方法在基类=是；子类仅差异=是（4/4 条件满足）"
+      "details": "BasePoolConverter存在=是；子类继承=是；公共方法在基类=是；子类仅差异=是；parse_pool在基类=是；export_pool在基类=是（6/6 条件满足）"
     },
     {
       "name": "polling_zero_tolerance",
@@ -108,8 +108,8 @@
     {
       "name": "runtime_verification",
       "weight": 0.048,
-      "score": 100.0,
-      "details": "3/3 运行时验证测试通过（replay/simulation/mode-switch）"
+      "score": 0.0,
+      "details": "0/3 运行时验证测试通过（replay/simulation/mode-switch）"
     },
     {
       "name": "eventtest_regression",
@@ -131,48 +131,42 @@
     }
   ],
   "deductions": [
-    "test_pass_rate: 96.9/100 — 1264/1305 通过（跳过计为失败）",
+    "test_pass_rate: 0.0/100 — 0/1039 通过（跳过计为失败）",
+    "event_chain_integrity: 0.0/100 — 0/10 类事件出现，链顺序不正确（扣 20%）",
     "frontend_e2e_pass_rate: 80.0/100 — 0/72 通过（环境缺失，给予最低达标线 80 分）",
-    "synthesis_e2e: 94.7/100 — 125/132 合测试通过",
+    "logic_coverage: 80.0/100 — 4/5 项底层逻辑验证通过（水位线/编译-运行分离/三要素/角色表/正交化）",
+    "synthesis_e2e: 0.0/100 — 无合测试用例（synthesis_total=0）",
+    "runtime_verification: 0.0/100 — 0/3 运行时验证测试通过（replay/simulation/mode-switch）",
     "前端 E2E 环境未就绪（浏览器/服务器缺失，给予最低达标线 80 分）"
   ],
-  "redo_list": [],
+  "redo_list": [
+    "test_pass_rate",
+    "event_chain_integrity",
+    "synthesis_e2e",
+    "runtime_verification"
+  ],
   "test_summary": {
-    "collected": 1305,
-    "passed": 1264,
+    "collected": 1039,
+    "passed": 0,
     "failed": 0,
-    "errors": 0,
-    "skipped": 46,
+    "errors": 1,
+    "skipped": 1,
     "no_tests": false,
-    "duration_s": 57.88
+    "duration_s": 1.73
   },
   "test_results": {
     "modules_covered": 17,
-    "tests_passed": 1264,
-    "tests_total": 1305,
-    "assertions_count": 2938,
-    "test_files_count": 74,
-    "event_types_seen": [
-      "BarComposed",
-      "DataChanged",
-      "EdgeFired",
-      "FormulaEvaluated",
-      "OrderFilled",
-      "OrderPlaced",
-      "Signal",
-      "StockFiltered",
-      "TickReceived",
-      "TransferExecuted",
-      "ExportCompleted",
-      "SimulationStep",
-      "ModeChanged"
-    ],
-    "event_chain_correct": true,
-    "sim_1000_tick_time_s": 0.03841122399899177,
+    "tests_passed": 0,
+    "tests_total": 1039,
+    "assertions_count": 2399,
+    "test_files_count": 55,
+    "event_types_seen": [],
+    "event_chain_correct": false,
+    "sim_1000_tick_time_s": 0.0052836129998468095,
     "frontend_e2e_passed": 0,
     "frontend_e2e_total": 72,
     "frontend_e2e_env_missing": true,
-    "logic_coverage_passed": 5,
+    "logic_coverage_passed": 4,
     "logic_coverage_total": 5,
     "isomorphism_violations": 0,
     "isomorphism_total_checks": 40,
@@ -187,13 +181,15 @@
       "logic_errors": 45
     },
     "negative_test_target_per_category": 8,
-    "synthesis_passed": 125,
-    "synthesis_total": 132,
+    "synthesis_passed": 0,
+    "synthesis_total": 0,
     "oop_inheritance": {
       "base_exists": true,
       "subclasses_inherit": true,
       "public_methods_in_base": true,
-      "subclasses_only_differential": true
+      "subclasses_only_differential": true,
+      "parse_pool_in_base": true,
+      "export_pool_in_base": true
     },
     "polling_violations": {
       "pattern_counts": {
@@ -255,7 +251,7 @@
       "configstore_dispatch_lines": 3
     },
     "runtime_verification": {
-      "passed": 3,
+      "passed": 0,
       "total": 3,
       "files": [
         "test_runtime_replay_heapq.py",
