@@ -302,3 +302,41 @@ class TestTickIntervalDeterminism:
         assert len(intervals) >= 2, (
             f"100 只股票应至少出现 2 种不同间隔，实际 {len(intervals)} 种"
         )
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 2 E3 + E5 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 E3 watchdog + E5 services/data heapq 收敛回归。"""
+
+    def test_no_file_watcher_loop_in_services_data(self):
+        """services/data.py 不含 _file_watcher_loop（E3 已改 watchdog 事件驱动）。"""
+        import re
+        from pathlib import Path
+        data_path = Path(__file__).resolve().parent.parent / "services" / "data.py"
+        if not data_path.is_file():
+            return
+        src = data_path.read_text(encoding="utf-8")
+        count = len(re.findall(r"def _file_watcher_loop\b", src))
+        assert count == 0, \
+            f"services/data.py 不应含 _file_watcher_loop（E3 已改 watchdog），实际 {count} 处"
+
+    def test_no_refresh_with_backoff_in_services_data(self):
+        """services/data.py 不含 _refresh_with_backoff（E5 已改 heapq 调度）。"""
+        import re
+        from pathlib import Path
+        data_path = Path(__file__).resolve().parent.parent / "services" / "data.py"
+        if not data_path.is_file():
+            return
+        src = data_path.read_text(encoding="utf-8")
+        count = len(re.findall(r"def _refresh_with_backoff\b", src))
+        assert count == 0, \
+            f"services/data.py 不应含 _refresh_with_backoff（E5 已改 heapq），实际 {count} 处"
+
+    def test_watchdog_observer_used_in_table_engine(self):
+        """table_engine.py 引用 watchdog.Observer（E3 文件监视事件驱动）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "table_engine.py").read_text(encoding="utf-8")
+        assert "watchdog.observers" in src or "Observer()" in src, \
+            "table_engine.py 应使用 watchdog.Observer（E3 文件监视事件驱动）"

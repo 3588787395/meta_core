@@ -360,3 +360,38 @@ class TestChangeMWithStockFilters:
             f"至少 3 类 evaluator 路径应经 _with_stock_filters 包装（变更 M），"
             f"实际 {wrapped_count} 处"
         )
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 3 C8 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 C8 Step 基类 + _compile_spec / _gate_window 收敛回归。"""
+
+    def test_step_base_class_present(self):
+        """execution_module 含 Step 基类（C8 合并 5 个 XStep）。"""
+        import ast
+        from pathlib import Path
+        tree = ast.parse((Path(__file__).resolve().parent.parent / "core" / "execution_module.py").read_text(encoding="utf-8"))
+        classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+        assert "Step" in classes, \
+            "execution_module.py 应含 Step 基类（C8 合并 5 个 XStep）"
+
+    def test_step_subclasses_present(self):
+        """execution_module 含 5 个 Step 子类（GateStep / FilterStep / PropagateStep / TTLStep / CallbackStep）。"""
+        import ast
+        from pathlib import Path
+        tree = ast.parse((Path(__file__).resolve().parent.parent / "core" / "execution_module.py").read_text(encoding="utf-8"))
+        classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+        for cls in ("GateStep", "FilterStep", "PropagateStep", "TTLStep", "CallbackStep"):
+            assert cls in classes, \
+                f"execution_module.py 应含 {cls}（继承 Step，C8 合并）"
+
+    def test_compile_spec_and_gate_window_helpers(self):
+        """execution_module 含 _compile_spec 与 _gate_window helper（C8 合并 _compile_X_spec / _gate_X）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "execution_module.py").read_text(encoding="utf-8")
+        assert "def _compile_spec" in src, \
+            "execution_module 应含 _compile_spec helper（C8 合并 3 个 _compile_X_spec）"
+        assert "_gate_window" in src, \
+            "execution_module 应含 _gate_window helper（C8 合并 4 个 _gate_X）"

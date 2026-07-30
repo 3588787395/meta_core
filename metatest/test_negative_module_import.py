@@ -29,6 +29,10 @@ _CORE_DIR = _PROJECT_ROOT / "core"
 
 # Shared infrastructure modules that any business module may import.
 # These are the "mediator" / "value object" / "config" layers.
+# NOTE: ``core._hashing`` is an ALLOWED new file per the v4 spec (变更 C3,
+# 哈希函数三族统一模块), so it is whitelisted here. ``converters_common`` is
+# the actual flat module name (NOT ``converters/_common.py``) for the 公共工具
+# 下沉 module (变更 P4 / Task 4) and is likewise whitelisted.
 _ALLOWED_INFRA = {
     "core.event_bus",
     "core.domain",
@@ -36,6 +40,8 @@ _ALLOWED_INFRA = {
     "core.schemas",
     "core.tick_table",
     "core.__init__",
+    "core._hashing",  # 变更 C3 — allowed new file (hash_dict_content / hash_tick_aggregate / BarHashMixin)
+    "converters_common",  # 变更 P4 — allowed new flat module (safe_int / safe_float / decode_formula)
 }
 
 # Business modules that must NOT be directly imported by other business

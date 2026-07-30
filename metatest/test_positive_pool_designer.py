@@ -446,3 +446,37 @@ class TestEdgeOrderNumberDesignStructure:
         assert d["interval"] == 60
         e2 = ConditionalEdge.from_dict(d)
         assert e2.interval == 60
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 1 P1 + 阶段 3 C1 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 P1 BasePoolConverter + C1 _FieldedBase 收敛回归。"""
+
+    def test_base_pool_converter_class_present(self):
+        """converters.py 含 BasePoolConverter 抽象基类（P1 收敛基类）。"""
+        import ast
+        from pathlib import Path
+        tree = ast.parse((Path(__file__).resolve().parent.parent / "converters.py").read_text(encoding="utf-8"))
+        classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+        assert "BasePoolConverter" in classes, \
+            "converters.py 应含 BasePoolConverter 抽象基类（P1 收敛基类）"
+
+    def test_fielded_base_mixin_present(self):
+        """domain.py 含 _FieldedBase mixin（C1 合并 _NodeBase/_EdgeBase 的 to_dict/from_dict）。"""
+        import ast
+        from pathlib import Path
+        tree = ast.parse((Path(__file__).resolve().parent.parent / "core" / "domain.py").read_text(encoding="utf-8"))
+        classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+        assert "_FieldedBase" in classes, \
+            "domain.py 应含 _FieldedBase mixin（C1 合并 to_dict/from_dict）"
+
+    def test_no_dzh_tdx_isomorphism_residue(self):
+        """converters.py 不含 _parse_func_element / _add_func 等 DZH/TDX 旧同构（P1 已合并）。"""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "converters.py").read_text(encoding="utf-8")
+        count = len(re.findall(r"def _parse_func_element\b|def _add_func\b|def _parse_pos\b", src))
+        assert count == 0, \
+            f"converters.py 不应含 DZH/TDX 旧同构方法（P1 已合并），实际 {count} 处"

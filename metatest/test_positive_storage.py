@@ -293,3 +293,41 @@ class TestStorageBatchWrite:
             assert rows[1]["stock_code"] == "fz000002", "第二条记录 stock_code 应为 fz000002"
         finally:
             conn.close()
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 3 C12 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 C12 _get_table helper 收敛回归。"""
+
+    def test_get_table_helper_in_core(self):
+        """core/*.py 至少 1 处定义 _get_table helper（C12 统一调用）。"""
+        import re
+        from pathlib import Path
+        core_dir = Path(__file__).resolve().parent.parent / "core"
+        total = 0
+        for py in core_dir.glob("*.py"):
+            try:
+                src = py.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            total += len(re.findall(r"def _get_table\b", src))
+        assert total >= 1, \
+            f"core/*.py 应至少 1 处定义 _get_table helper（C12 统一调用），实际 {total} 处"
+
+    def test_no_double_get_global_config_store_calls(self):
+        """core/*.py 不含双 get_global_config_store().get_table ... if get_global_config_store（C12 perf smell）。"""
+        import re
+        from pathlib import Path
+        core_dir = Path(__file__).resolve().parent.parent / "core"
+        regex = re.compile(r"get_global_config_store\(\)\.get_table.*\n.*if get_global_config_store", re.MULTILINE)
+        total = 0
+        for py in core_dir.glob("*.py"):
+            try:
+                src = py.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            total += len(regex.findall(src))
+        assert total == 0, \
+            f"core/*.py 不应含双 get_global_config_store 调用（C12 perf smell），实际 {total} 处"

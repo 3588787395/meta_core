@@ -890,3 +890,206 @@ def test_no_isomorphism_revival_iter_entries_in_table_engine():
         "变更 O 违规：_validate_table 未使用 _iter_entries"
         "（应表驱动按 type 分派，无 if/elif 双分支）"
     )
+
+
+# ============================================================================
+# Task 29.5 新增：表驱动分派表存在性验证（dispatch primitive convergence）
+# ============================================================================
+# spec 原语二：所有 if/elif 链与同构函数集合收敛为声明式表 + 通用 builder/dispatcher。
+# 验证 9 组核心分派表存在且非空（表驱动收敛形态）。
+
+
+class TestTableDrivenDispatchTablesExist:
+    """9 组核心分派表应存在（表驱动收敛形态，spec 原语二）。"""
+
+    def test_propagate_mode_table_exists(self):
+        """_PROPAGATE_MODE_TABLE 存在（execution_module.py，mode 派发表驱动）。"""
+        f = _CORE_DIR / "execution_module.py"
+        assert _grep_count(r"^_PROPAGATE_MODE_TABLE\s*:", f) >= 1
+
+    def test_filter_spec_builders_table_exists(self):
+        """_FILTER_SPEC_BUILDERS 存在（FilterSpec 构造分派表驱动）。"""
+        f = _CORE_DIR / "execution_module.py"
+        assert _grep_count(r"^_FILTER_SPEC_BUILDERS\s*:", f) >= 1
+
+    def test_adapter_specs_table_exists(self):
+        """_ADAPTER_SPECS 存在（monitoring_module.py，24 adapter 表驱动）。"""
+        f = _CORE_DIR / "monitoring_module.py"
+        assert _grep_count(r"^_ADAPTER_SPECS\s*:", f) >= 1
+
+    def test_ranking_specs_table_exists(self):
+        """_RANKING_SPECS 存在（monitoring_module.py，ranking 表驱动）。"""
+        f = _CORE_DIR / "monitoring_module.py"
+        assert _grep_count(r"^_RANKING_SPECS\s*:", f) >= 1
+
+    def test_nset_filter_handlers_table_exists(self):
+        """_NSET_FILTER_HANDLERS 存在（screening_module.py，nset 筛选表驱动）。"""
+        f = _CORE_DIR / "screening_module.py"
+        assert _grep_count(r"^_NSET_FILTER_HANDLERS\s*:", f) >= 1
+
+    def test_side_specs_table_exists(self):
+        """_SIDE_SPECS 存在（trade_module.py，BUY/SELL 表驱动替代 _execute_buy/_sell）。"""
+        f = _CORE_DIR / "trade_module.py"
+        assert _grep_count(r"^_SIDE_SPECS\s*:", f) >= 1
+
+    def test_psatt_side_effects_table_exists(self):
+        """_PSATT_SIDE_EFFECTS 存在（trade_module.py，5 if 分支表驱动）。"""
+        f = _CORE_DIR / "trade_module.py"
+        assert _grep_count(r"^_PSATT_SIDE_EFFECTS\s*:", f) >= 1
+
+    def test_pnl_computers_table_exists(self):
+        """_PNL_METRIC_SPECS 存在（monitoring_module.py，5 PnL 同构函数表驱动）。"""
+        f = _CORE_DIR / "monitoring_module.py"
+        assert _grep_count(r"^_PNL_METRIC_SPECS\s*:", f) >= 1
+
+    def test_subscriptions_in_five_modules(self):
+        """_SUBSCRIPTIONS ClassVar 在 5 个核心业务模块均存在（事件订阅表驱动）。"""
+        target_modules = [
+            "execution_module.py", "tick_bar_module.py",
+            "monitoring_module.py", "screening_module.py", "trade_module.py",
+        ]
+        missing = []
+        for name in target_modules:
+            f = _CORE_DIR / name
+            if not f.exists() or _grep_count(r"_SUBSCRIPTIONS\s*:\s*ClassVar", f) < 1:
+                missing.append(name)
+        assert not missing, (
+            f"变更 N 违规：_SUBSCRIPTIONS ClassVar 缺失于 {missing}（应 5 模块均表驱动订阅）"
+        )
+
+
+# ============================================================================
+# Task 29.5 新增：旧同构函数零匹配（dispatch primitive guard rails）
+# ============================================================================
+
+
+class TestOldIsomorphicFunctionsAbsent:
+    """旧同构函数名应零匹配（已收敛到表 + dispatcher）。"""
+
+    def test_no_execute_buy_sell(self):
+        """_execute_buy / _execute_sell 不应复活（已收敛到 _SIDE_SPECS + _execute_trade）。"""
+        total = _grep_count_in_dir(r"def _execute_buy\b|def _execute_sell\b", _CORE_DIR)
+        assert total == 0, (
+            f"检测到 {total} 处 _execute_buy/_execute_sell（应收敛到 _SIDE_SPECS）"
+        )
+
+    def test_no_gate_before_after(self):
+        """_gate_before / _gate_after 不应复活（已收敛到 _gate_window + 4 委托）。"""
+        total = _grep_count_in_dir(r"def _gate_before\b|def _gate_after\b", _CORE_DIR)
+        assert total == 0, (
+            f"检测到 {total} 处 _gate_before/_gate_after（应收敛到 _gate_window）"
+        )
+
+    def test_no_date_key_helpers_in_monitoring(self):
+        """_get_week_key / _get_month_key / _get_day_key 不应复活（已收敛到 _DATE_KEYS 表）。"""
+        f = _CORE_DIR / "monitoring_module.py"
+        total = _grep_count(
+            r"def _get_week_key\b|def _get_month_key\b|def _get_day_key\b", f
+        )
+        assert total == 0, (
+            f"检测到 {total} 处 _get_*_key 同构函数（应收敛到 _DATE_KEYS 表）"
+        )
+
+    def test_no_make_edge_ttl_actions(self):
+        """_make_edge / _ttl_interval_action / _ttl_endtime_action 不应复活
+        （已收敛到 _make_publishing_action + 3 表）。"""
+        total = _grep_count_in_dir(
+            r"def _make_edge\b|def _ttl_interval_action\b|def _ttl_endtime_action\b",
+            _CORE_DIR,
+        )
+        assert total == 0, (
+            f"检测到 {total} 处 _make_edge/_ttl_*_action（应收敛到 _make_publishing_action）"
+        )
+
+    def test_compile_spec_functions_are_thin_wrappers(self):
+        """_compile_timing/filter/propagate_spec 应为薄包装（委托 _compile_spec + 字段表）。"""
+        f = _CORE_DIR / "execution_module.py"
+        # 统一骨架 _compile_spec 应存在
+        assert _grep_count(r"def _compile_spec\b", f) >= 1, (
+            "_compile_spec 统一骨架缺失（_compile_*_spec 应委托它）"
+        )
+        # 3 个字段表应存在
+        for table in ("_COMPILE_TIMING_FIELDS", "_COMPILE_FILTER_FIELDS",
+                      "_COMPILE_PROPAGATE_FIELDS"):
+            assert _grep_count(rf"^{table}\b", f) >= 1, f"{table} 字段表缺失"
+
+
+# ============================================================================
+# Task 29.5 新增：哈希函数三族统一到 _hashing.py（hash primitive convergence）
+# ============================================================================
+# spec 变更 C3：per-content MD5 / aggregate tick hash / bar_hash accessor 三族
+# 哈希函数统一到 core/_hashing.py。验证统一源定义 + 薄包装委托。
+
+
+class TestHashFunctionUnification:
+    """哈希函数三族统一到 core/_hashing.py（变更 C3）。"""
+
+    def test_hash_dict_content_defined_only_in_hashing(self):
+        """hash_dict_content 仅在 core/_hashing.py 定义（统一源）。"""
+        total = _grep_count_in_dir(
+            r"^def hash_dict_content\b", _CORE_DIR, exclude_names=("_hashing.py",)
+        )
+        assert total == 0, (
+            f"hash_dict_content 在 _hashing.py 外有 {total} 处定义（应仅 _hashing.py）"
+        )
+
+    def test_hash_tick_aggregate_defined_only_in_hashing(self):
+        """hash_tick_aggregate 仅在 core/_hashing.py 定义。"""
+        total = _grep_count_in_dir(
+            r"^def hash_tick_aggregate\b", _CORE_DIR, exclude_names=("_hashing.py",)
+        )
+        assert total == 0, (
+            f"hash_tick_aggregate 在 _hashing.py 外有 {total} 处定义（应仅 _hashing.py）"
+        )
+
+    def test_bar_hash_mixin_defined_in_hashing(self):
+        """BarHashMixin 在 core/_hashing.py 定义（accessor 统一源）。"""
+        f = _CORE_DIR / "_hashing.py"
+        assert f.exists(), "core/_hashing.py 缺失"
+        assert _grep_count(r"^class BarHashMixin\b", f) >= 1
+
+    def test_hash_tick_wrapper_delegates_to_hashing(self):
+        """_hash_tick 薄包装应委托 hash_dict_content（非重新实现 MD5）。"""
+        f = _CORE_DIR / "domain.py"
+        if _grep_count(r"def _hash_tick\b", f) == 0:
+            return  # 已移除亦合法
+        assert _grep_count(r"hash_dict_content", f) >= 1, (
+            "_hash_tick 应委托 hash_dict_content（非重新实现 per-content MD5）"
+        )
+
+    def test_hash_tick_data_wrappers_delegate(self):
+        """_hash_tick_data 薄包装应委托 hash_tick_aggregate（非重新实现 aggregate hash）。"""
+        for fname in ("runtime_mode_module.py", "tick_bar_module.py"):
+            f = _CORE_DIR / fname
+            if _grep_count(r"def _hash_tick_data\b", f) == 0:
+                continue
+            assert _grep_count(r"hash_tick_aggregate", f) >= 1, (
+                f"{fname}: _hash_tick_data 应委托 hash_tick_aggregate"
+            )
+
+    def test_no_inline_md5_dict_hash_outside_hashing(self):
+        """core/*.py（_hashing.py 外）不应有内联 dict-content MD5（hashlib.md5 + json.dumps）。
+
+        变更 C3 统一的是 per-content DICT MD5（hash_dict_content）。字符串/文件
+        哈希（hashlib.md5(code.encode()) 等）属不同用途，不在 C3 范围内。
+        """
+        total = _grep_count_in_dir(
+            r"hashlib\.md5\([^)]*json\.dumps|hashlib\.md5\([^)]*sort_keys",
+            _CORE_DIR, exclude_names=("_hashing.py",),
+        )
+        assert total == 0, (
+            f"检测到 {total} 处内联 dict-content MD5（应委托 _hashing.hash_dict_content）"
+        )
+
+    def test_hashing_module_exists_and_nonempty(self):
+        """core/_hashing.py 存在且非空（三族哈希统一模块）。"""
+        f = _CORE_DIR / "_hashing.py"
+        assert f.exists(), "core/_hashing.py 缺失（变更 C3）"
+        assert _line_count(f) >= 30, f"core/_hashing.py 行数 {_line_count(f)} < 30"
+
+
+def _line_count(path):
+    """返回文件行数（hash unification 测试辅助）。"""
+    if not path.exists():
+        return 0
+    return sum(1 for _ in path.read_text(encoding="utf-8").splitlines())

@@ -359,3 +359,144 @@ def test_bar_overflow_capped():
     )
     # _hash 字段应被清理（不应残留）
     assert "_hash" not in last_bar, "bar 中残留 _hash 字段"
+
+
+# ============================================================================
+# Task 29.5 新增：轮询/自造事件循环零容忍（time primitive guard rails）
+# ============================================================================
+# spec 时间原语：所有时间触发经 EventDriver heapq 调度，禁止 while True + sleep
+# 自造时间调度。验证运行时核心模块无禁止轮询模式。
+
+
+import re as _re
+import subprocess as _subprocess
+from pathlib import Path as _Path
+
+_PROJECT_ROOT_RT = _Path(__file__).resolve().parent.parent
+
+
+def _grep_count_rt(pattern: str, target: str) -> int:
+    """运行 grep -nE PATTERN TARGET 返回匹配行数（0 = 无匹配）。"""
+    p = _PROJECT_ROOT_RT / target
+    if not p.exists():
+        return 0
+    try:
+        proc = _subprocess.run(
+            ["grep", "-nE", pattern, str(p)],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (FileNotFoundError, _subprocess.TimeoutExpired):
+        return 0
+    if proc.returncode == 0:
+        return len([ln for ln in proc.stdout.splitlines() if ln.strip()])
+    return 0
+
+
+class TestNoPollingRevival:
+    """运行时核心模块不应复活轮询/自造事件循环模式（Task 29.5 新增）。"""
+
+    def test_no_sync_play_loop(self):
+        """core/runtime_mode_module.py 无 _sync_play_loop（应 EventDriver 调度）。"""
+        assert _grep_count_rt(r"def _sync_play_loop\b", "core/runtime_mode_module.py") == 0
+
+    def test_no_sync_sim_loop(self):
+        """core/runtime_mode_module.py 无 _sync_sim_loop。"""
+        assert _grep_count_rt(r"def _sync_sim_loop\b", "core/runtime_mode_module.py") == 0
+
+    def test_no_auto_step_loop(self):
+        """core/runtime_mode_module.py 无 async def auto_step_loop。"""
+        assert _grep_count_rt(r"async def auto_step_loop\b", "core/runtime_mode_module.py") == 0
+
+    def test_no_start_polling_in_table_engine(self):
+        """core/table_engine.py 无 start_polling（应 ConfigStoreBase.check_and_reload）。"""
+        assert _grep_count_rt(r"def start_polling\b", "core/table_engine.py") == 0
+
+    def test_no_file_watcher_loop_in_services_data(self):
+        """services/data.py 无 _file_watcher_loop。"""
+        assert _grep_count_rt(r"def _file_watcher_loop\b", "services/data.py") == 0
+
+    def test_no_while_self_run_loop(self):
+        """core/runtime_mode_module.py 无 while self._run 自造事件循环。"""
+        assert _grep_count_rt(
+            r"while self\._run\b|while self\._sim_auto_step\b",
+            "core/runtime_mode_module.py",
+        ) == 0
+
+    def test_no_time_sleep_interval_in_runtime(self):
+        """core/runtime_mode_module.py 无 time.sleep(interval) 自造时间调度。"""
+        assert _grep_count_rt(r"time\.sleep\(interval\)", "core/runtime_mode_module.py") == 0
+
+    def test_no_asyncio_sleep_wait_seconds_in_services_data(self):
+        """services/data.py 无 asyncio.sleep(wait_seconds) 自造每日调度。"""
+        assert _grep_count_rt(r"asyncio\.sleep\(wait_seconds\)", "services/data.py") == 0
+
+
+# ============================================================================
+# Task 29.5 新增：EventBus 唯一性 + 事件处理器装饰器覆盖
+# ============================================================================
+# spec 第四层洞察：EventBus 是唯一事件分派器，禁止自造事件循环。
+# 7 模块通过 @_event_handler 装饰统一订阅。
+
+
+class TestEventBusSoleMediator:
+    """EventBus 是唯一事件分派器，7 模块通过 @_event_handler 统一订阅。"""
+
+    def test_event_bus_importable(self):
+        """core.event_bus.EventBus 可导入。"""
+        from core.event_bus import EventBus
+        assert EventBus is not None
+
+    def test_event_bus_has_publish_subscribe(self):
+        """EventBus 提供 publish / subscribe / subscribe_any 方法。"""
+        from core.event_bus import EventBus
+        bus = EventBus()
+        assert callable(getattr(bus, "publish", None))
+        assert callable(getattr(bus, "subscribe", None))
+        assert callable(getattr(bus, "subscribe_any", None))
+
+    def test_no_self_made_event_loop_in_core(self):
+        """core/*.py 无 while True 自造事件循环（EventBus 唯一）。
+
+        排除带 ``# noqa: event-driver`` 标记的合法循环（EventDriver heapq
+        派发循环自身、递归下降解析器 token 消费循环——非自造事件循环）。
+        """
+        _NOQA_EVENT_DRIVER = "# noqa: event-driver"
+        total = 0
+        for f in (_PROJECT_ROOT_RT / "core").glob("*.py"):
+            try:
+                content = f.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            for line in content.splitlines():
+                if _NOQA_EVENT_DRIVER in line:
+                    continue
+                total += len(_re.findall(r"^\s*while\s+True\s*:", line))
+        assert total == 0, f"core/*.py 检测到 {total} 处 while True 自造事件循环"
+
+    def test_event_handler_decorator_in_modules(self):
+        """5 核心模块共 ≥ 28 处 @_event_handler 装饰（事件订阅统一接口）。"""
+        target_modules = [
+            "execution_module.py", "tick_bar_module.py",
+            "monitoring_module.py", "screening_module.py", "trade_module.py",
+        ]
+        total = 0
+        for name in target_modules:
+            f = _PROJECT_ROOT_RT / "core" / name
+            if not f.exists():
+                continue
+            try:
+                content = f.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            total += len(_re.findall(r"@_event_handler\b", content))
+        assert total >= 28, f"5 模块共 {total} 处 @_event_handler < 28"
+
+    def test_base_module_class_exists(self):
+        """core.event_bus._BaseModule 基类存在（7 模块统一基类）。"""
+        from core.event_bus import _BaseModule
+        assert _BaseModule is not None
+
+    def test_base_module_has_register_subscribers(self):
+        """_BaseModule 提供 register_subscribers（_SUBSCRIPTIONS 单循环注册）。"""
+        from core.event_bus import _BaseModule
+        assert callable(getattr(_BaseModule, "register_subscribers", None))

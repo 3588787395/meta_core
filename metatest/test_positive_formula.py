@@ -622,3 +622,35 @@ class TestChangeDEvalFormulaCoreMerge:
                 method_text = "\n".join(src.splitlines()[node.lineno - 1: end])
                 assert "_eval_formula_core" in method_text, \
                     f"{node.name} 应委托 _eval_formula_core（变更 D 薄包装）"
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 3 C3 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 C3 _hashing 模块收敛回归。"""
+
+    def test_hashing_module_present(self):
+        """core/_hashing.py 模块存在（C3 哈希函数三族统一）。"""
+        from pathlib import Path
+        hashing_path = Path(__file__).resolve().parent.parent / "core" / "_hashing.py"
+        assert hashing_path.is_file(), \
+            "core/_hashing.py 应存在（C3 哈希函数三族统一模块）"
+
+    def test_hash_dict_content_present(self):
+        """_hashing.py 含 hash_dict_content（C3 族1 per-content MD5 合并）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "_hashing.py").read_text(encoding="utf-8")
+        assert "def hash_dict_content" in src, \
+            "_hashing.py 应定义 hash_dict_content（C3 族1 合并）"
+        assert "def hash_tick_aggregate" in src, \
+            "_hashing.py 应定义 hash_tick_aggregate（C3 族2 合并）"
+
+    def test_bar_hash_mixin_present(self):
+        """_hashing.py 含 BarHashMixin（C3 族3 bar_hash accessor 合并）。"""
+        import ast
+        from pathlib import Path
+        tree = ast.parse((Path(__file__).resolve().parent.parent / "core" / "_hashing.py").read_text(encoding="utf-8"))
+        classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+        assert "BarHashMixin" in classes, \
+            "_hashing.py 应定义 BarHashMixin（C3 族3 bar_hash accessor 合并）"

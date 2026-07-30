@@ -205,3 +205,33 @@ def test_engine_waterline_no_short_circuit_when_data_changed():
     # 断言：hash 已变化，未短路，下游被执行
     assert _tt.hash != _pre_hash
     assert events_published == ["DOWNSTREAM_EXECUTED"]
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 3 C3 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 C3 _hashing 模块收敛回归（waterline 用 hash 判等）。"""
+
+    def test_hashing_module_present(self):
+        """core/_hashing.py 模块存在（C3 哈希函数三族统一）。"""
+        from pathlib import Path
+        hashing_path = Path(__file__).resolve().parent.parent / "core" / "_hashing.py"
+        assert hashing_path.is_file(), \
+            "core/_hashing.py 应存在（C3 哈希函数三族统一模块）"
+
+    def test_hash_tick_aggregate_present(self):
+        """_hashing.py 含 hash_tick_aggregate（C3 族2 aggregate tick hash 合并）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "_hashing.py").read_text(encoding="utf-8")
+        assert "def hash_tick_aggregate" in src, \
+            "_hashing.py 应定义 hash_tick_aggregate（C3 族2 aggregate tick hash 合并）"
+        assert "def hash_dict_content" in src, \
+            "_hashing.py 应定义 hash_dict_content（C3 族1 per-content MD5 合并）"
+
+    def test_runtime_mode_hash_tick_data_delegates(self):
+        """runtime_mode_module _hash_tick_data 委托 hash_tick_aggregate（C3 族2 收敛）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "runtime_mode_module.py").read_text(encoding="utf-8")
+        assert "hash_tick_aggregate" in src, \
+            "runtime_mode_module 应引用 hash_tick_aggregate（C3 族2 收敛委托）"

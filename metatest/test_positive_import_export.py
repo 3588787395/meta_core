@@ -361,3 +361,38 @@ class TestChangeCConverterRegistry:
             f"_IMPORT_RULES 应覆盖 registry 的 import 格式，实际 {set(_IMPORT_RULES.keys())}"
         assert set(_EXPORT_RULES.keys()) >= export_formats, \
             f"_EXPORT_RULES 应覆盖 registry 的 export 格式，实际 {set(_EXPORT_RULES.keys())}"
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 1 P3 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 阶段 1 P3 _CONVERTER_REGISTRY 路由收敛回归。"""
+
+    def test_api_no_direct_converter_calls(self):
+        """api.py 不绕过 _CONVERTER_REGISTRY 直接调用 parse_dzh_xml / parse_tdx_xml / _build_tdx_xml。"""
+        import re
+        from pathlib import Path
+        api_path = Path(__file__).resolve().parent.parent / "api.py"
+        src = api_path.read_text(encoding="utf-8")
+        count = len(re.findall(r"parse_dzh_xml\(|parse_tdx_xml\(|_build_tdx_xml\(", src))
+        assert count == 0, \
+            f"api.py 不应绕过 _CONVERTER_REGISTRY 直接调用解析器，实际 {count} 处"
+
+    def test_app_no_direct_converter_calls(self):
+        """app.py 不绕过 _CONVERTER_REGISTRY 直接调用 parse_dzh_xml / parse_tdx_xml / _build_tdx_xml。"""
+        import re
+        from pathlib import Path
+        app_path = Path(__file__).resolve().parent.parent / "app.py"
+        src = app_path.read_text(encoding="utf-8")
+        count = len(re.findall(r"parse_dzh_xml\(|parse_tdx_xml\(|_build_tdx_xml\(", src))
+        assert count == 0, \
+            f"app.py 不应绕过 _CONVERTER_REGISTRY 直接调用解析器，实际 {count} 处"
+
+    def test_converter_registry_present(self):
+        """converters.py 含 _CONVERTER_REGISTRY 表（P3 OOP 路由入口）。"""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "converters.py").read_text(encoding="utf-8")
+        assert re.search(r"_CONVERTER_REGISTRY\s*[:=]", src), \
+            "converters.py 应含 _CONVERTER_REGISTRY 表（P3 OOP 路由）"

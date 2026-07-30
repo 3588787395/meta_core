@@ -16,6 +16,8 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from converters_common import safe_float
+
 # 分类配置：与前端 event-panel.js CATEGORY_CONFIG 保持一致（仅用于输出 category 字段）
 CATEGORY_CONFIG: Dict[str, Dict[str, str]] = {
     "tick": {"color": "#9e9e9e", "icon": "📡", "label": "Tick"},
@@ -132,26 +134,10 @@ def classify_event_type(event_type: Any) -> str:
     return "system"
 
 
-def _to_float(v: Any) -> Optional[float]:
-    if v is None:
-        return None
-    try:
-        n = float(v)
-    except (TypeError, ValueError):
-        return None
-    return None if math.isnan(n) else n
-
-
 def normalize_display_ms(ts: Any) -> Optional[float]:
-    """将任意时间戳归一化为展示毫秒。
-
-    规则：
-    - 相对秒（仿真 clock，< 1e9） -> *1000
-    - Unix 秒（>=1e9 且 <1e12） -> *1000
-    - Unix 毫秒（>=1e12） -> 保持
-    """
-    n = _to_float(ts)
-    if n is None:
+    """将任意时间戳归一化为展示毫秒。"""
+    n = safe_float(ts, None)
+    if n is None or math.isnan(n):
         return None
     if n < 1e9:
         return n * 1000.0
@@ -162,8 +148,8 @@ def normalize_display_ms(ts: Any) -> Optional[float]:
 
 def _is_relative_ts(ts: Any) -> bool:
     """判断时间戳是否为相对秒（仿真/回放坐标系）。"""
-    n = _to_float(ts)
-    return n is not None and n < 1e9
+    n = safe_float(ts, None)
+    return n is not None and not math.isnan(n) and n < 1e9
 
 
 def format_sim_duration(ms: float) -> str:
@@ -225,8 +211,8 @@ def get_fire_at_ms(ev: Dict[str, Any]) -> Optional[float]:
         if v is not None:
             return normalize_display_ms(v)
     if "ttl" in d:
-        ttl = _to_float(d.get("ttl"))
-        if ttl is not None:
+        ttl = safe_float(d.get("ttl"), None)
+        if ttl is not None and not math.isnan(ttl):
             ttl_ms = ttl * 1000.0 if ttl < 1e6 else ttl
             base = normalize_display_ms(ev.get("ts") or ev.get("timestamp") or ev.get("time"))
             if base is not None:
@@ -282,14 +268,7 @@ def format_remaining_time(fire_at_ms: float, now_ms: float) -> str:
 
 
 def format_event(ev: Dict[str, Any]) -> Dict[str, Any]:
-    """为前端事件面板生成可直接展示的字段。
-
-    输入为字典形式事件（来自 EventBus 或 API 归一化后），输出在保留原字段基础上追加：
-    - category
-    - display_ts / display_time / display_time_ms
-    - fire_at_ms / fire_at_time / fire_at_time_ms（仅限含 fire_at/ttl 的事件）
-    - time_mode: 'relative' | 'wall'
-    """
+    """为前端事件面板生成可直接展示的字段。"""
     result = dict(ev)
     ev_type = str(ev.get("event_type") or ev.get("type") or "UNKNOWN")
     result["category"] = classify_event_type(ev_type)

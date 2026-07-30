@@ -24,9 +24,10 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime as _dt
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple
 
 from core.event_bus import (
+    _BaseModule,
     _event_handler,
     AlertRaised,
     DataChanged,
@@ -278,9 +279,6 @@ def _dispatch_pool_enter_actions(pool_name, node_id, node, new_stocks, saved_cou
 
 # ═══════════════════════════════════════════════════════════════
 # TradeExecutor：交易执行器（原 core/trade_executor.py）
-# 订阅 EventBus 的 Signal 事件，仿真模式执行模拟记账。
-# 实盘模式预留券商接口（_execute_real）。
-# ═══════════════════════════════════════════════════════════════
 
 
 # _SIDE_SPECS: BUY/SELL 共享 _execute_trade 骨架的差异项（action / cash 方向 /
@@ -294,18 +292,7 @@ _SIDE_SPECS: Dict[str, Dict[str, Any]] = {
 
 
 class _TradeExecutor:
-    """交易执行器（内部组件，对外请使用 ``TradeModule``）。
-
-    订阅 EventBus 的 Signal 事件，仿真模式执行模拟记账。
-    实盘模式预留券商接口（_execute_real）。
-
-    属性（≤ 5）:
-      - bus: EventBus
-      - _positions: 模拟持仓 {code: {quantity, cost_price}}
-      - _cash: 模拟资金
-      - _trades: 交易记录
-      - _enabled: 是否已订阅
-    """
+    """交易执行器（内部组件，对外请使用 ``TradeModule``）。"""
 
     def __init__(self, bus: Optional[Any] = None, initial_cash: float = 100_000_000.0,
                  storage: Optional[Any] = None, pool_id: str = "") -> None:
@@ -330,11 +317,7 @@ class _TradeExecutor:
             self._execute_trade(event.signal_type, event)
 
     def _execute_trade(self, side: str, signal: Signal) -> None:
-        """交易执行——合并 _execute_buy / _execute_sell，按 _SIDE_SPECS 分派差异。
-
-        共享骨架：取持仓 → 按 side 计算 qty/amount/pnl 与 position 更新 → 更新 cash →
-        append trade → persist → log。BUY 加仓（均价）/扣资金；SELL 减仓/加资金+pnl。
-        """
+        """交易执行——合并 _execute_buy / _execute_sell，按 _SIDE_SPECS 分派差异。"""
         spec = _SIDE_SPECS[side]
         pos = self._positions.get(signal.code)
         if side == "SELL" and not pos:
@@ -408,11 +391,6 @@ class _TradeExecutor:
 
 # ═══════════════════════════════════════════════════════════════
 # 模拟交易（原 services/trading_service.py 中的 PaperTradeEngine）
-# PaperTradeEngine — 仿真模式模拟成交引擎
-#
-# 由 engine 在 post_tick 后按 trade_interfaces.json 配置调用。
-# 维护虚拟持仓、资金、盈亏、手续费、滑点。
-# ═══════════════════════════════════════════════════════════════
 
 
 @dataclass
@@ -464,10 +442,7 @@ _PAPER_SIDE_SPECS: Dict[str, Dict[str, Any]] = {
 
 
 class _PaperTradeEngine:
-    """模拟成交引擎（内部组件，对外请使用 ``TradeModule``）。
-
-    配置来自 trade_interfaces.json → simulation 条目。
-    """
+    """模拟成交引擎（内部组件，对外请使用 ``TradeModule``）。"""
 
     def __init__(self, initial_capital: float = 1_000_000.0,
                  commission_rate: float = 0.0003,
@@ -497,12 +472,7 @@ class _PaperTradeEngine:
     def _paper_trade(self, side: str, code: str, price: float,
                      quantity: Optional[int] = None,
                      timestamp: Optional[float] = None) -> Optional[_TradeRecord]:
-        """模拟交易——合并 buy/sell，按 _PAPER_SIDE_SPECS 分派差异。
-
-        共享骨架：frozen 检查 → 查表得 sign/direction → slippage 按 sign 偏移 →
-        commission → 资金/持仓校验 → 更新 cash + positions → 记录 + log。
-        BUY 加仓/扣资金；SELL 减仓/加资金+profit。
-        """
+        """模拟交易——合并 buy/sell，按 _PAPER_SIDE_SPECS 分派差异。"""
         spec = _PAPER_SIDE_SPECS[side]
         sign = spec["sign"]
         if self._frozen:
@@ -629,20 +599,8 @@ _PSATT_SIDE_EFFECTS: List[Tuple[str, Callable[[ActionSpec, List[str]], List[Any]
 # ═══════════════════════════════════════════════════════════════
 
 
-class TradeModule:
-    """Trade 模块：交易执行 + 模拟交易 + 历史记录。仅与 EventBus 交互。
-
-    订阅 Signal 事件，执行买入/卖出（live_order/paper_trade/noop 三接口），
-    发布 OrderPlaced/OrderFilled/PositionUpdated 事件。
-    支持 DZH tradeattr 19 字段精细交易控制 + TDX psatt 副作用。
-
-    属性（实例级，≤ 5）:
-      - _bus: EventBus
-      - _config: 配置 dict
-      - _trade_executor: _TradeExecutor 实例（仿真记账，向后兼容）
-      - _trading_service: _PaperTradeEngine 实例（模拟成交引擎）
-      - _trackers: 持仓跟踪表 {(pool_id, code): tracker}
-    """
+class TradeModule(_BaseModule):
+    """Trade 模块：交易执行 + 模拟交易 + 历史记录。仅与 EventBus 交互。"""
 
     # 表驱动：交易接口类型 → handler 方法名（无 if/elif 链）
     _INTERFACE_HANDLERS: Dict[str, str] = {
@@ -673,42 +631,24 @@ class TradeModule:
         self._trackers: Dict[Tuple[str, str], Dict[str, Any]] = {}
         # 最新价格缓存（code -> price），从DataChanged(tick)事件更新
         self._latest_prices: Dict[str, float] = {}
-        # 注册事件订阅
-        self._register_subscribers()
+        self.register_subscribers()
 
-    def _register_subscribers(self) -> None:
-        self._bus.subscribe(Signal, self._on_signal)
-        self._bus.subscribe(OrderPlaced, self._on_order_placed)
-        # SubTask 19.7：订阅 OrderFilled 触发 psatt 副作用
-        self._bus.subscribe(OrderFilled, self._on_order_filled)
-        # SubTask 20.3：订阅 ModeChanged 切换交易接口
-        self._bus.subscribe(ModeChanged, self._on_mode_changed)
-        # SubTask 21.4：订阅 TransferExecuted 支持入池即买入/出池即卖出语义
-        self._bus.subscribe(TransferExecuted, self._on_transfer_executed)
-        # 仿真链路修复：订阅DataChanged(tick)更新最新价缓存
-        self._bus.subscribe(DataChanged, self._on_data_changed)
-        # G2：订阅 TTLDue 事件，TradeModule 自行处理 TTL 到期卖出/删除
-        self._bus.subscribe(TTLDue, self._on_ttl_due)
+    _SUBSCRIPTIONS: ClassVar[List[Tuple[type, str]]] = [
+        (Signal, "_on_signal"),
+        (OrderPlaced, "_on_order_placed"),
+        (OrderFilled, "_on_order_filled"),
+        (ModeChanged, "_on_mode_changed"),
+        (TransferExecuted, "_on_transfer_executed"),
+        (DataChanged, "_on_data_changed"),
+        (TTLDue, "_on_ttl_due"),
+    ]
 
     # ------------------------------------------------------------------
     # SubTask 20.3：ModeChanged → 切换交易接口类型
     # ------------------------------------------------------------------
     @_event_handler("_on_mode_changed")
     def _on_mode_changed(self, event: ModeChanged) -> None:
-        """模式切换时切换 ``self._interface_type`` 并 freeze/unfreeze paper_trade。
-
-        三种模式与交易接口映射：
-          - ``live``:        ``live_order``（委托真实券商接口下单）→ unfreeze
-          - ``replay``:      ``noop``（仅记录日志，不实际下单；回放历史数据
-                              不应触发真实交易）→ freeze paper_trade
-          - ``simulation``:  ``paper_trade``（PaperTradeEngine 模拟成交记账）→ unfreeze
-
-        ``_INTERFACE_HANDLERS`` 表驱动分派保持不变，仅切换 ``_interface_type``
-        即可在下次 ``_on_signal`` 时按新模式分派 handler。
-
-        仿真模式 side_effects_scope="simulation" 允许 paper_order，
-        所以 simulation 模式下 unfreeze _trading_service。
-        """
+        """模式切换时切换 ``self._interface_type`` 并 freeze/unfreeze paper_trade。"""
         mode_id = event.mode_id or "live"
         mapping = {
             "live": "live_order",
@@ -736,13 +676,7 @@ class TradeModule:
 
     @_event_handler("_on_data_changed")
     def _on_data_changed(self, event: DataChanged) -> None:
-        """DataChanged事件处理：更新最新价缓存 + paper_trade持仓价格。
-
-        只处理source=tick的事件，支持单 tick dict 或 {code: tick_dict} 批量格式，
-        从tick中提取close/price/lastprice字段更新缓存，
-        同时更新_PaperTradeEngine中的持仓当前价格。
-        兼容 fz 前缀仿真代码（8字符）与真实6位代码。
-        """
+        """DataChanged事件处理：更新最新价缓存 + paper_trade持仓价格。"""
         if event.source != "tick":
             return
         data = event.data or {}
@@ -777,12 +711,7 @@ class TradeModule:
 
     @_event_handler("_on_ttl_due")
     def _on_ttl_due(self, event: TTLDue) -> None:
-        """TTLDue 事件处理：对 auto_sell_pools 中的池发布 SELL Signal（G2）。
-
-        G2：引擎只发事件不执行计算，TTL 到期时 EventDriver action 仅发布 TTLDue，
-        TradeModule 订阅后自行完成卖出逻辑。无持仓时仍发布 Signal(sell_all)
-       （quantity=0），由下游 _on_signal 优雅降级。
-        """
+        """TTLDue 事件处理：对 auto_sell_pools 中的池发布 SELL Signal（G2）。"""
         auto_sell_pools = self._config.get("auto_sell_pools", []) or []
         if event.node_id not in auto_sell_pools:
             return
@@ -804,10 +733,7 @@ class TradeModule:
         return price if price > 0 else fallback
 
     def _get_position_qty(self, code: str, pool_id: str = "") -> int:
-        """获取股票当前持仓数量（用于SELL quantity=0时卖全部）。
-        
-        优先从_PaperTradeEngine获取持仓，兼容_trade_executor和_tracker。
-        """
+        """获取股票当前持仓数量（用于SELL quantity=0时卖全部）。"""
         try:
             if hasattr(self._trading_service, "get_position"):
                 pos = self._trading_service.get_position(code)
@@ -831,14 +757,7 @@ class TradeModule:
 
     @_event_handler("_on_signal")
     def _on_signal(self, event: Signal) -> None:
-        """收到交易信号，执行买入/卖出。
-
-        仿真链路修复：
-        - price=0（市价单）时取最新tick价格
-        - SELL quantity<=0时卖全部持仓
-        - spec L142-143: SELL 无持仓时发布 rejected OrderPlaced（quantity=0，
-          不实际下单），而非静默跳过 — 确保 Signal 已发出的下游可观测。
-        """
+        """收到交易信号，执行买入/卖出。"""
         code = event.code
         side = event.signal_type.upper()
         price = float(event.price or 0.0)
@@ -898,10 +817,7 @@ class TradeModule:
             self._bus.publish(OrderPlaced(order=order, ts=event.ts))
 
     def _live_execute(self, order: Dict[str, Any]) -> bool:
-        """实盘下单（委托 TradingService 调用真实券商接口）。
-
-        真实券商适配器尚未接入时，降级为占位接受（流程继续，发布 OrderPlaced）。
-        """
+        """实盘下单（委托 TradingService 调用真实券商接口）。"""
         place = getattr(self._trading_service, "place_order", None)
         if callable(place):
             try:
@@ -1002,21 +918,10 @@ class TradeModule:
 
     @_event_handler("_on_transfer_executed")
     def _on_transfer_executed(self, event: TransferExecuted) -> None:
-        """转移执行完成 handler：支持入池即买入 / 出池即卖出语义。
-
-        - ``event.mode == "move"`` 且 ``event.tgt`` 在 ``auto_buy_pools`` 配置中：
-          发布 BUY Signal（qty=100）。
-        - ``event.src`` 在 ``auto_sell_pools`` 配置中：
-          查持仓 tracker 发布 SELL Signal（qty=当前持仓量）。
-        配置键从 ``self._config`` 读取（``auto_buy_pools`` / ``auto_sell_pools``），
-        未配置时为空列表，handler 退化为仅记录日志。
-        """
+        """转移执行完成 handler：支持入池即买入 / 出池即卖出语义。"""
         auto_buy_pools = self._config.get("auto_buy_pools", []) or []
         auto_sell_pools = self._config.get("auto_sell_pools", []) or []
         # 入池即买入：股票进入 auto_buy_pools 目标池时发布 BUY Signal。
-        # Spec: C 池入池买入链 TransferExecuted → Signal(buy,100)。
-        # 适用 copy/move/overwrite 全模式——股票进入目标池即触发买入，
-        # 与是否离开源池无关（copy 模式源池保留但目标池也入池）。
         if event.tgt in auto_buy_pools and event.codes:
             for code in event.codes:
                 self._bus.publish(Signal(
@@ -1040,10 +945,7 @@ class TradeModule:
                     ))
 
     def _immediate_fill(self, order: Dict[str, Any], ts: float) -> Dict[str, Any]:
-        """立即生成成交回报（模拟/空操作模式）。
-
-        仿真链路修复：price为0时取_latest_prices中的最新价。
-        """
+        """立即生成成交回报（模拟/空操作模式）。"""
         code = order.get("code", "")
         price = float(order.get("price", 0.0) or 0.0)
         if price <= 0:
@@ -1097,14 +999,7 @@ class TradeModule:
     # === SubTask 9.4：DZH tradeattr 19 字段 + TDX psatt 副作用 ===
 
     def _apply_tradeattr(self, order: Dict[str, Any], tradeattr: Dict[str, Any]) -> Dict[str, Any]:
-        """应用 DZH tradeattr 19 字段精细交易控制。
-
-        19 字段（从 ActionSpec.tradeattr 读取）:
-          accountno / entertradetype / enterrate / exittradetype / exitrate /
-          enterqty / exitqty / entercond / exitcond / enterdelay / exitdelay /
-          enteronce / exitonce / enterlimit / exitlimit / enterretry / exitretry /
-          enterexpire / exitexpire
-        """
+        """应用 DZH tradeattr 19 字段精细交易控制。"""
         enriched = dict(order)
         side = str(order.get("side", "")).upper()
         # 账户号
@@ -1136,11 +1031,7 @@ class TradeModule:
     def _apply_psatt_side_effects(
         self, action_spec: ActionSpec, codes: List[str]
     ) -> None:
-        """应用 TDX psatt 副作用——迭代 _PSATT_SIDE_EFFECTS 表逐项查 flag 分派。
-
-        通过 EventLogged / AlertRaised 事件通知下游模块（Database/Monitoring）处理，
-        本模块不直接执行文件 IO 或播放声音，保持事件驱动纯度。
-        """
+        """应用 TDX psatt 副作用——迭代 _PSATT_SIDE_EFFECTS 表逐项查 flag 分派。"""
         if not action_spec:
             return
         codes = codes or []

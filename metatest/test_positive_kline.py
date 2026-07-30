@@ -602,3 +602,33 @@ class TestChangeIBasePeriodTargetsTable:
         src = rt_path.read_text(encoding="utf-8")
         assert "_BASE_PERIOD_TARGETS" in src, \
             "runtime_mode_module 应引用 _BASE_PERIOD_TARGETS 表（变更 I 表驱动）"
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 3 C3 + C10 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 C3 BarHashMixin + C10 _aggregate_ohlcv 收敛回归。"""
+
+    def test_bar_hash_mixin_present(self):
+        """_hashing.py 含 BarHashMixin（C3 族3 bar_hash accessor 合并）。"""
+        import ast
+        from pathlib import Path
+        tree = ast.parse((Path(__file__).resolve().parent.parent / "core" / "_hashing.py").read_text(encoding="utf-8"))
+        classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+        assert "BarHashMixin" in classes, \
+            "_hashing.py 应定义 BarHashMixin（C3 族3 bar_hash accessor 合并）"
+
+    def test_aggregate_ohlcv_helper_present(self):
+        """runtime_mode_module 含 _aggregate_ohlcv helper（C10 OHLCV 字面量合并）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "runtime_mode_module.py").read_text(encoding="utf-8")
+        assert "def _aggregate_ohlcv" in src, \
+            "runtime_mode_module 应含 _aggregate_ohlcv helper（C10 OHLCV 字面量合并）"
+
+    def test_date_keys_table_present(self):
+        """runtime_mode_module 含 _DATE_KEYS 表（C10 日期函数合并）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "runtime_mode_module.py").read_text(encoding="utf-8")
+        assert "_DATE_KEYS" in src, \
+            "runtime_mode_module 应含 _DATE_KEYS 表（C10 日期函数表驱动）"

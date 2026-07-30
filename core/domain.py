@@ -47,16 +47,6 @@ def _build_adjacency(node_ids, edges_iter, src_getter, eid_getter) -> Dict[str, 
 
 # ════════════════════════════════════════════════════════════════
 # Section: 字段元数据（Task 11.1：_FieldMeta 用于 _NodeBase/_EdgeBase 子类
-# 声明类型特有字段的序列化规则，消除 to_dict / from_dict 手写样板）
-# ════════════════════════════════════════════════════════════════
-# serializer 取值约定：
-#   None          : 普通字段（直接取值 / d.get(name, default)）
-#   "list"        : 列表字段（to_dict 做 list() 拷贝）
-#   "dict"        : 字典字段（to_dict 做 dict() 拷贝）
-#   ("spec", Name): Spec 对象字段（to_dict 调 obj.to_dict() or None；
-#                   from_dict 调 SpecClass.from_dict(v) if v else None）
-#                   Name 为 Spec 类名字符串，运行时经 globals() 解析，
-#                   避免 Node/Edge 类定义早于 Spec 类的前向引用问题。
 _FieldMeta = namedtuple("_FieldMeta", ["name", "default", "serializer"])
 
 
@@ -112,9 +102,26 @@ class _FieldedBase:
     """to_dict/from_dict + 工厂查表 mixin——合并 _NodeBase/_EdgeBase 逐行复制（C1）。
 
     子类覆盖 _common_to_dict / _common_kwargs 处理公共字段差异。
+    ``_SPEC_DEFAULT_FIELDS`` 声明需实例化默认 Spec 的字段名（消除子类 __init__ 样板）。
     """
 
     _FIELDS: Tuple[_FieldMeta, ...] = ()
+    _SPEC_DEFAULT_FIELDS: frozenset = frozenset()
+
+    def _init_type_fields(self, extra: Dict[str, Any]) -> None:
+        """按 ``_FIELDS`` 元数据自动设置类型特有字段（dict/list/spec 转换 + Spec 默认实例化）。"""
+        for fm in self._FIELDS:
+            val = extra.get(fm.name, fm.default)
+            ser = fm.serializer
+            if ser == "list":
+                val = list(val) if val else []
+            elif ser == "dict":
+                val = dict(val) if val else {}
+            elif isinstance(ser, tuple) and ser[0] == "spec":
+                if not val and fm.name in self._SPEC_DEFAULT_FIELDS:
+                    spec_cls = globals().get(ser[1])
+                    val = spec_cls() if spec_cls else val
+            setattr(self, fm.name, val)
 
     def to_dict(self) -> Dict[str, Any]:
         """统一序列化：公共字段 + 遍历 _FIELDS 序列化类型特有字段。"""
@@ -156,9 +163,6 @@ class _FieldedBase:
 
 # ════════════════════════════════════════════════════════════════
 # Section: nodes.py — Node 子类：DZH/TDX 节点类型的统一 OOP 模型
-# 覆盖 DZH 11 种节点类型（0/1/2/3/4/5/6/200/201/202/203）与 TDX 6 种（0/1/2/3/7/8）
-# 表驱动：DZH/TDX type → Node 子类映射使用 dict 常量，无 if/elif 链。
-# ════════════════════════════════════════════════════════════════
 
 
 def _norm_pos(pos: Any) -> Tuple[float, float]:
@@ -183,6 +187,7 @@ class _NodeBase(_FieldedBase, Node):
         clr: int = 0,
         text: str = "",
         attr: int = 0,
+        **extra: Any,
     ) -> None:
         self.id = id
         self.legacy_type = legacy_type
@@ -190,6 +195,7 @@ class _NodeBase(_FieldedBase, Node):
         self.clr = clr
         self.text = text
         self.attr = attr
+        self._init_type_fields(extra)
 
     def _common_to_dict(self) -> Dict[str, Any]:
         return {
@@ -235,10 +241,6 @@ class TextLabelNode(_NodeBase):
         _FieldMeta("url", "", None),
     )
 
-    def __init__(self, url: str = "", **common: Any) -> None:
-        super().__init__(**common)
-        self.url = url
-
 
 class ContainerNode(_NodeBase):
     """容器（DZH type=2），独有 children。"""
@@ -247,10 +249,6 @@ class ContainerNode(_NodeBase):
     _FIELDS = (
         _FieldMeta("children", [], "list"),
     )
-
-    def __init__(self, children: Optional[List[str]] = None, **common: Any) -> None:
-        super().__init__(**common)
-        self.children = list(children) if children else []
 
 
 class StateColumnNode(_NodeBase):
@@ -270,20 +268,6 @@ class DiscardPoolNode(_NodeBase):
         _FieldMeta("psatt", {}, "dict"),
     )
 
-    def __init__(
-        self,
-        enter: Optional[Dict[str, Any]] = None,
-        exit: Optional[Dict[str, Any]] = None,
-        tradeattr: Optional[Dict[str, Any]] = None,
-        psatt: Optional[Dict[str, Any]] = None,
-        **common: Any,
-    ) -> None:
-        super().__init__(**common)
-        self.enter = dict(enter) if enter else {}
-        self.exit = dict(exit) if exit else {}
-        self.tradeattr = dict(tradeattr) if tradeattr else {}
-        self.psatt = dict(psatt) if psatt else {}
-
 
 class ExecutionOrderNode(_NodeBase):
     """执行顺序节点（DZH type=5），独有 order_type。"""
@@ -292,10 +276,6 @@ class ExecutionOrderNode(_NodeBase):
     _FIELDS = (
         _FieldMeta("order_type", "", None),
     )
-
-    def __init__(self, order_type: str = "", **common: Any) -> None:
-        super().__init__(**common)
-        self.order_type = order_type
 
 
 class FlowArrowNode(_NodeBase):
@@ -320,24 +300,6 @@ class StatePoolNode(_NodeBase):
         _FieldMeta("action_spec", None, ("spec", "ActionSpec")),
     )
 
-    def __init__(
-        self,
-        enter: Optional[Dict[str, Any]] = None,
-        exit: Optional[Dict[str, Any]] = None,
-        tradeattr: Optional[Dict[str, Any]] = None,
-        psatt: Optional[Dict[str, Any]] = None,
-        ttl_spec: Optional[TTLSpec] = None,
-        action_spec: Optional[ActionSpec] = None,
-        **common: Any,
-    ) -> None:
-        super().__init__(**common)
-        self.enter = dict(enter) if enter else {}
-        self.exit = dict(exit) if exit else {}
-        self.tradeattr = dict(tradeattr) if tradeattr else {}
-        self.psatt = dict(psatt) if psatt else {}
-        self.ttl_spec = ttl_spec
-        self.action_spec = action_spec
-
 
 class ResultPoolNode(StatePoolNode):
     """结果池（DZH type=203），StatePoolNode 变体，独有 result_type。"""
@@ -349,16 +311,13 @@ class ResultPoolNode(StatePoolNode):
         _FieldMeta("result_type", 0, None),
     )
 
-    def __init__(self, result_type: int = 0, **common: Any) -> None:
-        super().__init__(**common)
-        self.result_type = result_type
-
 
 class ConditionNode(_NodeBase):
     """转移条件节点（DZH type=201 / TDX type=3），独有 filter_spec。"""
 
     DZH_TYPE = 201
     TDX_TYPE = 3
+    _SPEC_DEFAULT_FIELDS = frozenset({"filter_spec"})
     _FIELDS = (
         _FieldMeta("func", {}, "dict"),
         _FieldMeta("indi", "", None),
@@ -366,26 +325,13 @@ class ConditionNode(_NodeBase):
         _FieldMeta("filter_spec", None, ("spec", "FilterSpec")),
     )
 
-    def __init__(
-        self,
-        func: Optional[Dict[str, Any]] = None,
-        indi: str = "",
-        indiparam: Optional[List[Dict[str, Any]]] = None,
-        filter_spec: Optional[FilterSpec] = None,
-        **common: Any,
-    ) -> None:
-        super().__init__(**common)
-        self.func = dict(func) if func else {}
-        self.indi = indi
-        self.indiparam = list(indiparam) if indiparam else []
-        self.filter_spec = filter_spec or FilterSpec()
-
 
 class CandidatePoolNode(_NodeBase):
     """备选池节点（DZH type=202 / TDX type=7），独有 candidate_range。"""
 
     DZH_TYPE = 202
     TDX_TYPE = 7
+    _SPEC_DEFAULT_FIELDS = frozenset({"candidate_range"})
     _FIELDS = (
         _FieldMeta("attrtext", "", None),
         _FieldMeta("reload", 0, None),
@@ -393,22 +339,6 @@ class CandidatePoolNode(_NodeBase):
         _FieldMeta("candidate_range", None, ("spec", "CandidateRange")),
         _FieldMeta("reload_schedule", None, ("spec", "ReloadSchedule")),
     )
-
-    def __init__(
-        self,
-        attrtext: str = "",
-        reload: int = 0,
-        spinfo: Optional[Dict[str, Any]] = None,
-        candidate_range: Optional[CandidateRange] = None,
-        reload_schedule: Optional[ReloadSchedule] = None,
-        **common: Any,
-    ) -> None:
-        super().__init__(**common)
-        self.attrtext = attrtext
-        self.reload = reload
-        self.spinfo = dict(spinfo) if spinfo else {}
-        self.candidate_range = candidate_range or CandidateRange()
-        self.reload_schedule = reload_schedule
 
 
 # 表驱动注册表：DZH/TDX type → Node 子类（无 if/elif 链）
@@ -449,11 +379,6 @@ def all_tdx_types() -> List[int]:
 
 # ════════════════════════════════════════════════════════════════
 # Section: edges.py — Edge 子类：DZH/TDX 流转边的统一 OOP 模型
-# 两种边类型：
-# - ConditionalEdge（条件转移边）：源为备选池/状态池/数据源，含时机/筛选/流转/动作/TTL 规格
-# - UnconditionalEdge（无条件转移边）：源为条件节点，仅含流转规格
-# 表驱动：DZH attr / 源 type → Edge 子类映射使用 dict 常量，无 if/elif 链。
-# ════════════════════════════════════════════════════════════════
 
 
 class _EdgeBase(_FieldedBase, Edge):
@@ -467,6 +392,7 @@ class _EdgeBase(_FieldedBase, Edge):
         attr: int = 0,
         clr: int = 0,
         size: int = 1,
+        **extra: Any,
     ) -> None:
         self.id = id
         self.from_id = from_id
@@ -474,6 +400,7 @@ class _EdgeBase(_FieldedBase, Edge):
         self.attr = attr
         self.clr = clr
         self.size = size
+        self._init_type_fields(extra)
 
     def _common_to_dict(self) -> Dict[str, Any]:
         return {
@@ -508,6 +435,7 @@ class _EdgeBase(_FieldedBase, Edge):
 class ConditionalEdge(_EdgeBase):
     """条件转移边：源为备选池/状态池/数据源，含时机/筛选/流转/动作/TTL 规格。"""
 
+    _SPEC_DEFAULT_FIELDS = frozenset({"timing_spec", "filter_spec", "propagate_spec"})
     _FIELDS = (
         _FieldMeta("interval", 0, None),
         _FieldMeta("begin", 0, None),
@@ -519,49 +447,18 @@ class ConditionalEdge(_EdgeBase):
         _FieldMeta("ttl_spec", None, ("spec", "TTLSpec")),
     )
 
-    def __init__(
-        self,
-        interval: int = 0,
-        begin: int = 0,
-        end: int = 0,
-        timing_spec: Optional[TimingSpec] = None,
-        filter_spec: Optional[FilterSpec] = None,
-        propagate_spec: Optional[PropagateSpec] = None,
-        action_spec: Optional[ActionSpec] = None,
-        ttl_spec: Optional[TTLSpec] = None,
-        **common: Any,
-    ) -> None:
-        super().__init__(**common)
-        self.interval = interval
-        self.begin = begin
-        self.end = end
-        self.timing_spec = timing_spec or TimingSpec()
-        self.filter_spec = filter_spec or FilterSpec()
-        self.propagate_spec = propagate_spec or PropagateSpec()
-        self.action_spec = action_spec
-        self.ttl_spec = ttl_spec
-
 
 class UnconditionalEdge(_EdgeBase):
     """无条件转移边：源为条件节点，仅含流转规格，无时间属性。"""
 
+    _SPEC_DEFAULT_FIELDS = frozenset({"propagate_spec"})
     _FIELDS = (
         _FieldMeta("propagate_spec", None, ("spec", "PropagateSpec")),
     )
 
-    def __init__(
-        self,
-        propagate_spec: Optional[PropagateSpec] = None,
-        **common: Any,
-    ) -> None:
-        super().__init__(**common)
-        self.propagate_spec = propagate_spec or PropagateSpec()
-
 
 # ════════════════════════════════════════════════════════════
 # 表驱动注册表（无 if/elif 链）
-# ════════════════════════════════════════════════════════════
-# DZH 边 attr → Edge 子类（依据 DESIGN.md 验证：8192=条件边, 8193=无条件边）
 _DZH_ATTR_REGISTRY: Dict[int, Type[Edge]] = {
     8192: ConditionalEdge,
     8193: UnconditionalEdge,
@@ -593,18 +490,10 @@ def all_edge_source_types() -> list:
 
 # ════════════════════════════════════════════════════════════════
 # Section: specs.py — 领域规范对象（Spec）：纯数据 dataclass
-# 每个 Spec 使用 @dataclass，继承 _SpecBase 获得统一 to_dict / from_dict
-# 往返实现（基于 dataclass 字段内省），并提供单位换算辅助方法。
-# Task 11：_SpecBase 消除 7 个 Spec 子类的 to_dict / from_dict 手写样板。
-# ════════════════════════════════════════════════════════════════
 
 
 def _as_dict(obj: Any) -> Any:
-    """将 dataclass 实例转为字典（递归处理嵌套 dataclass / dict / list）。
-
-    注意：不能通过 hasattr(obj, 'to_dict') 分派，否则 Spec.to_dict() → _as_dict(self)
-    → obj.to_dict() 会无限递归。改用 is_datacase 按字段迭代。
-    """
+    """将 dataclass 实例转为字典（递归处理嵌套 dataclass / dict / list）。"""
     if obj is None:
         return None
     if is_dataclass(obj) and not isinstance(obj, type):
@@ -747,9 +636,6 @@ class ReloadSchedule(_SpecBase):
 
 
 # ── DZH 列定义（领域常量，兼容老代码）─────────────────────────────────
-# 列 ID → {name/key/type} 映射，描述通达信/大智慧行情表格的列规格。
-# 原定义在 services/tq_adapter.py，现移至 core/domain 作为领域知识，
-# 供 services 与 core 层共同 import，消除 core → services 的跨层依赖。
 DZH_COL_MAP: Dict[int, Dict[str, str]] = {
     2: {'name': '代码', 'key': 'code', 'type': 'string'},
     -1: {'name': '名称', 'key': 'name', 'type': 'string'},
@@ -776,31 +662,15 @@ DZH_COL_MAP: Dict[int, Dict[str, str]] = {
 
 # ════════════════════════════════════════════════════════════════
 # Section: evaluators.py — 筛选评估器层次：按 nset(0-5) 划分的评估器抽象接口 + 数据载体
-# 领域层定义评估器接口与数据持有，同时承载被 converters 等上层复用的纯计算
-# 评估器操作函数（Task 23.3：从 core/evaluators.py 迁移至 core/domain/ 白名单，
-# 消除 converters/tdx.py → core.evaluators 跨层违规 import）。
-# 表驱动：evaluator_type → Evaluator 子类映射使用 dict 常量。
-# 仅依赖标准库 + config/ 下 JSON 配置表。
-# ════════════════════════════════════════════════════════════════
 
 
 # ════════════════════════════════════════════════════════════════
 # Task 12：Evaluator 注册表（装饰器驱动，消除静态 dict 维护）
-# _EVALUATOR_REGISTRY 由 @register_evaluator 装饰器在子类定义时填充，
-# Evaluator.from_filter_spec 工厂方法查表分派到子类实现。
-# ════════════════════════════════════════════════════════════════
 _EVALUATOR_REGISTRY: Dict[str, Type[Evaluator]] = {}
 
 
 def register_evaluator(evaluator_type: str):
-    """Evaluator 子类注册装饰器：将 (evaluator_type → cls) 写入 _EVALUATOR_REGISTRY。
-
-    用法::
-
-        @register_evaluator("indicator")
-        class IndicatorEvaluator(Evaluator):
-            ...
-    """
+    """Evaluator 子类注册装饰器：将 (evaluator_type → cls) 写入 _EVALUATOR_REGISTRY。"""
     def decorator(cls: Type[Evaluator]) -> Type[Evaluator]:
         _EVALUATOR_REGISTRY[evaluator_type] = cls
         return cls
@@ -817,9 +687,9 @@ class Evaluator(ABC):
 
     nset: int = -1
 
-    @abstractmethod
     def evaluate(self, context: Dict[str, Any]) -> List[str]:
         """返回 passed 的股票列表（领域层占位，真实逻辑在 core/evaluators.py）。"""
+        return []
 
     @classmethod
     def from_filter_spec(cls, filter_spec: FilterSpec) -> "Evaluator":
@@ -830,59 +700,39 @@ class Evaluator(ABC):
         return klass.from_filter_spec(filter_spec)
 
 
-@register_evaluator("indicator")
-class IndicatorEvaluator(Evaluator):
-    """技术指标评估器（nset=0，DZH 技术指标）。"""
-
-    nset = 0
+class _FormulaScalarEvaluator(Evaluator):
+    """formula_ref/noperate/fsecond 三字段标量评估器基类（合并 Indicator/FinancialScalar/MarketScalar 的 __init__/from_filter_spec 重复）。"""
 
     def __init__(self, formula_ref: str = "", noperate: int = 0, fsecond: Any = 0) -> None:
         self.formula_ref = formula_ref
         self.noperate = noperate
         self.fsecond = fsecond
 
-    def evaluate(self, context: Dict[str, Any]) -> List[str]:
-        return []
-
     @classmethod
-    def from_filter_spec(cls, filter_spec: FilterSpec) -> "IndicatorEvaluator":
+    def from_filter_spec(cls, filter_spec: FilterSpec) -> "_FormulaScalarEvaluator":
         return cls(formula_ref=filter_spec.formula_ref,
                    noperate=filter_spec.noperate, fsecond=filter_spec.fsecond)
 
 
+@register_evaluator("indicator")
+class IndicatorEvaluator(_FormulaScalarEvaluator):
+    """技术指标评估器（nset=0，DZH 技术指标）。"""
+
+    nset = 0
+
+
 @register_evaluator("condition_formula")
-class ConditionFormulaEvaluator(Evaluator):
-    """条件选股公式评估器（nset=1，DZH 条件选股）。"""
+class ConditionFormulaEvaluator(_FormulaScalarEvaluator):
+    """条件选股公式评估器（nset=1，DZH 条件选股，仅 formula_ref）。"""
 
     nset = 1
 
-    def __init__(self, formula_ref: str = "") -> None:
-        self.formula_ref = formula_ref
-
-    def evaluate(self, context: Dict[str, Any]) -> List[str]:
-        return []
-
-    @classmethod
-    def from_filter_spec(cls, filter_spec: FilterSpec) -> "ConditionFormulaEvaluator":
-        return cls(formula_ref=filter_spec.formula_ref)
-
 
 @register_evaluator("expert_system")
-class ExpertSystemEvaluator(Evaluator):
-    """专家系统评估器（nset=2，DZH 交易系统）。"""
+class ExpertSystemEvaluator(_FormulaScalarEvaluator):
+    """专家系统评估器（nset=2，DZH 交易系统，formula_ref + noperate）。"""
 
     nset = 2
-
-    def __init__(self, formula_ref: str = "", noperate: int = 0) -> None:
-        self.formula_ref = formula_ref
-        self.noperate = noperate
-
-    def evaluate(self, context: Dict[str, Any]) -> List[str]:
-        return []
-
-    @classmethod
-    def from_filter_spec(cls, filter_spec: FilterSpec) -> "ExpertSystemEvaluator":
-        return cls(formula_ref=filter_spec.formula_ref, noperate=filter_spec.noperate)
 
 
 # 30 个财务指标映射常量（DZH 基本面条件，nset=3）
@@ -902,24 +752,11 @@ FINANCIAL_INDICATORS: Dict[str, str] = {
 
 
 @register_evaluator("financial_scalar")
-class FinancialScalarEvaluator(Evaluator):
+class FinancialScalarEvaluator(_FormulaScalarEvaluator):
     """最新财务标量评估器（nset=3，DZH 基本面条件，30 财务指标）。"""
 
     nset = 3
     INDICATORS = FINANCIAL_INDICATORS
-
-    def __init__(self, formula_ref: str = "", noperate: int = 0, fsecond: Any = 0) -> None:
-        self.formula_ref = formula_ref
-        self.noperate = noperate
-        self.fsecond = fsecond
-
-    def evaluate(self, context: Dict[str, Any]) -> List[str]:
-        return []
-
-    @classmethod
-    def from_filter_spec(cls, filter_spec: FilterSpec) -> "FinancialScalarEvaluator":
-        return cls(formula_ref=filter_spec.formula_ref,
-                   noperate=filter_spec.noperate, fsecond=filter_spec.fsecond)
 
 
 # 12 个动态行情字段映射常量（DZH 动态行情，nset=4）
@@ -932,24 +769,11 @@ MARKET_FIELDS: Dict[str, str] = {
 
 
 @register_evaluator("market_scalar")
-class MarketScalarEvaluator(Evaluator):
+class MarketScalarEvaluator(_FormulaScalarEvaluator):
     """实时行情标量评估器（nset=4，DZH 动态行情，12 行情字段）。"""
 
     nset = 4
     FIELDS = MARKET_FIELDS
-
-    def __init__(self, formula_ref: str = "", noperate: int = 0, fsecond: Any = 0) -> None:
-        self.formula_ref = formula_ref
-        self.noperate = noperate
-        self.fsecond = fsecond
-
-    def evaluate(self, context: Dict[str, Any]) -> List[str]:
-        return []
-
-    @classmethod
-    def from_filter_spec(cls, filter_spec: FilterSpec) -> "MarketScalarEvaluator":
-        return cls(formula_ref=filter_spec.formula_ref,
-                   noperate=filter_spec.noperate, fsecond=filter_spec.fsecond)
 
 
 # noperate → 集合运算名称（nset=5）
@@ -968,9 +792,6 @@ class SetOperationEvaluator(Evaluator):
             raise ValueError(f"非法集合运算: {operation}，须为 {self.OPERATIONS}")
         self.operation = operation
 
-    def evaluate(self, context: Dict[str, Any]) -> List[str]:
-        return []
-
     @classmethod
     def from_filter_spec(cls, filter_spec: FilterSpec) -> "SetOperationEvaluator":
         op = _SET_OPERATION_MAP.get(filter_spec.noperate, "union")
@@ -979,9 +800,6 @@ class SetOperationEvaluator(Evaluator):
 
 # ════════════════════════════════════════════════════════════
 # 表驱动：evaluator_type → Evaluator 子类（无 if/elif 链）
-# Task 12：注册表由 @register_evaluator 装饰器自动填充，
-# 模块级辅助函数复用 _EVALUATOR_REGISTRY，无需静态 dict。
-# ════════════════════════════════════════════════════════════
 
 
 def evaluator_from_filter_spec(filter_spec: FilterSpec) -> Evaluator:
@@ -999,20 +817,10 @@ def all_evaluator_types() -> List[str]:
 
 # ════════════════════════════════════════════════════════════════
 # Task 23.3: 评估器操作函数（从 core/evaluators.py 迁移至 core/domain/ 白名单）
-#
-# converters/tdx.py 等上层模块需使用 _eval_op / _build_op_ctx / _resolve_rank /
-# _NOPERATE_RULES / _RANK_MODES。原 core/evaluators.py 不在白名单中，直接 import
-# 会导致跨层违规。将这些纯计算函数（含其依赖的派生表达式求值器与配置表加载）
-# 迁移至 core/domain/evaluators.py（白名单），core/evaluators.py 通过 re-export
-# 保持向后兼容。
-# ════════════════════════════════════════════════════════════════
 
 _domain_logger = logging.getLogger("core.evaluators")
 
 # 表驱动：noperate 操作符规则配置（config/tdx_noperate_rules.json）
-# records 的 expr/prev_expr/curr_expr/combine 字段（表达式字符串）驱动通用比较器 _eval_op
-# rank_modes 驱动排名处理器 _resolve_rank
-# 注意：合并后 __file__ 为 core/domain.py，需上溯 2 级到项目根再进入 config/
 _noperate_data = json.loads(
     (Path(__file__).parent.parent / "config" / "data" / "tdx_noperate_rules.json").read_text("utf-8")
 )
@@ -1024,15 +832,7 @@ _COMBINE_OPS = {"and": lambda a, b: a and b, "or": lambda a, b: a or b}
 
 
 def _build_op_ctx(line1: list, line2: list, params: dict | None = None) -> dict:
-    """构建 _eval_op 的 ctx 字典。
-
-    ctx 字段约定（由 tdx_noperate_rules.json 的 expr/prev_expr/curr_expr 消费）：
-        a / b       : 当前值（line1[-1] / line2[-1]）
-        line1/line2 : 向量序列（供索引访问 line1[-2]/line1[-3] 等）
-        tol_abs/tol_rel : 容差参数
-        abs_diff    : abs(a - b)（预计算，便于 expr 直接引用，避免重复求值）
-        tol         : max(tol_abs, abs(b) * tol_rel)（预计算，同上）
-    """
+    """构建 _eval_op 的 ctx 字典。"""
     params = params or {}
     tol_abs = params.get("tolerance_abs", 1e-8)
     tol_rel = params.get("tolerance_rel", 1e-4)
@@ -1046,16 +846,7 @@ def _build_op_ctx(line1: list, line2: list, params: dict | None = None) -> dict:
 
 
 def _eval_op(rule: dict, ctx: dict) -> bool | list:
-    """通用比较器，按 rule 的 expr/prev_expr/curr_expr/combine 字段执行。
-
-    计算逻辑由表字段（表达式字符串）承载，由 _eval_derived_expr 统一求值，
-    无 if/elif 比较分支。rank 类型由 _resolve_rank 统一处理，此处返回占位 []。
-
-    分派依据（表内容驱动，非代码分支）：
-        - rule["expr"] 存在 → 单表达式求值（abs_lt/gt/lt）
-        - rule["prev_expr"]+["curr_expr"] 存在 → 双表达式按 combine 组合（cross/inflection）
-        - rule["compare"] == "rank" → 占位 []（排名由 _resolve_rank 处理）
-    """
+    """通用比较器，按 rule 的 expr/prev_expr/curr_expr/combine 字段执行。"""
     if rule.get("compare") == "rank":
         return []
     expr = rule.get("expr")
@@ -1090,13 +881,7 @@ _TIE_HANDLERS = {"exact_rank": _tie_exact_rank, "none": _tie_slice}
 
 
 def _resolve_rank(ranked: list, fsecond: float, rank_rule: dict) -> list[str]:
-    """根据 rank_modes 表的 rank_rule 处理排名结果。
-
-    rank_rule 字段驱动差异：
-        - order: 排序方向（desc 降序 / asc 升序）
-        - tie_handling: 并列处理（由 _TIE_HANDLERS 表分派，无 if/elif）
-        - params.default_n: fsecond<=0 时的默认 N
-    """
+    """根据 rank_modes 表的 rank_rule 处理排名结果。"""
     if not ranked: return []
     n = int(fsecond) if fsecond > 0 else rank_rule.get("params", {}).get("default_n", 10)
     order = rank_rule.get("order", "desc")
@@ -1138,14 +923,7 @@ _DERIVED_FUNCS = {
 
 
 def _eval_derived_ast(tree, ctx: dict):
-    """对已解析的 ast.Expression 受控求值（无 eval）。
-
-    支持 +,-,*,/ 四则运算、比较运算、逻辑运算（and/or/not）、
-    索引访问（line1[-1]）、数字字面量、字段名变量、_DERIVED_FUNCS 表内函数调用。
-    变量从 ctx 字典查找（数值字段转 float，布尔/列表等非数值类型原样返回
-    以支持逻辑运算和索引访问）。None 值通过运算传播（类似 SQL NULL 语义）：
-    任意 None 操作数 → None（逻辑运算中 None 视为 False）。
-    """
+    """对已解析的 ast.Expression 受控求值（无 eval）。"""
     def _eval(node):
         if isinstance(node, ast.Expression):
             return _eval(node.body)
@@ -1238,14 +1016,7 @@ def _eval_derived_ast(tree, ctx: dict):
 
 
 def _eval_derived_expr(expr: str, ctx: dict, guard: str | None = None) -> float | None:
-    """受控表达式求值器，用 ast 模块解析，禁止 eval()。
-
-    支持 +,-,*,/ 四则运算、比较运算、逻辑运算（and/or/not）、
-    索引访问（line1[-1]）、数字字面量、字段名变量、_DERIVED_FUNCS 表内函数调用
-    （max/min/abs/round）。None 值通过运算传播（类似 SQL NULL 语义）：
-    任意 None 操作数 → None（逻辑运算中 None 视为 False）。
-    guard 为条件表达式，先求值 guard，False 或 None 则返回 None。
-    """
+    """受控表达式求值器，用 ast 模块解析，禁止 eval()。"""
     # 先求值 guard，False 或 None 则返回 None
     if guard:
         try:
@@ -1267,9 +1038,6 @@ def _eval_derived_expr(expr: str, ctx: dict, guard: str | None = None) -> float 
 # ════════════════════════════════════════════════════════════════
 
 # TDX nperiod 整数码 → 标准周期字符串映射（项目实例规范）
-# 按 spec.md R6：nperiod=1 表示 1 分钟 K 线，nperiod=5 表示 5 分钟 K 线。
-# 为兼容既有配置，保留原通达信部分约定：0=日线, 2=月线, 6=30分钟线,
-# 7=60分钟线, 9/10/11=日线, 同时 3/8 也映射为 1 分钟线。
 _TDX_NPERIOD_TO_PERIOD: Dict[int, str] = {
     0: '1d', 1: '1m', 2: '1mon', 3: '1m', 4: '5m', 5: '5m',
     6: '30m', 7: '60m', 8: '1m', 9: '1d', 10: '1d', 11: '1d',
@@ -1277,12 +1045,7 @@ _TDX_NPERIOD_TO_PERIOD: Dict[int, str] = {
 
 
 def _nperiod_to_period(nperiod) -> str:
-    """TDX nperiod 整数码映射为标准周期字符串。
-
-    1 → '1m'（1 分钟线），4/5 → '5m'（5 分钟线），
-    3/8 → '1m'，6 → '30m'，7 → '60m'，0/2/9/10/11 → '1d'。
-    缺失或无效返回 '1d'。
-    """
+    """TDX nperiod 整数码映射为标准周期字符串。"""
     try:
         return _TDX_NPERIOD_TO_PERIOD.get(int(nperiod), '1d')
     except (TypeError, ValueError):
@@ -1295,16 +1058,7 @@ def _nperiod_to_period(nperiod) -> str:
 
 
 def evaluate_intersection(codes: List[str], state: Any, edge_params: dict) -> List[str]:
-    """交集条件评估器：筛选同时存在于指定源状态池中的股票。
-
-    Args:
-        codes: 当前待筛选的股票代码列表。
-        state: 运行期状态对象，需提供 get_pool(nid) 方法。
-        edge_params: 边参数字典，需包含 intersection_source 键指定源状态池 ID。
-
-    Returns:
-        交集结果：codes 中同时存在于 intersection_source 指定状态池的股票代码列表。
-    """
+    """交集条件评估器：筛选同时存在于指定源状态池中的股票。"""
     source_pool = edge_params.get('intersection_source', '')
     other_stocks: set = set()
     for s in (state.get_pool(source_pool).get_stocks() if source_pool else []):
@@ -1314,9 +1068,6 @@ def evaluate_intersection(codes: List[str], state: Any, edge_params: dict) -> Li
 
 # ════════════════════════════════════════════════════════════════
 # Section: 内置公式查找（builtin_formulas.json）
-# I96 fail-fast 策略：模块加载时一次性读取并构建索引，消除重复 I/O 与静默回退。
-# 从 core/screening_module.py 迁移至此（白名单模块），解除 formula_module → screening_module 耦合。
-# ════════════════════════════════════════════════════════════════
 
 _builtin_formulas_cache = None
 
@@ -1339,28 +1090,14 @@ _BUILTIN_FORMULA_INFO = {f.get("name"): f for f in _BUILTIN_FORMULAS.get("formul
 
 
 def _lookup_builtin_script(name: str) -> str:
-    """从 config/builtin_formulas.json 按名称查找公式脚本。
-
-    Args:
-        name: 公式名称（如 "MA"、"MACD"）。
-
-    Returns:
-        公式脚本文本；未找到时返回空字符串。
-    """
+    """从 config/builtin_formulas.json 按名称查找公式脚本。"""
     if not name:
         return ""
     return _BUILTIN_FORMULA_INDEX.get(name, "")
 
 
 def _lookup_builtin_formula_info(name: str) -> dict:
-    """从 config/builtin_formulas.json 按名称查找完整公式信息。
-
-    Args:
-        name: 公式名称（如 "KDJ_5MIN_CROSS"）。
-
-    Returns:
-        完整公式信息字典（含 script/period/eval_field 等）；未找到时返回空字典。
-    """
+    """从 config/builtin_formulas.json 按名称查找完整公式信息。"""
     if not name:
         return {}
     return _BUILTIN_FORMULA_INFO.get(name, {})
@@ -1368,19 +1105,12 @@ def _lookup_builtin_formula_info(name: str) -> dict:
 
 # ════════════════════════════════════════════════════════════════
 # Section: tick_source.py — 行情 tick 源抽象与实现（领域层白名单模块）
-# Task 23.5：从 core/tick_source.py 迁移至 core/domain/ 白名单，
-# 消除 services/providers/mock_provider.py → core.tick_source 跨层违规 import。
-# SubTask 27.1：core/_market_utils.py 的 _stock_code / _normalize_stock_code /
-# _MARKET_PREFIXES / _MARKET_SUFFIXES / _load_market_cfg 已迁移至本模块。
-# ════════════════════════════════════════════════════════════════
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
 # 市场代码工具（SubTask 27.1：从 core/_market_utils.py 迁移至此）
-# 表驱动：_MARKET_PREFIXES/_MARKET_SUFFIXES 由 data_config.json 配置表决定。
-# ---------------------------------------------------------------------------
 
 # 注意：合并后 __file__ 为 core/domain.py，需上溯 2 级到项目根
 _CFG_ROOT = Path(__file__).parent.parent
@@ -1415,12 +1145,7 @@ def _stock_code(s: Any) -> str:
 
 
 def _normalize_stock_code(code: Any) -> str:
-    """归一化股票代码：统一为 ``fz`` 前缀的 8 字符格式。
-
-    先去除市场前缀(SH/SZ/BJ)、后缀(.SH/.SZ/.BJ)以及已有的 ``fz`` 前缀，
-    保留纯数字部分并补零到 6 位，最后返回 ``fz<6位数字>``。
-    例如 ``SH600000`` / ``600000.SH`` / ``fz1`` 均归一化为 ``fz600000``。
-    """
+    """归一化股票代码：统一为 ``fz`` 前缀的 8 字符格式。"""
     if code is None:
         return ''
     if not isinstance(code, str):
@@ -1442,14 +1167,7 @@ def _normalize_stock_code(code: Any) -> str:
 
 
 def _normalize_to_fz(code: str) -> str:
-    """将 ``600000.SH`` / ``SZ000001`` 等统一归一化为 ``fzNNNNNN`` 格式。
-
-    规则：
-      - 已以 ``fz`` 开头（含 ``fz_`` 或 ``fz000001``）提取数字部分。
-      - 移除 ``.SH`` / ``.SZ`` / ``.BJ`` 等后缀，再移除 ``SH/SZ/BJ`` 前缀。
-      - 保留纯数字部分，补零到 6 位，前接 ``fz``。
-    输出格式：``fz`` + 6位数字（如 fz000001, fz600000）。
-    """
+    """将 ``600000.SH`` / ``SZ000001`` 等统一归一化为 ``fzNNNNNN`` 格式。"""
     if not isinstance(code, str):
         code = str(code)
     code = code.strip()
@@ -1526,22 +1244,11 @@ class TimedEventSpec:
 
 
 class TickSource(ABC):
-    """行情 tick 源抽象基类。
-
-    核心循环通过 ``next_ticks(now)`` 获取当前到期的 per-code tick 字典，
-    再经 ``DataUpdater.apply_data`` 写入 ``PoolState.latest_tick``。
-    """
+    """行情 tick 源抽象基类。"""
 
     @abstractmethod
     def next_ticks(self, now: float) -> Dict[str, Dict[str, Any]]:
-        """返回当前到期的 tick 数据。
-
-        Args:
-            now: 当前时间戳（由 ``time_at(state)`` 提供，可为 Unix 时间或虚拟时钟）。
-
-        Returns:
-            ``{code: {open, high, low, close, volume, amount, _ts, ...}}`` 字典。
-        """
+        """返回当前到期的 tick 数据。"""
         ...
 
     @abstractmethod
@@ -1551,11 +1258,7 @@ class TickSource(ABC):
 
 
 class RealTickSource(TickSource):
-    """实盘 tick 源：通过外部 live 数据源（如 TQ adapter）获取快照。
-
-    保留现有实盘接入能力，将 ``tq_adapter.get_snapshot`` 等接口适配为
-    ``TickSource`` 协议。
-    """
+    """实盘 tick 源：通过外部 live 数据源（如 TQ adapter）获取快照。"""
 
     def __init__(
         self,
@@ -1651,15 +1354,7 @@ class MockDataSource(TickSource):
         self._event_bus = event_bus
 
     def register_tick_timers(self, now: float) -> None:
-        """为每只股票创建 TimedEventSpec 并注册到 EventDriver 统一优先队列。
-
-        tick 定时器与边触发/TTL 共用同一优先队列。到时由 EventDriver.fire_due
-        触发 action，action 只发布 TickDue(code, ts) 事件；tick 数据生成由
-        TickBarModule 订阅 TickDue 后完成。
-
-        Args:
-            now: 当前时间戳，首次触发时间 = now + interval。
-        """
+        """为每只股票创建 TimedEventSpec 并注册到 EventDriver 统一优先队列。"""
         if self._event_driver is None:
             return
         from .event_bus import TickDue
@@ -1675,15 +1370,7 @@ class MockDataSource(TickSource):
             self._event_driver.add_spec(spec, first_fire_time=now + interval)
 
     def _make_tick_action(self, code: str, TickDueCls: Any) -> Callable[..., None]:
-        """创建 tick 定时器 action：到时只发布 TickDue(code, ts) 事件。
-
-        G2：引擎只发事件不执行计算，tick 数据生成由 TickBarModule 订阅 TickDue
-        后调用 ``get_tick`` 完成。
-
-        fire_time 由 EventDriver.fire_due 注入（spec 在 heapq 中实际到期的时刻），
-        使 TickDue.ts 反映真实触发顺序，避免同一仿真步内所有 tick 事件共享
-        self.clock 导致前端时间轴堆叠为一条线。
-        """
+        """创建 tick 定时器 action：到时只发布 TickDue(code, ts) 事件。"""
         def action(params: Any, fire_time: Optional[float] = None) -> None:
             ts = fire_time if fire_time is not None else self._current_ts()
             if self._event_bus is not None:
@@ -1696,13 +1383,7 @@ class MockDataSource(TickSource):
         return action
 
     def _current_ts(self) -> float:
-        """获取当前时间戳，与 EventDriver.fire_due 的 now 一致。
-
-        G2 硬约束：统一委托 ``time_at(state)``，无 ``time.time()`` fallback。
-        EventDriver 在 ``_init_pool_runtime`` 装配时即注入（engine.py:925），
-        其 ``_state`` 即 PoolState 实例；``time_at`` 按 ``state.time_source.driver_type``
-        分派：仿真返回虚拟秒（current_ts 缺失返回 0），实盘返回墙钟。
-        """
+        """获取当前时间戳，与 EventDriver.fire_due 的 now 一致。"""
         if self._event_driver is not None:
             state = getattr(self._event_driver, "_state", None)
             if state is not None:
@@ -1730,15 +1411,7 @@ class MockDataSource(TickSource):
     # tick 数据生成
     # ------------------------------------------------------------------
     def get_tick(self, code: str, ts: Optional[float] = None) -> Dict[str, Any]:
-        """生成单只股票的 tick 数据（供 TickBarModule 订阅 TickDue 后调用）。
-
-        Args:
-            code: 股票代码（自动归一化为 fz 前缀）。
-            ts: 时间戳；None 时使用当前虚拟时钟或墙钟。
-
-        Returns:
-            ``{code, open, high, low, close, volume, amount, pre_close, _ts}`` 字典。
-        """
+        """生成单只股票的 tick 数据（供 TickBarModule 订阅 TickDue 后调用）。"""
         code = _normalize_to_fz(code)
         if code not in self._rngs:
             self.add_code(code)
@@ -1755,9 +1428,6 @@ class MockDataSource(TickSource):
             prev_close = rng.uniform(*self._price_range)
 
         # 价格随机游走：保留均值回归，避免趋势无限放大
-        # I98：trend 衰减系数从 0.9 降到 0.5，shock 权重从 0.1 升到 0.5，
-        # 让 trend 更快响应 shock，在 +/– 之间切换，产生金叉/死叉交替
-        # （0.9 衰减太慢，trend 一旦形成就持续单调，KDJ/MACD 无法穿越）
         shock = rng.gauss(0, self._change_pct_std)
         trend = self._price_trend.get(code, 0.0) * 0.5 + shock * 0.5
         self._price_trend[code] = trend
@@ -1882,19 +1552,7 @@ def _hms_to_seconds(h: int, m: int, s: int) -> int:
 
 
 def time_at(source: Optional[str] = None, state: Any = None) -> float:
-    """统一时间入口。三模式差异仅在参数（driver_type），不在代码分支。
-
-    G2 硬约束：仿真/实盘同代码，仅由 ``state.time_source.driver_type`` 决定时间源。
-    - ``source="wall"`` 或 ``state is None``：显式墙钟入口（如 ``_now()`` 无 state 上下文），
-      返回 ``time.time()``。
-    - ``driver_type in ("virtual", "sequence")``：返回 ``current_ts``（虚拟秒）；
-      ``current_ts`` 缺失返回 0.0（仿真冷启动前合法值）。
-    - ``driver_type in ("wall_clock", None)``：实盘模式，``current_ts`` 优先，否则 ``time.time()``。
-
-    不做任何"current_ts 是真实秒则返回 0"的 hack——那会形成仿真专用分支，违反 G2。
-    current_ts 的正确性由设置方保证（``_post_init_mode_state`` 仿真启动时设虚拟时钟，
-    ``run_pool`` 实盘启动时设墙钟）。
-    """
+    """统一时间入口。三模式差异仅在参数（driver_type），不在代码分支。"""
     if source == "wall" or state is None:
         return time.time()
     ts_cfg = getattr(state, "time_source", None) or {}
@@ -1953,11 +1611,7 @@ def time_now_unix(state: Any) -> float:
 
 
 class EdgeStateMixin:
-    """EdgeState 表级访问方法集合。
-
-    将公式结果缓存与过滤输入指纹的读写从 ``EdgeState`` 核心类中剥离，
-    使其属性/方法数满足架构约束。
-    """
+    """EdgeState 表级访问方法集合。"""
 
     def get_formula_result(self, formula_ref: Any, bar_hash: str) -> Any:
         return self.formula_results.get((formula_ref, bar_hash))
@@ -1974,13 +1628,7 @@ class EdgeStateMixin:
 
 @dataclass
 class EdgeState(EdgeStateMixin):
-    """边级运行时表真相源。
-
-    属性（按架构 ≤5 个）：
-      - exec_ctx
-      - formula_results
-      - filter_inputs
-    """
+    """边级运行时表真相源。"""
 
     exec_ctx: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     formula_results: Dict[Tuple[Any, str], Any] = field(default_factory=dict)

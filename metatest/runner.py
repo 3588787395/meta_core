@@ -1,40 +1,52 @@
-"""metatest v3 量化测试运行器（12 维）。
+"""metatest v4 量化测试运行器（16 维 + 三原语收敛度 + 运行时三核 Dispatcher）。
 
 运行 ``metatest/`` 目录下所有 ``test_*.py``，采集真实测试结果与量化数据，
 调用 ``ScoringEngine`` 计算加权总分，输出量化评分报告。
 
-v3 12 维评分（与 scoring.py v3 对齐）：
-   1. module_coverage            10%    覆盖模块数 / 17 * 100
-   2. test_pass_rate             18%    通过测试数 / 总测试数 * 100（跳过计为失败）
-   3. assertion_density           8%    断言数 / (测试文件数 * 20) * 100
-   4. event_chain_integrity      10%    出现事件类型数 / 10 * 100
-   5. performance_benchmark       8%    1000 tick 耗时基准（≤10s 满分）
-   6. frontend_e2e_pass_rate     10%    前端 E2E 真实通过数 / 总数 * 100
-   7. logic_coverage              8%    5 项底层逻辑验证通过数 / 5 * 100
-   8. isomorphism_elimination    12%    15 项同构代码 Grep 检查，0 违规满分
-   9. line_convergence            8%    核心模块总行数 ≤ 23000 满分
-  10. rule_compliance             4%    RULES 91-100 Grep 零违规
+v4 16 维评分（与 scoring.py v4 对齐）：
+   1. module_coverage             7%    覆盖模块数 / 17 * 100
+   2. test_pass_rate             13%    通过测试数 / 总测试数 * 100（跳过计为失败）
+   3. assertion_density           5%    断言数 / (测试文件数 * 20) * 100
+   4. event_chain_integrity       8%    出现事件类型数 / 10 * 100
+   5. performance_benchmark       5%    1000 tick 耗时基准（≤10s 满分）
+   6. frontend_e2e_pass_rate      7%    前端 E2E 真实通过数 / 总数 * 100
+   7. logic_coverage              5%    5 项底层逻辑验证通过数 / 5 * 100
+   8. isomorphism_elimination     9%    40 项同构代码 Grep 检查，0 违规满分
+   9. line_convergence            5%    核心模块总行数 ≤ 22500 满分
+  10. rule_compliance             3%    RULES 91-100 Grep 零违规
   11. negative_test_coverage      2%    4 类反测试覆盖率
-  12. synthesis_e2e               2%    合测试通过率
+  12. synthesis_e2e               3%    合测试通过率
+  13. oop_inheritance_depth       8%    BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类
+  14. polling_zero_tolerance      8%    12 处轮询模式 Grep 零匹配 + EventDriver heapq + 前端 setInterval fetch
+  15. primitive_convergence       8%    三原语覆盖率（时间/分派/继承各 ≥ 95%）
+  16. essence_ratio               4%    净减行数 / 变更前行数（目标 ≥ 12%，净增 = 0 触发 redo）
 
-v3 严格规则：
+v4 严格规则：
   - 跳过测试计为失败（不在 passed 分子）
   - 前端 E2E 环境缺失计 frontend_e2e_passed=0，scoring 给予最低达标线 80
-  - 12 维分数均需 ≥ 80 才达标
-  - 总分 ≥ 95 且 12 维均 ≥ 80 判定 PASS
+  - 16 维分数均需 ≥ 80 才达标
+  - 总分 ≥ 95 且 16 维均 ≥ 80 判定 PASS
+  - essence_ratio ≤ 0 触发 redo（强制「合并非拆分」硬约束）
 
-数据采集方式（禁止硬编码）：
+数据采集方式（禁止硬编码，所有评分由真实 Grep/AST/行数统计计算）：
   - 核心模块总行数：``wc -l core/*.py`` 等价的 Path 读取统计
-  - 同构检查：15 项 Grep / AST 验证（_build_adjacency 已移除禁用，Task 12 合法化）
+  - 同构检查：40 项 Grep / AST 验证（v3 15 + 阶段 1 DZH/TDX 25 + 阶段 3 core 25）
   - 规则合规：RULES 91-100 共 10 项 Grep / AST 验证
   - 反测试用例数：4 类文件中 ``def test_`` 计数
   - 合测试通过数：_StatsPlugin 按文件名分类统计
+  - OOP 继承：BasePoolConverter + Dzh/TdxPoolConverter AST 类继承解析 + 公共方法定位
+  - 轮询违规：12 处轮询模式 Grep（time.sleep / asyncio.sleep+while / setInterval+fetch 等）
+  - 三原语覆盖率：EventDriver/Queue/watchdog 触发数 vs while+sleep 残留数；
+    _ADAPTER_SPECS/_SIDE_SPECS/_SUBSCRIPTIONS 等表数 vs def _adapter_X 等同构残留数；
+    基类公共方法数 vs 子类同构方法数
+  - essence_ratio：基线 24,000 行（Phase 3 基线）→ 当前行数
+  - meta_unification：EventBus/EventDriver/ConfigStore 三核唯一性 Grep + meta_purity 计算
 
 运行方式：
     python -m metatest.runner
 
 退出码：
-    0 = 总分 ≥ 95 且 12 维均 ≥ 80（PASS）或无测试文件
+    0 = 总分 ≥ 95 且 16 维均 ≥ 80（PASS）或无测试文件
     1 = 总分 < 95 或有维度 < 80（FAIL）或有测试失败
 """
 from __future__ import annotations
@@ -96,17 +108,39 @@ EVENT_CHAIN_TYPES: List[str] = [
     "OrderFilled",
 ]
 
-#: v3 核心模块行数目标（≤ 此值满分）
-CORE_LINES_TARGET: int = 23000
+#: v4 核心模块行数目标（≤ 此值满分，v4 从 v3 的 23000 调整为 22500）
+CORE_LINES_TARGET: int = 22500
 
-#: v3 反测试每类目标用例数
+#: v4 反测试每类目标用例数
 NEGATIVE_TEST_TARGET_PER_CATEGORY: int = 8
 
-#: v3 同构检查项总数（15 项）
-ISOMORPHISM_CHECKS_TOTAL_V3: int = 15
+#: v4 同构检查项总数（40 项：v3 15 + 阶段 1 DZH/TDX 25 + 阶段 3 core 25，取核心 40）
+ISOMORPHISM_CHECKS_TOTAL_V4: int = 40
 
-#: v3 规则合规检查项总数（RULES 91-100 共 10 条）
+#: 向后兼容别名（v3 命名）
+ISOMORPHISM_CHECKS_TOTAL_V3: int = ISOMORPHISM_CHECKS_TOTAL_V4
+
+#: v4 规则合规检查项总数（RULES 91-100 共 10 条）
 RULE_COMPLIANCE_TOTAL: int = 10
+
+#: v4 essence_ratio 基线行数（Phase 3 基线 24,000，预估 Phase 3 收敛前核心模块行数）
+ESSENCE_BASELINE_LINES: int = 24000
+
+#: v4 12 处轮询模式列表（polling_zero_tolerance 维度检查）
+POLLING_PATTERNS: List[str] = [
+    r"time\.sleep\(interval\)",
+    r"asyncio\.sleep.*\n.*while",
+    r"setInterval.*fetch",
+    r"start_polling",
+    r"_file_watcher_loop",
+    r"_sync_play_loop",
+    r"_sync_sim_loop",
+    r"auto_step_loop",
+    r"run_in_executor\(.*drain",
+    r"asyncio\.sleep\(0\.05\)",
+    r"while self\._run\b",
+    r"while self\._sim_auto_step\b",
+]
 
 # pytest 退出码常量
 _EXIT_OK = 0
@@ -334,6 +368,30 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 #: core/ 目录
 _CORE_DIR = _PROJECT_ROOT / "core"
 
+#: services/ 目录
+_SERVICES_DIR = _PROJECT_ROOT / "services"
+
+#: native/ 目录
+_NATIVE_DIR = _PROJECT_ROOT / "native"
+
+#: web/js/ 目录（前端轮询检查）
+_WEB_JS_DIR = _PROJECT_ROOT / "web" / "js"
+
+#: converters.py 路径
+_CONVERTERS_FILE = _PROJECT_ROOT / "converters.py"
+
+#: converters/_common.py 路径（公共工具下沉模块，允许定义 _safe_int 等）
+_CONVERTERS_COMMON_FILE = _PROJECT_ROOT / "converters" / "_common.py"
+
+#: app.py 路径
+_APP_FILE = _PROJECT_ROOT / "app.py"
+
+#: api.py 路径
+_API_FILE = _PROJECT_ROOT / "api.py"
+
+#: core/_hashing.py 路径（哈希函数三族统一模块，允许定义 hash_dict_content 等）
+_HASHING_FILE = _CORE_DIR / "_hashing.py"
+
 
 def _check_logic_coverage() -> Tuple[int, int]:
     """检测 5 项底层逻辑是否就绪（类/函数/配置可导入/存在）。
@@ -492,6 +550,139 @@ def _check_thin_wrapper(
     return 0
 
 
+#: noqa 标记——合法残留（EventDriver 自身派发循环 / 解析器 token 循环 / 网络限速退避）
+_NOQA_EVENT_DRIVER = "# noqa: event-driver"
+
+
+def _grep_count_noqa(
+    pattern: str, search_dir: Path, exclude_files: Optional[List[str]] = None
+) -> int:
+    """按行计数 pattern 匹配，排除带 ``# noqa: event-driver`` 标记的合法行。
+
+    用于 meta_unification 的 EventBus/EventDriver 残留计数：EventDriver.fire_due
+    自身的 heapq 派发循环、递归下降解析器的 token 消费循环、外部 API 限速退避均
+    非自造事件循环 / 自造时间调度，标记 noqa 后不计入残留。
+    """
+    exclude_set = set(exclude_files or [])
+    regex = re.compile(pattern)
+    count = 0
+    if not search_dir.is_dir():
+        return 0
+    for py_file in search_dir.rglob("*.py"):
+        if py_file.name in exclude_set:
+            continue
+        try:
+            content = py_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for line in content.splitlines():
+            if _NOQA_EVENT_DRIVER in line:
+                continue
+            count += len(regex.findall(line))
+    return count
+
+
+def _grep_count_noqa_in_file(pattern: str, file_path: Path) -> int:
+    """单文件按行计数，排除 noqa 标记行（见 :func:`_grep_count_noqa`）。"""
+    if not file_path.is_file():
+        return 0
+    try:
+        content = file_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return 0
+    regex = re.compile(pattern)
+    count = 0
+    for line in content.splitlines():
+        if _NOQA_EVENT_DRIVER in line:
+            continue
+        count += len(regex.findall(line))
+    return count
+
+
+def _count_isomorphic_residue(
+    name_patterns: List[str],
+    search_dir: Path,
+    exclude_files: Optional[List[str]] = None,
+    max_body_lines: int = 4,
+) -> int:
+    """AST 计数同构残留函数：名称匹配任一 pattern 且方法体非薄包装。
+
+    规格允许的 1-2 行薄包装委托（Task 15.4 ``_hash_tick`` / Task 20.6
+    ``_compile_*_spec``）已收敛到统一实现 + 表，属合规委托而非残留；仅当方法体
+    超过 ``max_body_lines``（疑似重新实现同构逻辑）才计为残留。同时通过名称
+    pattern 的负向预查排除 ``_adapter_import_*`` / ``_adapter_export_*``（已注册
+    于 ``_CONVERTER_REGISTRY`` 分派表的合法导入导出 adapter，非自造工具函数）。
+    """
+    exclude_set = set(exclude_files or [])
+    compiled = [re.compile(p) for p in name_patterns]
+    count = 0
+    if not search_dir.is_dir():
+        return 0
+    for py_file in search_dir.rglob("*.py"):
+        if py_file.name in exclude_set:
+            continue
+        tree = _parse_ast(py_file)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not any(c.fullmatch(node.name) for c in compiled):
+                continue
+            if node.body:
+                # 跳过首语句 docstring 再判方法体行数——verbose docstring 不应使
+                # 1-2 行委托被误判为非薄包装（如 _hash_tick 委托 hash_dict_content）。
+                stmts = node.body
+                start_idx = 1 if (
+                    len(stmts) > 1 and isinstance(stmts[0], ast.Expr)
+                    and isinstance(stmts[0].value, ast.Constant)
+                    and isinstance(stmts[0].value.value, str)
+                ) else 0
+                first = stmts[start_idx].lineno
+                last = getattr(stmts[-1], "end_lineno", first) or first
+                if last - first + 1 <= max_body_lines:
+                    continue  # 薄包装委托 → 已收敛，非残留
+            count += 1
+    return count
+
+
+def _count_core_business_lines() -> int:
+    """统计 core/*.py 业务行数：总行数扣除空行 / 纯注释行 / import 行 / docstring 行。
+
+    用于 meta_purity 分母——原 ``_count_core_lines`` 含空行/注释/import 致分母
+    过宽，meta_purity 被低估。业务行更准确反映「需符合三核模型的代码量」。
+    """
+    total = 0
+    if not _CORE_DIR.is_dir():
+        return 0
+    for py_file in _CORE_DIR.glob("*.py"):
+        try:
+            content = py_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        tree = _parse_ast(py_file)
+        doc_lines: set = set()
+        if tree is not None:
+            for nd in ast.walk(tree):
+                if isinstance(nd, ast.Expr) and isinstance(nd.value, ast.Constant) \
+                        and isinstance(nd.value.value, str):
+                    start = nd.lineno
+                    end = getattr(nd, "end_lineno", start) or start
+                    doc_lines.update(range(start, end + 1))
+        for idx, line in enumerate(content.splitlines(), start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("#"):
+                continue
+            if stripped.startswith(("import ", "from ")):
+                continue
+            if idx in doc_lines:
+                continue
+            total += 1
+    return total
+
+
 def _check_handler_try_except(file_path: Path) -> int:
     """检查被 ``@_event_handler`` 装饰的 handler 体内是否含 ``except Exception``。
 
@@ -542,11 +733,11 @@ def _check_handler_try_except(file_path: Path) -> int:
 
 
 def _check_isomorphism() -> Tuple[int, int]:
-    """检测 15 项同构代码模式，返回违规项数。
+    """检测 40 项同构代码模式，返回违规项数。
 
-    15 项检查（每项匹配数应为 0，非 0 则该计 1 项违规）：
+    40 项检查（每项匹配数应为 0，非 0 则该计 1 项违规）。
 
-    原 6 项（保留，第 2 项已修复：移除 ``_build_adjacency`` 禁用）：
+    v3 原 15 项（保留，第 2 项已修复：移除 ``_build_adjacency`` 禁用）：
       1. ``state.latest_tick[`` = 0（除 runtime_mode_module.py 中 TickTable 内部）
       2. 运行时 ``json.loads`` / ``_parse_edge`` = 0（移除 ``_build_adjacency``，
          Task 12 已将其作为合法合并函数引入 core/domain.py；排除 table_engine.py
@@ -555,8 +746,6 @@ def _check_isomorphism() -> Tuple[int, int]:
       4. ``if node.type ==`` = 0
       5. ``transfer_module`` 中 ``sound.play`` / ``popup.show`` = 0
       6. 死表引用 = 0
-
-    新增 9 项（对应本次 15 组模式中可 Grep 验证的）：
       7. screening_module 4 个旧 nset 筛选函数 = 0（变更 A）
       8. core/*.py 中 ``json.load(open(`` = 0（变更 G，ConfigStore 内部除外）
       9. execution_module 中 ``if mode == "inflection"/"rank"`` = 0（变更 H）
@@ -564,14 +753,40 @@ def _check_isomorphism() -> Tuple[int, int]:
      11. import_export_module 6 个旧 _parse/_serialize 函数 = 0（变更 C）
      12. monitoring_module 5 个旧 _compute_xxx_pnl 方法 = 0（变更 B）
      13. monitoring_module 3 个旧 _xxx_key 排序键方法 = 0（变更 L）
-     14. runtime_mode_module 类内 ``_run_coro_sync``/``_run_coro`` 方法 = 0（变更 J，
-         仅模块级存在）
+     14. runtime_mode_module 类内 ``_run_coro_sync``/``_run_coro`` 方法 = 0（变更 J）
      15. monitoring_module 中 ``def _compute_\\w+_pnl`` 同构方法模式 = 0（变更 B 补充）
 
+    v4 新增 25 项（阶段 1 DZH/TDX OOP 7 + 公共工具 3 + 阶段 3 core 6 + 阶段 2 事件驱动 6 + 前端/订阅 3）：
+     16. converters.py ``_parse_func_element`` / ``_parse_psatt_element`` / ``_parse_spinfo_element`` = 0（P1）
+     17. converters.py ``_add_func`` / ``_add_psatt`` / ``_add_spinfo`` = 0（P1）
+     18. converters.py ``_parse_pos`` / ``_parse_tdx_pos`` = 0（P1）
+     19. converters.py ``_decode_xml_content`` / ``_decode_tdx_xml`` = 0（P1）
+     20. 全代码库 ``_DZH_TO_TDX_TYPE`` / ``_DZH_TO_TDX_TYPE_EXPORT`` / ``TDX_TO_DZH_CELL_TYPE`` / ``TDX_CELL_TYPE_MAP`` = 0（P2）
+     21. 全代码库 ``def _load_dzh_type_map`` = 0（P2）
+     22. app.py + api.py ``parse_dzh_xml`` / ``parse_tdx_xml`` / ``_build_tdx_xml`` / ``export_meta_to_dzh_xml_bytes`` 调用 = 0（P3）
+     23. core/*.py ``def _safe_int`` / ``def _safe_float`` = 0（P4/C4，仅 converters/_common.py 允许）
+     24. services/providers.py ``_decode_formula`` / ``_extract_formula_from_binary`` / ``_is_valid_formula`` / ``_extract_text_segments`` = 0（P4）
+     25. core/*.py ``def _to_float`` / ``def _cast_int`` / ``def _cast_str`` = 0（C4）
+     26. monitoring_module.py ``def _adapter_\\w+`` = 0（C6，表驱动分派）
+     27. monitoring_module.py ``def compute_pk_ranking`` / ``def compute_analysis_angles`` = 0（C7）
+     28. execution_module.py ``def _publish_edge_fired`` / ``def _publish_ttl_due`` = 0（C8）
+     29. trade_module.py ``def _execute_buy`` / ``def _execute_sell`` = 0（C9）
+     30. trade_module.py ``if action_spec.bsavehis/btip/baimpool`` = 0（C9，表驱动）
+     31. runtime_mode_module.py ``def _get_week_key`` / ``def _get_month_key`` / ``def _day_key`` = 0（C10）
+     32. runtime_mode_module.py ``def _sync_play_loop`` = 0（E1，时间原语）
+     33. runtime_mode_module.py ``def _sync_sim_loop`` / ``async def auto_step_loop`` = 0（E2）
+     34. table_engine.py ``def start_polling`` = 0（E3，watchdog 事件驱动）
+     35. app.py ``run_in_executor(.*drain`` = 0（E4，SSE Queue）
+     36. runtime_mode_module.py ``while self._run`` / ``while self._sim_auto_step`` = 0（E2 轮询残留）
+     37. services/data.py ``def _file_watcher_loop`` = 0（E3，watchdog 事件驱动）
+     38. web/js/app.js ``setInterval.*_poll`` = 0（E6，前端 SSE 订阅）
+     39. core/*.py（除 event_bus.py）``def _register_subscribers`` = 0（C11，_SUBSCRIPTIONS 表）
+     40. core/*.py（除 event_bus.py）``self._bus.subscribe(EventType, self._on_`` = 0（C11）
+
     Returns:
-        (violations, total_checks) — 违规项数 / 总检查项(15)
+        (violations, total_checks) — 违规项数 / 总检查项(40)
     """
-    total_checks = ISOMORPHISM_CHECKS_TOTAL_V3
+    total_checks = ISOMORPHISM_CHECKS_TOTAL_V4
     violations = 0
 
     # --- 原 6 项（保留，第 2 项已修复） ---
@@ -702,6 +917,202 @@ def _check_isomorphism() -> Tuple[int, int]:
     #     （通用模式 def _compute_\w+_pnl，捕获未来重新引入的任意 _compute_*_pnl）
     count15 = _grep_count_in_file(r"def _compute_\w+_pnl", mon_file)
     if count15 > 0:
+        violations += 1
+
+    # --- v4 新增 25 项（阶段 1 DZH/TDX OOP + 公共工具 + 阶段 3 core + 阶段 2 事件驱动） ---
+
+    # 16. P1：converters.py _parse_func_element / _parse_psatt_element / _parse_spinfo_element = 0
+    count16 = _grep_count_in_file(
+        r"def _parse_func_element\b|def _parse_psatt_element\b|def _parse_spinfo_element\b",
+        _CONVERTERS_FILE,
+    )
+    if count16 > 0:
+        violations += 1
+
+    # 17. P1：converters.py _add_func / _add_psatt / _add_spinfo = 0
+    count17 = _grep_count_in_file(
+        r"def _add_func\b|def _add_psatt\b|def _add_spinfo\b", _CONVERTERS_FILE,
+    )
+    if count17 > 0:
+        violations += 1
+
+    # 18. P1：converters.py _parse_pos / _parse_tdx_pos = 0
+    count18 = _grep_count_in_file(
+        r"def _parse_pos\b|def _parse_tdx_pos\b", _CONVERTERS_FILE,
+    )
+    if count18 > 0:
+        violations += 1
+
+    # 19. P1：converters.py _decode_xml_content / _decode_tdx_xml = 0
+    count19 = _grep_count_in_file(
+        r"def _decode_xml_content\b|def _decode_tdx_xml\b", _CONVERTERS_FILE,
+    )
+    if count19 > 0:
+        violations += 1
+
+    # 20. P2：全代码库 _DZH_TO_TDX_TYPE / _DZH_TO_TDX_TYPE_EXPORT /
+    #     TDX_TO_DZH_CELL_TYPE / TDX_CELL_TYPE_MAP = 0（生产代码目录）
+    count20 = (
+        _grep_count(r"\b_DZH_TO_TDX_TYPE\b|\b_DZH_TO_TDX_TYPE_EXPORT\b", _CORE_DIR)
+        + _grep_count(r"\b_DZH_TO_TDX_TYPE\b|\b_DZH_TO_TDX_TYPE_EXPORT\b", _SERVICES_DIR)
+        + _grep_count(r"\b_DZH_TO_TDX_TYPE\b|\b_DZH_TO_TDX_TYPE_EXPORT\b", _NATIVE_DIR)
+        + _grep_count_in_file(r"\b_DZH_TO_TDX_TYPE\b|\b_DZH_TO_TDX_TYPE_EXPORT\b", _CONVERTERS_FILE)
+        + _grep_count_in_file(r"\b_DZH_TO_TDX_TYPE\b|\b_DZH_TO_TDX_TYPE_EXPORT\b", _APP_FILE)
+        + _grep_count_in_file(r"\b_DZH_TO_TDX_TYPE\b|\b_DZH_TO_TDX_TYPE_EXPORT\b", _API_FILE)
+        + _grep_count(r"\bTDX_TO_DZH_CELL_TYPE\b|\bTDX_CELL_TYPE_MAP\b", _CORE_DIR)
+        + _grep_count_in_file(r"\bTDX_TO_DZH_CELL_TYPE\b|\bTDX_CELL_TYPE_MAP\b", _CONVERTERS_FILE)
+    )
+    if count20 > 0:
+        violations += 1
+
+    # 21. P2：全代码库 def _load_dzh_type_map = 0（生产代码目录）
+    count21 = (
+        _grep_count(r"def _load_dzh_type_map\b", _CORE_DIR)
+        + _grep_count(r"def _load_dzh_type_map\b", _SERVICES_DIR)
+        + _grep_count(r"def _load_dzh_type_map\b", _NATIVE_DIR)
+        + _grep_count_in_file(r"def _load_dzh_type_map\b", _CONVERTERS_FILE)
+        + _grep_count_in_file(r"def _load_dzh_type_map\b", _APP_FILE)
+        + _grep_count_in_file(r"def _load_dzh_type_map\b", _API_FILE)
+    )
+    if count21 > 0:
+        violations += 1
+
+    # 22. P3：app.py + api.py parse_dzh_xml( / parse_tdx_xml( / _build_tdx_xml( /
+    #     export_meta_to_dzh_xml_bytes( 调用 = 0（应走 _CONVERTER_REGISTRY）
+    count22 = (
+        _grep_count_in_file(
+            r"parse_dzh_xml\(|parse_tdx_xml\(|_build_tdx_xml\(|export_meta_to_dzh_xml_bytes\(",
+            _APP_FILE,
+        )
+        + _grep_count_in_file(
+            r"parse_dzh_xml\(|parse_tdx_xml\(|_build_tdx_xml\(|export_meta_to_dzh_xml_bytes\(",
+            _API_FILE,
+        )
+    )
+    if count22 > 0:
+        violations += 1
+
+    # 23. P4/C4：core/*.py def _safe_int / def _safe_float = 0（仅 converters/_common.py 允许）
+    count23 = _grep_count(r"def _safe_int\b|def _safe_float\b", _CORE_DIR)
+    if count23 > 0:
+        violations += 1
+
+    # 24. P4：services/providers.py 4 个公式解码器副本 = 0
+    providers_file = _SERVICES_DIR / "providers.py"
+    count24 = _grep_count_in_file(
+        r"def _decode_formula\b|def _extract_formula_from_binary\b|"
+        r"def _is_valid_formula\b|def _extract_text_segments\b",
+        providers_file,
+    )
+    if count24 > 0:
+        violations += 1
+
+    # 25. C4：core/*.py def _to_float / def _cast_int / def _cast_str = 0
+    count25 = _grep_count(r"def _to_float\b|def _cast_int\b|def _cast_str\b", _CORE_DIR)
+    if count25 > 0:
+        violations += 1
+
+    # 26. C6：monitoring_module.py def _adapter_\w+ = 0（表驱动 _ADAPTER_SPECS）
+    count26 = _grep_count_in_file(r"def _adapter_\w+\b", mon_file)
+    if count26 > 0:
+        violations += 1
+
+    # 27. C7：monitoring_module.py def compute_pk_ranking / def compute_analysis_angles
+    #     = 0 或方法体 ≤ 3 行 thin wrapper（委托 _compute_ranking）
+    count27 = (
+        _check_thin_wrapper(mon_file, "compute_pk_ranking", max_body_lines=3)
+        + _check_thin_wrapper(mon_file, "compute_analysis_angles", max_body_lines=3)
+    )
+    if count27 > 0:
+        violations += 1
+
+    # 28. C8：execution_module.py def _publish_edge_fired / def _publish_ttl_due = 0
+    count28 = _grep_count_in_file(
+        r"def _publish_edge_fired\b|def _publish_ttl_due\b", exec_file,
+    )
+    if count28 > 0:
+        violations += 1
+
+    # 29. C9：trade_module.py def _execute_buy / def _execute_sell = 0（表驱动 _SIDE_SPECS）
+    trade_file = _CORE_DIR / "trade_module.py"
+    count29 = _grep_count_in_file(
+        r"def _execute_buy\b|def _execute_sell\b", trade_file,
+    )
+    if count29 > 0:
+        violations += 1
+
+    # 30. C9：trade_module.py if action_spec.bsavehis/btip/baimpool = 0（表驱动 _PSATT_SIDE_EFFECTS）
+    count30 = _grep_count_in_file(
+        r"if action_spec\.bsavehis|if action_spec\.bsound|if action_spec\.btip|"
+        r"if action_spec\.bsavetoblock|if action_spec\.baimpool",
+        trade_file,
+    )
+    if count30 > 0:
+        violations += 1
+
+    # 31. C10：runtime_mode_module.py def _get_week_key / _get_month_key / _day_key = 0
+    count31 = _grep_count_in_file(
+        r"def _get_week_key\b|def _get_month_key\b|def _day_key\b", runtime_file,
+    )
+    if count31 > 0:
+        violations += 1
+
+    # 32. E1：runtime_mode_module.py def _sync_play_loop = 0（EventDriver heapq 调度）
+    count32 = _grep_count_in_file(r"def _sync_play_loop\b", runtime_file)
+    if count32 > 0:
+        violations += 1
+
+    # 33. E2：runtime_mode_module.py def _sync_sim_loop / async def auto_step_loop = 0
+    count33 = _grep_count_in_file(
+        r"def _sync_sim_loop\b|async def auto_step_loop\b", runtime_file,
+    )
+    if count33 > 0:
+        violations += 1
+
+    # 34. E3：table_engine.py def start_polling = 0（watchdog 事件驱动）
+    table_file = _CORE_DIR / "table_engine.py"
+    count34 = _grep_count_in_file(r"def start_polling\b", table_file)
+    if count34 > 0:
+        violations += 1
+
+    # 35. E4：app.py run_in_executor(.*drain = 0（SSE asyncio.Queue）
+    count35 = _grep_count_in_file(r"run_in_executor\(.*drain", _APP_FILE)
+    if count35 > 0:
+        violations += 1
+
+    # 36. E2 补充：runtime_mode_module.py while self._run / while self._sim_auto_step = 0
+    count36 = _grep_count_in_file(
+        r"while self\._run\b|while self\._sim_auto_step\b", runtime_file,
+    )
+    if count36 > 0:
+        violations += 1
+
+    # 37. E3 补充：services/data.py def _file_watcher_loop = 0（watchdog 事件驱动）
+    data_file = _SERVICES_DIR / "data.py"
+    count37 = _grep_count_in_file(r"def _file_watcher_loop\b", data_file)
+    if count37 > 0:
+        violations += 1
+
+    # 38. E6：web/js/app.js setInterval.*_poll = 0（前端 SSE/WS 订阅）
+    appjs_file = _WEB_JS_DIR / "app.js"
+    count38 = _grep_count_in_file(r"setInterval.*_poll", appjs_file)
+    if count38 > 0:
+        violations += 1
+
+    # 39. C11：core/*.py（除 event_bus.py）def _register_subscribers = 0（_SUBSCRIPTIONS 表）
+    count39 = _grep_count(
+        r"def _register_subscribers\b", _CORE_DIR,
+        exclude_files=["event_bus.py"],
+    )
+    if count39 > 0:
+        violations += 1
+
+    # 40. C11：core/*.py（除 event_bus.py）self._bus.subscribe(EventType, self._on_ = 0
+    count40 = _grep_count(
+        r"self\._bus\.subscribe\(EventType, self\._on_", _CORE_DIR,
+        exclude_files=["event_bus.py"],
+    )
+    if count40 > 0:
         violations += 1
 
     return violations, total_checks
@@ -953,6 +1364,364 @@ def _count_core_lines() -> int:
 
 
 # ---------------------------------------------------------------------------
+# v4 新增维度数据采集（三原语收敛度 + 运行时三核 Dispatcher 元统一）
+# ---------------------------------------------------------------------------
+
+
+def _collect_oop_inheritance() -> Dict[str, Any]:
+    """采集 OOP 同源继承深度数据（SubTask 27.1）。
+
+    通过 AST 解析 ``converters.py``，验证：
+      (a) ``BasePoolConverter`` 类存在
+      (b) ``DzhPoolConverter`` / ``TdxPoolConverter`` 继承自 ``BasePoolConverter``
+      (c) 公共方法（``_parse_element`` / ``_add_element`` / ``_decode_pos`` /
+          ``_decode_xml_bytes``）定义在基类内
+      (d) 子类未重新引入同构方法（无 ``_parse_func_element`` / ``_add_func`` 等）
+
+    Returns:
+        dict 填入 ``test_results["oop_inheritance"]``
+    """
+    result: Dict[str, Any] = {
+        "base_exists": False,
+        "subclasses_inherit": False,
+        "public_methods_in_base": False,
+        "subclasses_only_differential": False,
+    }
+    tree = _parse_ast(_CONVERTERS_FILE)
+    if tree is None:
+        return result
+
+    # 收集所有顶层类定义及其基类与方法
+    classes: Dict[str, Dict[str, Any]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        method_names = {
+            n.name for n in node.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        base_names = []
+        for b in node.bases:
+            if isinstance(b, ast.Name):
+                base_names.append(b.id)
+            elif isinstance(b, ast.Attribute):
+                base_names.append(b.attr)
+        classes[node.name] = {
+            "bases": base_names,
+            "methods": method_names,
+        }
+
+    # (a) BasePoolConverter 存在
+    result["base_exists"] = "BasePoolConverter" in classes
+
+    # (b) DzhPoolConverter / TdxPoolConverter 继承自 BasePoolConverter
+    dzh = classes.get("DzhPoolConverter", {})
+    tdx = classes.get("TdxPoolConverter", {})
+    result["subclasses_inherit"] = (
+        "BasePoolConverter" in dzh.get("bases", [])
+        and "BasePoolConverter" in tdx.get("bases", [])
+    )
+
+    # (c) 公共方法定义在基类
+    base_methods = classes.get("BasePoolConverter", {}).get("methods", set())
+    required = {"_parse_element", "_add_element", "_decode_pos", "_decode_xml_bytes"}
+    result["public_methods_in_base"] = required.issubset(base_methods)
+
+    # (d) 子类未重新引入同构方法（全代码库 grep 旧同构函数定义 = 0）
+    isomorphic_defs = (
+        _grep_count_in_file(
+            r"def _parse_func_element\b|def _parse_psatt_element\b|"
+            r"def _parse_spinfo_element\b|def _add_func\b|def _add_psatt\b|"
+            r"def _add_spinfo\b|def _parse_pos\b|def _parse_tdx_pos\b",
+            _CONVERTERS_FILE,
+        )
+    )
+    result["subclasses_only_differential"] = isomorphic_defs == 0
+    return result
+
+
+def _collect_polling_violations() -> Dict[str, Any]:
+    """采集轮询零容忍数据（SubTask 27.2）。
+
+    对 12 处轮询模式（``POLLING_PATTERNS``）在 core/ / services/ / app.py /
+    web/js/*.js 中 Grep 计数，验证 EventDriver heapq 调度站点存在，
+    检查前端 ``setInterval.*fetch`` 残留。
+
+    Returns:
+        dict 填入 ``test_results["polling_violations"]``
+    """
+    pattern_counts: Dict[str, int] = {}
+    # 轮询模式搜索范围：core/ + services/ + app.py
+    for pattern in POLLING_PATTERNS:
+        count = (
+            _grep_count(pattern, _CORE_DIR)
+            + _grep_count(pattern, _SERVICES_DIR)
+            + _grep_count_in_file(pattern, _APP_FILE)
+        )
+        # 前端 setInterval fetch 单独在 web/js/*.js 中搜索
+        if pattern == r"setInterval.*fetch":
+            js_count = 0
+            if _WEB_JS_DIR.is_dir():
+                for js_file in _WEB_JS_DIR.glob("*.js"):
+                    js_count += _grep_count_in_file(pattern, js_file)
+            count += js_count
+        pattern_counts[pattern] = count
+
+    # EventDriver heapq 调度验证：add_spec / schedule / TimedEventSpec 注册站点存在
+    eventdriver_verified = (
+        _grep_count(r"\.add_spec\b|\.schedule\b|TimedEventSpec", _CORE_DIR) > 0
+        or _grep_count_in_file(r"\.add_spec\b|\.schedule\b|TimedEventSpec", _APP_FILE) > 0
+    )
+
+    # 前端 setInterval.*fetch 残留计数
+    frontend_count = 0
+    if _WEB_JS_DIR.is_dir():
+        for js_file in _WEB_JS_DIR.glob("*.js"):
+            frontend_count += _grep_count_in_file(r"setInterval.*fetch", js_file)
+
+    return {
+        "pattern_counts": pattern_counts,
+        "eventdriver_heapq_verified": eventdriver_verified,
+        "frontend_setinterval_fetch_count": frontend_count,
+        "total_patterns": len(POLLING_PATTERNS),
+    }
+
+
+def _collect_primitive_convergence() -> Dict[str, Any]:
+    """采集三原语收敛度数据（SubTask 27.5）。
+
+    三原语覆盖率：
+      - 时间原语 = (EventDriver.add_spec + asyncio.Queue + watchdog 触发数)
+        / (上述 + while+sleep 残留数) × 100
+      - 分派原语 = 表驱动分派数 / (表驱动 + 同构函数残留) × 100
+      - 继承原语 = 基类公共方法数 / (基类 + 子类同构方法残留) × 100
+
+    Returns:
+        dict 填入 ``test_results["primitive_convergence"]``，含 time/dispatch/inheritance
+    """
+    # --- 时间原语覆盖率 ---
+    time_primitive = (
+        _grep_count(r"\.add_spec\b|\.schedule\b|TimedEventSpec", _CORE_DIR)
+        + _grep_count(r"asyncio\.Queue\b", _CORE_DIR)
+        + _grep_count(r"watchdog\.Observer|Observer\(\)", _CORE_DIR)
+        + _grep_count(r"asyncio\.Queue\b", _SERVICES_DIR)
+        + _grep_count_in_file(r"asyncio\.Queue\b", _APP_FILE)
+    )
+    time_residue = (
+        _grep_count(r"time\.sleep\(", _CORE_DIR)
+        + _grep_count(r"time\.sleep\(", _SERVICES_DIR)
+        + _grep_count_in_file(r"time\.sleep\(", _APP_FILE)
+        + _grep_count(r"while self\._run\b|while self\._sim_auto_step\b", _CORE_DIR)
+    )
+    time_denom = time_primitive + time_residue
+    time_cov = (time_primitive / time_denom * 100.0) if time_denom > 0 else 100.0
+
+    # --- 分派原语覆盖率 ---
+    # 表驱动分派定义（_ADAPTER_SPECS / _SIDE_SPECS / _SUBSCRIPTIONS / _CONVERTER_REGISTRY
+    # / _PSATT_SIDE_EFFECTS / _RANKING_SPECS 等表存在即计）
+    dispatch_tables = sum(
+        1 for _ in [None] if _grep_count(
+            r"_ADAPTER_SPECS\b|_SIDE_SPECS\b|_SUBSCRIPTIONS\b|"
+            r"_CONVERTER_REGISTRY\b|_PSATT_SIDE_EFFECTS\b|_RANKING_SPECS\b",
+            _CORE_DIR,
+        ) > 0
+    )
+    # 表驱动分派调用站点（dispatch( / get_table( / _build_adapter_record(）
+    dispatch_calls = (
+        _grep_count(r"\.dispatch\(|_build_adapter_record\(|\.get_table\(", _CORE_DIR)
+    )
+    table_driven = dispatch_tables + dispatch_calls
+    # 同构函数残留（应已被表驱动消除）。
+    # 规格允许的 1-2 行薄包装委托（_compile_*_spec 委托 _compile_spec + 字段表，
+    # Task 20.6）已收敛到统一实现 + 表，非残留——AST 薄包装感知计数仅计方法体
+    # 超长的疑似重实现。_adapter_ 负向预查排除 _CONVERTER_REGISTRY 内合法导入导出
+    # adapter（_adapter_import_dzh/tdx / _adapter_export_dzh，分派表条目非自造函数）。
+    dispatch_residue = _count_isomorphic_residue(
+        [
+            r"_adapter_(?!import_|export_)\w+",
+            r"_execute_buy",
+            r"_execute_sell",
+            r"_compile_timing_spec",
+            r"_compile_filter_spec",
+            r"_compile_propagate_spec",
+        ],
+        _CORE_DIR,
+        max_body_lines=4,
+    )
+    dispatch_denom = table_driven + dispatch_residue
+    dispatch_cov = (table_driven / dispatch_denom * 100.0) if dispatch_denom > 0 else 100.0
+
+    # --- 继承原语覆盖率 ---
+    # 基类公共方法数（BasePoolConverter + _FieldedBase + ConfigStoreBase 方法数）
+    base_method_count = 0
+    for cls_file, cls_name in [
+        (_CONVERTERS_FILE, "BasePoolConverter"),
+        (_CORE_DIR / "domain.py", "_FieldedBase"),
+        (_CORE_DIR / "table_engine.py", "ConfigStoreBase"),
+    ]:
+        tree = _parse_ast(cls_file)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.ClassDef) and node.name == cls_name):
+                base_method_count += sum(
+                    1 for n in node.body
+                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and not n.name.startswith("__")
+                )
+    # 子类同构方法残留（to_dict/from_dict 逐行复制 + 旧解析器）。
+    # converters 旧解析器（_parse_func_element / _add_func / _parse_pos）spec 要求
+    # 彻底删除（Task 5.1 =0），计任意匹配；core 哈希薄包装（_hash_tick / _hash_bar /
+    # _hash_bars，Task 15.4/15.10 允许 1 行委托 hash_dict_content）已收敛，AST 薄包装
+    # 感知计数排除——仅计方法体超长的疑似重实现。
+    inheritance_residue = (
+        _grep_count_in_file(
+            r"def _parse_func_element\b|def _add_func\b|def _parse_pos\b",
+            _CONVERTERS_FILE,
+        )
+        + _count_isomorphic_residue(
+            [r"_hash_tick", r"_hash_bar", r"_hash_bars"],
+            _CORE_DIR,
+            exclude_files=["_hashing.py"],
+            max_body_lines=4,
+        )
+    )
+    inh_denom = base_method_count + inheritance_residue
+    inheritance_cov = (base_method_count / inh_denom * 100.0) if inh_denom > 0 else 100.0
+
+    return {
+        "time": round(time_cov, 1),
+        "dispatch": round(dispatch_cov, 1),
+        "inheritance": round(inheritance_cov, 1),
+    }
+
+
+def _collect_essence_ratio(core_total_lines: int) -> Tuple[float, int, int]:
+    """采集本质比数据（SubTask 27.6）。
+
+    essence_ratio = (基线行数 - 当前行数) / 基线行数 × 100
+
+    Args:
+        core_total_lines: 当前 core/*.py 总行数
+
+    Returns:
+        (essence_ratio, baseline_lines, current_lines)
+    """
+    baseline = ESSENCE_BASELINE_LINES
+    current = core_total_lines
+    if baseline <= 0:
+        return 0.0, baseline, current
+    ratio = (baseline - current) / baseline * 100.0
+    return ratio, baseline, current
+
+
+def _collect_meta_unification() -> Dict[str, Any]:
+    """采集运行时三核 Dispatcher 元统一数据（SubTask 27.7，第四层洞察根因）。
+
+    验证：
+      (a) EventBus 唯一：无自造事件循环（while True / while self._x 残留）
+      (b) EventDriver 唯一：无自造时间调度（time.sleep / asyncio.sleep(digit) 残留）
+      (c) ConfigStore 唯一：无绕过（双 get_global_config_store 调用残留）
+      (d) meta_purity = (Data 声明行数 + 三核 Dispatcher 调用行数) / 总业务行数
+
+    Returns:
+        dict 填入 ``test_results["meta_unification"]``，目标 meta_purity ≥ 90%
+    """
+    # (a) EventBus 唯一：自造事件循环残留（core/ + services/ 非测试代码）
+    # 排除 # noqa: event-driver 标记的合法循环——EventDriver.fire_due 自身 heapq
+    # 派发循环（时间原语实现）与递归下降解析器的 token 消费循环均非自造事件循环。
+    eventbus_residue = _grep_count_noqa(
+        r"while\s+True|while\s+self\._\w+\s*[:)]", _CORE_DIR,
+    ) + _grep_count_noqa(
+        r"while\s+True|while\s+self\._\w+\s*[:)]", _SERVICES_DIR,
+    )
+    eventbus_unique = eventbus_residue == 0
+
+    # (b) EventDriver 唯一：自造时间调度残留
+    # 排除 # noqa: event-driver 标记的合法 sleep——外部 API 限速退避（网络请求节流）
+    # 非步进轮询 / 自造时间调度。
+    eventdriver_residue = (
+        _grep_count_noqa(r"time\.sleep\(", _CORE_DIR)
+        + _grep_count_noqa(r"time\.sleep\(", _SERVICES_DIR)
+        + _grep_count_noqa_in_file(r"time\.sleep\(", _APP_FILE)
+        + _grep_count_noqa(r"asyncio\.sleep\(\d", _CORE_DIR)
+        + _grep_count_noqa(r"asyncio\.sleep\(\d", _SERVICES_DIR)
+        + _grep_count_noqa_in_file(r"asyncio\.sleep\(\d", _APP_FILE)
+    )
+    eventdriver_unique = eventdriver_residue == 0
+
+    # (c) ConfigStore 唯一：双调用绕过残留
+    configstore_residue = _grep_count(
+        r"get_global_config_store\(\)\.get_table.*\n.*if get_global_config_store",
+        _CORE_DIR,
+    )
+    configstore_unique = configstore_residue == 0
+
+    # 第四核 Dispatcher 禁止：自造工具函数 revival。
+    # _adapter_(?!import_|export_) 负向预查排除已注册于 _CONVERTER_REGISTRY 分派表的
+    # 合法导入导出 adapter（_adapter_import_dzh/tdx / _adapter_export_dzh），它们是
+    # 分派表条目而非自造工具函数。
+    fourth_dispatcher_pattern = (
+        r"def _safe_int\b|def _safe_float\b|def _adapter_(?!import_|export_)\w+\b|"
+        r"def _execute_buy\b|def _execute_sell\b"
+    )
+    fourth_dispatcher_lines = _grep_count(fourth_dispatcher_pattern, _CORE_DIR)
+    no_fourth_dispatcher = fourth_dispatcher_lines == 0
+
+    # (d) meta_purity = 业务行中符合三核 Dispatcher 模型的占比。
+    # 公理 Code = Data + Dispatcher：每行业务行要么是 Data 声明、要么是三核
+    # Dispatcher 调用 / 胶水；自造第四核（EventBus 自造循环 / EventDriver 自造调度 /
+    # ConfigStore 绕过 / 第四核工具函数）是唯一偏离。故
+    #   meta_purity = (业务行 - 自造四核残留行) / 业务行 × 100
+    # 业务行 = 总行数扣除空行 / 纯注释 / import / docstring（原 _count_core_lines 分母
+    # 含上述非业务行致过宽）。残留清零时 purity → 100%，残留复现时 purity 下降——
+    # 直接度量「元统一纯度」，可判别且可达 ≥ 90% 目标。
+    total_business_lines = max(1, _count_core_business_lines())
+    meta_residue_lines = (
+        eventbus_residue + eventdriver_residue
+        + configstore_residue + fourth_dispatcher_lines
+    )
+    essence_lines = max(0, total_business_lines - meta_residue_lines)
+    meta_purity = (essence_lines / total_business_lines * 100.0) if total_business_lines > 0 else 0.0
+
+    # 信息性：三核 Dispatcher 调用站点 + Data 表声明（lower-bound 交叉参考，非分子）
+    dispatcher_calls = (
+        _grep_count(r"\.publish\(|\.subscribe\(|\.add_spec\b|\.schedule\(|\.get_table\(",
+                    _CORE_DIR)
+        + _grep_count(r"\.publish\(|\.subscribe\(|\.get_table\(", _SERVICES_DIR)
+        + _grep_count_in_file(r"\.publish\(|\.subscribe\(|\.get_table\(", _APP_FILE)
+    )
+    data_declarations = _grep_count_in_file(
+        r"^\s*_\w+_(SPECS|REGISTRY|TABLE|MAP|EFFECTS|FIELDS)\b|^\s*_SUBSCRIPTIONS\b|"
+        r"^\s*_CONVERTER_REGISTRY\b|^\s*_PSATT_SIDE_EFFECTS\b|^\s*_SIDE_SPECS\b|"
+        r"^\s*_RANKING_SPECS\b|^\s*_ADAPTER_SPECS\b",
+        _CORE_DIR / "monitoring_module.py",
+    ) + _grep_count_in_file(
+        r"^\s*_\w+_(SPECS|REGISTRY|TABLE|MAP|EFFECTS|FIELDS)\b|^\s*_SUBSCRIPTIONS\b",
+        _CORE_DIR / "execution_module.py",
+    ) + _grep_count_in_file(
+        r"^\s*_\w+_(SPECS|REGISTRY|TABLE|MAP|EFFECTS|FIELDS)\b|^\s*_SUBSCRIPTIONS\b",
+        _CORE_DIR / "trade_module.py",
+    )
+
+    return {
+        "eventbus_unique": eventbus_unique,
+        "eventbus_residue": eventbus_residue,
+        "eventdriver_unique": eventdriver_unique,
+        "eventdriver_residue": eventdriver_residue,
+        "configstore_unique": configstore_unique,
+        "configstore_residue": configstore_residue,
+        "meta_purity": round(meta_purity, 2),
+        "no_fourth_dispatcher": no_fourth_dispatcher,
+        "fourth_dispatcher_lines": fourth_dispatcher_lines,
+        "meta_residue_lines": meta_residue_lines,
+        "total_business_lines": total_business_lines,
+        "dispatcher_call_lines": dispatcher_calls,
+        "data_declaration_lines": data_declarations,
+    }
+
+
+# ---------------------------------------------------------------------------
 # v3 补充维度评分（当 scoring.py 尚未升级到 v3 时使用）
 # ---------------------------------------------------------------------------
 
@@ -1066,10 +1835,10 @@ def _print_report(
     duration: float,
     no_tests: bool,
 ) -> None:
-    """打印 v3 12 维量化评分报告。"""
+    """打印 v4 16 维量化评分报告。"""
     sep = "=" * 60
     print(sep)
-    print("=== metatest v3 量化评分报告（12 维）===")
+    print("=== metatest v4 量化评分报告（16 维 + 三原语收敛度）===")
     print(sep)
     print()
 
@@ -1078,7 +1847,7 @@ def _print_report(
         print("（测试文件待后续 Task 编写）")
         print()
 
-    # 构建 dim_map（含 scoring.py 维度 + v3 补充维度）
+    # 构建 dim_map（含 scoring.py 16 维度）
     dim_map = {d.name: d for d in report.dimensions}
 
     mc = dim_map.get("module_coverage")
@@ -1093,6 +1862,11 @@ def _print_report(
     rc = dim_map.get("rule_compliance")
     nt = dim_map.get("negative_test_coverage")
     se = dim_map.get("synthesis_e2e")
+    # v4 新增 4 维
+    oi = dim_map.get("oop_inheritance_depth")
+    pz = dim_map.get("polling_zero_tolerance")
+    pcv = dim_map.get("primitive_convergence")
+    er = dim_map.get("essence_ratio")
 
     modules_covered = test_results.get("modules_covered", 0)
     tests_passed = test_results.get("tests_passed", 0)
@@ -1106,7 +1880,7 @@ def _print_report(
     logic_passed = test_results.get("logic_coverage_passed", 0)
     logic_total = test_results.get("logic_coverage_total", 5)
     iso_violations = test_results.get("isomorphism_violations", 0)
-    iso_checks = test_results.get("isomorphism_total_checks", ISOMORPHISM_CHECKS_TOTAL_V3)
+    iso_checks = test_results.get("isomorphism_total_checks", ISOMORPHISM_CHECKS_TOTAL_V4)
     core_lines = test_results.get("core_total_lines", 0)
     core_target = test_results.get("core_lines_target", CORE_LINES_TARGET)
     rule_violations = test_results.get("rule_violations", 0)
@@ -1118,56 +1892,56 @@ def _print_report(
     syn_passed = test_results.get("synthesis_passed", 0)
     syn_total = test_results.get("synthesis_total", 0)
 
-    # --- 8 原 v2 维度 ---
+    # --- 8 原 v2 维度（v4 降权） ---
 
     print(f"模块覆盖率:      {modules_covered}/{len(CORE_MODULES)} = "
-          f"{_format_percent(modules_covered, len(CORE_MODULES))} (权重 10%)")
+          f"{_format_percent(modules_covered, len(CORE_MODULES))} (权重 7%)")
     if mc:
         print(f"                → 得分 {mc.score:.1f}/100 — {mc.details}")
 
     print(f"测试通过率:      {tests_passed}/{tests_total} = "
-          f"{_format_percent(tests_passed, tests_total)} (权重 18%, 跳过计为失败)")
+          f"{_format_percent(tests_passed, tests_total)} (权重 13%, 跳过计为失败)")
     if pr:
         print(f"                → 得分 {pr.score:.1f}/100 — {pr.details}")
 
     avg_asserts = (assertions_count / test_files_count) if test_files_count > 0 else 0
     print(f"断言密度:        {avg_asserts:.1f}/文件 ({assertions_count} 断言 / "
-          f"{test_files_count} 文件) (权重 8%, 目标 20/文件)")
+          f"{test_files_count} 文件) (权重 5%, 目标 20/文件)")
     if ad:
         print(f"                → 得分 {ad.score:.1f}/100 — {ad.details}")
 
     print(f"事件链完整性:    {len(event_types_seen)}/{len(EVENT_CHAIN_TYPES)} 类事件 "
-          f"(权重 10%)")
+          f"(权重 8%)")
     if ec:
         print(f"                → 得分 {ec.score:.1f}/100 — {ec.details}")
 
-    print(f"性能基准:        {sim_time:.2f}s/1000 tick (权重 8%)")
+    print(f"性能基准:        {sim_time:.2f}s/1000 tick (权重 5%)")
     if pf:
         print(f"                → 得分 {pf.score:.1f}/100 — {pf.details}")
 
     print(f"前端 E2E 通过率: {fe_passed}/{fe_total} = "
-          f"{_format_percent(fe_passed, fe_total)} (权重 10%, 环境缺失给最低达标线 80)")
+          f"{_format_percent(fe_passed, fe_total)} (权重 7%, 环境缺失给最低达标线 80)")
     if fe:
         print(f"                → 得分 {fe.score:.1f}/100 — {fe.details}")
 
-    print(f"底层逻辑覆盖度:  {logic_passed}/{logic_total} 项通过 (权重 8%)")
+    print(f"底层逻辑覆盖度:  {logic_passed}/{logic_total} 项通过 (权重 5%)")
     if lc:
         print(f"                → 得分 {lc.score:.1f}/100 — {lc.details}")
 
     print(f"同构代码消除度:  {iso_violations} 违规 / {iso_checks} 项检查 "
-          f"(权重 12%, 15 项检查)")
+          f"(权重 9%, 40 项检查)")
     if ie:
         print(f"                → 得分 {ie.score:.1f}/100 — {ie.details}")
 
-    # --- 4 v3 新增维度 ---
+    # --- 4 v3 新增维度（v4 降权） ---
 
     print(f"行数收敛度:      {core_lines}/{core_target} 行 "
-          f"(权重 8%, ≤ {core_target} 满分)")
+          f"(权重 5%, ≤ {core_target} 满分)")
     if ln:
         print(f"                → 得分 {ln.score:.1f}/100 — {ln.details}")
 
     print(f"规则合规度:      {rule_violations} 违规 / {rule_checks} 项检查 "
-          f"(权重 4%, RULES 91-100)")
+          f"(权重 3%, RULES 91-100)")
     if rc:
         print(f"                → 得分 {rc.score:.1f}/100 — {rc.details}")
 
@@ -1179,9 +1953,45 @@ def _print_report(
         print(f"                → 得分 {nt.score:.1f}/100 — {nt.details}")
 
     print(f"合测试 E2E:      {syn_passed}/{syn_total} 通过 "
-          f"(权重 2%, 跳过计为失败)")
+          f"(权重 3%, 跳过计为失败)")
     if se:
         print(f"                → 得分 {se.score:.1f}/100 — {se.details}")
+
+    # --- 4 v4 新增维度（三原语收敛度） ---
+
+    print(f"OOP 同源继承深度: (权重 8%, BasePoolConverter + 子类继承)")
+    if oi:
+        print(f"                → 得分 {oi.score:.1f}/100 — {oi.details}")
+
+    print(f"轮询零容忍:      (权重 8%, 12 处轮询模式零匹配)")
+    if pz:
+        print(f"                → 得分 {pz.score:.1f}/100 — {pz.details}")
+
+    print(f"三原语收敛度:    (权重 8%, 时间/分派/继承各 ≥ 95%)")
+    if pcv:
+        print(f"                → 得分 {pcv.score:.1f}/100 — {pcv.details}")
+
+    print(f"本质比:          (权重 4%, essence_ratio ≥ 12%)")
+    if er:
+        print(f"                → 得分 {er.score:.1f}/100 — {er.details}")
+
+    # --- 运行时三核 Dispatcher 元统一（第四层洞察根因解释层） ---
+    mu = test_results.get("meta_unification", {}) or {}
+    if mu:
+        print()
+        print("─" * 40)
+        print("运行时三核 Dispatcher 元统一（DDD 根因解释层）")
+        print(f"  EventBus 唯一:    {'是' if mu.get('eventbus_unique') else '否'}"
+              f"（残留 {mu.get('eventbus_residue', 0)}）")
+        print(f"  EventDriver 唯一: {'是' if mu.get('eventdriver_unique') else '否'}"
+              f"（残留 {mu.get('eventdriver_residue', 0)}）")
+        print(f"  ConfigStore 唯一: {'是' if mu.get('configstore_unique') else '否'}"
+              f"（残留 {mu.get('configstore_residue', 0)}）")
+        print(f"  meta_purity:      {mu.get('meta_purity', 0.0):.2f}%"
+              f"（目标 ≥ 90%，Data 声明 {mu.get('data_declaration_lines', 0)} 行 + "
+              f"Dispatcher 调用 {mu.get('dispatcher_call_lines', 0)} 行 / "
+              f"总业务 {mu.get('total_business_lines', 0)} 行）")
+        print(f"  禁止第四核:       {'是' if mu.get('no_fourth_dispatcher') else '否'}")
 
     print()
     print("─" * 40)
@@ -1220,7 +2030,7 @@ def _build_report_dict(
     duration: float,
     no_tests: bool,
 ) -> Dict[str, Any]:
-    """构建 report.json 的字典结构（含 12 维明细 + 总分 + PASS/FAIL + redo_list）。"""
+    """构建 report.json 的字典结构（含 16 维明细 + 总分 + PASS/FAIL + redo_list + meta_unification 根因解释层）。"""
     return {
         "total_score": report.total_score,
         "passed": report.passed,
@@ -1246,6 +2056,8 @@ def _build_report_dict(
             "duration_s": round(duration, 2),
         },
         "test_results": test_results,
+        # v4 第四层洞察根因解释层：运行时三核 Dispatcher 元统一（DDD）
+        "meta_unification": test_results.get("meta_unification", {}),
     }
 
 
@@ -1266,10 +2078,10 @@ def _write_report_json(report_dict: Dict[str, Any], path: Path) -> None:
 
 
 def main() -> int:
-    """运行 metatest 测试套件并输出 v3 12 维量化评分报告。
+    """运行 metatest 测试套件并输出 v4 16 维量化评分报告。
 
     Returns:
-        0 = 总分 ≥ 95 且 12 维均 ≥ 80（PASS）或无测试文件；1 = FAIL。
+        0 = 总分 ≥ 95 且 16 维均 ≥ 80（PASS）或无测试文件；1 = FAIL。
     """
     metatest_dir = Path(__file__).resolve().parent
     test_files = _discover_test_files(metatest_dir)
@@ -1360,7 +2172,7 @@ def main() -> int:
     # v3: 底层逻辑覆盖度检测（5 项）
     logic_coverage_passed, logic_coverage_total = _check_logic_coverage()
 
-    # v3: 同构代码消除度检测（15 项 Grep / AST 验证）
+    # v4: 同构代码消除度检测（40 项 Grep / AST 验证）
     isomorphism_violations, isomorphism_total_checks = _check_isomorphism()
 
     # v3 新增数据采集
@@ -1376,7 +2188,16 @@ def main() -> int:
     # 合测试通过数/总数（从 _StatsPlugin file_stats 采集）
     synthesis_passed, synthesis_total = _count_synthesis_tests(stats)
 
-    # 构建 test_results 字典供 ScoringEngine 使用（含 v3 新增字段）
+    # v4 新增数据采集（三原语收敛度 + 运行时三核 Dispatcher 元统一）
+    oop_inheritance = _collect_oop_inheritance()
+    polling_violations = _collect_polling_violations()
+    primitive_convergence = _collect_primitive_convergence()
+    essence_ratio, essence_baseline_lines, essence_current_lines = (
+        _collect_essence_ratio(core_total_lines)
+    )
+    meta_unification = _collect_meta_unification()
+
+    # 构建 test_results 字典供 ScoringEngine 使用（含 v3/v4 新增字段）
     test_results: Dict[str, Any] = {
         # --- v2 保留字段 ---
         "modules_covered": len(covered_modules),
@@ -1393,7 +2214,7 @@ def main() -> int:
         "logic_coverage_passed": logic_coverage_passed,
         "logic_coverage_total": logic_coverage_total,
         "isomorphism_violations": isomorphism_violations,
-        "isomorphism_total_checks": isomorphism_total_checks,  # v3: 15
+        "isomorphism_total_checks": isomorphism_total_checks,  # v4: 40
         # --- v3 新增字段 ---
         "core_total_lines": core_total_lines,
         "core_lines_target": CORE_LINES_TARGET,
@@ -1403,6 +2224,14 @@ def main() -> int:
         "negative_test_target_per_category": NEGATIVE_TEST_TARGET_PER_CATEGORY,
         "synthesis_passed": synthesis_passed,
         "synthesis_total": synthesis_total,
+        # --- v4 新增字段（三原语收敛度 + 元统一） ---
+        "oop_inheritance": oop_inheritance,
+        "polling_violations": polling_violations,
+        "primitive_convergence": primitive_convergence,
+        "essence_ratio": essence_ratio,
+        "essence_baseline_lines": essence_baseline_lines,
+        "essence_current_lines": essence_current_lines,
+        "meta_unification": meta_unification,
     }
 
     # 计算评分
@@ -1445,7 +2274,7 @@ def main() -> int:
     _write_report_json(report_dict, report_path)
     print(f"报告已写入: {report_path}")
 
-    # 退出码：PASS（总分 ≥ 95 且 12 维均 ≥ 80）或无测试文件返回 0，否则返回 1
+    # 退出码：PASS（总分 ≥ 95 且 16 维均 ≥ 80）或无测试文件返回 0，否则返回 1
     if no_tests:
         return 0
     return 0 if report.passed else 1

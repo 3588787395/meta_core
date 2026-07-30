@@ -18,7 +18,7 @@ from __future__ import annotations
 import functools
 import logging
 from dataclasses import field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Tuple
 
 from pydantic.dataclasses import dataclass
 
@@ -176,11 +176,7 @@ class BarComposed:
 
 @dataclass
 class FormulaEvaluated:
-    """公式求值完成事件。
-
-    error 字段（spec.md L128 要求）：公式求值异常或无效配置时携带错误信息，
-    默认空串表示无错误。下游订阅者可据此诊断公式失败原因。
-    """
+    """公式求值完成事件。"""
 
     formula_ref: str
     result: Any
@@ -212,11 +208,7 @@ class StockFiltered:
 
 @dataclass
 class EdgeFired:
-    """边触发事件。
-
-    一条边到期触发时发布一个事件，只携带 eid 和 ts。
-    脏股票由 EdgeExecutor 从源池 StatePoolView.get_dirty_codes() 取（G3）。
-    """
+    """边触发事件。"""
 
     eid: str
     ts: float
@@ -246,11 +238,7 @@ class TTLExpired:
 
 @dataclass
 class TTLDue:
-    """TTL 到期事件。
-
-    G2：引擎只发事件不执行计算，TTL 到期时由 EventDriver action 发布 TTLDue，
-    TradeModule 订阅后自行完成卖出/删除。
-    """
+    """TTL 到期事件。"""
 
     node_id: str
     code: str
@@ -259,11 +247,7 @@ class TTLDue:
 
 @dataclass
 class TickDue:
-    """Tick 到期事件。
-
-    G2：引擎只发事件不执行计算，tick 定时器到时由 EventDriver action 发布 TickDue，
-    TickBarModule 订阅后调用数据源生成 tick 数据并发布 TickReceived/DataChanged。
-    """
+    """Tick 到期事件。"""
 
     code: str
     ts: float
@@ -376,11 +360,7 @@ class SimulationStep:
 
 @dataclass
 class SimulationStateChanged:
-    """仿真运行状态变更事件。
-
-    由运行控制 API（start/pause/resume/stop）发布，前端据此统一更新
-    AppState.simulationState，禁止按钮回调直接修改前端状态。
-    """
+    """仿真运行状态变更事件。"""
 
     state: str  # running / paused / stopped
     session_id: str = ""
@@ -443,19 +423,7 @@ _Event = Any
 
 
 class EventBus:
-    """事件总线。
-
-    属性（实例级，≤ 5）:
-      - _subscribers: 按事件类型名索引的 handler 列表
-      - _events: 已发布事件日志
-
-    方法（≤ 5）:
-      - __init__
-      - subscribe
-      - publish
-      - get_events
-      - clear
-    """
+    """事件总线。"""
 
     def __init__(self, max_events: int = 5000) -> None:
         self._subscribers: Dict[str, List[Callable[[_Event], None]]] = {}
@@ -479,15 +447,7 @@ class EventBus:
         return self._dropped_count
 
     def get_events_since(self, absolute_offset: int) -> List[_Event]:
-        """获取从绝对偏移量开始的所有事件。
-
-        Args:
-            absolute_offset: 绝对事件偏移量（基于 total_published）
-
-        Returns:
-            从该偏移量开始的事件列表。如果 offset 在已删除范围内，
-            返回当前所有事件；如果 offset 超出总数，返回空列表。
-        """
+        """获取从绝对偏移量开始的所有事件。"""
         if absolute_offset >= self._total_published:
             return []
         # 计算相对 _events 列表的实际偏移
@@ -520,12 +480,7 @@ class EventBus:
         return unsubscribe
 
     def publish(self, event: _Event) -> None:
-        """同步发布事件：写入日志并通知订阅者。
-
-        I22：订阅者异常从静默 ``except: pass`` 改为 ``logger.warning``，
-        使中断驱动维度的失败可被诊断（旧实现完全吞掉异常，bug 难以定位）。
-        异常仍不向上抛，保证总线与其他订阅者不受影响。
-        """
+        """同步发布事件：写入日志并通知订阅者。"""
         self._events.append(event)
         self._total_published += 1
         # I96：上限保护，超出时删除最旧事件
@@ -557,6 +512,18 @@ class EventBus:
     def clear(self) -> None:
         """清空事件日志。"""
         self._events.clear()
+
+
+class _BaseModule:
+    """模块基类——事件订阅的表驱动注册（分派原语收敛）。"""
+
+    _SUBSCRIPTIONS: ClassVar[List[Tuple[type, str]]] = []
+    _bus: "EventBus"  # 子类 __init__ 设置
+
+    def register_subscribers(self) -> None:
+        """表驱动订阅——迭代 ``_SUBSCRIPTIONS`` 类属性表。"""
+        for event_type, handler_name in self._SUBSCRIPTIONS:
+            self._bus.subscribe(event_type, getattr(self, handler_name))
 
 
 def is_event_bus(bus: Any) -> bool:

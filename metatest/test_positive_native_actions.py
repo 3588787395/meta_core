@@ -437,3 +437,40 @@ class TestChangeLAngleSortKeys:
         src = mon_path.read_text(encoding="utf-8")
         assert "_ANGLE_SORT_KEYS" in src, \
             "monitoring_module 应引用 _ANGLE_SORT_KEYS 表（变更 L 表驱动）"
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 1 P4 + 阶段 3 C4 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 P4/C4 safe_cast 公共工具下沉收敛回归。"""
+
+    def test_converters_common_module_present(self):
+        """converters_common.py 模块存在（P4/C4 公共工具下沉模块）。"""
+        from pathlib import Path
+        common_path = Path(__file__).resolve().parent.parent / "converters_common.py"
+        assert common_path.is_file(), \
+            "converters_common.py 应存在（P4/C4 公共工具下沉模块）"
+
+    def test_safe_cast_int_float_defined(self):
+        """converters_common.py 定义 safe_cast / safe_int / safe_float（C4 跨模块统一）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "converters_common.py").read_text(encoding="utf-8")
+        assert "def safe_cast" in src, "converters_common.py 应定义 safe_cast（C4 跨模块统一）"
+        assert "def safe_int" in src, "converters_common.py 应定义 safe_int"
+        assert "def safe_float" in src, "converters_common.py 应定义 safe_float"
+
+    def test_no_safe_int_float_in_core(self):
+        """core/*.py 不含 def _safe_int / def _safe_float（C4 已下沉到 converters_common）。"""
+        import re
+        from pathlib import Path
+        core_dir = Path(__file__).resolve().parent.parent / "core"
+        total = 0
+        for py in core_dir.glob("*.py"):
+            try:
+                src = py.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            total += len(re.findall(r"def _safe_int\b|def _safe_float\b", src))
+        assert total == 0, \
+            f"core/*.py 不应含 def _safe_int/_safe_float（C4 已下沉），实际 {total} 处"

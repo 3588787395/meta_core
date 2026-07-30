@@ -340,3 +340,35 @@ class TestChangeGFormulaConfigStore:
             "table_engine 不应含 _load_config 旧函数（变更 G 已移除）"
         assert hasattr(te, "load_config_table"), \
             "table_engine 应提供 load_config_table 统一入口"
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 3 C5 + 阶段 2 E3 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 C5 ConfigStoreBase + E3 watchdog 收敛回归。"""
+
+    def test_config_store_base_class_present(self):
+        """table_engine.py 含 ConfigStoreBase 基类（C5 合并热加载三件套）。"""
+        import ast
+        from pathlib import Path
+        tree = ast.parse((Path(__file__).resolve().parent.parent / "core" / "table_engine.py").read_text(encoding="utf-8"))
+        classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+        assert "ConfigStoreBase" in classes, \
+            "table_engine.py 应含 ConfigStoreBase 基类（C5 合并热加载三件套）"
+
+    def test_no_start_polling_in_table_engine(self):
+        """table_engine.py 不含 def start_polling（E3 已改 watchdog 事件驱动）。"""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "table_engine.py").read_text(encoding="utf-8")
+        count = len(re.findall(r"def start_polling\b", src))
+        assert count == 0, \
+            f"table_engine.py 不应含 def start_polling（E3 已改 watchdog），实际 {count} 处"
+
+    def test_watchdog_observer_used(self):
+        """table_engine.py 引用 watchdog.Observer（E3 文件监视事件驱动）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "table_engine.py").read_text(encoding="utf-8")
+        assert "watchdog.observers" in src or "watchdog Observer" in src or "Observer()" in src, \
+            "table_engine.py 应使用 watchdog.Observer（E3 事件驱动文件监视）"

@@ -22,10 +22,7 @@ _registry_cache = None
 
 
 def _load_registry() -> Dict[str, Any]:
-    """读取 config/cell_type_registry.json 并缓存结果。
-
-    fail-fast：配置缺失或解析失败时抛出 ConfigLoadError，禁止静默回退空字典。
-    """
+    """读取 config/cell_type_registry.json 并缓存结果。"""
     global _registry_cache
     if _registry_cache is not None:
         return _registry_cache
@@ -49,10 +46,7 @@ _bit_fields_cache: Optional[Dict[str, Any]] = None
 
 
 def _load_field_defs() -> Dict[str, Any]:
-    """加载 config/field_definitions.json 并缓存结果。
-
-    fail-fast：配置缺失或解析失败时抛出 ConfigLoadError，禁止静默回退空字典。
-    """
+    """加载 config/field_definitions.json 并缓存结果。"""
     global _field_defs_cache, _bit_fields_cache
     if _field_defs_cache is not None:
         return _field_defs_cache
@@ -72,10 +66,7 @@ _defaults_cache: Optional[Dict[str, Any]] = None
 
 
 def _load_defaults() -> Dict[str, Any]:
-    """加载 config/defaults.json 并缓存结果。
-
-    fail-fast：配置缺失或解析失败时抛出 ConfigLoadError，禁止静默回退硬编码值。
-    """
+    """加载 config/defaults.json 并缓存结果。"""
     global _defaults_cache
     if _defaults_cache is not None:
         return _defaults_cache
@@ -91,14 +82,7 @@ def _load_defaults() -> Dict[str, Any]:
 
 
 def _parse_attr_bits(type_key, attr_int: int) -> Dict[str, bool]:
-    """Parse attr int into boolean sub-properties based on bit_fields entries.
-
-    Args:
-        type_key: 类型标识（整数 type_id 或 "flow"）
-        attr_int: 原始 attr 整数值
-    Returns:
-        {field_name: bool} 字典
-    """
+    """Parse attr int into boolean sub-properties based on bit_fields entries."""
     _load_field_defs()
     bit_fields = _bit_fields_cache.get(str(type_key), {})
     result: Dict[str, bool] = {}
@@ -109,14 +93,7 @@ def _parse_attr_bits(type_key, attr_int: int) -> Dict[str, bool]:
 
 
 def _compose_attr_int(type_key, data: dict) -> int:
-    """Compose boolean sub-properties back into attr int.
-
-    Args:
-        type_key: 类型标识（整数 type_id 或 "flow"）
-        data: 包含 bit field boolean 值的字典
-    Returns:
-        组合后的 attr 整数值
-    """
+    """Compose boolean sub-properties back into attr int."""
     _load_field_defs()
     bit_fields = _bit_fields_cache.get(str(type_key), {})
     v = 0
@@ -128,23 +105,10 @@ def _compose_attr_int(type_key, data: dict) -> int:
 
 # ═══════════════════════════════════════════════════
 # _DualDictAccessMixin — DynamicCellModel/FlowModel 共享的 dict/attr 访问原语
-# ═══════════════════════════════════════════════════
-# 底层运行逻辑洞察（Code = Data + Dispatcher）：两个 Dynamic*Model 共享
-# ``_data + _extra + _present_attrs`` 三字段存储 + 7 个 dunder 访问器 +
-# ``to_dict`` 序列化骨架（``_extra/_data merge + _compose_attr_int + pop bit_fields``）。
-# 提升至 mixin 后子类仅声明 ``_attr_key``（"cell_type" / "flow"）与
-# ``_internal_pop_keys``（序列化需剔除的内部字段），重复行收敛至单一实现。
 
 
 class _DualDictAccessMixin:
-    """dict/attr 双访问 + to_dict 序列化骨架的共享 mixin。
-
-    子类约定：
-      - ``self._data`` / ``self._extra`` / ``self._present_attrs`` 在 __init__ 中初始化
-      - ``self._attr_key``：用于 ``_compose_attr_int`` 的类型 key
-                          （"cell_type" 取 data 值，"flow" 固定字符串）
-      - ``self._internal_pop_keys``：to_dict 末尾需 pop 的内部字段元组
-    """
+    """dict/attr 双访问 + to_dict 序列化骨架的共享 mixin。"""
 
     # ── dict-style access ──────────────────────────────────────
 
@@ -191,12 +155,7 @@ class _DualDictAccessMixin:
     # ── serialization skeleton ─────────────────────────────────
 
     def _base_to_dict(self) -> Dict[str, Any]:
-        """to_dict 骨架：merge _extra/_data + 重组 attr + pop bit_fields + pop 内部键。
-
-        ``_attr_key`` 为 ``"cell_type"`` 时从 ``_data`` 取动态类型并额外处理 position；
-        为 ``"flow"`` 时使用固定字符串。``_internal_pop_keys`` 列出每个子类需剔除的
-        内部兼容字段。
-        """
+        """to_dict 骨架：merge _extra/_data + 重组 attr + pop bit_fields + pop 内部键。"""
         result: Dict[str, Any] = {}
         result.update(self._extra)
         result.update(self._data)
@@ -230,12 +189,7 @@ class _DualDictAccessMixin:
 # ═══════════════════════════════════════════════════
 
 class DynamicCellModel(_DualDictAccessMixin):
-    """通用 Cell 模型，根据 field_definitions.json 动态加载字段定义。
-
-    支持 dict 风格访问 (model['key'], model.get('key')) 和属性访问 (model.key)。
-    attr 整数字段自动展开为 bit_fields 中定义的 boolean 子属性。
-    未知字段存储在 _extra 字典中。
-    """
+    """通用 Cell 模型，根据 field_definitions.json 动态加载字段定义。"""
 
     _COMMON_KEYS = {"id", "type", "pos", "clr", "text", "attr"}
     _attr_key = "cell_type"
@@ -248,14 +202,7 @@ class DynamicCellModel(_DualDictAccessMixin):
 
     @classmethod
     def from_dict(cls, data: dict) -> "DynamicCellModel":
-        """从原始字典创建 DynamicCellModel。
-
-        自动解析：
-        - pos → PositionModel
-        - attr → bit_fields boolean 子属性
-        - tradeattr → TradeAttrModel
-        - tdx_psatt / tdx_func / tdx_spinfo / tdx_stocks → 对应 TDX 模型
-        """
+        """从原始字典创建 DynamicCellModel。"""
         _load_field_defs()
         obj = cls()
 
@@ -284,9 +231,6 @@ class DynamicCellModel(_DualDictAccessMixin):
             obj._data["type"] = cell_type
 
         # 解析 position — 支持三种输入格式：
-        #   1. position=<PositionModel> 对象（直接使用）
-        #   2. pos=<tuple> (x1,y1,x2,y2) 元组
-        #   3. pos=<str> "x1,y1,x2,y2" 字符串
         position_obj = data.get("position")
         if isinstance(position_obj, PositionModel):
             obj._data["position"] = position_obj
@@ -361,10 +305,7 @@ _flow_mode_registry_cache: Optional[Dict[str, Any]] = None
 
 
 def _load_flow_mode_registry() -> Dict[str, Any]:
-    """加载 config/flow_mode_registry.json 并缓存结果。
-
-    fail-fast：配置缺失或解析失败时抛出 ConfigLoadError，禁止静默回退空字典。
-    """
+    """加载 config/flow_mode_registry.json 并缓存结果。"""
     global _flow_mode_registry_cache
     if _flow_mode_registry_cache is not None:
         return _flow_mode_registry_cache
@@ -380,10 +321,7 @@ def _load_flow_mode_registry() -> Dict[str, Any]:
 
 
 def _build_flow_mode_map() -> Dict[int, str]:
-    """从 flow_mode_registry.json 的 resolve_rules 构建 mode_index -> mode_name 映射。
-
-    fail-fast：resolve_rules 缺失时抛出 ConfigLoadError，禁止回退硬编码字典。
-    """
+    """从 flow_mode_registry.json 的 resolve_rules 构建 mode_index -> mode_name 映射。"""
     registry = _load_flow_mode_registry()
     resolve_rules = registry.get("resolve_rules", [])
     if not resolve_rules:
@@ -403,16 +341,7 @@ _FLOW_MODE_MAP: Dict[int, str] = _build_flow_mode_map()
 
 
 def _resolve_flow_mode_from_bits(data: Dict[str, Any]) -> str:
-    """根据 flow_mode_registry.json 的 resolve_rules 解析流转模式（单一真相源实现）。
-
-    流程：
-    1. 加载 flow_mode_registry.json
-    2. 按 priority 排序 resolve_rules
-    3. 对每条规则，检查 check_bits 全部为 True 且 check_bits_absent 全部为 False
-    4. 返回第一条匹配规则的 mode 名称
-
-    fail-fast：resolve_rules 缺失时抛出 ConfigLoadError，禁止回退 7 层 if 硬编码。
-    """
+    """根据 flow_mode_registry.json 的 resolve_rules 解析流转模式（单一真相源实现）。"""
     registry = _load_flow_mode_registry()
     resolve_rules = registry.get("resolve_rules", [])
     if not resolve_rules:
@@ -438,11 +367,6 @@ def _resolve_flow_mode_from_bits(data: Dict[str, Any]) -> str:
 
 # ═══════════════════════════════════════════════════
 # 字段别名归一化表（DynamicFlowModel.from_dict 表驱动）
-# ═══════════════════════════════════════════════════
-# canonical_field -> [(alias, needs_dict_extract), ...]
-# 首个匹配的别名生效；canonical 已存在时不覆盖。
-# needs_dict_extract=True 时从 {"node_id": ...} / {"id": ...} / 非空 str 提取 cell id，
-# 并同步填充短别名（from/to）以兼容旧代码。
 _FIELD_ALIASES: Dict[str, List[tuple]] = {
     "from_cell_id": [("from", False), ("source", True)],
     "to_cell_id": [("to", False), ("target", True)],
@@ -455,11 +379,7 @@ _FIELD_ALIASES: Dict[str, List[tuple]] = {
 
 
 class DynamicFlowModel(_DualDictAccessMixin):
-    """通用 Flow 模型，根据 field_definitions.json 的 flow_fields 动态加载字段定义。
-
-    支持 dict 风格访问和属性访问。
-    attr 整数字段自动展开为 bit_fields.flow 中定义的 boolean 子属性。
-    """
+    """通用 Flow 模型，根据 field_definitions.json 的 flow_fields 动态加载字段定义。"""
 
     _FLOW_KEYS = {"from", "to", "attr", "begin", "begint", "end", "endt",
                   "interval", "clr", "mid", "count"}
@@ -528,10 +448,7 @@ class DynamicFlowModel(_DualDictAccessMixin):
 
     @classmethod
     def from_int(cls, attr_int: int) -> "DynamicFlowModel":
-        """兼容旧 FlowAttrBitsModel.from_int() 接口。
-
-        从 int 解析 flow attr bits，返回包含 boolean 属性的 DynamicFlowModel。
-        """
+        """兼容旧 FlowAttrBitsModel.from_int() 接口。"""
         obj = cls()
         bit_props = _parse_attr_bits("flow", attr_int)
         obj._data.update(bit_props)
@@ -539,11 +456,7 @@ class DynamicFlowModel(_DualDictAccessMixin):
         return obj
 
     def model_dump(self, exclude=None) -> Dict[str, Any]:
-        """兼容旧 pydantic model_dump() 接口。
-
-        Args:
-            exclude: 要排除的字段名集合
-        """
+        """兼容旧 pydantic model_dump() 接口。"""
         exclude = exclude or set()
         return {k: v for k, v in self._data.items() if k not in exclude}
 
@@ -683,10 +596,7 @@ class PositionModel(BaseModel):
 
 
 class _DictConstructible:
-    """from_dict mixin——合并 schemas.py 中 Pydantic 模型的 from_dict 实现。
-
-    子类覆盖 ``_preprocess_dict`` 做嵌套解析；默认按 ``model_fields`` 过滤未知键。
-    """
+    """from_dict mixin——合并 schemas.py 中 Pydantic 模型的 from_dict 实现。"""
 
     @classmethod
     def _preprocess_dict(cls, data: dict) -> dict:
@@ -919,9 +829,6 @@ SETCODE_REVERSE = {v: k for k, v in SETCODE_MAP.items()}
 
 # ═══════════════════════════════════════════════════
 # 表驱动 to_xml_attrs 通用 Mixin
-# ═══════════════════════════════════════════════════
-# 子类只需声明 _XML_FIELDS 列表，即可自动生成 XML 属性字典：
-#   str 字段保持原值，float 字段格式化为 :.6f，其它字段 str() 转换。
 class _XmlAttrMixin(_DictConstructible):
     _XML_FIELDS: ClassVar[List[str]] = []
 
@@ -972,17 +879,7 @@ def _validate_in_set(v, allowed, message):
 
 
 class TdxPsattModel(_XmlAttrMixin, BaseModel):
-    """TDX状态池属性模型（psatt子元素），14个字段。
-
-    基于通达信客户端「股票池状态属性」对话框 + 10个控制变量XML样本验证。
-    核心发现：ndeltype 是时间单位(0=天,1=小时,2=分钟,3=秒)，不是删除策略。
-
-    ⚠️ DZH vs TDX 范围差异（✅ 已确认 2026-06-10）：
-      - TDX ndeltype: 0=天, 1=小时, 2=分钟, 3=秒（本模型，validator限制0~3）
-      - DZH deltype:  0=自然日, 1=交易日, 2=小时, 3=分钟, 4=秒（多一个值，见runtime_simulator.py DelType枚举）
-      两者语义不同！DZH的deltype=0/1都是"天"但含义不同（自然日vs交易日），
-      TDX将两者合并为ndeltype=0。转换时需注意映射关系。
-    """
+    """TDX状态池属性模型（psatt子元素），14个字段。"""
     bdel: int = 0          # 是否启用自动删除 (0=关闭, 1=启用)
     ndelnum: int = 0        # 时间数量（与ndeltype配合，如3天/18小时/5分钟）
     ndeltype: int = 0       # 时间单位: 0=天(×86400s), 1=小时(×3600s), 2=分钟(×60s), 3=秒(×1s), 4=秒(DZH兼容,×1s)
@@ -1008,23 +905,7 @@ class TdxPsattModel(_XmlAttrMixin, BaseModel):
 
 
 class TdxSpinfoModel(_XmlAttrMixin, BaseModel):
-    """备选池（type=7）spinfo 子元素模型。
-
-    Attributes:
-        type: 候选池类型枚举值。
-            0 = 自设监控品种；
-            1 = 沪深300+中证500；
-            2 = 所有A股；
-            3 = 自选股；
-            4 = 自定义板块；
-            5 = 板块指数；
-            6 = ETF基金；
-            7 = 可转债。
-        customblockname: 自定义板块名称（当 type=4 时有效）。
-        size: 候选股票数量。
-        market: 市场选择（"SZ"/"SH"/"SZ,SH"），从stk的setcode推断或spinfo语义推导。
-        sector_type: 板块类型细分（0=普通, 1=行业板块, 2=概念板块, 3=地区板块）。
-    """
+    """备选池（type=7）spinfo 子元素模型。"""
     type: int = 0
     customblockname: str = ""
     size: int = 0
@@ -1079,9 +960,6 @@ class TdxStkModel(_XmlAttrMixin, BaseModel):
 
 # ═══════════════════════════════════════════════════
 # 嵌套模型解析表（DynamicCellModel.from_dict 表驱动）
-# ═══════════════════════════════════════════════════
-# field_name -> (ModelClass, is_list)
-# is_list=True 表示该字段是模型列表（如 tdx_stocks），需逐元素解析
 _NESTED_MODELS: Dict[str, tuple] = {
     "tdx_psatt": (TdxPsattModel, False),
     "tdx_func": (TdxFuncModel, False),

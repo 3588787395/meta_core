@@ -229,3 +229,43 @@ def test_engine_defines_five_action_handlers():
     for handler in expected_handlers:
         assert f'"{handler}"' in src, \
             f"engine.py 应定义 action handler: {handler}"
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 1 P2 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 P2 dzh_type_map 单一真相源收敛回归。"""
+
+    def test_dzh_type_map_file_present(self):
+        """config/architecture/dzh_type_map.json 存在（P2 类型映射单一真相源）。"""
+        from pathlib import Path
+        tm_path = Path(__file__).resolve().parent.parent / "config" / "architecture" / "dzh_type_map.json"
+        assert tm_path.is_file(), \
+            "config/architecture/dzh_type_map.json 应存在（P2 类型映射单一真相源）"
+
+    def test_dzh_type_map_has_four_directions(self):
+        """dzh_type_map.json 含 4 向映射 keys（P2 单源）。"""
+        import json
+        from pathlib import Path
+        tm_path = Path(__file__).resolve().parent.parent / "config" / "architecture" / "dzh_type_map.json"
+        data = json.loads(tm_path.read_text(encoding="utf-8"))
+        assert "dzh_to_tdx" in data, "dzh_type_map.json 应含 dzh_to_tdx 映射"
+        assert "tdx_to_dzh" in data, "dzh_type_map.json 应含 tdx_to_dzh 映射"
+        assert "tdx_to_frontend" in data, "dzh_type_map.json 应含 tdx_to_frontend 映射"
+        assert "frontend_to_tdx" in data, "dzh_type_map.json 应含 frontend_to_tdx 映射"
+
+    def test_no_parallel_type_map_in_core(self):
+        """core/*.py 不含 _DZH_TO_TDX_TYPE / TDX_CELL_TYPE_MAP 并行表（P2 已统一到 JSON）。"""
+        import re
+        from pathlib import Path
+        core_dir = Path(__file__).resolve().parent.parent / "core"
+        total = 0
+        for py in core_dir.glob("*.py"):
+            try:
+                src = py.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            total += len(re.findall(r"\b_DZH_TO_TDX_TYPE\b|\bTDX_CELL_TYPE_MAP\b", src))
+        assert total == 0, \
+            f"core/*.py 不应含 _DZH_TO_TDX_TYPE/TDX_CELL_TYPE_MAP 并行表（P2 已统一），实际 {total} 处"

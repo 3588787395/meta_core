@@ -207,3 +207,63 @@ class TestHotReloadSynthesis:
         modules = report_state.setdefault("modules_covered", [])
         if "core.table_engine" not in modules:
             modules.append("core.table_engine")
+
+
+# ====================================================================
+# v4 端到端收敛验证（Task 30 SubTask 30.5）—— ConfigStoreBase 继承原语
+# ====================================================================
+
+
+class TestV4ConfigStoreBaseInheritanceConvergence:
+    """v4 变更 C5 端到端：ConfigStoreBase 基类收敛热加载三件套（继承原语）。
+
+    验证 ``check_and_reload`` / ``rollback`` 模板方法在 ``ConfigStoreBase`` 基类
+    定义，``ConfigStore`` / ``ConfigStoreHotReloadManager`` 继承而非近拷贝，
+    消除 70 行近乎全拷贝（违反继承原语）。
+    """
+
+    def test_config_store_base_has_template_methods(self, report_state) -> None:
+        """ConfigStoreBase 基类含 check_and_reload / rollback 模板方法。"""
+        from core.table_engine import ConfigStoreBase
+
+        assert "check_and_reload" in ConfigStoreBase.__dict__, \
+            "check_and_reload 应在 ConfigStoreBase 基类定义（模板方法）"
+        assert "rollback" in ConfigStoreBase.__dict__, \
+            "rollback 应在 ConfigStoreBase 基类定义（模板方法）"
+        assert hasattr(ConfigStoreBase, "_validate"), \
+            "ConfigStoreBase 应含 _validate 抽象 hook"
+        assert hasattr(ConfigStoreBase, "_commit"), \
+            "ConfigStoreBase 应含 _commit 抽象 hook"
+
+    def test_config_store_inherits_base_no_near_copy(self, report_state) -> None:
+        """ConfigStore/HotReloadManager 继承 ConfigStoreBase，不重定义 check_and_reload 模板方法。"""
+        from core.table_engine import ConfigStore, ConfigStoreBase, HotReloadManager
+
+        assert issubclass(ConfigStore, ConfigStoreBase), \
+            "ConfigStore 应继承 ConfigStoreBase"
+        assert issubclass(HotReloadManager, ConfigStoreBase), \
+            "HotReloadManager 应继承 ConfigStoreBase"
+        # ConfigStore 不应重定义 check_and_reload（继承基类模板方法）
+        assert "check_and_reload" not in ConfigStore.__dict__, \
+            "ConfigStore 不应重定义 check_and_reload（应继承 ConfigStoreBase）"
+        # HotReloadManager 也不应重定义 check_and_reload（继承基类模板方法）
+        assert "check_and_reload" not in HotReloadManager.__dict__, \
+            "HotReloadManager 不应重定义 check_and_reload（应继承 ConfigStoreBase）"
+        # check_changes 是 HotReloadManager 必要差异化 override（仅检测，非近拷贝）
+        assert "check_changes" in HotReloadManager.__dict__, \
+            "HotReloadManager 应含 check_changes（必要差异化 override）"
+
+    def test_no_near_copy_residue_in_table_engine(self, report_state) -> None:
+        """table_engine.py check/check_and_reload/rollback 定义 ≤ 3（无近拷贝残留）。"""
+        import re
+        te_file = _PROJECT_ROOT / "core" / "table_engine.py"
+        content = te_file.read_text(encoding="utf-8")
+        count = len(re.compile(
+            r"def check_changes\b|def check_and_reload\b|def rollback\b",
+            re.MULTILINE).findall(content))
+        assert count <= 3, (
+            f"table_engine check/check_and_reload/rollback {count} 处 > 3，"
+            "应已收敛到 ConfigStoreBase 基类 + 必要 thin override（无近拷贝）")
+        modules = report_state.setdefault("modules_covered", [])
+        if "core.table_engine.ConfigStoreBase" not in modules:
+            modules.append("core.table_engine.ConfigStoreBase")

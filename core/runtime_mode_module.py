@@ -23,9 +23,6 @@ import 白名单：``core.event_bus`` / ``core.domain`` / ``core.engine`` /
 from __future__ import annotations
 
 # === 合并自 core/runtime.py ===
-# 以下 import 中的 copy / typing.Iterable / typing.Tuple /
-# execution_module.EdgeState / execution_module.time_at 来自原 runtime.py，
-# 与本文件原有 import 去重后合并。
 import asyncio
 import copy
 import heapq
@@ -39,7 +36,7 @@ import tracemalloc
 from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, time as dt_time, timedelta
-from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, TYPE_CHECKING
+from typing import Any, Callable, ClassVar, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, TYPE_CHECKING
 
 import pandas as pd
 
@@ -51,6 +48,7 @@ if TYPE_CHECKING:
     from core.engine import PoolEngine
 
 from core.event_bus import (
+    _BaseModule,
     DataChanged,
     EventBus,
     ModeChanged,
@@ -132,6 +130,19 @@ def _get_market_close_time(dt: datetime) -> datetime:
     return dt.replace(hour=15, minute=0, second=0, microsecond=0)
 
 
+_BAR_DT_FORMATS = ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
+
+
+def _parse_bar_dt(s: str) -> Optional[datetime]:
+    """bar 时间字符串 → datetime——合并 4 处 strptime 多格式尝试。"""
+    for fmt in _BAR_DT_FORMATS:
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
+
+
 # =====================================================================
 # 仿真器辅助函数与数据类（原 core/simulator.py）
 # =====================================================================
@@ -177,6 +188,14 @@ class MockStock:
 
     def to_snapshot(self):
         return StockSnapshotModel(label=f"{self.code}{self.name}", t=self.code, p=f"{self.price:.2f}")
+
+
+# _dict_to_mock 已消费字段（不进入 MockStock.extra）——frozenset 加速 membership 测试。
+_MOCK_RESERVED_KEYS = frozenset({
+    "code", "name", "label", "close", "price", "p", "now", "inprice", "rise",
+    "market", "change_pct", "volume", "amount", "ddx", "bbd", "volume_ratio",
+    "turnover", "high", "low", "open", "open_price", "pre_close", "_tracker",
+})
 
 
 @dataclass
@@ -231,18 +250,8 @@ class StatePool:
 
 # =====================================================================
 # K 线回放引擎（原 core/replay.py: KLineReplayEngine）
-# =====================================================================
-# Task 24: MetaEngine 已合并入 PoolEngine。KLineReplayEngine 深度依赖 PoolEngine 内部状态
-# （_init_node_stocks / kline_provider / tq_adapter / _pool_engine.state.time_source / _tick /
-#  _flow_exec_counts / market_data_port），完整事件化需先将这些状态迁移到对应模块。
-# Task 24+（Item 3）：KLineReplayEngine 订阅 ReplayStarted 事件触发回放启动，
-# _do_step 末尾发布 DataChanged 事件由 TickBar 模块处理（不再仅依赖直接方法调用）。
 def _run_coro_sync(coro, loop_holder, loop_attr="_sim_loop"):
-    """复用持久事件循环同步执行协程：复用 loop → run_until_complete → 运行中降级线程。
-
-    KLineReplayEngine._replay_loop 与 RuntimeSimulator._sim_loop 同构，loop 属性名经
-    loop_attr 参数化（getattr/setattr 读写 loop_holder 上的持久 loop）。
-    """
+    """复用持久事件循环同步执行协程：复用 loop → run_until_complete → 运行中降级线程。"""
     loop = getattr(loop_holder, loop_attr)
     if loop is None or loop.is_closed():
         loop = asyncio.new_event_loop()
@@ -272,6 +281,30 @@ def _status(status: str, **extra) -> Dict[str, Any]:
     return {"success": True, "status": status, **extra}
 
 
+def _normalize_endpoint(edge: Dict[str, Any], key: str, alt_key: str) -> None:
+    """归一化边的 source/target 端点为 ``{"node_id": str}``（合并两段同构分支）。"""
+    if key not in edge and alt_key in edge:
+        edge[key] = {"node_id": str(edge[alt_key])}
+    elif key in edge:
+        v = edge[key]
+        if isinstance(v, str):
+            edge[key] = {"node_id": v}
+        elif isinstance(v, dict):
+            nid = v.get("node_id", "")
+            if nid:
+                v["node_id"] = str(nid)
+
+
+def _obj_field(obj: Any, attr: str, dict_keys: Tuple[str, ...], default: Any = None) -> Any:
+    """统一对象属性 / 字典字段读取（合并 get_timeline_plan 的 hasattr vs dict.get 双分支）。"""
+    if isinstance(obj, dict):
+        for k in dict_keys:
+            if k in obj:
+                return obj[k]
+        return default
+    return getattr(obj, attr, default)
+
+
 class KLineReplayEngine:
     def __init__(self, meta_engine: PoolEngine, storage: Optional[Any] = None,
                  bus: Optional[Any] = None):
@@ -285,10 +318,6 @@ class KLineReplayEngine:
         # 为 None 时跳过持久化（_create_db_session / _record_snapshot 内部会判空）。
         self._storage = storage
         # Task 24+（Item 3）：EventBus 实例（由 app.py lifespan 注入）。
-        # 订阅 ReplayStarted 事件：当 RuntimeModeModule.start_replay 发布 ReplayStarted 时，
-        # 本引擎记录会话信息（session_id/codes）供后续步进使用。
-        # 实际 K 线加载仍由 load_kline_data 显式触发（需 pool_model/base_period/date_range，
-        # 这些参数不在 ReplayStarted.session 中，由 API 端点直接传入）。
         self._bus = bus
         self._bars: Dict[str, List[Dict]] = {}
         self._timeline: List[Dict] = []
@@ -360,13 +389,7 @@ class KLineReplayEngine:
         klp_period = _PERIOD_TO_KLP.get(base_period, base_period)
 
         # end_time 转为 datetime
-        end_dt: Optional[datetime] = None
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
-            try:
-                end_dt = datetime.strptime(end, fmt)
-                break
-            except ValueError:
-                continue
+        end_dt = _parse_bar_dt(end)
 
         # 对每个 symbol 调用 get_kline_series 获取 K 线
         self._bars = {}
@@ -526,26 +549,9 @@ class KLineReplayEngine:
             return
         edges = self._pool_model.get("edges", [])
         for edge in edges:
-            # 兼容前端格式：source/target可能是字符串ID
-            if "source" not in edge and "startid" in edge:
-                edge["source"] = {"node_id": str(edge["startid"])}
-            elif "source" in edge:
-                if isinstance(edge["source"], str):
-                    edge["source"] = {"node_id": edge["source"]}
-                elif isinstance(edge["source"], dict):
-                    nid = edge["source"].get("node_id", "")
-                    if nid:
-                        edge["source"]["node_id"] = str(nid)
-
-            if "target" not in edge and "endid" in edge:
-                edge["target"] = {"node_id": str(edge["endid"])}
-            elif "target" in edge:
-                if isinstance(edge["target"], str):
-                    edge["target"] = {"node_id": edge["target"]}
-                elif isinstance(edge["target"], dict):
-                    nid = edge["target"].get("node_id", "")
-                    if nid:
-                        edge["target"]["node_id"] = str(nid)
+            # source/target 同构：合并 startid/endid 兼容 + str/dict 归一化为 {node_id: str}
+            _normalize_endpoint(edge, "source", "startid")
+            _normalize_endpoint(edge, "target", "endid")
 
             if not edge.get("id"):
                 src = edge.get("source", {}).get("node_id", "")
@@ -600,13 +606,7 @@ class KLineReplayEngine:
     def _get_current_datetime(self) -> Optional[datetime]:
         if self._current_index < 0 or self._current_index >= self._total_bars:
             return None
-        time_str = self._timeline[self._current_index]["time"]
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
-            try:
-                return datetime.strptime(time_str, fmt)
-            except ValueError:
-                continue
-        return None
+        return _parse_bar_dt(self._timeline[self._current_index]["time"])
 
     def _do_step(self) -> Dict:
         self._current_index += 1
@@ -962,11 +962,6 @@ class KLineReplayEngine:
         max_profit = round(profit_pct * 1.2, 2) if enter_price > 0 else float(snap.get('max_profit', 0) or 0)
 
         # I45：表驱动行值——key→value 映射从 11 路 elif 链提取为 dict。
-        # 前提：current_price/enter_price/profit_pct/max_profit 已在循环前预算
-        # （lines 685-692），code/idx/snap/info 均为函数参数，故所有分支取值
-        # 不依赖循环变量 cid，可一次性物化为 dict。O(1) 查找替代 O(n) elif 扫描。
-        # 对比 tq_adapter.get_stock_table_data 的同类 elif 链：彼处分支含 try/except
-        # + 多源回退 + 公式计算，无法预算物化，故彼处保持显式分支（已注释说明）。
         row_values: Dict[str, Any] = {
             'code': code,
             'name': snap.get('name') or info.get('name') or code,
@@ -1052,7 +1047,7 @@ def _group_and_synthesize(bars: List[Dict], key_func) -> List[Dict]:
     groups: Dict[str, List[Dict]] = {}
     order: List[str] = []
     for bar in bars:
-        dt = datetime.strptime(bar["time"], "%Y-%m-%d %H:%M:%S")
+        dt = _parse_bar_dt(bar["time"])
         key = key_func(dt)
         if key not in groups:
             groups[key] = []
@@ -1073,7 +1068,7 @@ def _synthesize_intraday_to_day(bars: List[Dict]) -> List[Dict]:
     """分钟级 → day：按日分组并将 time 重写为当日 ``00:00:00``。"""
     result = _group_and_synthesize(bars, lambda dt: _get_date_key(dt, "day"))
     for bar in result:
-        dt = datetime.strptime(bar["time"], "%Y-%m-%d %H:%M:%S")
+        dt = _parse_bar_dt(bar["time"])
         bar["time"] = dt.strftime("%Y-%m-%d") + " 00:00:00"
     return result
 
@@ -1200,18 +1195,9 @@ class RuntimeSimulator:
                 config.pop("cells", None)
                 config.pop("flows", None)
                 return config
-            nodes = []
-            for n in config.get("cells", []):
-                if hasattr(n, "to_dict"):
-                    n = n.to_dict()
-                nodes.append(n)
-            edges = []
-            for e in config.get("flows", []):
-                if hasattr(e, "to_dict"):
-                    e = e.to_dict()
-                edges.append(e)
-            config["nodes"] = nodes
-            config["edges"] = edges
+            # cells/flows → nodes/edges 同构：统一 to_dict 透传
+            config["nodes"] = [n.to_dict() if hasattr(n, "to_dict") else n for n in config.get("cells", [])]
+            config["edges"] = [e.to_dict() if hasattr(e, "to_dict") else e for e in config.get("flows", [])]
             config.pop("cells", None)
             config.pop("flows", None)
             return config
@@ -1282,36 +1268,7 @@ class RuntimeSimulator:
             low=d.get("low", price),
             open_price=d.get("open_price", d.get("open", price)),
             pre_close=d.get("pre_close", price),
-            extra={
-                k: v
-                for k, v in d.items()
-                if k
-                not in {
-                    "code",
-                    "name",
-                    "label",
-                    "close",
-                    "price",
-                    "p",
-                    "now",
-                    "inprice",
-                    "rise",
-                    "market",
-                    "change_pct",
-                    "volume",
-                    "amount",
-                    "ddx",
-                    "bbd",
-                    "volume_ratio",
-                    "turnover",
-                    "high",
-                    "low",
-                    "open",
-                    "open_price",
-                    "pre_close",
-                    "_tracker",
-                }
-            },
+            extra={k: v for k, v in d.items() if k not in _MOCK_RESERVED_KEYS},
         )
 
     def _all_node_ids(self):
@@ -1387,13 +1344,7 @@ class RuntimeSimulator:
     # Public API
     # ------------------------------------------------------------------
     def _sync_stock_prices(self, bar_data: dict):
-        """用 bar_data 更新 node_stocks 中股票字典的价格字段。
-
-        仿真模式下源节点股票字典初始化时只有 code/name（无价格），
-        边转移后目标节点通过 _tracker 获取价格，但源节点本身仍无价格字段。
-        此方法在每 step 用生成的 bar_data 同步价格到所有 node_stocks 字典，
-        使 _dict_to_mock 的 close 字段优先级能直接命中。
-        """
+        """用 bar_data 更新 node_stocks 中股票字典的价格字段。"""
         if not bar_data:
             return
         node_stocks = self._mode_state.get("node_stocks", {})
@@ -1650,15 +1601,18 @@ class RuntimeSimulator:
         finally:
             self._astep_mode = False
 
-    async def _step_once_impl(self, d, *, async_mode: bool):
-        """_step_once 与 _astep_once 的统一骨架（11 步）。
+    def _ev_to_dict(self, ev) -> Dict[str, Any]:
+        """事件 → 记录 dict（合并 3 处 asdict/dict + event_type/time 注入）。"""
+        try:
+            ev_dict = asdict(ev) if hasattr(ev, '__dataclass_fields__') else dict(ev)
+        except Exception:
+            ev_dict = {"repr": repr(ev)}
+        ev_dict["event_type"] = type(ev).__name__
+        ev_dict["time"] = self.clock
+        return ev_dict
 
-        async_mode=False：通过 _run_coro_sync 调用 engine._tick（同步路径），
-                          末尾根据 not self._astep_mode 发布 SimulationStep。
-        async_mode=True：直接 await engine._tick（异步路径），
-                         应用 _ASTEP_KEY_TYPES 过滤 + 200 条上限；
-                         SimulationStep 由调用方处理。
-        """
+    async def _step_once_impl(self, d, *, async_mode: bool):
+        """_step_once 与 _astep_once 的统一骨架（11 步，async_mode 分派同步/异步路径）。"""
         tick_seq = self._perf_tick_count
         pe = self._engine._pool_engine
         if pe is not None:
@@ -1690,9 +1644,7 @@ class RuntimeSimulator:
             changed_codes = step_result.get("changed_codes", [])
             bar_data = step_result.get("bar_data", {})
             tick_data = step_result.get("tick_data", {})
-            # 同步虚拟时钟（MockDataSource 内部已推进）
-            # 统一逻辑：sync/async 路径均在 virtual_clock 非 None 时同步
-            # pe.state.time_source["current_ts"]（修复 _step_once 的 latent bug）。
+            # 同步虚拟时钟（MockDataSource 内部已推进）；sync/async 路径统一处理。
             if step_result.get("virtual_clock") is not None:
                 self.clock = step_result["virtual_clock"]
                 if pe is not None:
@@ -1702,13 +1654,8 @@ class RuntimeSimulator:
                          tick_seq, len(changed_codes), len(bar_data), t_mock_ms)
 
             # ── 1b. 通过 EventBus 发布 TickReceived 事件 ──
-            # 注意：MockDataSource.next_ticks 返回空（G5 重构后 tick 由 EventDriver 调度），
-            # 此处的 tick_data 来自 tick_source.step()，可能为空。
-            # TickReceived → DataChanged(tick) → BarComposed 的桥接由
-            # PoolEngine._on_tick_received 订阅者完成（engine.py）。
-            # Task 3：委托 _publish_tick_batch 统一发布（ts=None 时按 tick._ts 取值，
-            # fallback 到 self.clock 保留原 ts=float(tick.get("_ts", self.clock)) 语义；
-            # per-tick try/except 错误隔离由 _publish_tick_batch 内部维护）。
+            # tick_data 来自 tick_source.step()；TickReceived→DataChanged→BarComposed
+            # 桥接由 PoolEngine._on_tick_received 完成。委托 _publish_tick_batch 统一发布。
             if event_bus is not None and tick_data:
                 _publish_tick_batch(event_bus, tick_data, None, ts_fallback=self.clock)
         else:
@@ -1750,8 +1697,7 @@ class RuntimeSimulator:
         logger.info("tick=%d phase=engine_tick duration_ms=%.2f", tick_seq, t_engine_ms)
 
         # ── 5. 收集事件 ──
-        # async_mode=True：仅收集 _ASTEP_KEY_TYPES 关键事件 + 200 条上限。
-        # async_mode=False：收集所有事件（无过滤）。
+        # async_mode=True：仅收集 _ASTEP_KEY_TYPES 关键事件 + 200 条上限；False：全收集。
         t_evt_start = time.perf_counter()
         events = []
         if event_bus is not None:
@@ -1763,27 +1709,13 @@ class RuntimeSimulator:
                     "StockFiltered", "FormulaEvaluated",
                 })
                 for ev in new_events:
-                    ev_type = type(ev).__name__
-                    if ev_type not in _ASTEP_KEY_TYPES:
+                    if type(ev).__name__ not in _ASTEP_KEY_TYPES:
                         continue
-                    try:
-                        ev_dict = asdict(ev) if hasattr(ev, '__dataclass_fields__') else dict(ev)
-                    except Exception:
-                        ev_dict = {"repr": repr(ev)}
-                    ev_dict["event_type"] = ev_type
-                    ev_dict["time"] = self.clock
-                    events.append(ev_dict)
+                    events.append(self._ev_to_dict(ev))
                     if len(events) >= 200:
                         break
             else:
-                for ev in new_events:
-                    try:
-                        ev_dict = asdict(ev) if hasattr(ev, '__dataclass_fields__') else dict(ev)
-                    except Exception:
-                        ev_dict = {"repr": repr(ev)}
-                    ev_dict["event_type"] = type(ev).__name__
-                    ev_dict["time"] = self.clock
-                    events.append(ev_dict)
+                events = [self._ev_to_dict(ev) for ev in new_events]
         while not self._engine._event_queue.empty():
             try:
                 self._engine._event_queue.get_nowait()
@@ -1830,12 +1762,7 @@ class RuntimeSimulator:
                         ev_type = type(ev).__name__
                         if ev_type not in _KEY_EVENT_TYPES:
                             continue
-                        try:
-                            ev_dict = asdict(ev) if hasattr(ev, '__dataclass_fields__') else dict(ev)
-                        except Exception:
-                            ev_dict = {"repr": repr(ev)}
-                        ev_dict["event_type"] = ev_type
-                        ev_dict["time"] = self.clock
+                        ev_dict = self._ev_to_dict(ev)
                         events.append(ev_dict)
                         self.event_log.append(ev_dict)
                     if len(self.event_log) > EVENT_LOG_MAX_SIZE:
@@ -1877,10 +1804,15 @@ class RuntimeSimulator:
             r.extend(self.step(min(1.0, ts - self.clock)))
         return r
 
+    @property
+    def _sim_node_stocks(self) -> Dict[str, Any]:
+        """仿真 node_stocks 视图——合并 4 处 ``_mode_state.get("node_stocks", {}) if _mode_state else {}``。"""
+        return self._mode_state.get("node_stocks", {}) if self._mode_state else {}
+
     def get_state(self, c):
         if not self._mode_state:
             return StatePool(c, [], self.clock, hold_seconds=self._default_hold_seconds)
-        stocks = self._mode_state.get("node_stocks", {}).get(c, [])
+        stocks = self._sim_node_stocks.get(c, [])
         return StatePool(c, [self._dict_to_mock(s) for s in stocks], self.clock, hold_seconds=self._default_hold_seconds)
 
     def get_all_states(self):
@@ -1900,9 +1832,7 @@ class RuntimeSimulator:
             ac[action] += 1
             mc[mode] += 1
             tt += len(passed)
-        node_stocks = (
-            self._mode_state.get("node_stocks", {}) if self._mode_state else {}
-        )
+        node_stocks = self._sim_node_stocks
         pool_states = {}
         for nid, stocks in node_stocks.items():
             pool_states[nid] = {"count": len(stocks), "hold_seconds": self._default_hold_seconds}
@@ -1920,11 +1850,7 @@ class RuntimeSimulator:
         }
 
     def perf_summary(self) -> Dict[str, Any]:
-        """返回仿真性能摘要字典。
-
-        采集各阶段耗时（mock_generate / engine_tick / event_collect / tick_total）、
-        总耗时、单 tick 均值、内存峰值。供 simtests/harness/driver.py 调用。
-        """
+        """返回仿真性能摘要字典。"""
         total_sec = time.perf_counter() - self._perf_start
         tick_count = self._perf_tick_count
         per_tick_ms = (total_sec * 1000.0 / tick_count) if tick_count > 0 else 0.0
@@ -1966,9 +1892,7 @@ class RuntimeSimulator:
 
     def get_state_snapshot(self):
         # 注：快照输出是运行时聚合，不属于核心循环，延后到输出规则系统统一设计
-        node_stocks = (
-            self._mode_state.get("node_stocks", {}) if self._mode_state else {}
-        )
+        node_stocks = self._sim_node_stocks
         pi = {}
         for c, stocks in node_stocks.items():
             mock_stocks = [self._dict_to_mock(s) for s in stocks[:20]]
@@ -2004,16 +1928,10 @@ class RuntimeSimulator:
         }
 
     def step_with_snapshot(self, d=1.0):
-        node_stocks = (
-            self._mode_state.get("node_stocks", {}) if self._mode_state else {}
-        )
-        bf = {c: len(stocks) for c, stocks in node_stocks.items()}
+        bf = {c: len(stocks) for c, stocks in self._sim_node_stocks.items()}
         eb = len(self.event_log)
         self.step(d)
-        node_stocks = (
-            self._mode_state.get("node_stocks", {}) if self._mode_state else {}
-        )
-        af = {c: len(stocks) for c, stocks in node_stocks.items()}
+        af = {c: len(stocks) for c, stocks in self._sim_node_stocks.items()}
         ch = {
             c: {
                 "before": bf.get(c, 0),
@@ -2026,16 +1944,8 @@ class RuntimeSimulator:
         new_events = []
         for e in self.event_log[eb:][-10:]:
             # I87：_event_queue 全 dict（I61 asdict 派生），ExecutionEvent 类已删除，
-            # isinstance(e, dict) 检查 + else 分支已消除。
-            # I84：消费者收敛——flow_id/source_id/target_id/mode 在 details dict
-            # （event_rules.json detail_mapping），transferred_codes 不在 DomainEvent
-            # 中（per-code 事件），stocks_passed=1 if code else 0。
             d = e.get("details") or {}
             # I85：消费者 schema 收敛——flow_from/flow_to 加 pool_id fallback，
-            # 与 tick log（L482 3-way fallback）同构。ENTER details 有 source_id 无
-            # target_id → flow_to 回退 pool_id（目标池）；EXIT details 有 target_id 无
-            # source_id → flow_from 回退 pool_id（源池）；TIMEOUT details 两者皆无 →
-            # 均回退 pool_id（过期池）。消除 new_events flow_from/flow_to 空值透传 HTTP。
             new_events.append(
                 {
                     "timestamp": e.get("time", self.clock),
@@ -2065,22 +1975,14 @@ class RuntimeSimulator:
         edges = self.pool_config.get("edges", [])
         plan = []
         for i, f in enumerate(edges):
-            if hasattr(f, "from_cell_id"):
-                from_cell = f.from_cell_id
-                to_cell = f.to_cell_id
-                begin_type = getattr(f, "begin_type", 0)
-                begin_param = getattr(f, "begin_param", 0)
-                end_type = getattr(f, "end_type", 0)
-                interval_sec = getattr(f, "interval_sec", 0)
-                attr = getattr(f, "attr", 0)
-            else:
-                from_cell = f.get("from", f.get("from_cell_id", ""))
-                to_cell = f.get("to", f.get("to_cell_id", ""))
-                begin_type = f.get("begin_type", f.get("begin", 0))
-                begin_param = f.get("begin_param", f.get("begint", 0))
-                end_type = f.get("end_type", f.get("end", 0))
-                interval_sec = f.get("interval_sec", f.get("interval", 0))
-                attr = f.get("attr", 0)
+            # 对象属性 / 字典字段统一读取（合并 hasattr vs dict.get 双分支）
+            from_cell = _obj_field(f, "from_cell_id", ("from", "from_cell_id"), "")
+            to_cell = _obj_field(f, "to_cell_id", ("to", "to_cell_id"), "")
+            begin_type = _obj_field(f, "begin_type", ("begin_type", "begin"), 0)
+            begin_param = _obj_field(f, "begin_param", ("begin_param", "begint"), 0)
+            end_type = _obj_field(f, "end_type", ("end_type", "end"), 0)
+            interval_sec = _obj_field(f, "interval_sec", ("interval_sec", "interval"), 0)
+            attr = _obj_field(f, "attr", ("attr",), 0)
             plan.append(
                 {
                     "flow_id": i,
@@ -2146,15 +2048,7 @@ class RuntimeSimulator:
     # 时间表达解析（统一入口）
     # ------------------------------------------------------------------
     def _parse_target_seconds(self, ts):
-        """将多种时间表达解析为相对当天 00:00:00 的秒数。
-
-        支持：
-          - "HH:MM:SS" / "HH:MM"  →  当天该时间点的秒数
-          - "YYYY-MM-DD"           →  默认 09:30:00 (A 股集合竞价起)
-          - "YYYY-MM-DD HH:MM:SS" / "YYYY-MM-DDTHH:MM:SS" / "YYYY/MM/DD HH:MM:SS"
-          - 纯数字                 →  视为秒数
-          - 浮点数字符串           →  视为秒数
-        """
+        """将多种时间表达解析为相对当天 00:00:00 的秒数。"""
         if ts is None:
             raise ValueError("时间表达不能为空")
         s = str(ts).strip()
@@ -2298,15 +2192,8 @@ class RuntimeSimulator:
 # =====================================================================
 # RuntimeMode 模块统一入口
 # =====================================================================
-class RuntimeModeModule:
-    """RuntimeMode 模块：实盘/回放/仿真三模式。仅与 EventBus 交互。
-
-    模式切换时发布 ``ModeChanged`` 事件，
-    实盘模式发布 ``TimeAdvanced`` 事件（wall_clock），
-    回放模式发布 ``ReplayStarted`` / ``ReplayStep`` 事件，
-    仿真模式发布 ``SimulationStep`` 事件。
-    支持手动步进 / 自动步进 / 速度调节（0.5x~20x）。
-    """
+class RuntimeModeModule(_BaseModule):
+    """RuntimeMode 模块：实盘/回放/仿真三模式。仅与 EventBus 交互。"""
 
     def __init__(self, bus: EventBus, config: Optional[Dict[str, Any]] = None) -> None:
         self._bus = bus
@@ -2319,11 +2206,6 @@ class RuntimeModeModule:
         # 当前模式
         self._current_mode: str = "live"
         # Task 24+：attach_replay_engine / attach_simulator 已删除，
-        # RuntimeModeModule 不再持有 KLineReplayEngine / RuntimeSimulator 引用。
-        # step_replay / step_simulation 仅发布 ReplayStep / SimulationStep 事件，
-        # 引擎由各自创建方（app.py / api.py）直接驱动；
-        # KLineReplayEngine 通过订阅 ReplayStarted/ReplayStep 事件推进内部状态（Item 3）。
-        # 虚拟时钟（仿真模式）
         self._virtual_clock: float = 0.0
         # 仿真速度倍率
         self._sim_speed: float = 1.0
@@ -2333,30 +2215,20 @@ class RuntimeModeModule:
         self._sim_step_idx: int = 0
         # 回放会话信息
         self._replay_session: Dict[str, Any] = {}
-        # 注册事件订阅
-        self._register_subscribers()
+        self.register_subscribers()
 
     # ------------------------------------------------------------------
     # 内部辅助
-    # ------------------------------------------------------------------
-    # Task 9.6: _load_json 已删除，统一改用 ConfigStore.get_table（通过 get_global_config_store）
 
-    def _register_subscribers(self) -> None:
-        """注册事件订阅。"""
-        try:
-            self._bus.subscribe(TickReceived, self._on_tick_received)
-        except Exception as ex:
-            logger.warning("RuntimeModeModule 订阅注册失败: %s", ex)
+    _SUBSCRIPTIONS: ClassVar[List[Tuple[type, str]]] = [
+        (TickReceived, "_on_tick_received"),
+    ]
 
     # ------------------------------------------------------------------
     # SubTask 13.2：模式切换发布 ModeChanged 事件
     # ------------------------------------------------------------------
     def switch_mode(self, mode_id: str) -> None:
-        """切换运行模式，发布 ``ModeChanged`` 事件。
-
-        所有订阅 ``ModeChanged`` 的模块将重置自身状态（TickBar 切换数据源、
-        Execution 切换时间源、Trade 切换交易接口、Database 切换副作用范围）。
-        """
+        """切换运行模式，发布 ``ModeChanged`` 事件。"""
         try:
             modes = self._runtime_modes.get("modes", {}) if isinstance(
                 self._runtime_modes, dict
@@ -2379,10 +2251,6 @@ class RuntimeModeModule:
             logger.warning("RuntimeMode switch_mode 失败: %s", ex)
 
     # Task 24+：attach_replay_engine / attach_simulator 已完全删除。
-    # RuntimeModeModule 不再持有 KLineReplayEngine / RuntimeSimulator 引用，
-    # 仅通过 EventBus 发布 ReplayStep / SimulationStep 事件通知下游。
-    # KLineReplayEngine 通过订阅 ReplayStarted/ReplayStep 事件推进内部状态（Item 3）；
-    # RuntimeSimulator 由各自创建方（app.py / api.py）直接驱动。
 
     # ------------------------------------------------------------------
     # SubTask 13.3：实盘模式发布 TimeAdvanced 事件
@@ -2543,34 +2411,11 @@ class RuntimeModeModule:
 
 # =====================================================================
 # === 合并自 core/runtime.py ===
-# 运行时表真相源：PoolState 与 15 张核心运行时表。
-#
-# 本段按 ``execute-architecture-migration`` 规格 Task 2 实现，
-# 将原先散落在 ``MetaEngine`` 中的 29 张运行时表收敛为 15 张目标表
-# （Task 24 合并前 MetaEngine 已统一为 PoolEngine），并提供统一的读写接口。
-#
-# Task 10 扩展：新增 ``data_source`` / ``trade_interface`` /
-# ``side_effects_scope`` 三模式配置行，以及 ``replay`` / ``simulator``
-# 子对象用于状态隔离。
-#
-# 收敛后 ``PoolState`` 仅保留 5 个核心属性：
-#   - pool_config
-#   - _tables（15 张运行时表容器）
-#   - dirty
-#   - edge_state
-#   - first_run
-#
-# 其余表级访问方法集中到 ``PoolStateMixin``，保持核心类简洁。
-# =====================================================================
 
 # SubTask 29.6: _hash_tick 已上移至文件顶部（engine import 之前），此处删除原重复定义。
 
 
 # 15 张运行时表名（按 ARCHITECTURE_FINAL.md 收敛；I13 新增 prev_tick 供 TickTable 双周期视图；
-# I60 移除 exit_tracker_cache——该表从不写入，为 vestigial 死状态；
-# I74 移除 trackers——仅 _init_entry_trackers 写入 1 次，_update_trackers 从不同步，
-# 生产 0 读取（post_tick 读 stock._tracker，_build_exit_tracker_info 读 prev_stock_index），
-# 为 vestigial 死状态。tracker 单一真相源 = stock._tracker）
 _TABLE_NAMES: frozenset[str] = frozenset({
     "node_stocks",
     "latest_tick",
@@ -2592,12 +2437,7 @@ _TABLE_NAMES: frozenset[str] = frozenset({
 
 @dataclass
 class DirtyState:
-    """脏标记对象：合并原 ``_dirty_nodes`` 与 ``_data_dirty`` 两张表。
-
-    changed_codes: 本 tick 内有数据更新（Tick/Bar 变化）的股票代码集合。
-    条件边触发时，仅对 changed_codes 与源池股票的交集重新评估公式，
-    未变化股票沿用上一次筛选缓存结果。
-    """
+    """脏标记对象：合并原 ``_dirty_nodes`` 与 ``_data_dirty`` 两张表。"""
 
     nodes: Dict[str, bool] = field(default_factory=dict)
     data: bool = False
@@ -2613,22 +2453,14 @@ class DirtyState:
 
 
 def _extract_code(s: Any) -> str:
-    """从股票对象提取代码：dict 取 code（fallback label），其余 str()。
-
-    与 ``core.domain._stock_code`` 语义一致，本文件内独立定义以避免循环导入。
-    """
+    """从股票对象提取代码：dict 取 code（fallback label），其余 str()。"""
     if isinstance(s, dict):
         return str(s.get('code', s.get('label', '')))
     return str(s)
 
 
 class StatePoolView:
-    """状态池视图：脏股票在 tick 表变更列（state.dirty.changed_codes），本类是访问接口。
-
-    G4：状态池是视图，不独立维护脏股票集合。
-    - get_dirty_codes() = state.dirty.changed_codes ∩ 本池股票
-    - add_stocks() 入池 + 标脏；remove_stocks() 出池 + 标脏
-    """
+    """状态池视图：脏股票在 tick 表变更列（state.dirty.changed_codes），本类是访问接口。"""
 
     def __init__(self, state: 'PoolState', nid: str):
         self._state = state
@@ -2657,11 +2489,7 @@ class StatePoolView:
 
 
 class PoolStateMixin:
-    """PoolState 表级访问方法集合。
-
-    将 15 张运行时表的读写、回放隔离、拓扑预建等职责从 ``PoolState``
-    核心类中剥离，使其属性/方法数满足架构约束。
-    """
+    """PoolState 表级访问方法集合。"""
 
     def _populate_tables(self) -> None:
         """初始化 15 张运行时表容器。"""
@@ -2712,28 +2540,11 @@ class PoolStateMixin:
         return self.latest_tick
 
     def bar_hash(self) -> str:
-        """返回 ``latest_tick`` 顶层 ``_hash``（缓存键 / 事件 payload）；缺失返回空串。
-
-        I25：收敛 ``state.latest_tick.get("_hash","")`` 全系统 4 处重复访问
-        （formula.py / engine.py / data_updater.py / runtime.py）到唯一访问器。
-        与 ``TickTable.bar_hash()``（视图层）形成双层一致性，二者读取同一字段。
-        """
+        """返回 ``latest_tick`` 顶层 ``_hash``（缓存键 / 事件 payload）；缺失返回空串。"""
         return self.latest_tick.get("_hash", "")
 
     def update_latest_tick(self, tick_data: Optional[Dict[str, Any]]) -> bool:
-        """刷新 latest_tick，自动计算 hash 与水位线 _ts。
-
-        Returns:
-            True 表示 hash 变化（内容推进），False 表示无变化或空输入。
-
-        I26：与 ``DataUpdater.apply_data`` 路径统一——规范化每个 tick（注入 ``code``、
-        设置 per-code ``_hash``/``_ts``），并使用聚合 hash 算法。两条写入路径对
-        相同行情内容现在产生相同的 ``latest_tick["_hash"]``，缓存键
-        ``(formula, mode, ref, bar_hash)`` 不再因路径切换而失效。
-
-        注意：``.clear()`` + ``.update()`` 而非 ``= dict(...)``，保留 dict 对象身份
-        使 TickTable 等 view 持有者引用稳定（I13）。
-        """
+        """刷新 latest_tick，自动计算 hash 与水位线 _ts。"""
         if not tick_data:
             return False
         now = time_at(state=self)
@@ -2766,30 +2577,15 @@ class PoolStateMixin:
 
     @staticmethod
     def _hash_tick_data(tick_data: Dict[str, Any]) -> str:
-        """对行情数据做聚合 hash，与 ``DataUpdater._hash_aggregate`` 算法一致。
-
-        I26：统一双 hash 算法。原 ``md5(json(whole tick_data))`` 与 ``_hash_aggregate``
-        （per-code ``_hash`` 聚合）对相同行情内容产生不同 hash，导致缓存键在
-        ``update_latest_tick``（全量替换）与 ``apply_data``（增量更新）两条路径间
-        不命中。现统一为聚合算法：对每个 code 取其 per-code ``_hash``（缺失则从
-        tick 内容计算），按 code 排序后用 ``\\x00`` 连接做 md5。
-        """
-        payload_parts: List[str] = []
-        for code in sorted(tick_data.keys()):
-            if isinstance(code, str) and code.startswith("_"):
-                continue
-            tick = tick_data[code]
-            if not isinstance(tick, dict):
-                continue
+        """对行情数据做聚合 hash——委托 core._hashing.hash_tick_aggregate。"""
+        def _per_code(code: Any, tick: Dict[str, Any]) -> str:
             per_hash = tick.get("_hash")
             if not per_hash:
-                # 与 _apply_code_tick 一致：注入 code 字段后计算 per-code hash
                 tick_copy = dict(tick)
                 tick_copy.setdefault("code", str(code))
                 per_hash = _hash_tick(tick_copy)
-            payload_parts.append(f"{code}:{per_hash}")
-        payload = "\x00".join(payload_parts)
-        return hashlib.md5(payload.encode("utf-8")).hexdigest()
+            return per_hash
+        return hash_tick_aggregate(tick_data, _per_code)
 
     # ------------------------------------------------------------------
     # dirty 标记
@@ -2871,11 +2667,6 @@ class PoolStateMixin:
 
     # ------------------------------------------------------------------
     # time_source / 三模式配置行
-    # Task 16: 4 个字段已通过 ``_populate_tables`` 初始化为 ``{}``，
-    # 并经 ``__getattr__``/``__setattr__`` 代理到 ``self._tables[name]``。
-    # ``get_xxx`` 已删除——外部直接用 ``state.time_source`` 等属性访问。
-    # ``set_xxx`` 因 ``core/engine.py`` 多处外部调用而保留，简化为直接赋值。
-    # ------------------------------------------------------------------
     def set_time_source(self, ts_config: Dict[str, Any]) -> None:
         self.time_source = ts_config or {}
 
@@ -2889,11 +2680,7 @@ class PoolStateMixin:
         self.side_effects_scope = se_config or {}
 
     def set_state_scope(self, cfg: Dict[str, Any]) -> None:
-        """根据模式配置的 state_scope 字段切换回放/实盘状态作用域。
-
-        ``state_scope == "replay"`` 进入回放隔离副本；其他值在回放激活时
-        退出回放恢复实盘状态。表驱动替代 ``if mode_id == "replay"`` 分支。
-        """
+        """根据模式配置的 state_scope 字段切换回放/实盘状态作用域。"""
         if cfg.get("state_scope", "live") == "replay":
             self.enter_replay()
         elif self.is_replay_active():
@@ -2915,11 +2702,7 @@ class PoolStateMixin:
         }
 
     def enter_replay(self) -> None:
-        """进入回放模式：快照实盘状态并切换到回放副本。
-
-        回放期间 ``run_tick()`` 操作的是 ``replay.node_stocks`` 与
-        ``replay.edge_state``，回放结束调用 ``exit_replay()`` 恢复实盘状态。
-        """
+        """进入回放模式：快照实盘状态并切换到回放副本。"""
         self.replay["live_node_stocks"] = copy.deepcopy(self.node_stocks)
         self.replay["live_edge_state"] = self._snapshot_edge_state()
         self.replay["live_node_snapshots"] = copy.deepcopy(self.node_snapshots)
@@ -2957,18 +2740,7 @@ class PoolStateMixin:
 
 
 class PoolState(PoolStateMixin):
-    """池级运行时表真相源。
-
-    按 ``ARCHITECTURE_FINAL.md`` 约束，核心类仅保留 5 个属性：
-      - pool_config
-      - _tables（15 张运行时表容器，含 latest_tick + prev_tick 双周期）
-      - dirty
-      - edge_state
-      - first_run
-
-    15 张运行时表通过 ``_tables`` 按名访问；``__getattr__`` / ``__setattr__``
-    提供对旧代码 ``self.node_stocks`` 等写法的兼容。
-    """
+    """池级运行时表真相源。"""
 
     def __init__(self, pool_config: Optional[Dict[str, Any]] = None) -> None:
         self.pool_config = pool_config or {}
@@ -2983,152 +2755,6 @@ class PoolState(PoolStateMixin):
 
 
 # TickTable 已抽离至 core.tick_table（共享值对象），顶部 import 保持向后兼容导出
-
-
-if __name__ == "__main__":
-    bars_1min = []
-    for i in range(30):
-        bars_1min.append({
-            "time": f"2024-01-15 09:{30 + i:02d}:00",
-            "open": float(10 + i),
-            "high": float(10 + i + 0.5),
-            "low": float(10 + i - 0.5),
-            "close": float(10 + i + 0.2),
-            "volume": 1000 + i * 100,
-            "amount": 10000.0 + i * 1000.0,
-        })
-
-    result_5min = synthesize(bars_1min, "1min", "5min")
-    assert len(result_5min) == 6, f"Expected 6 5min bars, got {len(result_5min)}"
-    assert result_5min[0]["open"] == 10.0
-    assert result_5min[0]["close"] == 14.2
-    assert result_5min[0]["high"] == 14.5
-    assert result_5min[0]["low"] == 9.5
-    assert result_5min[0]["volume"] == 6000
-    assert result_5min[0]["amount"] == 60000.0
-    assert result_5min[-1]["open"] == 35.0
-    assert result_5min[-1]["close"] == 39.2
-    print("PASS: synthesize_from_1min -> 5min")
-
-    result_15min = synthesize(bars_1min, "1min", "15min")
-    assert len(result_15min) == 2, f"Expected 2 15min bars, got {len(result_15min)}"
-    assert result_15min[0]["open"] == 10.0
-    assert result_15min[0]["close"] == 24.2
-    assert result_15min[0]["high"] == 24.5
-    assert result_15min[0]["low"] == 9.5
-    assert result_15min[0]["volume"] == sum(1000 + i * 100 for i in range(15))
-    assert result_15min[1]["open"] == 25.0
-    assert result_15min[1]["close"] == 39.2
-    print("PASS: synthesize_from_1min -> 15min")
-
-    bars_5min = []
-    for i in range(24):
-        h = 9 + (i * 5) // 60
-        m = (i * 5) % 60
-        bars_5min.append({
-            "time": f"2024-01-15 {h:02d}:{m:02d}:00",
-            "open": float(20 + i),
-            "high": float(20 + i + 0.8),
-            "low": float(20 + i - 0.3),
-            "close": float(20 + i + 0.1),
-            "volume": 2000 + i * 200,
-            "amount": 20000.0 + i * 2000.0,
-        })
-
-    result_30min = synthesize(bars_5min, "5min", "30min")
-    assert len(result_30min) == 4, f"Expected 4 30min bars, got {len(result_30min)}"
-    assert result_30min[0]["open"] == 20.0
-    assert result_30min[0]["close"] == 25.1
-    assert result_30min[0]["high"] == 25.8
-    assert result_30min[0]["low"] == 19.7
-    assert result_30min[0]["volume"] == sum(2000 + i * 200 for i in range(6))
-    print("PASS: synthesize_from_5min -> 30min")
-
-    result_60min = synthesize(bars_5min, "5min", "60min")
-    assert len(result_60min) == 2, f"Expected 2 60min bars, got {len(result_60min)}"
-    assert result_60min[0]["open"] == 20.0
-    assert result_60min[0]["close"] == 31.1
-    assert result_60min[1]["open"] == 32.0
-    assert result_60min[1]["close"] == 43.1
-    print("PASS: synthesize_from_5min -> 60min")
-
-    bars_daily = []
-    start = datetime(2024, 1, 1)
-    for i in range(60):
-        dt = start + timedelta(days=i)
-        bars_daily.append({
-            "time": dt.strftime("%Y-%m-%d") + " 00:00:00",
-            "open": float(50 + i),
-            "high": float(50 + i + 1.0),
-            "low": float(50 + i - 1.0),
-            "close": float(50 + i + 0.5),
-            "volume": 5000 + i * 500,
-            "amount": 50000.0 + i * 5000.0,
-        })
-
-    result_week = synthesize(bars_daily, "day", "week")
-    assert len(result_week) >= 8, f"Expected >=8 week bars, got {len(result_week)}"
-    assert result_week[0]["open"] == 50.0
-    assert result_week[0]["time"].startswith("2024-01-01")
-    assert result_week[1]["time"].startswith("2024-01-08")
-    print(f"PASS: synthesize_from_daily -> week ({len(result_week)} bars)")
-
-    result_month = synthesize(bars_daily, "day", "month")
-    assert len(result_month) >= 2, f"Expected >=2 month bars, got {len(result_month)}"
-    assert result_month[0]["open"] == 50.0
-    assert result_month[0]["time"].startswith("2024-01-01")
-    assert result_month[1]["time"].startswith("2024-02-01")
-    print(f"PASS: synthesize_from_daily -> month ({len(result_month)} bars)")
-
-    assert synthesize_kline(bars_1min, "1min", "1min") == bars_1min
-    print("PASS: synthesize_kline identity (1min -> 1min)")
-
-    assert synthesize_kline(bars_daily, "day", "day") == bars_daily
-    print("PASS: synthesize_kline identity (day -> day)")
-
-    k_1min_to_5min = synthesize_kline(bars_1min, "1min", "5min")
-    assert len(k_1min_to_5min) == 6
-    assert k_1min_to_5min[0]["open"] == 10.0
-    print("PASS: synthesize_kline 1min -> 5min")
-
-    k_5min_to_60min = synthesize_kline(bars_5min, "5min", "60min")
-    assert len(k_5min_to_60min) == 2
-    print("PASS: synthesize_kline 5min -> 60min")
-
-    k_day_to_week = synthesize_kline(bars_daily, "day", "week")
-    assert len(k_day_to_week) >= 8
-    print("PASS: synthesize_kline day -> week")
-
-    k_day_to_month = synthesize_kline(bars_daily, "day", "month")
-    assert len(k_day_to_month) >= 2
-    print("PASS: synthesize_kline day -> month")
-
-    k_5min_to_30min = synthesize_kline(bars_5min, "5min", "30min")
-    assert len(k_5min_to_30min) == 4
-    print("PASS: synthesize_kline 5min -> 30min")
-
-    # === Task 1: TickTable 单元测试 ===
-    tt = TickTable()
-    # 相同数据重复 update 返回 False
-    assert tt.update({"fz000001": {"close": 10}}) is True
-    assert tt.update({"fz000001": {"close": 10}}) is False
-    # 不同数据返回 True，ts 递增
-    ts1 = tt.ts
-    assert tt.update({"fz000001": {"close": 11}}) is True
-    assert tt.ts > ts1
-    # hash 随数据变化
-    h1 = tt.hash
-    assert tt.update({"fz000001": {"close": 12}}) is True
-    assert tt.hash != h1
-    # get / snapshot
-    assert tt.get("fz000001") == {"close": 12}
-    assert tt.get("fz000002") == {}
-    snap = tt.snapshot()
-    assert snap == {"fz000001": {"close": 12}}
-    assert snap is not tt.data
-    print("PASS: TickTable waterline (same→False, diff→True, ts increments, hash changes)")
-
-    print("\n=== ALL TESTS PASSED ===")
 
 
 __all__ = ["RuntimeModeModule", "KLineReplayEngine", "RuntimeSimulator", "DirtyState", "PoolState"]

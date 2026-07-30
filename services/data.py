@@ -2140,7 +2140,7 @@ class DataSyncService:
                     self._report_progress(f"正在同步同花顺概念成分股 ({idx}/{len(concepts)})...",
                                          idx, len(concepts))
                     # 避免请求过快
-                    await asyncio.sleep(0.1)
+                    await asyncio.sleep(0.1)  # noqa: event-driver  # 外部 API 限速（网络退避，非步进轮询）
 
             duration = (datetime.now() - started_at).total_seconds()
 
@@ -2289,7 +2289,7 @@ class DataSyncService:
                     if idx % 50 == 0:
                         self._report_progress(f"正在同步东方财富概念成分股 ({idx}/{len(concepts)})...",
                                              idx, len(concepts))
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(0.1)  # noqa: event-driver  # 外部 API 限速（网络退避，非步进轮询）
 
             duration = (datetime.now() - started_at).total_seconds()
             total_sectors = industry_count + concept_count

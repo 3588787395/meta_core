@@ -427,3 +427,37 @@ class TestChangeJRunCoroSyncModuleLevel:
         call_count = len(re.findall(r"\b_run_coro_sync\(", src))
         assert call_count >= 1, \
             f"runtime_mode_module 应调用 _run_coro_sync 执行协程（变更 J），实际 {call_count} 处"
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 2 E1/E2 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 E1/E2 EventDriver heapq 调度收敛回归。"""
+
+    def test_no_sync_play_sim_loop(self):
+        """runtime_mode_module 不含 _sync_play_loop / _sync_sim_loop / auto_step_loop（E1/E2 heapq）。"""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "runtime_mode_module.py").read_text(encoding="utf-8")
+        count = len(re.findall(r"def _sync_play_loop\b|def _sync_sim_loop\b|async def auto_step_loop\b", src))
+        assert count == 0, \
+            f"runtime_mode_module 不应含 _sync_play_loop/_sync_sim_loop/auto_step_loop，实际 {count} 处"
+
+    def test_no_while_flag_polling(self):
+        """runtime_mode_module 不含 while self._run / while self._sim_auto_step 标志轮询（E1/E2 heapq）。"""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "runtime_mode_module.py").read_text(encoding="utf-8")
+        count = len(re.findall(r"while self\._run\b|while self\._sim_auto_step\b", src))
+        assert count == 0, \
+            f"runtime_mode_module 不应含 _run/_sim_auto_step 标志轮询，实际 {count} 处"
+
+    def test_eventdriver_add_spec_used(self):
+        """runtime_mode_module 引用 TimedEventSpec / .add_spec（E1/E2 heapq 调度入口）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "runtime_mode_module.py").read_text(encoding="utf-8")
+        assert "TimedEventSpec" in src, \
+            "runtime_mode_module 应引用 TimedEventSpec（E1/E2 heapq 步进事件）"
+        assert ".add_spec(" in src or "driver.add_spec" in src, \
+            "runtime_mode_module 应调用 .add_spec 注册步进事件（E1/E2 heapq 调度）"

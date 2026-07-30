@@ -23,9 +23,10 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple
 
 from core.event_bus import (
+    _BaseModule,
     _event_handler,
     BarComposed,
     DataChanged,
@@ -58,12 +59,7 @@ def _get_table(name: str) -> Dict[str, Any]:
 
 
 def _import_stock_code():
-    """惰性导入 _stock_code，避免 _EventPanel 单独导入时强依赖 core.domain 子包。
-
-    原 ``snapshot_builder.py`` 在模块顶部 import _stock_code；合并后为避免
-    ``_EventPanel`` 被单独导入时连带触发 ``core.domain.__init__`` →
-    ``core.domain.evaluators`` 的重量级初始化，改为在 _SnapshotBuilder 内部按需导入。
-    """
+    """惰性导入 _stock_code，避免 _EventPanel 单独导入时强依赖 core.domain 子包。"""
     try:
         from core.domain import _stock_code
     except ImportError:
@@ -87,14 +83,7 @@ _MAX_PANEL_EVENTS = 500
 
 
 class _EventPanel:
-    """事件浮窗：订阅 EventBus，收集事件记录供 UI 渲染。
-
-    属性（≤ 5）:
-      - bus: EventBus
-      - _events: 事件记录列表（maxlen=500）
-      - _pending: 待排队事件缓存
-      - _enabled: 是否已订阅
-    """
+    """事件浮窗：订阅 EventBus，收集事件记录供 UI 渲染。"""
 
     def __init__(self, bus: Optional[Any] = None, event_driver: Optional[Any] = None) -> None:
         self.bus = bus
@@ -330,16 +319,6 @@ class _SnapshotBuilder:
 
 
 # === 事件记录适配器（表驱动，无 if/elif 链）===
-# 每个适配器从事件对象提取 details 字段，返回统一记录 dict。
-# event_to_record 按 type(event).__name__ 查表分派。
-#
-# 底层运行逻辑洞察（Code = Data + Dispatcher）：25 个适配器共享
-# ``{"event_type": str, "ts": float, "code"?: str, "details": dict, **extra}``
-# envelope 骨架，差异仅 details 字段映射与 code/ts 取值。提取 3 个公共原语：
-#   - ``_truncate_codes(codes)``：合并 4 处 `",".join(codes[:5]) + "..."` 截断
-#   - ``_envelope(event_type, ts, code="", details=None, **extra)``：合并 envelope 骨架
-#   - ``_payload_adapter(event_type, payload, ts, fields)``：合并 3 处
-#     ``dict(event.X or {})`` + 逐字段 ``.get`` 提取（OrderPlaced/OrderFilled/AlertRaised）
 
 
 def _truncate_codes(codes) -> str:
@@ -349,11 +328,7 @@ def _truncate_codes(codes) -> str:
 
 
 def _envelope(event_type: str, ts, code: str = "", details: Optional[dict] = None, **extra) -> dict:
-    """统一事件记录 envelope 构造器（合并 ~15 处重复骨架）。
-
-    输出 schema：``{"event_type", "ts", "code"?, "details"?, **extra}``，
-    缺省字段（空 code / None details）不入 record，与原各 adapter 字面量构造语义一致。
-    """
+    """统一事件记录 envelope 构造器（合并 ~15 处重复骨架）。"""
     record: dict = {"event_type": event_type, "ts": ts}
     if code:
         record["code"] = code
@@ -365,13 +340,7 @@ def _envelope(event_type: str, ts, code: str = "", details: Optional[dict] = Non
 
 
 def _payload_adapter(event_type: str, payload_src, ts, payload_fields: List[Tuple[str, str]], code_key: str = "code") -> dict:
-    """合并 OrderPlaced/OrderFilled/AlertRaised 的 ``dict(event.X or {})`` + ``.get`` 提取骨架。
-
-    Args:
-        payload_src: ``event.order`` / ``event.fill`` / ``event.alert`` 等原始 payload（dict 或 None）。
-        payload_fields: ``[(details_key, payload_key), ...]`` 字段映射表。
-        code_key: payload 中 code 字段名（默认 "code"）。
-    """
+    """合并 OrderPlaced/OrderFilled/AlertRaised 的 ``dict(event.X or {})`` + ``.get`` 提取骨架。"""
     payload = dict(payload_src or {})
     code = str(payload.get(code_key, "") or "")
     details = {dk: payload.get(pk, 0 if dk in ("qty", "price") else "") for dk, pk in payload_fields}
@@ -454,10 +423,6 @@ def _stats_record(event):
 
 
 # _ADAPTER_SPECS: event_type_name -> build callable (event -> record dict | None)
-# 表驱动分派：event_to_record 按 type(event).__name__ 查表，未命中走 _default_adapter。
-# 简单 adapter 内联为 lambda（直接调 _envelope/_payload_adapter）；多步逻辑的 adapter
-# 委托给上方具名 helper（_tick/_formula/_executed/_alert/_position/_stats_record）。
-# EventLogged 返回 None（不重复记录到浮窗，避免循环）。
 _ADAPTER_SPECS: Dict[str, Callable[[Any], Optional[dict]]] = {
     "TickReceived": _tick_record,
     "DataChanged": lambda e: _envelope("DataChanged", e.ts, code=_truncate_codes(list(e.codes) if e.codes else []), details={"source": e.source or "", "period": e.period or "", "count": len(list(e.codes) if e.codes else [])}),
@@ -511,21 +476,7 @@ def event_to_record(event):
 
 
 class MonitoringModule:
-    """Monitoring 模块：监控记录 + 浮窗 + 看盘面板 + 告警。仅与 EventBus 交互。
-
-    订阅所有事件类型，构建节点股票快照、事件列表、看盘面板、告警，
-    发布 SnapshotUpdated/EventLogged/AlertRaised 事件。
-
-    属性（实例级，≤ 5）:
-      - _bus: EventBus
-      - _config: 配置 dict
-      - _dashboard_schema / _alert_rules: 看盘面板/告警规则配置表
-      - _event_panel / _snapshot_builder: 原 2 个组件实例（向后兼容，不暴露）
-      - _event_list / _pending_events: 浮窗事件列表 / 未排队事件列表
-      - _node_snapshots: 节点股票快照
-      - _alert_cooldown: 告警冷却时间表
-      - _dashboard_data: 看盘面板数据
-    """
+    """Monitoring 模块：监控记录 + 浮窗 + 看盘面板 + 告警。仅与 EventBus 交互。"""
 
     def __init__(self, bus: EventBus, config: Optional[Dict[str, Any]] = None) -> None:
         self._bus = bus
@@ -536,9 +487,6 @@ class MonitoringModule:
             _get_table("alert_rules")
         )
         # 持有原 2 个组件实例（不暴露给外部）
-        # EventPanel 不调用 subscribe()，避免与 MonitoringModule 的 Signal 订阅重复；
-        # SnapshotBuilder 在构造函数中自动订阅旧事件类型（Executed/DataChanged/DomainEvent），
-        # 用于兼容存量 UI 渲染路径
         self._event_panel = _EventPanel(bus=bus)
         self._snapshot_builder = _SnapshotBuilder(
             bus, nodes=self._config.get("nodes"),
@@ -561,11 +509,7 @@ class MonitoringModule:
 
     @staticmethod
     def _normalize_alert_rules(raw: Dict[str, Any]) -> Dict[str, Any]:
-        """将 alert_rules.json 的 {"rules": {...}} 结构扁平化为 {rule_id: rule}。
-
-        使 ``self._alert_rules.get(rule_id, {})`` 直接命中规则体，
-        与 ``alert.get("rule_id")`` 对齐。
-        """
+        """将 alert_rules.json 的 {"rules": {...}} 结构扁平化为 {rule_id: rule}。"""
         if not raw:
             return {}
         rules = raw.get("rules", raw)
@@ -593,20 +537,7 @@ class MonitoringModule:
     # === 浮窗事件列表管理 ===
 
     def _add_to_event_list(self, event_dict: Dict[str, Any]) -> None:
-        """添加事件到浮窗列表（按时间排序，限长 _MAX_EVENT_LIST）。
-        
-        统一事件格式：
-        {
-            "event_type": str,
-            "code": str,
-            "node_id": str,
-            "edge_id": str,
-            "pool_id": str,
-            "details": dict,
-            "time": str (HH:MM:SS),
-            "timestamp": float,
-        }
-        """
+        """添加事件到浮窗列表（按时间排序，限长 _MAX_EVENT_LIST）。"""
         from datetime import datetime
         
         ts = event_dict.get("ts", 0.0) or event_dict.get("timestamp", 0.0) or time.time()
@@ -735,20 +666,8 @@ _RANKING_SPECS: List[Tuple[str, str, Callable[[List[Any]], Dict[str, Any]], str,
 ]
 
 
-class StatisticsModule:
-    """Statistics 模块：交易统计 + 收益分析 + PK 排名 + 多分析角度。仅与 EventBus 交互。
-
-    订阅 ``PositionUpdated`` / ``BarComposed`` 事件，计算交易统计与收益分析，
-    执行 PK 排名与多分析角度，发布 ``StatisticsUpdated`` / ``RankingChanged`` 事件。
-
-    属性（实例级，≤ 5）:
-      - _bus: EventBus
-      - _config: 配置 dict
-      - _pk_cfg / _analysis_cfg: pk_config.json / analysis_config.json 配置表
-      - _trackers: 持仓跟踪表镜像 {(node_id, code): tracker}
-      - _stats: 累计统计指标
-      - _pk_rankings / _angle_results: PK 排名 / 多分析角度结果
-    """
+class StatisticsModule(_BaseModule):
+    """Statistics 模块：交易统计 + 收益分析 + PK 排名 + 多分析角度。仅与 EventBus 交互。"""
 
     def __init__(self, bus: EventBus, config: Optional[Dict[str, Any]] = None) -> None:
         self._bus = bus
@@ -772,22 +691,13 @@ class StatisticsModule:
         self._pk_rankings: Dict[str, List[Any]] = {}
         # 多分析角度结果
         self._angle_results: Dict[str, List[Any]] = {}
-        # 注册事件订阅
-        self._register_subscribers()
+        self.register_subscribers()
 
-    # === 初始化辅助 ===
-
-    def _register_subscribers(self) -> None:
-        """注册事件订阅：PositionUpdated / BarComposed / StatisticsUpdated。
-
-        SubTask 19.6: 订阅 StatisticsUpdated 事件，统计更新后自动触发
-        ``publish_rankings`` 发布 RankingChanged 事件（原为公开方法但无
-        事件驱动触发，导致 PK 排名/多分析角度链路断裂）。
-        """
-        self._bus.subscribe(PositionUpdated, self._on_position_updated)
-        self._bus.subscribe(BarComposed, self._on_bar_composed)
-        # SubTask 19.6: StatisticsUpdated → publish_rankings → RankingChanged
-        self._bus.subscribe(StatisticsUpdated, self._on_statistics_updated)
+    _SUBSCRIPTIONS: ClassVar[List[Tuple[type, str]]] = [
+        (PositionUpdated, "_on_position_updated"),
+        (BarComposed, "_on_bar_composed"),
+        (StatisticsUpdated, "_on_statistics_updated"),
+    ]
 
     @_event_handler("_on_statistics_updated")
     def _on_statistics_updated(self, event: StatisticsUpdated) -> None:
@@ -905,10 +815,7 @@ class StatisticsModule:
     # === SubTask 10.3: PK 排名 + 多分析角度（表驱动，见模块级 _RANKING_SPECS）===
 
     def _compute_ranking(self, spec: Tuple[str, str, Callable[[List[Any]], Dict[str, Any]], str, str]) -> Dict[str, Any]:
-        """排名计算共享骨架——合并 compute_pk_ranking / compute_analysis_angles。
-
-        cfg 空检查 → 过滤持仓候选 → builder 构建结果 → 存回实例属性 → 异常日志返回 {}。
-        """
+        """排名计算共享骨架——合并 compute_pk_ranking / compute_analysis_angles。"""
         cfg_attr, store_attr, builder, label, _dimension = spec
         if not getattr(self, cfg_attr):
             return {}
@@ -933,10 +840,7 @@ class StatisticsModule:
         return self._compute_ranking(_RANKING_SPECS[1])
 
     def publish_rankings(self, ts: float = 0.0) -> None:
-        """发布排名变化事件——迭代 _RANKING_SPECS 表逐项发布 RankingChanged。
-
-        dimension 字段区分（``pk`` / ``analysis_angles``），下游订阅者按 dimension 过滤。
-        """
+        """发布排名变化事件——迭代 _RANKING_SPECS 表逐项发布 RankingChanged。"""
         for cfg_attr, store_attr, builder, label, dimension in _RANKING_SPECS:
             try:
                 rankings = self._compute_ranking((cfg_attr, store_attr, builder, label, dimension))

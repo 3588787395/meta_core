@@ -29,7 +29,7 @@ import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, Protocol, Tuple, TYPE_CHECKING, runtime_checkable
+from typing import Any, Callable, ClassVar, Dict, List, Literal, Optional, Protocol, Tuple, TYPE_CHECKING, runtime_checkable
 
 import numpy as np
 import pandas as pd
@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from .runtime_mode_module import PoolState
 from .domain import _lookup_builtin_script, _lookup_builtin_formula_info
 from .event_bus import (
+    _BaseModule,
     BarComposed,
     CrossOverDetected,
     DataChanged,
@@ -47,29 +48,13 @@ from .event_bus import (
     PoolLoaded,
 )
 from .table_engine import load_config_table
-from ._hashing import hash_dict_content
+from ._hashing import hash_dict_content, hash_object
 
 logger = logging.getLogger(__name__)
 
 
 # ===========================================================================
 # 来自 core/formula_engine.py — 纯 Python 公式引擎
-# ===========================================================================
-# """纯 Python 公式引擎（轻量级、numpy/pandas 向量化）。
-#
-# 作为复杂公式引擎（HQChart 等）不可用时的高性能兜底路径，
-# 仅支持简单 TDX 风格公式：字段、函数、比较/逻辑/算术运算符、
-# 变量赋值 `:=` 与输出 `:`。
-#
-# 所有序列函数（MA、REF、CROSS、HHV、LLV、SUM、COUNT、STD 等）
-# 均使用 pandas 向量化实现，禁止逐根 K 线的 Python 循环。
-# 公式编译结果缓存于 ``self._compiled_cache``（LRU，容量由 ``_CACHE_MAXSIZE`` 控制），
-# 同一条公式二次求值时直接复用编译产物。
-#
-# 本引擎不持有数据源，K 线数据由调用方通过 ``bars`` 参数传入；
-# 批量求值时由 ``data_fetcher`` 或 ``data_query`` 提供每只标的的
-# ``pd.DataFrame``。
-# """
 
 # ---------------------------------------------------------------------------
 # 字段名 / 函数名映射
@@ -135,27 +120,12 @@ def _to_series(x: Any) -> pd.Series:
 
 # ---------------------------------------------------------------------------
 # 通用算子（表驱动）：window_op / shift_op / cross_op
-# ---------------------------------------------------------------------------
-# 滚动窗口聚合方法名由表字段 agg_method 承载（深表驱动），
-# window_op 通过 getattr 动态调用 pandas rolling 方法，无 lambda 分派表。
-# COUNT 的 agg_override="bool_sum" 为语义标记：pandas rolling.sum() 已正确处理
-# 布尔序列求和，与非布尔 sum 行为一致，无需额外代码分支。
 
 
 def window_op(series: Any, n: int, agg_method: str,
               agg_override: Optional[str] = None,
               agg_kwargs: Optional[Dict[str, Any]] = None) -> pd.Series:
-    """通用滚动窗口算子（深表驱动）。
-
-    agg_method 为 pandas rolling 聚合方法名（mean/max/min/sum/std），
-    通过 ``getattr`` 动态调用，避免 if/elif 分支与 lambda 分派表。
-    agg_kwargs 透传给聚合方法（如 std 的 ddof）。
-    agg_override 为语义标记（如 bool_sum），pandas rolling.sum() 已正确处理
-    布尔序列求和，无需额外代码分支。
-
-    n=0 时使用 expanding 窗口（从首个数据点到当前点的累计计算），
-    与通达信 SUM(X,0)/HHV(X,0)/LLV(X,0)/COUNT(X,0)/STD(X,0) 语义一致。
-    """
+    """通用滚动窗口算子（深表驱动）。"""
     s = _to_series(series)
     n = int(n)
     kwargs = agg_kwargs or {}
@@ -177,13 +147,7 @@ def shift_op(series: Any, n: int) -> pd.Series:
 
 
 def cross_op(line1: Any, line2: Any, direction: str = "above") -> pd.Series:
-    """通用穿越检测算子，替代 CROSS。
-
-    direction='above'（金叉）：line1 从下方上穿 line2，
-        即前一根 line1<=line2 且当前 line1>line2（通达信标准 CROSS 语义）。
-    direction='below'（死叉）：line1 从上方下穿 line2，
-        即前一根 line1>=line2 且当前 line1<line2。
-    """
+    """通用穿越检测算子，替代 CROSS。"""
     sa, sb = _to_series(line1), _to_series(line2)
     if direction == "above":
         return (sa.shift(1) <= sb.shift(1)) & (sa > sb)
@@ -195,11 +159,7 @@ def cross_op(line1: Any, line2: Any, direction: str = "above") -> pd.Series:
 # 递推与逐元素算子：EMA / SMA / ABS / MAX / MIN / IF
 # ---------------------------------------------------------------------------
 def _ewm_core(series: Any, n: int, alpha_fn: Callable[[int], float]) -> pd.Series:
-    """通用指数加权核心：按 ``alpha_fn(n)`` 计算 alpha，调用 pandas ``ewm``。
-
-    EMA/SMA 共享同一递推骨架（首值即 X[0]，adjust=False），
-    仅 alpha 计算方式不同，差异通过 alpha_fn 闭包注入，消除重复分支。
-    """
+    """通用指数加权核心：按 ``alpha_fn(n)`` 计算 alpha，调用 pandas ``ewm``。"""
     s = _to_series(series)
     n = int(n)
     if n <= 0 or len(s) == 0:
@@ -209,20 +169,12 @@ def _ewm_core(series: Any, n: int, alpha_fn: Callable[[int], float]) -> pd.Serie
 
 
 def ema_op(series: Any, n: int) -> pd.Series:
-    """指数移动平均 EMA(X, N)。
-
-    递推：ema[i] = X[i]*2/(N+1) + ema[i-1]*(1-2/(N+1))，首值 ema[0] = X[0]。
-    等价于 pandas ``ewm(alpha=2/(N+1), adjust=False).mean()``。
-    """
+    """指数移动平均 EMA(X, N)。"""
     return _ewm_core(series, n, lambda n: 2.0 / (n + 1))
 
 
 def sma_op(series: Any, n: int, m: int) -> pd.Series:
-    """加权移动平均 SMA(X, N, M)。
-
-    递推：sma[i] = (X[i]*M + sma[i-1]*(N-M)) / N，首值 sma[0] = X[0]。
-    等价于 pandas ``ewm(alpha=M/N, adjust=False).mean()``。
-    """
+    """加权移动平均 SMA(X, N, M)。"""
     m = int(m)
     return _ewm_core(series, n, lambda n: m / n)
 
@@ -256,15 +208,7 @@ def if_op(cond: Any, a: Any, b: Any) -> Any:
 
 
 def sar_op(high: Any, low: Any, n: int, step: int, maxp: int) -> pd.Series:
-    """抛物线转向 SAR(N, STEP, MAXP)。
-
-    TDX 参数以百分比×100 传入（STEP=2 表示 0.02，MAXP=20 表示 0.2）。
-    递推规则：
-      - 首根 K 线假定上升趋势，SAR[0]=low[0]，EP=high[0]，AF=step/100。
-      - 每根更新 SAR = SAR_prev + AF*(EP - SAR_prev)。
-      - 上升趋势限制 SAR <= min(low[i-1], low[i])；跌破 SAR 则反转。
-      - 下降趋势限制 SAR >= max(high[i-1], high[i])；升破 SAR 则反转。
-    """
+    """抛物线转向 SAR(N, STEP, MAXP)。"""
     h = _to_series(high).astype(float).values
     l = _to_series(low).astype(float).values
     length = len(h)
@@ -328,16 +272,7 @@ _CASTERS = {"int": int, "series": _to_series}
 
 
 def _dispatch_func(name: str, args: List[Any], ctx: Optional[Dict[str, Any]] = None) -> Any:
-    """按表配置分派到通用算子（深表驱动：handler 反射调用 + arg_spec 参数提取入表）。
-
-    参数提取规则由 cfg["arg_spec"] 声明（idx/cast/default），
-    算子函数由 cfg["handler"] 声明并通过 globals() 反射获取，
-    额外 kwargs 由 cfg["cfg_kwargs"] 列表声明（从 cfg 提取指定字段透传），
-    cross 方向由 cfg["direction_field"] 声明（指向承载 direction 值的字段名）。
-    若 cfg 声明 ``context_fields``，则从求值命名空间自动注入对应字段（如 high/low），
-    支持 SAR 等需要多字段的系统函数。
-    无 if/elif op 分支，差异完全入表。
-    """
+    """按表配置分派到通用算子（深表驱动：handler 反射调用 + arg_spec 参数提取入表）。"""
     cfg = _FUNCS_CFG.get(name)
     if cfg is None:
         return None
@@ -458,7 +393,7 @@ class _ExprParser:
     # 加减
     def _parse_additive(self) -> str:
         left = self._parse_multiplicative()
-        while True:
+        while True:  # noqa: event-driver  # 递归下降解析器消费 +/- token（受 token 流约束，非轮询）
             t = self._peek()
             if t in ("+", "-"):
                 self._consume()
@@ -471,7 +406,7 @@ class _ExprParser:
     # 乘除
     def _parse_multiplicative(self) -> str:
         left = self._parse_unary()
-        while True:
+        while True:  # noqa: event-driver  # 递归下降解析器消费 */ token（受 token 流约束，非轮询）
             t = self._peek()
             if t in ("*", "/"):
                 self._consume()
@@ -538,11 +473,7 @@ class _ExprParser:
 
 
 def _parse_statement(stmt: List[str]) -> Tuple[str, Optional[str], Any]:
-    """解析单条语句，返回 (kind, name, compiled_code)。
-
-    kind 为 'assign'（:= 中间变量）或 'output'（: 输出）。
-    无赋值符时作为匿名 output，name 为 None。
-    """
+    """解析单条语句，返回 (kind, name, compiled_code)。"""
     depth = 0
     assign_idx = -1
     assign_tok = ""
@@ -622,38 +553,19 @@ class IFormulaEngine(Protocol):
     """
 
     def eval(self, *args: Any, **kwargs: Any) -> Any:
-        """公式求值：单股条件/指标求值。
-
-        Returns:
-            - 条件公式返回最后一根 K 线是否成立（bool）；
-            - 单输出指标返回最后一根 K 线的标量值；
-            - 多输出指标返回 ``{output_name: last_value}``。
-        """
+        """公式求值：单股条件/指标求值。"""
         ...
 
     def eval_outvars(self, *args: Any, **kwargs: Any) -> Optional[Dict[str, Any]]:
-        """公式求值：返回全部输出变量末值字典。
-
-        Returns:
-            ``{outvar_name: last_value}`` 字典（匿名/XG 输出归一为 ``"XG"``）；
-            求值失败或无输出时返回 None。
-        """
+        """公式求值：返回全部输出变量末值字典。"""
         ...
 
     def eval_series(self, *args: Any, **kwargs: Any) -> Optional[Dict[str, Any]]:
-        """公式序列求值：返回输出变量的最近 N 个值序列。
-
-        Returns:
-            ``{outvar_name: [v0, v1, ..., vN-1]}`` 字典（vN-1 为最新值）；
-            求值失败时返回 None。
-        """
+        """公式序列求值：返回输出变量的最近 N 个值序列。"""
         ...
 
     def eval_batch(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
-        """批量求值：返回 ``{symbol: eval_result}`` 映射。
-
-        任一标的数据不足或求值失败时该标的结果为 ``False`` / ``None``。
-        """
+        """批量求值：返回 ``{symbol: eval_result}`` 映射。"""
         ...
 
 
@@ -701,13 +613,7 @@ class CompiledFormula:
         return v
 
     def _eval_core(self, bars: pd.DataFrame, args: Optional[dict] = None) -> Optional[OrderedDict]:
-        """核心求值：构建命名空间并执行全部语句，返回输出变量 OrderedDict。
-
-        与 ``eval`` / ``eval_outvars`` 共享同一求值核心，避免形状分裂。
-
-        Returns:
-            ``{name: raw_value}`` 有序字典；命名空间构建失败、求值异常或无输出时返回 None。
-        """
+        """核心求值：构建命名空间并执行全部语句，返回输出变量 OrderedDict。"""
         namespace = _build_namespace(bars)
         if namespace is None:
             return None
@@ -737,14 +643,7 @@ class CompiledFormula:
         return outputs if outputs else None
 
     def eval(self, bars: pd.DataFrame, args: Optional[dict] = None) -> Any:
-        """对单只股票的 K 线数据进行求值（异构返回）。
-
-        - 匿名表达式或 XG 输出返回最后一根 K 线的 bool。
-        - 单输出指标返回最后一根 K 线的标量值。
-        - 多输出指标返回 ``{output_name: last_value}``。
-
-        适用于条件筛选（``eval``）；需要统一字典契约时使用 ``eval_outvars``。
-        """
+        """对单只股票的 K 线数据进行求值（异构返回）。"""
         outputs = self._eval_core(bars, args)
         if outputs is None:
             return None
@@ -760,14 +659,7 @@ class CompiledFormula:
         return {name: self._last_value(val) for name, val in outputs.items()}
 
     def eval_outvars(self, bars: pd.DataFrame, args: Optional[dict] = None) -> Optional[Dict[str, Any]]:
-        """对单只股票的 K 线数据进行求值，返回全部输出变量末值字典。
-
-        与 ``eval`` 共享 ``_eval_core`` 求值核心，但始终返回 ``{outvar_name: last_value}``：
-        匿名/XG 输出归一为键 ``"XG"``，单输出指标以输出名作键，多输出原样返回。
-
-        Returns:
-            ``{outvar_name: last_value}`` 字典；求值失败或无输出时返回 None。
-        """
+        """对单只股票的 K 线数据进行求值，返回全部输出变量末值字典。"""
         outputs = self._eval_core(bars, args)
         if outputs is None:
             return None
@@ -778,47 +670,19 @@ class CompiledFormula:
         return result
 
     def eval_series(self, bars: pd.DataFrame, args: Optional[dict] = None, lookback: int = 5) -> Optional[Dict[str, Any]]:
-        """对单只股票的 K 线数据进行求值，返回全部输出变量的最近 lookback 个值序列。
-
-        用于 cross/inflection 等需要历史数据的操作符检测。
-
-        Args:
-            bars: K线数据DataFrame
-            args: 公式参数
-            lookback: 返回最近N个值，默认5（足够cross需要2个、inflection需要3个）
-
-        Returns:
-            ``{outvar_name: [v0, v1, ..., vN-1]}`` 字典（vN-1为最新值）；
-            求值失败或无输出时返回 None。
-        """
+        """对单只股票的 K 线数据进行求值，返回全部输出变量的最近 lookback 个值序列。"""
         outputs = self._eval_core(bars, args)
         if outputs is None:
             return None
         result: OrderedDict = OrderedDict()
         for name, val in outputs.items():
             key = "XG" if name is None else name
-            if isinstance(val, pd.Series):
-                series = val.values
-                n = min(lookback, len(series))
-                if n > 0:
-                    last_n = [float(x) if not (isinstance(x, float) and np.isnan(x)) else None for x in series[-n:]]
-                    result[key] = last_n
-                else:
-                    result[key] = []
-            elif isinstance(val, np.ndarray):
-                n = min(lookback, len(val))
-                if n > 0:
-                    last_n = [float(x) if not (isinstance(x, float) and np.isnan(x)) else None for x in val[-n:]]
-                    result[key] = last_n
-                else:
-                    result[key] = []
-            elif isinstance(val, (list, tuple)):
-                n = min(lookback, len(val))
-                if n > 0:
-                    last_n = [float(x) if x is not None and not (isinstance(x, float) and np.isnan(x)) else None for x in val[-n:]]
-                    result[key] = last_n
-                else:
-                    result[key] = []
+            # pd.Series/np.ndarray/list/tuple 共享末 N 值提取骨架（3 分支合并）。
+            seq = val.values if isinstance(val, pd.Series) else val
+            if isinstance(seq, (np.ndarray, list, tuple)):
+                n = min(lookback, len(seq))
+                result[key] = ([float(x) if x is not None and not (isinstance(x, float) and np.isnan(x)) else None
+                                for x in seq[-n:]] if n > 0 else [])
             else:
                 v = self._last_value(val)
                 result[key] = [v] if v is not None else []
@@ -883,12 +747,7 @@ class PythonFormulaEngine:
     """
 
     def __init__(self, data_query: Any = None):
-        """初始化引擎。
-
-        Args:
-            data_query: 可选的数据查询对象，当 ``eval_batch`` 未提供
-                ``data_fetcher`` 时作为兜底数据源。
-        """
+        """初始化引擎。"""
         self.data_query = data_query
         self._compiled_cache = _LRUCache(maxsize=_CACHE_MAXSIZE)
 
@@ -902,199 +761,92 @@ class PythonFormulaEngine:
         self._compiled_cache.set(formula, compiled)
         return compiled
 
-    def eval(self, formula: str, bars: pd.DataFrame, args: Optional[dict] = None) -> Any:
-        """对单只股票的 bars 求值。
-
-        - 条件公式返回最后一根 K 线是否成立（bool）。
-        - 单输出指标返回最后一根 K 线的标量值。
-        - 多输出指标返回 ``{output_name: last_value}``。
-
-        数据不足或编译/求值失败时保守返回 ``False`` / ``None``。
-        """
+    def _eval_single(self, formula: str, bars: pd.DataFrame, args: Optional[dict], method_name: str) -> Any:
+        """编译 + 委托 CompiledFormula.{method_name} 求值（eval/eval_outvars 同构骨架合并）。"""
         try:
-            compiled = self._compile(formula)
-            return compiled.eval(bars, args)
+            return getattr(self._compile(formula), method_name)(bars, args)
         except Exception as e:
             logger.warning("公式编译失败 %s: %s", formula, e)
             return None
+
+    def eval(self, formula: str, bars: pd.DataFrame, args: Optional[dict] = None) -> Any:
+        """对单只股票的 bars 求值（条件→bool / 单输出→标量 / 多输出→dict；失败返回 None）。"""
+        return self._eval_single(formula, bars, args, "eval")
 
     def eval_outvars(self, formula: str, bars: pd.DataFrame, args: Optional[dict] = None) -> Optional[Dict[str, Any]]:
-        """对单只股票的 bars 求值，返回全部输出变量末值字典。
+        """对单只股票的 bars 求值，返回全部输出变量末值字典（失败返回 None）。"""
+        return self._eval_single(formula, bars, args, "eval_outvars")
 
-        始终返回 ``{outvar_name: last_value}`` 字典（匿名/XG 输出归一为 ``"XG"``），
-        编译/求值失败或数据不足时返回 None。
-        """
-        try:
-            compiled = self._compile(formula)
-            return compiled.eval_outvars(bars, args)
-        except Exception as e:
-            logger.warning("公式编译失败 %s: %s", formula, e)
-            return None
+    def _fetch_bars(self, symbol: str, period: str, data_fetcher) -> Optional[pd.DataFrame]:
+        df: Optional[pd.DataFrame] = None
+        if data_fetcher is not None:
+            try:
+                df = data_fetcher(symbol, period)
+            except Exception as e:
+                logger.debug("data_fetcher 异常 %s: %s", symbol, e)
+        elif self.data_query is not None:
+            try:
+                df = self.data_query.fetch(symbol, period)
+            except Exception:
+                try:
+                    df = self.data_query.get_bars(symbol, period)
+                except Exception as e2:
+                    logger.debug("data_query 取数异常 %s: %s", symbol, e2)
+        return df
 
-    def eval_batch(
-        self,
-        formula: str,
-        symbols: List[str],
-        period: str = "1d",
-        data_fetcher: Optional[Callable[[str, str], pd.DataFrame]] = None,
-        args: Optional[dict] = None,
-    ) -> Dict[str, Any]:
-        """批量求值：为每只标的取数据并分别求值。
-
-        Args:
-            formula: 公式字符串。
-            symbols: 标的代码列表。
-            period: 周期，默认 ``'1d'``。
-            data_fetcher: 可选数据获取函数 ``(symbol, period) -> pd.DataFrame``。
-            args: 公式参数（如 SHORT/LONG/MID），注入到求值命名空间。
-
-        Returns:
-            ``{symbol: eval_result}``，任一标的数据不足或求值失败时该标的结果为 ``False``。
-        """
-        results: Dict[str, Any] = {}
+    def _eval_batch_impl(self, formula, symbols, period, data_fetcher, args, eval_call, miss_default) -> Dict[str, Any]:
         try:
             compiled = self._compile(formula)
         except Exception as e:
             logger.warning("批量公式编译失败 %s: %s", formula, e)
-            return {symbol: False for symbol in symbols}
-
+            return {symbol: miss_default for symbol in symbols}
+        results: Dict[str, Any] = {}
         for symbol in symbols:
-            df: Optional[pd.DataFrame] = None
-            if data_fetcher is not None:
-                try:
-                    df = data_fetcher(symbol, period)
-                except Exception as e:
-                    logger.debug("data_fetcher 异常 %s: %s", symbol, e)
-            elif self.data_query is not None:
-                try:
-                    # 优先尝试 (symbol, period) 签名
-                    df = self.data_query.fetch(symbol, period)
-                except Exception:
-                    try:
-                        df = self.data_query.get_bars(symbol, period)
-                    except Exception as e2:
-                        logger.debug("data_query 取数异常 %s: %s", symbol, e2)
-
+            df = self._fetch_bars(symbol, period, data_fetcher)
             if df is None or not isinstance(df, pd.DataFrame) or len(df) == 0:
-                results[symbol] = False
+                results[symbol] = miss_default
                 continue
-
             try:
-                results[symbol] = compiled.eval(df, args)
+                results[symbol] = eval_call(compiled, df, args)
             except Exception as e:
                 logger.debug("批量求值异常 %s: %s", symbol, e)
-                results[symbol] = False
-
+                results[symbol] = miss_default
         return results
 
-    def eval_series_batch(
-        self,
-        formula: str,
-        symbols: List[str],
-        period: str = "1d",
-        data_fetcher: Optional[Callable[[str, str], pd.DataFrame]] = None,
-        args: Optional[dict] = None,
-        lookback: int = 5,
-    ) -> Dict[str, Any]:
-        """批量序列求值：为每只标的取数据并返回输出变量的最近lookback个值序列。
+    def eval_batch(self, formula, symbols, period="1d", data_fetcher=None, args=None) -> Dict[str, Any]:
+        """批量求值：为每只标的取数据并分别求值。失败标的结果为 ``False``。"""
+        return self._eval_batch_impl(formula, symbols, period, data_fetcher, args,
+                                     lambda c, df, a: c.eval(df, a), False)
 
-        Args:
-            formula: 公式字符串。
-            symbols: 标的代码列表。
-            period: 周期，默认 ``'1d'``。
-            data_fetcher: 可选数据获取函数 ``(symbol, period) -> pd.DataFrame``。
-            args: 公式参数（如 SHORT/LONG/MID），注入到求值命名空间。
-            lookback: 返回最近N个值，默认5。
-
-        Returns:
-            ``{symbol: {outvar_name: [v0,...,vN-1]}}``，任一标的数据不足或求值失败时该标的结果为 ``None``。
-        """
-        results: Dict[str, Any] = {}
-        try:
-            compiled = self._compile(formula)
-        except Exception as e:
-            logger.warning("批量公式编译失败 %s: %s", formula, e)
-            return {symbol: None for symbol in symbols}
-
-        for symbol in symbols:
-            df: Optional[pd.DataFrame] = None
-            if data_fetcher is not None:
-                try:
-                    df = data_fetcher(symbol, period)
-                except Exception as e:
-                    logger.debug("data_fetcher 异常 %s: %s", symbol, e)
-            elif self.data_query is not None:
-                try:
-                    df = self.data_query.fetch(symbol, period)
-                except Exception:
-                    try:
-                        df = self.data_query.get_bars(symbol, period)
-                    except Exception as e2:
-                        logger.debug("data_query 取数异常 %s: %s", symbol, e2)
-
-            if df is None or not isinstance(df, pd.DataFrame) or len(df) == 0:
-                results[symbol] = None
-                continue
-
-            try:
-                results[symbol] = compiled.eval_series(df, args, lookback=lookback)
-            except Exception as e:
-                logger.debug("批量序列求值异常 %s: %s", symbol, e)
-                results[symbol] = None
-
-        return results
+    def eval_series_batch(self, formula, symbols, period="1d", data_fetcher=None, args=None, lookback=5) -> Dict[str, Any]:
+        """批量序列求值：返回各标的输出变量最近 lookback 个值序列。失败标的结果为 ``None``。"""
+        return self._eval_batch_impl(formula, symbols, period, data_fetcher, args,
+                                     lambda c, df, a: c.eval_series(df, a, lookback=lookback), None)
 
 
 # ===========================================================================
 # 来自 core/formula.py — 公式定义（EvalContext + 有状态 FormulaEngine）
-# ===========================================================================
-# """统一公式引擎接口（Task 4）。
-#
-# `FormulaEngine` 是无状态求值组件，按 `FilterSpec` 对股票代码集合求值，
-# 并将结果缓存在 `PoolState.formula_results[("formula", formula_ref, bar_hash)]`。
-# filter 结果（passed / rejected 集合）不缓存，由调用方实时生成。
-# """
 
 
 def _hash_code_bars(bars_data: Any) -> str:
     """计算单只股票的K线数据哈希，用于per-code缓存粒度。"""
-    if bars_data is None:
-        return "0" * 32
-    if isinstance(bars_data, dict):
-        return hash_dict_content(bars_data, exclude=set())
-    try:
-        if isinstance(bars_data, pd.DataFrame):
-            payload = bars_data.to_json(orient="records", date_format="iso")
-        elif isinstance(bars_data, list):
-            payload = json.dumps(bars_data, sort_keys=True, ensure_ascii=False, default=str)
-        else:
-            payload = repr(bars_data)
-    except Exception:
+    def _serialize(b):
         try:
-            payload = repr(bars_data)
+            if isinstance(b, pd.DataFrame):
+                return b.to_json(orient="records", date_format="iso")
+            if isinstance(b, list):
+                return json.dumps(b, sort_keys=True, ensure_ascii=False, default=str)
+            return repr(b)
         except Exception:
-            payload = str(bars_data)
-    return hashlib.md5(payload.encode("utf-8", errors="replace")).hexdigest()
-
-
-def _hash_bars(bars: Dict[str, Any]) -> str:
-    """per-content MD5——委托 core._hashing.hash_dict_content。"""
-    return hash_dict_content(bars, exclude=set())
+            try:
+                return repr(b)
+            except Exception:
+                return str(b)
+    return hash_object(bars_data, serializer=_serialize)
 
 
 def _get_period_bars(state: Any, period: str = "1d") -> Dict[str, Any]:
-    """从 `PoolState` 提取指定周期的 code->bars 列表。
-
-    返回 `state.bars_history[period][code]`（已闭合 K 线）+
-    `state.bars[period][code]`（当前未闭合 K 线，如果存在）。
-
-    公式引擎通过 fetcher 将 list 转为多行 DataFrame，使 LLV/HHV/SMA/CROSS 等
-    需历史窗口的函数可正确计算；未闭合 K 线的 close 取 latest_tick 最新价，
-    确保实时计算基于最新行情。
-
-    period 规范化：``"5min"`` / ``"1min"`` 等 builtin_formula 周期名映射到
-    ``bars_history`` / ``bars`` 的短键 ``"5m"`` / ``"1m"``，消除两端命名不一致导致的空数据。
-    """
+    """从 `PoolState` 提取指定周期的 code->bars 列表。"""
     if state is None:
         return {}
     state_hist = getattr(state, "bars_history", None)
@@ -1143,10 +895,7 @@ def _get_period_bars(state: Any, period: str = "1d") -> Dict[str, Any]:
 
 @dataclass
 class EvalContext:
-    """公式求值上下文。
-
-    字段数 = 5，满足架构约束。
-    """
+    """公式求值上下文。"""
 
     mode: Literal["live", "replay", "simulation"]
     bar_hash: str
@@ -1157,12 +906,7 @@ class EvalContext:
 
 
 def live_context(state: PoolState, period: str = "1d") -> EvalContext:
-    """构造实盘模式求值上下文。
-
-    - `bar_hash` 取 `PoolState.bar_hash()`（I25：收敛到唯一访问器）
-    - `bars` 取 `_get_period_bars(state, period)`（合并 history + current）
-    - `latest_tick` 取 `state.latest_tick`
-    """
+    """构造实盘模式求值上下文。"""
     return EvalContext(
         mode="live",
         bar_hash=state.bar_hash(),
@@ -1172,34 +916,30 @@ def live_context(state: PoolState, period: str = "1d") -> EvalContext:
     )
 
 
-def replay_context(
-    state: PoolState, bars: Dict[str, Dict[str, Any]], bar_hash: str = ""
+def _mock_context(
+    mode: str, state: PoolState, bars: Dict[str, Dict[str, Any]], bar_hash: str = ""
 ) -> EvalContext:
-    """构造回放模式求值上下文。
-
-    若未提供 `bar_hash`，则根据 `bars` 内容自动生成。
-    """
+    """构造回放/仿真模式求值上下文（两模式仅 mode 字符串不同，bar_hash 缺省自动生成）。"""
     return EvalContext(
-        mode="replay",
-        bar_hash=bar_hash or _hash_bars(bars),
+        mode=mode,
+        bar_hash=bar_hash or hash_dict_content(bars),
         bars=bars,
         latest_tick=state.latest_tick,
     )
 
 
+def replay_context(
+    state: PoolState, bars: Dict[str, Dict[str, Any]], bar_hash: str = ""
+) -> EvalContext:
+    """构造回放模式求值上下文。若未提供 `bar_hash`，则根据 `bars` 内容自动生成。"""
+    return _mock_context("replay", state, bars, bar_hash)
+
+
 def simulation_context(
     state: PoolState, mock_bars: Dict[str, Dict[str, Any]], bar_hash: str = ""
 ) -> EvalContext:
-    """构造仿真模式求值上下文。
-
-    `mock_bars` 由 mock 数据生成器当前 tick 提供；未提供 hash 时自动生成。
-    """
-    return EvalContext(
-        mode="simulation",
-        bar_hash=bar_hash or _hash_bars(mock_bars),
-        bars=mock_bars,
-        latest_tick=state.latest_tick,
-    )
+    """构造仿真模式求值上下文。`mock_bars` 由 mock 数据生成器当前 tick 提供。"""
+    return _mock_context("simulation", state, mock_bars, bar_hash)
 
 
 class FormulaEngine:
@@ -1260,12 +1000,7 @@ class FormulaEngine:
         evaluator_fn: Callable[[List[str], EvalContext], Dict[str, Any]],
         writeback: bool,
     ) -> Dict[str, Any]:
-        """统一缓存求值：per-code 粒度缓存。
-
-        缓存键为 (formula_ref, code, period, code_bar_hash)，值为公式结果。
-        某只股票 K 线变化仅因 hash 改变而失效该股票对应周期的公式缓存，
-        其他股票缓存保持有效。
-        """
+        """统一缓存求值：per-code 粒度缓存。"""
         formula_ref = spec.formula_ref
         period = getattr(ctx, 'period', '1d') or '1d'
 
@@ -1391,11 +1126,7 @@ class FormulaEngine:
         return result
 
     def eval_series(self, spec: FilterSpec, codes: List[str], ctx: EvalContext, lookback: int = 5) -> Dict[str, Any]:
-        """公式序列求值路径：返回输出变量的最近lookback个值序列，用于cross/inflection检测。
-
-        Returns:
-            {code: {outvar_name: [v0,...,vN-1]}}
-        """
+        """公式序列求值路径：返回输出变量的最近lookback个值序列，用于cross/inflection检测。"""
         return self._cached_eval(
             spec, codes, ctx,
             lambda c, x: self._eval_formula_series(spec.formula_ref, c, x, spec, lookback=lookback),
@@ -1411,31 +1142,6 @@ class FormulaEngine:
 
 # ===========================================================================
 # 来自 core/formula_router.py — 公式路由器
-# ===========================================================================
-# """公式路由分发器。
-#
-# 根据公式复杂度与数据周期，在纯 Python 公式引擎与 HQChart C++ 引擎之间做显式路由，
-# 并集成公式结果缓存。
-#
-# 路由策略（决策预先做出，失败时不切换路径）：
-# - 简单公式（token 全部属于 ``simple_functions`` 或运算符/比较/逻辑/数字）且周期为
-#   ``1m``/``tick`` 时，使用 Python 公式引擎。
-# - 其它情形使用 HQChart 引擎。
-# - HQChart 不可用时，仅当满足「简单公式 + 1m/tick」才回退到 Python 引擎；
-#   否则直接抛出 ``RuntimeError``，禁止静默回退到 mock 或任何兜底数据源。
-#
-# 缓存策略：
-# - 每次求值先查缓存，命中直接返回。
-# - 计算完成后按周期 TTL 写入缓存（``tick`` 不缓存，分钟级由配置决定，日线级 86400s）。
-# - 分钟闭合时由调用方触发 ``invalidate_on_minute_close``。
-#
-# 架构契约：
-# - 公式路由层不通过 PythonFormulaEngine 间接持有数据源。
-# - K 线数据由注入的 ``data_query`` 提供，显式注入，避免隐式持有。
-# """
-# SubTask 22.2: FormulaEvaluated 事件类型在本文件顶部已统一从 .event_bus 导入，
-# 无需延迟导入。FormulaRouter 接收 bus 参数后，可订阅 FormulaEvaluated 事件用于路由后
-# 再次发布（路由内部逻辑），实现模块间事件驱动通信。
 
 
 # ---------------------------------------------------------------------------
@@ -1484,11 +1190,7 @@ class IHQChartProvider(Protocol):
 
 
 class _InMemoryCache:
-    """默认内存缓存（无 TTL），当未注入 IFormulaCache 时作为兜底。
-
-    替代原 ``services.formula_cache.FormulaCache`` 的默认实例化，
-    避免 core 层跨层 import services。接口与 ``IFormulaCache`` 兼容。
-    """
+    """默认内存缓存（无 TTL），当未注入 IFormulaCache 时作为兜底。"""
 
     def __init__(self) -> None:
         self._data: Dict[Any, Any] = {}
@@ -1551,19 +1253,6 @@ _OUTVARS_METHOD_PRIORITY = [
 ]
 
 
-def _hash_object(obj: Any) -> str:
-    """对任意对象做确定性 md5 哈希，生成 32 位十六进制字符串。"""
-    if obj is None:
-        return "0" * 32
-    if isinstance(obj, dict):
-        return hash_dict_content(obj, exclude=set())
-    try:
-        serialized = json.dumps(obj, sort_keys=True, default=str, ensure_ascii=False)
-    except Exception:
-        serialized = repr(obj)
-    return hashlib.md5(serialized.encode("utf-8", errors="replace")).hexdigest()
-
-
 class FormulaRouter:
     """公式路由器：按复杂度与周期选择执行引擎，并管理结果缓存。
 
@@ -1574,10 +1263,6 @@ class FormulaRouter:
     """
 
     # Task 5.1 — 表驱动引擎分派表（spec 迭代 2 / RULES.md 第 16 条）。
-    # 映射 engine_name → {method_key: method_name}，由 ``_dispatch_engine_call``
-    # 反射调用。新增引擎（如 JS）仅需在此表追加条目，零行分派代码改动。
-    # 优先级：``formula_routing.json`` 的 ``engine_methods`` 覆盖此默认表
-    # （由 ``_load_engine_methods`` 合并），保持配置热加载能力。
     _ENGINE_DISPATCH: Dict[str, Dict[str, str]] = {
         "python": {
             "eval": "_eval_python",
@@ -1647,9 +1332,6 @@ class FormulaRouter:
         self._prev_results: Dict[tuple, tuple] = {}
 
         # SubTask 22.2: EventBus 实例（可选）——订阅 FormulaEvaluated 事件用于路由后
-        # 再次发布 FormulaEvaluated 事件（路由内部逻辑）。当前为过渡期 stub：
-        # 路由器仍以方法调用形式提供 eval/eval_outvars/eval_batch 接口，
-        # bus 注入后仅在 evaluate() 完成后追加 publish(FormulaEvaluated) 通知下游模块。
         self._bus: Optional[Any] = bus
 
     @staticmethod
@@ -1661,11 +1343,7 @@ class FormulaRouter:
 
     @staticmethod
     def _load_routing_config(key: str, default: Any) -> Any:
-        """从 config/formula_routing.json 加载指定键（统一加载函数）。
-
-        engine_routing / engine_methods 等同构配置项共用此加载逻辑，
-        仅 key 与默认值不同，消除重复的 try/open/get 样板。
-        """
+        """从 config/formula_routing.json 加载指定键（统一加载函数）。"""
         cfg = load_config_table("formula_routing")
         return cfg.get(key, default)
 
@@ -1689,17 +1367,7 @@ class FormulaRouter:
         return FormulaRouter._ENGINE_DISPATCH
 
     def _resolve_engine(self, ctx: dict) -> str:
-        """按 formula_routing.json 规则表匹配引擎。
-
-        ctx 含 complexity/period/hqchart_available，按规则表顺序匹配，
-        首个命中的规则返回其 engine；均不命中时返回 "error"。
-
-        Args:
-            ctx: 路由上下文，包含 complexity、period、hqchart_available 等字段。
-
-        Returns:
-            引擎名称："python" / "hqchart" / "error"。
-        """
+        """按 formula_routing.json 规则表匹配引擎。"""
         for rule in self._routing_rules:
             cond = rule["condition"]
             if cond == "default":
@@ -1710,11 +1378,7 @@ class FormulaRouter:
 
     @staticmethod
     def _match_condition(cond: dict, ctx: dict) -> bool:
-        """检查 ctx 是否匹配 condition 中的全部字段约束。
-
-        支持的约束字段：complexity（等值）、period_in（成员归属）、
-        hqchart_available（等值）。所有出现的约束均需满足才返回 True。
-        """
+        """检查 ctx 是否匹配 condition 中的全部字段约束。"""
         if "complexity" in cond and ctx.get("complexity") != cond["complexity"]:
             return False
         if "period_in" in cond and ctx.get("period") not in cond["period_in"]:
@@ -1758,17 +1422,7 @@ class FormulaRouter:
         return await method(*args, **kwargs)
 
     def _analyze_complexity(self, formula: str) -> str:
-        """分析公式复杂度：``simple`` / ``complex``。
-
-        对公式分词后，仅检查函数调用名（标识符后紧跟 ``(`` ）是否在
-        config/data_pipeline.json ``formula.simple_functions`` 声明中。
-
-        非函数标识符（输出变量名、参数名、OHLC 字段别名如 CLOSE/OPEN、
-        显示指令如 COLORSTICK）不参与复杂度判定。
-
-        若所有函数调用均属于 simple_functions，则判定为 simple；
-        否则判定为 complex（如含 BOLL、KDJ 等未声明函数）。
-        """
+        """分析公式复杂度：``simple`` / ``complex``。"""
         tokens = self._tokenize(formula)
         for i, tok in enumerate(tokens):
             upper = tok.upper()
@@ -1807,18 +1461,13 @@ class FormulaRouter:
         return self._cache.make_key(
             symbol,
             period,
-            _hash_object(formula),
-            _hash_object(args),
+            hash_object(formula),
+            hash_object(args),
         )
 
     @staticmethod
     def _inject_args_into_script(formula: str, args: Optional[dict]) -> str:
-        """将公式参数注入到脚本前部（HQChart 引擎不支持 SetArgs 时的兜底实现）。
-
-        TDX/DZH 公式参数（如 MACD 的 SHORT/LONG/MID）在脚本中以裸标识符引用，
-        在脚本前部追加 ``NAME:=value;`` 赋值即可让 HQChart 引擎使用前端配置值。
-        若脚本自身已对同名变量赋值，脚本内赋值生效，保持向后兼容。
-        """
+        """将公式参数注入到脚本前部（HQChart 引擎不支持 SetArgs 时的兜底实现）。"""
         if not args:
             return formula
         parts = []
@@ -1831,6 +1480,15 @@ class FormulaRouter:
             return formula
         return "".join(parts) + formula
 
+    def _resolve_engine_for(self, formula: str, period: str) -> str:
+        """统一复杂度分析 + 引擎路由（合并 eval/eval_outvars/eval_batch 同构块）。"""
+        complexity = self._analyze_complexity(formula)
+        return self._resolve_engine({
+            "complexity": complexity,
+            "period": period,
+            "hqchart_available": self._hqchart_available,
+        })
+
     async def eval(
         self,
         formula: str,
@@ -1839,30 +1497,13 @@ class FormulaRouter:
         args: Optional[dict] = None,
         context: Optional[dict] = None,
     ) -> Any:
-        """单股公式求值（带缓存+路由）。
-
-        Args:
-            formula: 公式字符串。
-            symbol: 标的代码。
-            period: 周期，默认 ``'1d'``。
-            args: 公式参数，参与缓存键计算。
-            context: 可选上下文（暂不参与缓存键，仅保留扩展性）。
-
-        Returns:
-            公式求值结果；HQChart 不可用时若无法回退到 Python 引擎则抛出异常。
-        """
+        """单股公式求值（带缓存+路由）。"""
         key = self._make_key(formula, symbol, period, args)
         cached = self._cache.get(key)
         if cached is not None:
             return cached
 
-        complexity = self._analyze_complexity(formula)
-        engine = self._resolve_engine({
-            "complexity": complexity,
-            "period": period,
-            "hqchart_available": self._hqchart_available,
-        })
-
+        engine = self._resolve_engine_for(formula, period)
         result = await self._dispatch_engine_call(
             engine, "eval", formula, symbol, period, args
         )
@@ -1877,21 +1518,8 @@ class FormulaRouter:
         period: str = "1d",
         args: Optional[dict] = None,
     ) -> Optional[Dict[str, Any]]:
-        """单股公式求值，返回全部输出变量的末值。
-
-        与 ``eval`` 不同，本方法始终返回 ``{outvar_name: last_value}`` 字典，
-        适用于需要多输出变量结果的场景（如公式测试端点）。
-
-        Returns:
-            ``{outvar_name: last_value}`` 字典；求值失败时返回 None。
-        """
-        complexity = self._analyze_complexity(formula)
-        engine = self._resolve_engine({
-            "complexity": complexity,
-            "period": period,
-            "hqchart_available": self._hqchart_available,
-        })
-
+        """单股公式求值，返回全部输出变量的末值。"""
+        engine = self._resolve_engine_for(formula, period)
         return await self._dispatch_engine_call(
             engine, "eval_outvars", formula, symbol, period, args
         )
@@ -1899,24 +1527,21 @@ class FormulaRouter:
     # ── 单股求值共享原语（合并 6 处 ``_data_query is None`` 守卫 + 4 处 K 线获取骨架）──
 
     def _require_data_query(self, engine_name: str) -> None:
-        """统一 ``_data_query is None`` 守卫 + RuntimeError 抛出。
-
-        底层运行逻辑洞察（Code = Data + Dispatcher）：6 个 ``_eval_*`` 方法共享
-        ``if self._data_query is None: raise RuntimeError("data_query is required
-        for X engine ...")`` 同构守卫，差异仅 engine_name（"Python" / "HQChart"）。
-        提升至单一入口后，新增 engine 零守卫代码。
-        """
+        """统一 ``_data_query is None`` 守卫 + RuntimeError 抛出。"""
         if self._data_query is None:
             raise RuntimeError(
                 f"data_query is required for {engine_name} engine evaluation"
             )
 
-    async def _fetch_kline_df(self, symbol: str, period: str) -> "Optional[pd.DataFrame]":
-        """合并 4 处单股 K 线获取骨架：``loop.run_in_executor(get_kline_series)``。
+    def _require_hqchart(self, formula: str, args: Optional[dict]) -> str:
+        """HQChart 引擎统一前置守卫 + 脚本注入（合并 3 个 _eval_hqchart* 同构块）。"""
+        self._require_data_query("HQChart")
+        if self._hqchart_provider is None:
+            raise RuntimeError("HQChart provider is not available")
+        return self._inject_args_into_script(formula, args)
 
-        Python 引擎方法直接返回 df（由调用方判 None/empty）；HQChart 引擎方法
-        由调用方 ``df.to_dict("records")`` 转 bars dict。
-        """
+    async def _fetch_kline_df(self, symbol: str, period: str) -> "Optional[pd.DataFrame]":
+        """合并 4 处单股 K 线获取骨架：``loop.run_in_executor(get_kline_series)``。"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, self._data_query.get_kline_series, symbol, period
@@ -1926,12 +1551,7 @@ class FormulaRouter:
         self, formula: str, symbol: str, period: str, args: Optional[dict] = None,
     ) -> Optional[Dict[str, Any]]:
         """使用 HQChart 引擎对单股求值，返回全部输出变量。"""
-        self._require_data_query("HQChart")
-        if self._hqchart_provider is None:
-            raise RuntimeError("HQChart provider is not available")
-
-        # 注入公式参数（HQChart 不支持 SetArgs，与 _eval_hqchart_batch 一致通过脚本前置赋值）
-        script = self._inject_args_into_script(formula, args)
+        script = self._require_hqchart(formula, args)
 
         df = await self._fetch_kline_df(symbol, period)
         bars = df.to_dict("records") if df is not None else []
@@ -1957,44 +1577,32 @@ class FormulaRouter:
             return {"value": scalar} if scalar is not None else None
         raise RuntimeError("HQChart provider 缺少可用的求值方法")
 
+    async def _eval_python_core(
+        self, formula: str, symbol: str, period: str, args: Optional[dict], method_name: str,
+    ) -> Any:
+        """Python 引擎单股求值共享骨架（合并 _eval_python / _eval_python_outvars）。"""
+        self._require_data_query("Python")
+        df = await self._fetch_kline_df(symbol, period)
+        if df is None or df.empty:
+            return None
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None, getattr(self._python_engine, method_name), formula, df, args
+        )
+
     async def _eval_python_outvars(
         self, formula: str, symbol: str, period: str, args: Optional[dict] = None,
     ) -> Optional[Dict[str, Any]]:
-        """使用 Python 公式引擎对单股求值，返回全部输出变量末值字典。
-
-        与 ``_eval_python`` 不同，本方法始终返回 ``{outvar_name: last_value}`` 字典
-        （由 ``PythonFormulaEngine.eval_outvars`` 保证形状契约），适用于公式测试端点。
-        """
-        self._require_data_query("Python")
-
-        df = await self._fetch_kline_df(symbol, period)
-        if df is None or df.empty:
-            return None
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._python_engine.eval_outvars, formula, df, args
-        )
+        """使用 Python 公式引擎对单股求值，返回全部输出变量末值字典。"""
+        return await self._eval_python_core(formula, symbol, period, args, "eval_outvars")
 
     async def _eval_python(self, formula: str, symbol: str, period: str, args: Optional[dict] = None) -> Any:
         """使用 Python 公式引擎对单股求值。"""
-        self._require_data_query("Python")
-
-        df = await self._fetch_kline_df(symbol, period)
-        if df is None or df.empty:
-            return None
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, self._python_engine.eval, formula, df, args
-        )
+        return await self._eval_python_core(formula, symbol, period, args, "eval")
 
     async def _eval_hqchart(self, formula: str, symbol: str, period: str, args: Optional[dict] = None) -> Any:
         """使用 HQChart 引擎对单股求值。"""
-        self._require_data_query("HQChart")
-        if self._hqchart_provider is None:
-            raise RuntimeError("HQChart provider is not available")
-
-        # 注入公式参数（HQChart 不支持 SetArgs，与 _eval_hqchart_outvars/_eval_hqchart_batch 一致）
-        script = self._inject_args_into_script(formula, args)
+        script = self._require_hqchart(formula, args)
 
         df = await self._fetch_kline_df(symbol, period)
         bars = df.to_dict("records") if df is not None else []
@@ -2020,18 +1628,7 @@ class FormulaRouter:
         args: Optional[dict] = None,
         context: Optional[dict] = None,
     ) -> Dict[str, Any]:
-        """批量公式求值（带缓存+路由）。
-
-        Args:
-            formula: 公式字符串。
-            symbols: 标的代码列表。
-            period: 周期，默认 ``'1d'``。
-            args: 公式参数，参与缓存键计算。
-            context: 可选上下文（暂不参与缓存键，仅保留扩展性）。
-
-        Returns:
-            ``{symbol: result}`` 映射；HQChart 不可用时若无法回退到 Python 引擎则抛出异常。
-        """
+        """批量公式求值（带缓存+路由）。"""
         results: Dict[str, Any] = {}
         misses: List[str] = []
 
@@ -2046,13 +1643,7 @@ class FormulaRouter:
         if not misses:
             return results
 
-        complexity = self._analyze_complexity(formula)
-        engine = self._resolve_engine({
-            "complexity": complexity,
-            "period": period,
-            "hqchart_available": self._hqchart_available,
-        })
-
+        engine = self._resolve_engine_for(formula, period)
         batch = await self._dispatch_engine_call(
             engine, "eval_batch", formula, misses, period, args, context
         )
@@ -2084,12 +1675,7 @@ class FormulaRouter:
         args: Optional[dict] = None, context: Optional[dict] = None,
     ) -> Dict[str, Any]:
         """使用 HQChart 引擎批量求值。"""
-        self._require_data_query("HQChart")
-        if self._hqchart_provider is None:
-            raise RuntimeError("HQChart provider is not available")
-
-        # 注入公式参数（HQChart 不支持 SetArgs，通过脚本前置赋值实现）
-        script = self._inject_args_into_script(formula, args)
+        script = self._require_hqchart(formula, args)
 
         kline_data: Dict[str, List[Dict]] = {}
         for symbol in symbols:
@@ -2138,20 +1724,7 @@ class FormulaRouter:
         period: str = "1d",
         args: Optional[dict] = None,
     ) -> Any:
-        """同步公式求值（事件驱动场景的便捷入口）。
-
-        包装异步 ``eval``，供 EventBus 同步 handler 调用。若当前不在事件循环中
-        直接 ``asyncio.run``；若已在事件循环中，在新线程中运行新事件循环以避免阻塞。
-
-        Args:
-            formula: 公式字符串。
-            symbol: 标的代码。
-            period: 周期，默认 ``'1d'``。
-            args: 公式参数。
-
-        Returns:
-            公式求值结果；``data_query`` 未注入时抛 ``RuntimeError``。
-        """
+        """同步公式求值（事件驱动场景的便捷入口）。"""
         coro = self.eval(formula, symbol, period, args)
         try:
             asyncio.get_running_loop()
@@ -2182,22 +1755,7 @@ class FormulaRouter:
     def detect_crossover(
         self, formula_ref: str, code: str, result: Any
     ) -> Optional[str]:
-        """检测金叉/死叉。
-
-        简化实现：维护 ``(formula_ref, code)`` 的上一帧结果，若主信号线与触发线
-        之间发生穿越则返回 ``"golden"``/``"death"``。
-
-        支持 MACD 风格（DIF/DEA）、KDJ 风格（K/D）、MACD-SIGNAL 风格输出字典。
-        非字典结果或缺少可识别线对时返回 None。
-
-        Args:
-            formula_ref: 公式引用名（用于历史帧索引）。
-            code: 标的代码。
-            result: 公式求值结果（期望为输出变量字典）。
-
-        Returns:
-            ``"golden"`` / ``"death"`` / ``None``。
-        """
+        """检测金叉/死叉。"""
         if not isinstance(result, dict):
             return None
 
@@ -2235,11 +1793,7 @@ class FormulaRouter:
 
     @staticmethod
     def _pick_crossover_pair(result: Dict[str, Any]) -> tuple:
-        """从结果字典中识别主信号线与触发线。
-
-        优先级：MACD 风格（DIF/DEA）> KDJ 风格（K/D）> MACD-SIGNAL 风格。
-        返回 ``(main_key, trig_key)``；无可识别线对时返回 ``(None, None)``。
-        """
+        """从结果字典中识别主信号线与触发线。"""
         upper_keys = {k.upper(): k for k in result.keys()}
         if "DIF" in upper_keys and "DEA" in upper_keys:
             return upper_keys["DIF"], upper_keys["DEA"]
@@ -2269,12 +1823,7 @@ class ValueExtractor:
 
     def extract_value(self, spec: Dict[str, Any], ctx: Dict[str, Any], *,
                       edge: Optional[Dict] = None, args=None, kwargs=None, source=None) -> Any:
-        """按 extractors[spec.type] 表行的 path/call/value/wrap 字段执行提取。
-
-        1 个通用解释器替代 12 个 _extract_* 方法。type 优先于 source：
-        _resolve_chain 的 candidate 用 type 字段表示提取器类型，用 source 字段承载待提取的数据对象；
-        _build_action_inputs/_build_tracker 的 spec 用 source 字段表示提取器类型。
-        """
+        """按 extractors[spec.type] 表行的 path/call/value/wrap 字段执行提取。"""
         extractor_type = spec.get('type') or spec.get('source') or 'literal_value'
         extractors = self._tables.get('value_extractors', {}).get('extractors', {})
         cfg = extractors.get(extractor_type)
@@ -2340,14 +1889,7 @@ class ValueExtractor:
         return result
 
     def resolve_chain(self, candidates: List[Dict[str, Any]], *, default=None) -> Any:
-        """通用多源解析链：按优先级依次尝试候选者，返回第一个非 None 结果。
-
-        candidates: list of dict，每项描述一个候选来源：
-          {"type": "dict_key", "source": dict_obj, "key": "xxx"}
-          {"type": "source_attr", "source": obj, "attr": "xxx"}
-          {"type": "callable_fn", "fn": callable}
-          {"type": "literal_value", "value": xxx}
-        """
+        """通用多源解析链：按优先级依次尝试候选者，返回第一个非 None 结果。"""
         for c in candidates:
             try:
                 val = self.extract_value(c, {}, source=c.get("source"))
@@ -2358,13 +1900,7 @@ class ValueExtractor:
         return default
 
     def resolve_field(self, spec: Dict[str, Any], ctx: Dict[str, Any]) -> Any:
-        """深度表驱动字段解析：遍历 chain 返回首个非 None/非 0 值，否则 default。
-
-        路径解析支持三种形式：
-        1. 纯嵌套：'a.b.c' → ctx['a']['b']['c']
-        2. 直接 key：'quote.price' → ctx['quote.price']（key 含点号）
-        3. 前缀 key + 子路径：'tracker.snapshot.exit_price' → ctx['tracker.snapshot']['exit_price']
-        """
+        """深度表驱动字段解析：遍历 chain 返回首个非 None/非 0 值，否则 default。"""
         for path in spec.get('chain', []):
             # 1. 纯嵌套取值
             val = self._get_nested(ctx, path)
@@ -2460,22 +1996,8 @@ class ValueExtractor:
 # ===========================================================================
 # FormulaModule — 对外统一入口
 # ===========================================================================
-class FormulaModule:
-    """Formula 模块：公式计算 + 金叉检测。仅与 EventBus 交互。
-
-    内部持有 ``PythonFormulaEngine`` / ``FormulaRouter`` / ``FormulaCache``
-    三个原组件实例（``core.formula`` 的有状态 ``FormulaEngine`` 不参与事件驱动
-    路径，其能力由 ``PythonFormulaEngine`` 承担），外部只能通过 EventBus
-    与之交互。
-
-    订阅事件：
-      - ``DataChanged``：tick 数据变更，触发依赖 tick 的公式重算
-      - ``BarComposed``：bar 合成完成，触发依赖 bar 的公式重算 + 金叉/死叉检测
-
-    发布事件：
-      - ``FormulaEvaluated``：公式求值完成
-      - ``CrossOverDetected``：金叉/死叉检测命中
-    """
+class FormulaModule(_BaseModule):
+    """Formula 模块：公式计算 + 金叉检测。仅与 EventBus 交互。"""
 
     def __init__(
         self,
@@ -2485,19 +2007,7 @@ class FormulaModule:
         formula_cache: Optional[IFormulaCache] = None,
         hqchart_provider: Optional[IHQChartProvider] = None,
     ):
-        """初始化 FormulaModule。
-
-        Args:
-            bus: 事件总线实例。
-            config: 模块配置，支持字段：
-                - ``tick_formulas``: ``List[str]``，依赖 tick 数据的公式引用列表
-                - ``bar_formulas``: ``Dict[str, List[str]]``，依赖 bar 数据的公式
-                  引用映射，键为周期（如 ``"1d"``/``"5m"``），值为公式引用列表
-            data_query: 数据查询接口（实现 ``IDataQuery``），注入 FormulaRouter。
-            formula_cache: 公式缓存接口（实现 ``IFormulaCache``）；为 None 时由
-                本模块内联的 ``FormulaCache`` 提供默认实现。
-            hqchart_provider: HQChart 引擎接口（实现 ``IHQChartProvider``）。
-        """
+        """初始化 FormulaModule。"""
         self._bus = bus
         self._config: Dict[str, Any] = dict(config or {})
 
@@ -2523,27 +2033,19 @@ class FormulaModule:
             python_engine=self._formula_engine,
         )
 
-        self._register_subscribers()
+        self.register_subscribers()
 
     # ------------------------------------------------------------------
     # 订阅注册
     # ------------------------------------------------------------------
-    def _register_subscribers(self) -> None:
-        """注册事件订阅。"""
-        self._bus.subscribe(DataChanged, self._on_data_changed)
-        self._bus.subscribe(BarComposed, self._on_bar_composed)
-        # 订阅 PoolLoaded：从 pool_config.edges 提取 formula_ref，
-        # 按 builtin_formulas.json 的 period 字段归类到 _bar_formulas，
-        # 解决 lifespan 创建时 config 无 tick_formulas/bar_formulas 导致
-        # _on_data_changed/_on_bar_composed 空转的问题
-        self._bus.subscribe(PoolLoaded, self._on_pool_loaded)
+    _SUBSCRIPTIONS: ClassVar[List[Tuple[type, str]]] = [
+        (DataChanged, "_on_data_changed"),
+        (BarComposed, "_on_bar_composed"),
+        (PoolLoaded, "_on_pool_loaded"),
+    ]
 
     def _on_pool_loaded(self, event: PoolLoaded) -> None:
-        """收到 PoolLoaded 时，从 pool_config.edges 提取 formula_ref 并按周期归类。
-
-        builtin_formulas.json 中 period 字段为 "1min"/"5min"/"15min" 等，
-        统一映射为 BarComposer 使用的 "1m"/"5m"/"15m" 周期键。
-        """
+        """收到 PoolLoaded 时，从 pool_config.edges 提取 formula_ref 并按周期归类。"""
         try:
             pool_config = event.pool_config or {}
             edges = pool_config.get("edges", []) if isinstance(pool_config, dict) else []
@@ -2577,14 +2079,7 @@ class FormulaModule:
             logger.warning("FormulaModule._on_pool_loaded 异常: %s", ex, exc_info=True)
 
     def _get_dependent_formulas(self, period: str) -> List[str]:
-        """获取依赖指定周期的公式引用列表。
-
-        Args:
-            period: 周期标识，``"tick"`` 返回 tick 依赖公式；其他值按 bar 周期查表。
-
-        Returns:
-            公式引用列表（副本），无匹配时返回空列表。
-        """
+        """获取依赖指定周期的公式引用列表。"""
         if period == "tick":
             return list(self._tick_formulas)
         return list(self._bar_formulas.get(period, []))
@@ -2593,11 +2088,7 @@ class FormulaModule:
     # 事件 handler（异常隔离：try/except + logger.warning）
     # ------------------------------------------------------------------
     def _on_data_changed(self, event: DataChanged) -> None:
-        """tick 数据变更，触发依赖 tick 的公式重算。
-
-        遍历 ``event.codes`` 中每只标的，对全部 tick 依赖公式调用
-        ``FormulaRouter.evaluate`` 同步求值，并发布 ``FormulaEvaluated`` 事件。
-        """
+        """tick 数据变更，触发依赖 tick 的公式重算。"""
         try:
             codes = list(getattr(event, "codes", []) or [])
             bar_hash = getattr(event, "bar_hash", "") or ""
@@ -2617,11 +2108,7 @@ class FormulaModule:
             logger.warning("FormulaModule._on_data_changed 异常: %s", ex)
 
     def _on_bar_composed(self, event: BarComposed) -> None:
-        """bar 合成完成，触发依赖 bar 的公式重算 + 金叉/死叉检测。
-
-        对当前周期下的全部 bar 依赖公式调用 ``FormulaRouter.evaluate`` 同步求值，
-        发布 ``FormulaEvaluated`` 事件，并调用 ``_detect_crossover`` 检测金叉/死叉。
-        """
+        """bar 合成完成，触发依赖 bar 的公式重算 + 金叉/死叉检测。"""
         try:
             code = getattr(event, "code", "")
             period = getattr(event, "period", "")
@@ -2644,11 +2131,7 @@ class FormulaModule:
     def _detect_crossover(
         self, formula_ref: str, code: str, result: Any, ts: float
     ) -> None:
-        """金叉/死叉检测，命中时发布 ``CrossOverDetected`` 事件。
-
-        委托 ``FormulaRouter.detect_crossover`` 判断当前帧是否发生穿越，
-        返回 ``"golden"``/``"death"`` 时发布事件。
-        """
+        """金叉/死叉检测，命中时发布 ``CrossOverDetected`` 事件。"""
         try:
             cross = self._formula_router.detect_crossover(formula_ref, code, result)
             if cross in ("golden", "death"):
@@ -2712,20 +2195,6 @@ class FormulaModule:
 
 # ===========================================================================
 # === 公式缓存层（自 services/formula_cache.py 合并）===
-# ===========================================================================
-# 公式结果 L1 进程内缓存。
-#
-# 缓存策略：
-# - Tick 级公式：不缓存（变化太快，缓存无意义）。
-# - 分钟级公式：缓存至当前分钟闭合，默认 TTL 60 秒（可通过 config/data_pipeline.json
-#   的 ``formula.cache_ttl_minute`` 覆盖）。
-# - 日线级公式：缓存至交易日结束，默认 TTL 86400 秒。
-# - 日终统一调用 ``invalidate_daily()``（即 ``clear_all()``），禁止跨交易日复用。
-#
-# 缓存条目格式：``{key: {'value': value, 'ts': timestamp, 'ttl': ttl}}``。
-#
-# 注意：``_CONFIG_PATH`` / ``_hash_object`` / ``logger`` 复用本文件已有定义
-# （``_CONFIG_PATH`` 指向 ``config/data/data_pipeline.json``，路径正确）。
 _DEFAULT_TTL_MINUTE = 60
 _DEFAULT_TTL_DAY = 86400
 
@@ -2759,10 +2228,7 @@ _TTL_DAY: int = _TTL_CFG['cache_ttl_day']
 
 
 class FormulaCache:
-    """公式结果 L1 进程内缓存。
-
-    使用简单字典 + ``time.time()`` 实现，无外部依赖。
-    """
+    """公式结果 L1 进程内缓存。"""
 
     def __init__(self):
         self._cache: Dict[Any, Dict[str, Any]] = {}
@@ -2770,12 +2236,7 @@ class FormulaCache:
 
     @staticmethod
     def _period_from_key(key: str) -> Optional[str]:
-        """从字符串缓存键中解析 period 字段。
-
-        键格式：
-        - 含分钟标签：``{symbol}:{minute}:{period}:{formula_hash}:{args_hash}``
-        - 不含分钟标签：``{symbol}:{period}:{formula_hash}:{args_hash}``
-        """
+        """从字符串缓存键中解析 period 字段。"""
         if not isinstance(key, str):
             return None
         parts = key.split(':')
@@ -2794,12 +2255,7 @@ class FormulaCache:
         args_hash: Optional[str] = None,
         minute: Optional[int] = None,
     ) -> str:
-        """生成确定性缓存键。
-
-        新键格式：
-        - 含分钟标签：``{symbol}:{minute}:{period}:{formula_hash}:{args_hash}``
-        - 不含分钟标签：``{symbol}:{period}:{formula_hash}:{args_hash}``
-        """
+        """生成确定性缓存键。"""
         fh = formula_hash if formula_hash is not None else ''
         ah = args_hash if args_hash is not None else ''
         if minute is not None:
@@ -2818,11 +2274,7 @@ class FormulaCache:
             return entry['value']
 
     def set(self, key: Any, value: Any, ttl: Optional[int] = None) -> None:
-        """写入缓存。
-
-        - ``ttl=None`` 时根据键中的 period 自动选择 TTL。
-        - ``period=='tick'`` 或 ``ttl <= 0`` 时不缓存。
-        """
+        """写入缓存。"""
         if ttl is None:
             period = self._period_from_key(key)
             if period == 'tick':
@@ -2843,16 +2295,7 @@ class FormulaCache:
         self.clear_all()
 
     def invalidate_on_minute_close(self, symbol: str, minute: int) -> int:
-        """分钟闭合时，失效指定标的在该分钟下的分钟级缓存。
-
-        会删除以下键：
-        - 以 ``{symbol}:{minute}:`` 开头的键；
-        - 包含 ``:{minute}:`` 分钟标签的键；
-        - 旧格式键中 symbol 匹配且 period 属于分钟周期的键。
-
-        Returns:
-            被失效的条目数。
-        """
+        """分钟闭合时，失效指定标的在该分钟下的分钟级缓存。"""
         prefix = f"{symbol}:{minute}:"
         tag = f":{minute}:"
         removed = 0

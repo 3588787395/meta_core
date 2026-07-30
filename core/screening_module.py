@@ -44,7 +44,7 @@ import logging
 import operator
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple, Type
 
 try:
     from .schemas import ConfigLoadError
@@ -61,7 +61,7 @@ from .domain import (
     MarketScalarEvaluator,
     SetOperationEvaluator,
 )
-from .event_bus import _event_handler, EventBus, FormulaEvaluated, PoolLoaded, StockFiltered
+from .event_bus import _BaseModule, _event_handler, EventBus, FormulaEvaluated, PoolLoaded, StockFiltered
 from .table_engine import load_config_table
 
 # 表驱动：noperate 操作符规则配置（config/tdx_noperate_rules.json）
@@ -109,14 +109,7 @@ _BASE_BAR_FIELDS = frozenset({"close", "open", "high", "low", "volume", "amount"
 
 
 def _run_async(coro_factory):
-    """同步运行异步协程，兼容已有事件循环的场景。
-
-    FormulaRouter.eval_batch / MarketDataPort.* 均为 async，而评估器为同步入口，
-    通过此桥接调用。当主线程已有运行中的事件循环时，在新线程中创建独立 loop 执行。
-
-    Args:
-        coro_factory: 返回协程的可调用对象（避免协程在错误线程中创建）。
-    """
+    """同步运行异步协程，兼容已有事件循环的场景。"""
     try:
         asyncio.get_running_loop()
         # 已有运行中的事件循环，在新线程中运行以避免嵌套
@@ -217,13 +210,7 @@ def _get_float(data, *fields) -> float | None:
 
 
 def _extract_indicator_scalar(value) -> float | None:
-    """从公式求值结果中提取标量值。
-
-    nset=0 技术指标求值可能返回：
-        - 标量值（单输出，如 15.5）
-        - dict（多输出变量，如 {"DIF": 1.2, "DEA": 0.8}，取第一个变量的值）
-        - list/tuple（时间序列，取末值）
-    """
+    """从公式求值结果中提取标量值。"""
     if value is None:
         return None
     if isinstance(value, bool):
@@ -328,9 +315,6 @@ def eval_formula_nset(action_inputs: dict, nset_cfg: dict) -> list[str]:
         # 技术指标：公式求值返回标量值，应用 noperate 操作符与 fsecond 比较
         return _eval_nset0_result(result, noperate, fsecond, eval_field=eval_field)
     # 条件选股/专家系统：公式求值返回 0/1 或 True/False
-    # I87：eval_batch 契约收敛——真实 FormulaRouter.eval_batch 返回 {symbol: value}，
-    # 不含 success 元数据键（I86 统一失败路径到 raise RuntimeError）。测试 mock 同步收敛。
-    # bool 是 int 子类，v>0 自然区分 True/False。
     return [s for s, v in result.items()
             if isinstance(v, (int, float)) and v > 0]
 
@@ -459,16 +443,7 @@ def _eval_nset0_result(result: dict, noperate: int, fsecond: float,
 
 
 def eval_scalar_nset(action_inputs: dict, nset_cfg: dict, prev_lookup: Callable[[str], float | None] = None) -> list[str]:
-    """nset=3/4 标量评估通用入口：通过 MarketDataPort 接口获取标量。
-
-    差异由 nset_cfg 字段驱动：
-        - nset_cfg.field_table：选择字段表（nset_3_financial / nset_4_market）
-        - nset_cfg.data_method：选择数据获取方法
-        - nset_cfg.supports_derived：是否处理派生字段
-        - nset_cfg.supports_bar_fallback：是否回退 current_bar_data
-        - nset_cfg.apply_field_map：是否应用 stock_info_field_map 映射
-        - nset_cfg.nset：日志前缀
-    """
+    """nset=3/4 标量评估通用入口：通过 MarketDataPort 接口获取标量。"""
     nset = nset_cfg.get("nset", 0)
     func = action_inputs.get("src_params", {}).get("tdx_func", {})
     ntjindexno = int(func.get("ntjindexno", 0))
@@ -636,9 +611,6 @@ def eval_tdx_condition(dispatch_key: str, action_inputs: dict) -> list[str]:
 
 # ════════════════════════════════════════════════════════════
 # 表驱动：nset → 筛选策略函数（无 if/elif 链）
-# 每个函数接收 (filter_spec, stock_results, current_code, evaluator)，
-# 返回 passed 代码列表或 None（无法评估）。rejected 由 _evaluate_filter 统一计算。
-# ════════════════════════════════════════════════════════════
 
 
 def _filter_indicator(
@@ -647,17 +619,7 @@ def _filter_indicator(
     current_code: str,
     evaluator: Evaluator,
 ) -> Optional[List[str]]:
-    """nset=0：技术指标评估，从公式结果提取标量并用 noperate 比较。
-
-    优先按 builtin_formulas.json 的 eval_field 提取信号输出变量
-    （如 CROSS_J_K / CROSS_DIF_DEA），无 eval_field 时回退到
-    _extract_indicator_scalar 取首值。委托 _apply_noperate_mode 执行
-    rank/inflection/compare 三模式分派。
-
-    CROSS 信号公式（eval_field 以 CROSS_ 开头）特殊处理：CROSS 函数
-    返回 0/1，noperate 任意值时均按 truthy 判断（>0 即通过），
-    避免 noperate=0(等于) 误将 CROSS=0 判为通过。
-    """
+    """nset=0：技术指标评估，从公式结果提取标量并用 noperate 比较。"""
     if not stock_results:
         return None
     # 根据 formula_ref 查 builtin_formulas.json 获取 eval_field
@@ -685,10 +647,7 @@ def _filter_truthy(
     current_code: str,
     evaluator: Evaluator,
 ) -> Optional[List[str]]:
-    """nset=1（条件选股公式）/ nset=2（专家系统公式）：公式求值返回 0/1 或 True/False，检查真值。
-
-    bool 是 int 子类，v>0 自然区分 True/False（与 core.evaluators.eval_formula_nset 一致）。
-    """
+    """nset=1（条件选股公式）/ nset=2（专家系统公式）：公式求值返回 0/1 或 True/False，检查真值。"""
     if not stock_results:
         return None
     return [c for c, v in stock_results.items()
@@ -701,11 +660,7 @@ def _filter_scalar(
     current_code: str,
     evaluator: Evaluator,
 ) -> Optional[List[str]]:
-    """nset=3（最新财务标量）/ nset=4（实时行情标量）：用 noperate 比较标量值。
-
-    委托 core.evaluators._apply_noperate_mode 执行 rank/compare 分派；
-    nset_label 由 filter_spec.nset 派生，对 3/4 自动正确。
-    """
+    """nset=3（最新财务标量）/ nset=4（实时行情标量）：用 noperate 比较标量值。"""
     if not stock_results:
         return None
     scalars: Dict[str, float] = {}
@@ -725,11 +680,7 @@ def _filter_set_operation(
     current_code: str,
     evaluator: Evaluator,
 ) -> Optional[List[str]]:
-    """nset=5：集合运算，纯集合运算（并/差/交），不依赖公式结果。
-
-    集合运算需要多个边的源池数据，事件驱动模式下暂返回当前结果集，
-    完整集合运算由 Execution 模块在边执行时处理（与原 edge_executor._eval_set_op_path 共存）。
-    """
+    """nset=5：集合运算，纯集合运算（并/差/交），不依赖公式结果。"""
     return list(stock_results.keys()) if stock_results else (
         [current_code] if current_code else []
     )
@@ -746,27 +697,8 @@ _NSET_FILTER_HANDLERS: Dict[int, Callable[..., Optional[List[str]]]] = {
 }
 
 
-class ScreeningModule:
-    """Screening 模块：股票筛选（强弱对比）。仅与 EventBus 交互。
-
-    订阅 FormulaEvaluated 事件，按 nset×noperate 矩阵筛选股票，
-    发布 StockFiltered 事件（含 passed/rejected 列表）。
-
-    属性（实例级，≤ 5）:
-      - _bus: EventBus
-      - _config: 配置 dict
-      - _dispatch_cfg: dispatch.json 的 nset_dispatch 配置
-      - _formula_results: 公式结果缓存 (formula_ref, bar_hash) → {code: result}
-      - _edge_filter_specs: 边的 filter_spec (eid → FilterSpec)
-
-    方法（≤ 6）:
-      - __init__
-      - _register_subscribers
-      - _on_formula_evaluated
-      - _evaluate_filter
-      - register_edge_filter
-      - _resolve_evaluator
-    """
+class ScreeningModule(_BaseModule):
+    """Screening 模块：股票筛选（强弱对比）。仅与 EventBus 交互。"""
 
     # 表驱动：nset → Evaluator 子类（无 if/elif 链）
     # 使用 core.domain.evaluators 的 6 种 Evaluator 子类作为评估器层次
@@ -790,23 +722,16 @@ class ScreeningModule:
         self._edge_filter_specs: Dict[str, FilterSpec] = {}
         # 边的 passed 缓存：eid → set(code)，用于增量筛选
         self._edge_passed_cache: Dict[str, Set[str]] = {}
-        # 注册事件订阅
-        self._register_subscribers()
+        self.register_subscribers()
 
-    def _register_subscribers(self) -> None:
-        """注册事件订阅：FormulaEvaluated → _on_formula_evaluated。"""
-        self._bus.subscribe(FormulaEvaluated, self._on_formula_evaluated)
-        self._bus.subscribe(PoolLoaded, self._on_pool_loaded)
+    _SUBSCRIPTIONS: ClassVar[List[Tuple[type, str]]] = [
+        (FormulaEvaluated, "_on_formula_evaluated"),
+        (PoolLoaded, "_on_pool_loaded"),
+    ]
 
     @_event_handler("_on_pool_loaded")
     def _on_pool_loaded(self, event: PoolLoaded) -> None:
-        """收到 PoolLoaded 时，从 pool_config.edges 提取 formula_ref 编译 filter_spec。
-
-        按"模块间禁止相互引用"约束，ScreeningModule 自行从 edges 提取
-        formula_ref 并构建简化 FilterSpec，避免依赖 ExecutionModule.Compiler。
-        支持三种 condition_type：INDICATOR（含 formula_ref）、INTERSECTION、
-        以及无 formula_ref 的无条件边（pass_through）。
-        """
+        """收到 PoolLoaded 时，从 pool_config.edges 提取 formula_ref 编译 filter_spec。"""
         pool_config = event.pool_config or {}
         edges = pool_config.get("edges", []) if isinstance(pool_config, dict) else []
         # 清空旧 spec，避免重复池配置残留
@@ -854,10 +779,7 @@ class ScreeningModule:
         )
 
     def _load_dispatch_config(self) -> Dict[str, Any]:
-        """加载 config/dispatch.json 的 nset_dispatch 配置。
-
-        fail-tolerant：加载失败时返回空 dict 并 warning，不阻断模块初始化。
-        """
+        """加载 config/dispatch.json 的 nset_dispatch 配置。"""
         try:
             data = load_config_table("dispatch")
             return data.get("nset_dispatch", {})
@@ -866,12 +788,7 @@ class ScreeningModule:
             return {}
 
     def register_edge_filter(self, eid: str, filter_spec: FilterSpec) -> None:
-        """注册边的 filter_spec（供 Execution 模块调用）。
-
-        Args:
-            eid: 边 ID。
-            filter_spec: 边的强弱筛选规格（含 nset/noperate/formula_ref/fsecond）。
-        """
+        """注册边的 filter_spec（供 Execution 模块调用）。"""
         self._edge_filter_specs[eid] = filter_spec
 
     def unregister_edge_filter(self, eid: str) -> None:
@@ -879,28 +796,13 @@ class ScreeningModule:
         self._edge_filter_specs.pop(eid, None)
 
     def _resolve_evaluator(self, nset: int) -> Evaluator:
-        """根据 nset 返回对应 Evaluator 子类实例（表驱动，无 if/elif）。
-
-        Args:
-            nset: 0-5，对应 6 种 DZH 评估器类型。
-
-        Returns:
-            Evaluator 子类实例；未知 nset 回退至 IndicatorEvaluator。
-        """
+        """根据 nset 返回对应 Evaluator 子类实例（表驱动，无 if/elif）。"""
         evaluator_cls = self._NSET_TO_EVALUATOR.get(nset, IndicatorEvaluator)
         return evaluator_cls()
 
     @_event_handler("_on_formula_evaluated")
     def _on_formula_evaluated(self, event: FormulaEvaluated) -> None:
-        """处理 FormulaEvaluated 事件：per-code 缓存并触发依赖边的增量筛选。
-
-        缓存策略：(formula_ref, code) → result。
-        增量策略：仅对事件携带的 code（或 result 中的 codes）重新评估，
-        其余股票沿用 _edge_passed_cache 中缓存的 passed 集合。
-
-        异常隔离：由 ``_event_handler`` 装饰器统一捕获 + ``logger.warning``，
-        保证事件总线与其他订阅者不受影响。
-        """
+        """处理 FormulaEvaluated 事件：per-code 缓存并触发依赖边的增量筛选。"""
         # 确定本次变化的 code 集合
         changed_codes: List[str] = []
         if event.code:
@@ -933,15 +835,7 @@ class ScreeningModule:
         filter_spec: FilterSpec,
         changed_codes: Optional[List[str]] = None,
     ) -> Tuple[Optional[List[str]], List[str]]:
-        """执行筛选：按 nset 表驱动分派，支持增量筛选。
-
-        changed_codes:
-          - None：全量评估（首次/无缓存）。
-          - []：缓存命中则直接返回，否则全量。
-          - 非空：仅对 changed_codes 中的股票重新评估，其余沿用缓存。
-
-        增量合并公式：passed_set = (cached_passed - changed_set) | newly_passed
-        """
+        """执行筛选：按 nset 表驱动分派，支持增量筛选。"""
         try:
             formula_ref = filter_spec.formula_ref
             # 收集当前公式已缓存的所有 code（作为候选全集）

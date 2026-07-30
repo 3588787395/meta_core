@@ -38,6 +38,11 @@ def safe_float(val, default=0.0):
     return safe_cast(val, float, default)
 
 
+def safe_str(val, default=""):
+    """安全转换值为字符串，失败时返回默认值。"""
+    return safe_cast(val, str, default)
+
+
 # ============================================================
 # DZH 公式解码（原 core/import_export_module / services/providers 副本）
 # ============================================================

@@ -400,3 +400,35 @@ class TestSimulationSpeed:
         rmm.step_simulation(step_idx=0)
         # 2x → interval = 0.5 秒
         assert rmm.virtual_clock - clock_before == pytest.approx(0.5)
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 2 E1/E2 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 E1/E2 EventDriver heapq 调度收敛回归（mode 切换路径）。"""
+
+    def test_no_time_sleep_interval_in_runtime(self):
+        """runtime_mode_module 不含 time.sleep(interval) replay 步进轮询（E1 heapq）。"""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "runtime_mode_module.py").read_text(encoding="utf-8")
+        count = len(re.findall(r"time\.sleep\(interval\)", src))
+        assert count == 0, \
+            f"runtime_mode_module 不应含 time.sleep(interval)（E1 heapq 调度），实际 {count} 处"
+
+    def test_no_while_flag_polling(self):
+        """runtime_mode_module 不含 while self._run / while self._sim_auto_step 标志轮询（E1/E2 heapq）。"""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "runtime_mode_module.py").read_text(encoding="utf-8")
+        count = len(re.findall(r"while self\._run\b|while self\._sim_auto_step\b", src))
+        assert count == 0, \
+            f"runtime_mode_module 不应含 _run/_sim_auto_step 标志轮询，实际 {count} 处"
+
+    def test_timed_event_spec_registered(self):
+        """runtime_mode_module 引用 TimedEventSpec 注册步进（E1/E2 heapq 调度）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "runtime_mode_module.py").read_text(encoding="utf-8")
+        assert "TimedEventSpec" in src, \
+            "runtime_mode_module 应引用 TimedEventSpec（E1/E2 heapq 步进事件规格）"

@@ -285,3 +285,43 @@ class TestSessionIsolation:
                 ws_count += 1
         assert sse_is_get, "SSE 端点未找到或非 GET"
         assert ws_count >= 3, f"应有 ≥3 个 WebSocket 路由，实际 {ws_count} 个"
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 2 E4 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 E4 SSE asyncio.Queue + E6 前端 setInterval 收敛回归。"""
+
+    def test_app_uses_asyncio_queue_for_sse(self):
+        """app.py events_stream 使用 asyncio.Queue（E4 替代 50ms 轮询）。"""
+        from pathlib import Path
+        src = Path(__file__).resolve().parent.parent.joinpath("app.py").read_text(encoding="utf-8")
+        assert "async def events_stream" in src, \
+            "app.py 应含 async def events_stream 函数（SSE 端点）"
+        assert "asyncio.Queue" in src, \
+            "events_stream 应使用 asyncio.Queue（E4 阻塞等待，替代 50ms 轮询）"
+
+    def test_no_asyncio_sleep_005_in_app(self):
+        """app.py 不含 asyncio.sleep(0.05) 50ms SSE 轮询（E4 已改 asyncio.Queue）。"""
+        import re
+        from pathlib import Path
+        src = Path(__file__).resolve().parent.parent.joinpath("app.py").read_text(encoding="utf-8")
+        count = len(re.findall(r"asyncio\.sleep\(0\.05\)", src))
+        assert count == 0, \
+            f"app.py 不应含 asyncio.sleep(0.05) SSE 轮询（E4 已改 asyncio.Queue），实际 {count} 处"
+
+    def test_no_setinterval_fetch_in_web_js(self):
+        """web/js/*.js 不含 setInterval.*fetch 前端轮询（E6 已改 SSE/WS 订阅）。"""
+        import re
+        from pathlib import Path
+        js_dir = Path(__file__).resolve().parent.parent / "web" / "js"
+        total = 0
+        for js in js_dir.glob("*.js"):
+            try:
+                src = js.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            total += len(re.findall(r"setInterval.*fetch", src))
+        assert total == 0, \
+            f"web/js/*.js 不应含 setInterval.*fetch 前端轮询（E6 已改 SSE/WS），实际 {total} 处"

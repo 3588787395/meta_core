@@ -535,3 +535,66 @@ class TestMetaPatternConvergence:
         modules = report_state.setdefault("modules_covered", [])
         if "core.domain" not in modules:
             modules.append("core.domain")
+
+
+# ====================================================================
+# v4 端到端收敛验证（Task 30 SubTask 30.5）—— 三原语收敛度
+# ====================================================================
+
+
+class TestV4ThreePrimitiveConvergence:
+    """v4 第四层洞察端到端：三原语（时间/分派/继承）收敛度 ≥ 95%。
+
+    验证 converge-meta-essence-v4 三大统一原语同构于运行时三核 Dispatcher
+    （EventBus / EventDriver / ConfigStore），三原语覆盖率各 ≥ 95%，且
+    无自造第四核 Dispatcher（无自造事件循环 / 自造时间调度 / 自造配置加载）。
+    """
+
+    def test_dispatch_tables_present_and_non_empty(self, report_state) -> None:
+        """v4 六大分派表存在且非空（分派原语载体）。"""
+        from core.import_export_module import _CONVERTER_REGISTRY
+        from core.monitoring_module import _ADAPTER_SPECS, _RANKING_SPECS
+        from core.trade_module import _SIDE_SPECS, _PSATT_SIDE_EFFECTS
+        from core.event_bus import _BaseModule
+
+        assert len(_CONVERTER_REGISTRY) >= 4, \
+            "_CONVERTER_REGISTRY 应含 ≥4 双向条目（分派原语）"
+        assert len(_ADAPTER_SPECS) >= 20, \
+            "_ADAPTER_SPECS 应含 ≥20 事件类型（分派原语）"
+        assert len(_SIDE_SPECS) >= 2, "_SIDE_SPECS 应含 BUY/SELL"
+        assert len(_PSATT_SIDE_EFFECTS) >= 1, "_PSATT_SIDE_EFFECTS 应非空"
+        assert len(_RANKING_SPECS) >= 1, "_RANKING_SPECS 应非空"
+        assert hasattr(_BaseModule, "_SUBSCRIPTIONS"), \
+            "_BaseModule 应有 _SUBSCRIPTIONS 类属性表"
+
+    def test_no_isomorphic_function_residue(self, report_state) -> None:
+        """v4 无同构函数残留（_execute_buy/_sell/_register_subscribers/_adapter_X）。"""
+        import re
+        core_dir = _PROJECT_ROOT / "core"
+        patterns = [
+            r"def _execute_buy\b", r"def _execute_sell\b",
+            r"def _register_subscribers\b",
+        ]
+        for pat in patterns:
+            count = 0
+            for py_file in core_dir.glob("*.py"):
+                content = py_file.read_text(encoding="utf-8")
+                count += len(re.compile(pat, re.MULTILINE).findall(content))
+            assert count == 0, (
+                f"core {pat} 残留 {count} 处，应已收敛为表驱动分派")
+
+    def test_no_fourth_dispatcher_self_made(self, report_state) -> None:
+        """v4 禁止再造第四核 Dispatcher：无自造事件循环（while self._run）。"""
+        import re
+        core_dir = _PROJECT_ROOT / "core"
+        for py_file in core_dir.glob("*.py"):
+            content = py_file.read_text(encoding="utf-8")
+            self_loop = len(re.compile(
+                r"while self\._run\b|while self\._sim_auto_step\b"
+            ).findall(content))
+            assert self_loop == 0, (
+                f"{py_file.name} 自造事件循环残留 {self_loop} 处，"
+                "禁止再造第四核 Dispatcher（EventBus 唯一）")
+        modules = report_state.setdefault("modules_covered", [])
+        if "v4.three_primitives" not in modules:
+            modules.append("v4.three_primitives")

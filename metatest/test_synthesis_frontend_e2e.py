@@ -27,9 +27,11 @@ import pytest
 
 
 # 前端 E2E 测试需要 Playwright + 运行中的 web 服务器。
-# 通过 fixture（playwright_browser / web_server_url）在环境不可用时 skip，
-# 不在此处强制 skip，使环境就绪时测试可自动运行。
-pytestmark = pytest.mark.importorskip("playwright")
+# 通过 fixture（playwright_browser / web_server_url）在环境不可用时 skip
+# （conftest.py:playwright_browser 调用 pytest.importorskip("playwright")），
+# 使无前端环境下的纯后端测试不受影响。
+# 注：TestV4FrontendEventDrivenConvergence（静态源码收敛验证）无需 Playwright，
+# 不依赖上述 fixture，始终运行。
 
 
 class TestFrontendE2E:
@@ -216,3 +218,121 @@ class TestFrontendE2E:
             report_state.get("frontend_e2e_passed", 0) + 1
         report_state["frontend_e2e_total"] = \
             report_state.get("frontend_e2e_total", 0) + 1
+
+
+# ====================================================================
+# v4 端到端收敛验证（Task 30 SubTask 30.6）—— 前端事件驱动收敛（静态）
+# ====================================================================
+#
+# 以下静态测试无需 Playwright 浏览器，验证 v4 变更 E6 前端收敛不变量：
+#   - 4 处 setInterval 轮询已消除（setInterval.*_poll / .*reload /
+#     .*highlight-events / .*syncTimerQueue 零匹配）
+#   - SSE / WS 订阅真实存在（EventSource / WebSocket）
+#   - 一次性初始态 fetch 合法（非 setInterval 轮询）
+#
+# 注意：本静态类不递增 ``frontend_e2e_passed``——真实浏览器 E2E 通过数仅由
+# 上方 Playwright 测试用例填充（环境缺失计 frontend_e2e_passed=0，禁止信用分）。
+
+
+class TestV4FrontendEventDrivenConvergence:
+    """v4 变更 E6 静态端到端：前端 4 处 setInterval 轮询改为 SSE/WS 订阅。
+
+    验证 ``web/js/*.js`` 中 4 处轮询模式（RuntimeState._poll / _startHotReload /
+    HighlightManager.startPolling / syncTimerQueue）已消除，状态更新由
+    ``EventSource('/api/events/stream')`` SSE + ``WebSocket`` 推送驱动。
+    """
+
+    def test_no_setinterval_poll_in_app_js(self, report_state) -> None:
+        """app.js 无 setInterval.*_poll 轮询（RuntimeState._poll 已删除）。"""
+        import re
+        from pathlib import Path
+        app_js = Path(__file__).resolve().parent.parent / "web" / "js" / "app.js"
+        content = app_js.read_text(encoding="utf-8")
+        poll_n = len(re.compile(r"setInterval\s*\([^)]*_poll").findall(content))
+        assert poll_n == 0, (
+            f"app.js setInterval.*_poll 轮询残留 {poll_n} 处，"
+            "应改由 SSE 事件推送")
+
+    def test_no_setinterval_reload_in_ui_js(self, report_state) -> None:
+        """ui.js 无 setInterval.*reload 轮询（_startHotReload 已删除）。"""
+        import re
+        from pathlib import Path
+        ui_js = Path(__file__).resolve().parent.parent / "web" / "js" / "ui.js"
+        content = ui_js.read_text(encoding="utf-8")
+        reload_n = len(re.compile(r"setInterval\s*\([^)]*\/reload").findall(content))
+        assert reload_n == 0, (
+            f"ui.js setInterval.*reload 轮询残留 {reload_n} 处，"
+            "应改由 /api/config/ws WebSocket 推送")
+
+    def test_no_setinterval_highlight_events_in_ui_js(self, report_state) -> None:
+        """ui.js 无 setInterval.*highlight-events 轮询（HighlightManager 已改 WS）。"""
+        import re
+        from pathlib import Path
+        ui_js = Path(__file__).resolve().parent.parent / "web" / "js" / "ui.js"
+        content = ui_js.read_text(encoding="utf-8")
+        hl_n = len(re.compile(
+            r"setInterval\s*\([^)]*\/api\/highlight-events").findall(content))
+        assert hl_n == 0, (
+            f"ui.js setInterval.*highlight-events 轮询残留 {hl_n} 处，"
+            "应改由 /ws/highlight WebSocket 推送")
+
+    def test_no_setinterval_sync_timer_queue_in_event_panel(self, report_state) -> None:
+        """event-panel.js 无 setInterval.*syncTimerQueue 轮询（已改 SSE 推送）。"""
+        import re
+        from pathlib import Path
+        ep_js = (Path(__file__).resolve().parent.parent
+                 / "web" / "js" / "event-panel.js")
+        content = ep_js.read_text(encoding="utf-8")
+        tq_n = len(re.compile(
+            r"setInterval\s*\([^)]*syncTimerQueue").findall(content))
+        assert tq_n == 0, (
+            f"event-panel.js setInterval.*syncTimerQueue 轮询残留 {tq_n} 处，"
+            "应改由 SSE 流 TimerQueued/TimerFired 事件更新")
+
+    def test_sse_event_source_present(self, report_state) -> None:
+        """event-panel.js 含 EventSource('/api/events/stream') SSE 订阅（时间原语）。"""
+        from pathlib import Path
+        ep_js = (Path(__file__).resolve().parent.parent
+                 / "web" / "js" / "event-panel.js")
+        content = ep_js.read_text(encoding="utf-8")
+        assert "new EventSource" in content, \
+            "event-panel.js 应含 new EventSource（SSE 订阅，时间原语）"
+        assert "/api/events/stream" in content, \
+            "event-panel.js 应订阅 /api/events/stream SSE 端点"
+
+    def test_websocket_subscription_present(self, report_state) -> None:
+        """app.js/ui.js 含 WebSocket 订阅（事件驱动状态更新，时间原语）。"""
+        from pathlib import Path
+        web_dir = Path(__file__).resolve().parent.parent / "web" / "js"
+        ws_found = False
+        for js_file in web_dir.glob("*.js"):
+            content = js_file.read_text(encoding="utf-8")
+            if "new WebSocket" in content:
+                ws_found = True
+                break
+        assert ws_found, (
+            "web/js/*.js 应含 new WebSocket 订阅（WS 推送，时间原语）")
+
+    def test_runtime_state_fetch_is_one_time_not_polling(self, report_state) -> None:
+        """app.js fetch('/api/state/runtime') 为一次性初始态拉取（非 setInterval 轮询）。"""
+        import re
+        from pathlib import Path
+        app_js = Path(__file__).resolve().parent.parent / "web" / "js" / "app.js"
+        content = app_js.read_text(encoding="utf-8")
+        # fetch('/api/state/runtime') 应存在（初始态），但不应在 setInterval 内
+        assert "fetch('/api/state/runtime')" in content or \
+               'fetch("/api/state/runtime")' in content, \
+            "app.js 应含 fetch('/api/state/runtime') 一次性初始态拉取"
+        # 确认不在 setInterval 轮询上下文（一次性拉取 + SSE 后续更新）
+        poll_ctx = len(re.compile(
+            r"setInterval\s*\([^)]*fetch\([^)]*state/runtime"
+        ).findall(content))
+        assert poll_ctx == 0, (
+            f"fetch('/api/state/runtime') 在 setInterval 轮询上下文 {poll_ctx} 处，"
+            "应为一次性初始态拉取 + SSE 后续推送")
+        # 注释应标注「非轮询」或「SSE」
+        assert "非轮询" in content or "SSE" in content, \
+            "app.js 应注释标注一次性拉取（非轮询）+ SSE 后续推送"
+        modules = report_state.setdefault("modules_covered", [])
+        if "web.js.event_driven" not in modules:
+            modules.append("web.js.event_driven")

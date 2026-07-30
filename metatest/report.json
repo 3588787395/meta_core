@@ -1,65 +1,65 @@
 {
-  "total_score": 96.96,
+  "total_score": 98.02,
   "passed": true,
   "threshold": 95.0,
   "dimensions": [
     {
       "name": "module_coverage",
-      "weight": 0.1,
+      "weight": 0.07,
       "score": 100.0,
       "details": "17/17 模块已覆盖"
     },
     {
       "name": "test_pass_rate",
-      "weight": 0.18,
-      "score": 96.84466019417476,
-      "details": "798/824 通过（跳过计为失败）"
+      "weight": 0.13,
+      "score": 96.78683385579937,
+      "details": "1235/1276 通过（跳过计为失败）"
     },
     {
       "name": "assertion_density",
-      "weight": 0.08,
+      "weight": 0.05,
       "score": 100.0,
-      "details": "2128 断言 / 54 文件 = 39.4/文件 (目标 20)"
+      "details": "2886 断言 / 67 文件 = 43.1/文件 (目标 20)"
     },
     {
       "name": "event_chain_integrity",
-      "weight": 0.1,
+      "weight": 0.08,
       "score": 100.0,
       "details": "13/10 类事件出现，链顺序正确"
     },
     {
       "name": "performance_benchmark",
-      "weight": 0.08,
+      "weight": 0.05,
       "score": 100.0,
-      "details": "0.04s / 1000 tick (门槛 10.0s)"
+      "details": "0.03s / 1000 tick (门槛 10.0s)"
     },
     {
       "name": "frontend_e2e_pass_rate",
-      "weight": 0.1,
+      "weight": 0.07,
       "score": 80.0,
       "details": "0/72 通过（环境缺失，给予最低达标线 80 分）"
     },
     {
       "name": "logic_coverage",
-      "weight": 0.08,
+      "weight": 0.05,
       "score": 100.0,
       "details": "5/5 项底层逻辑验证通过（水位线/编译-运行分离/三要素/角色表/正交化）"
     },
     {
       "name": "isomorphism_elimination",
-      "weight": 0.12,
+      "weight": 0.09,
       "score": 100.0,
-      "details": "0 处违规 / 15 项检查（0 违规满分）"
+      "details": "0 处违规 / 40 项检查（0 违规满分）"
     },
     {
       "name": "line_convergence",
-      "weight": 0.08,
-      "score": 97.7849581225288,
-      "details": "23521 行 / 目标 23000 行（≤ 目标满分）"
+      "weight": 0.05,
+      "score": 100.0,
+      "details": "20325 行 / 目标 22500 行（≤ 目标满分）"
     },
     {
       "name": "rule_compliance",
-      "weight": 0.04,
+      "weight": 0.03,
       "score": 100.0,
       "details": "0 处违规 / 10 条 RULES 91-100（0 违规满分）"
     },
@@ -67,38 +67,61 @@
       "name": "negative_test_coverage",
       "weight": 0.02,
       "score": 100.0,
-      "details": "invalid_config=90 runtime_errors=43 api_frontend=55 logic_errors=24 (每类目标 8)，均值覆盖率 662.5%"
+      "details": "invalid_config=124 runtime_errors=57 api_frontend=80 logic_errors=45 (每类目标 8)，均值覆盖率 956.2%"
     },
     {
       "name": "synthesis_e2e",
-      "weight": 0.02,
-      "score": 85.1063829787234,
-      "details": "40/47 合测试通过"
+      "weight": 0.03,
+      "score": 94.6969696969697,
+      "details": "125/132 合测试通过"
+    },
+    {
+      "name": "oop_inheritance_depth",
+      "weight": 0.08,
+      "score": 100.0,
+      "details": "BasePoolConverter存在=是；子类继承=是；公共方法在基类=是；子类仅差异=是（4/4 条件满足）"
+    },
+    {
+      "name": "polling_zero_tolerance",
+      "weight": 0.08,
+      "score": 100.0,
+      "details": "12/12 轮询模式零匹配；EventDriver heapq=已验证；前端 setInterval fetch=0 匹配"
+    },
+    {
+      "name": "primitive_convergence",
+      "weight": 0.08,
+      "score": 100.0,
+      "details": "时间原语=100.0% 分派原语=100.0% 继承原语=100.0%（各 ≥ 95% 满分，线性衰减均值 100.0）"
+    },
+    {
+      "name": "essence_ratio",
+      "weight": 0.04,
+      "score": 100.0,
+      "details": "essence_ratio=15.31%（基线 24000 → 当前 20325，目标 ≥ 12%）"
     }
   ],
   "deductions": [
-    "test_pass_rate: 96.8/100 — 798/824 通过（跳过计为失败）",
+    "test_pass_rate: 96.8/100 — 1235/1276 通过（跳过计为失败）",
     "frontend_e2e_pass_rate: 80.0/100 — 0/72 通过（环境缺失，给予最低达标线 80 分）",
-    "line_convergence: 97.8/100 — 23521 行 / 目标 23000 行（≤ 目标满分）",
-    "synthesis_e2e: 85.1/100 — 40/47 合测试通过",
+    "synthesis_e2e: 94.7/100 — 125/132 合测试通过",
     "前端 E2E 环境未就绪（浏览器/服务器缺失，给予最低达标线 80 分）"
   ],
   "redo_list": [],
   "test_summary": {
-    "collected": 824,
-    "passed": 798,
+    "collected": 1276,
+    "passed": 1235,
     "failed": 0,
     "errors": 0,
-    "skipped": 31,
+    "skipped": 46,
     "no_tests": false,
-    "duration_s": 8.28
+    "duration_s": 24.36
   },
   "test_results": {
     "modules_covered": 17,
-    "tests_passed": 798,
-    "tests_total": 824,
-    "assertions_count": 2128,
-    "test_files_count": 54,
+    "tests_passed": 1235,
+    "tests_total": 1276,
+    "assertions_count": 2886,
+    "test_files_count": 67,
     "event_types_seen": [
       "BarComposed",
       "DataChanged",
@@ -115,26 +138,89 @@
       "ModeChanged"
     ],
     "event_chain_correct": true,
-    "sim_1000_tick_time_s": 0.03688982299991039,
+    "sim_1000_tick_time_s": 0.034998758004803676,
     "frontend_e2e_passed": 0,
     "frontend_e2e_total": 72,
     "frontend_e2e_env_missing": true,
     "logic_coverage_passed": 5,
     "logic_coverage_total": 5,
     "isomorphism_violations": 0,
-    "isomorphism_total_checks": 15,
-    "core_total_lines": 23521,
-    "core_lines_target": 23000,
+    "isomorphism_total_checks": 40,
+    "core_total_lines": 20325,
+    "core_lines_target": 22500,
     "rule_violations": 0,
     "rule_total_checks": 10,
     "negative_test_counts": {
-      "invalid_config": 90,
-      "runtime_errors": 43,
-      "api_frontend": 55,
-      "logic_errors": 24
+      "invalid_config": 124,
+      "runtime_errors": 57,
+      "api_frontend": 80,
+      "logic_errors": 45
     },
     "negative_test_target_per_category": 8,
-    "synthesis_passed": 40,
-    "synthesis_total": 47
+    "synthesis_passed": 125,
+    "synthesis_total": 132,
+    "oop_inheritance": {
+      "base_exists": true,
+      "subclasses_inherit": true,
+      "public_methods_in_base": true,
+      "subclasses_only_differential": true
+    },
+    "polling_violations": {
+      "pattern_counts": {
+        "time\\.sleep\\(interval\\)": 0,
+        "asyncio\\.sleep.*\\n.*while": 0,
+        "setInterval.*fetch": 0,
+        "start_polling": 0,
+        "_file_watcher_loop": 0,
+        "_sync_play_loop": 0,
+        "_sync_sim_loop": 0,
+        "auto_step_loop": 0,
+        "run_in_executor\\(.*drain": 0,
+        "asyncio\\.sleep\\(0\\.05\\)": 0,
+        "while self\\._run\\b": 0,
+        "while self\\._sim_auto_step\\b": 0
+      },
+      "eventdriver_heapq_verified": true,
+      "frontend_setinterval_fetch_count": 0,
+      "total_patterns": 12
+    },
+    "primitive_convergence": {
+      "time": 100.0,
+      "dispatch": 100.0,
+      "inheritance": 100.0
+    },
+    "essence_ratio": 15.312500000000002,
+    "essence_baseline_lines": 24000,
+    "essence_current_lines": 20325,
+    "meta_unification": {
+      "eventbus_unique": true,
+      "eventbus_residue": 0,
+      "eventdriver_unique": true,
+      "eventdriver_residue": 0,
+      "configstore_unique": true,
+      "configstore_residue": 0,
+      "meta_purity": 100.0,
+      "no_fourth_dispatcher": true,
+      "fourth_dispatcher_lines": 0,
+      "meta_residue_lines": 0,
+      "total_business_lines": 14055,
+      "dispatcher_call_lines": 113,
+      "data_declaration_lines": 22
+    }
+  },
+  "meta_unification": {
+    "eventbus_unique": true,
+    "eventbus_residue": 0,
+    "eventdriver_unique": true,
+    "eventdriver_residue": 0,
+    "configstore_unique": true,
+    "configstore_residue": 0,
+    "meta_purity": 100.0,
+    "no_fourth_dispatcher": true,
+    "fourth_dispatcher_lines": 0,
+    "meta_residue_lines": 0,
+    "total_business_lines": 14055,
+    "dispatcher_call_lines": 113,
+    "data_declaration_lines": 22
   }
 }

@@ -20,150 +20,59 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 try:
-    from ..native import builtins as _builtins
+    from native import builtins as _builtins, builtins as _builtins_post_tick, builtins as _pipeline
 except ImportError:
-    try:
-        from native import builtins as _builtins
-    except ImportError:
-        import builtins as _builtins
+    import builtins as _builtins, builtins as _builtins_post_tick, builtins as _pipeline
 
 try:
-    from ..native import builtins as _builtins_post_tick
+    from native.validators import TopologyPatternMatcher
 except ImportError:
-    try:
-        from native import builtins as _builtins_post_tick
-    except ImportError:
-        import builtins as _builtins_post_tick
-
-try:
-    from ..native import builtins as _pipeline
-except ImportError:
-    try:
-        from native import builtins as _pipeline
-    except ImportError:
-        import builtins as _pipeline
-
-try:
-    from ..native.validators import TopologyPatternMatcher
-except ImportError:
-    try:
-        from native.validators import TopologyPatternMatcher
-    except ImportError:
-        TopologyPatternMatcher = None
+    TopologyPatternMatcher = None
 
 try:
     from . import screening_module as tdx_evaluators
 except ImportError:
-    try:
-        from ..core import screening_module as tdx_evaluators
-    except ImportError:
-        import screening_module as tdx_evaluators
+    import screening_module as tdx_evaluators
 
 try:
     from .domain import _hms_to_seconds
 except ImportError:
-    try:
-        from ..core.domain import _hms_to_seconds
-    except ImportError:
-        from domain import _hms_to_seconds
+    from domain import _hms_to_seconds
 
-try:
-    # PoolState 已合并到 runtime_mode_module.py（SubTask 29.6）。
-    # 此处不在顶部 import PoolState，因 runtime_mode_module 顶部 import
-    # ``from core.engine import PoolEngine``，顶部互相 import 会触发循环依赖。
-    # 改为在 __init__ 内使用处懒加载（与本方法已有的 trade_module /
-    # monitoring_module 懒加载模式一致）。
-    from ..core.execution_module import (
-        Compiler, CompiledSchedule,
-        _extract_edge_endpoint as _ce_extract_edge_endpoint,
-        _resolve_node_type as _ce_resolve_node_type,
-        _resolve_edge_type as _ce_resolve_edge_type,
-        _normalize_nodes as _ce_normalize_nodes,
-        build_timed_event_specs,
-    )
-    from ..core.formula_module import FormulaEngine
-    from ..core.execution_module import EdgeExecutor, _lookup_edge_cond
-    from ..core.event_bus import (
-        EVENT_DOMAIN, EVENT_EXECUTED, EVENT_SIGNAL,
-        EventBus, DataChanged, DomainEvent, Executed, Signal, TimeAdvanced, TickReceived,
-    )
-    from ..core.tick_bar_module import DataUpdater, BarComposer
-    from ..core.execution_module import TTLHelper
-    from ..core.execution_module import EventDriver
-    from ..core.formula_module import ValueExtractor
-    from ..core.domain import (
-        TickSource, RealTickSource, MockDataSource,
-        _stock_code, _normalize_stock_code, _MARKET_PREFIXES, _MARKET_SUFFIXES,
-        time_at, _safe_timestamp, is_offset_of_day, anchor_to_today, _build_adjacency,
-    )
-except ImportError:
-    try:
-        from .execution_module import (
-            Compiler, CompiledSchedule,
-            _extract_edge_endpoint as _ce_extract_edge_endpoint,
-            _resolve_node_type as _ce_resolve_node_type,
-            _resolve_edge_type as _ce_resolve_edge_type,
-            _normalize_nodes as _ce_normalize_nodes,
-            build_timed_event_specs,
-        )
-        from .formula_module import FormulaEngine
-        from .execution_module import EdgeExecutor, _lookup_edge_cond
-        from .event_bus import (
-            EVENT_DOMAIN, EVENT_EXECUTED, EVENT_SIGNAL,
-            EventBus, DataChanged, DomainEvent, Executed, Signal, TimeAdvanced, TickReceived,
-        )
-        from .tick_bar_module import DataUpdater, BarComposer
-        from .execution_module import TTLHelper
-        from .execution_module import EventDriver
-        from .formula_module import ValueExtractor
-        from .domain import (
-            TickSource, RealTickSource, MockDataSource,
-            _stock_code, _normalize_stock_code, _MARKET_PREFIXES, _MARKET_SUFFIXES,
-            time_at, _safe_timestamp, is_offset_of_day, anchor_to_today, _build_adjacency,
-        )
-    except ImportError:
-        from execution_module import (
-            Compiler, CompiledSchedule,
-            _extract_edge_endpoint as _ce_extract_edge_endpoint,
-            _resolve_node_type as _ce_resolve_node_type,
-            _resolve_edge_type as _ce_resolve_edge_type,
-            _normalize_nodes as _ce_normalize_nodes,
-            build_timed_event_specs,
-        )
-        from formula import FormulaEngine
-        from execution_module import EdgeExecutor, _lookup_edge_cond
-        from event_bus import (
-            EVENT_DOMAIN, EVENT_EXECUTED, EVENT_SIGNAL,
-            EventBus, DataChanged, DomainEvent, Executed, Signal, TimeAdvanced, TickReceived,
-        )
-        from tick_bar_module import DataUpdater, BarComposer
-        from execution_module import TTLHelper
-        from execution_module import EventDriver
-        from formula_module import ValueExtractor
-        from domain import (
-            TickSource, RealTickSource, MockDataSource,
-            _stock_code, _normalize_stock_code, _MARKET_PREFIXES, _MARKET_SUFFIXES,
-            time_at, _safe_timestamp, is_offset_of_day, anchor_to_today, _build_adjacency,
-        )
+# PoolState 已合并到 runtime_mode_module.py（SubTask 29.6），顶部互相 import 会触发
+# 循环依赖，故在 __init__ 内使用处懒加载（与 trade_module/monitoring_module 一致）。
+from .execution_module import (
+    Compiler, CompiledSchedule,
+    _extract_edge_endpoint as _ce_extract_edge_endpoint,
+    _resolve_node_type as _ce_resolve_node_type,
+    _resolve_edge_type as _ce_resolve_edge_type,
+    _normalize_nodes as _ce_normalize_nodes,
+    build_timed_event_specs,
+    EdgeExecutor, _lookup_edge_cond, TTLHelper, EventDriver,
+)
+from .formula_module import FormulaEngine, ValueExtractor
+from .event_bus import (
+    EVENT_DOMAIN, EVENT_EXECUTED, EVENT_SIGNAL,
+    EventBus, DataChanged, DomainEvent, Executed, Signal, TimeAdvanced, TickReceived,
+)
+from .tick_bar_module import DataUpdater, BarComposer
+from .domain import (
+    TickSource, RealTickSource, MockDataSource,
+    _stock_code, _normalize_stock_code, _MARKET_PREFIXES, _MARKET_SUFFIXES,
+    time_at, _safe_timestamp, is_offset_of_day, anchor_to_today, _build_adjacency,
+)
 
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Task 11: role-action table-driven dispatch (node_roles.json -> _ROLE_ACTIONS)
-# Additive: existing node-type dispatch chains kept; replacement in later task.
-# Structure: {role: {"on_enter": [action_fns], "on_exit": [action_fns]}}
-# ---------------------------------------------------------------------------
 
 _ROLE_ACTIONS: Dict[str, Dict[str, List]] = {}
 
 
 def _resolve_action(action_name: str):
-    """Resolve action name to callable.
-
-    Callable signature: (engine, node_id, code, ts) -> None.
-    Actions bound to engine instance methods at dispatch time.
-    """
+    """Resolve action name to callable."""
     _ACTION_FNS = {
         "mark_out_edges_dirty": lambda engine, node_id, code, ts: engine._mark_out_edges_dirty(node_id),
         "publish_enter_event": lambda engine, node_id, code, ts: engine._publish_enter_event(node_id, code, ts),
@@ -175,18 +84,10 @@ def _resolve_action(action_name: str):
 
 
 def _init_role_actions(roles: Optional[Dict[str, Any]] = None):
-    """Initialize role actions from node_roles.json config.
-
-    Prefer passed roles (engine self.tables['node_roles']);
-    fall back to get_global_config_store().get_table('node_roles').
-    Graceful degradation: _ROLE_ACTIONS stays empty if config unavailable.
-    """
+    """Initialize role actions from node_roles.json config."""
     try:
         if roles is None:
-            try:
-                from .table_engine import get_global_config_store
-            except ImportError:
-                from core.table_engine import get_global_config_store
+            from .table_engine import get_global_config_store
             cs = get_global_config_store()
             if cs is None:
                 return
@@ -203,11 +104,7 @@ def _init_role_actions(roles: Optional[Dict[str, Any]] = None):
 
 
 def _dispatch_role_action(engine, role, event_type, node_id, code, ts):
-    """Dispatch role-based action via table lookup.
-
-    Look up _ROLE_ACTIONS[role][event_type] for action list, execute in order.
-    No-op if role unregistered or event_type has no actions.
-    """
+    """Dispatch role-based action via table lookup."""
     actions = _ROLE_ACTIONS.get(role, {}).get(event_type, [])
     for action_fn in actions:
         action_fn(engine, node_id, code, ts)
@@ -260,15 +157,10 @@ class CompiledExpression:
 
 # ---------------------------------------------------------------------------
 # Protocol 接口：替代 services.* 跨层 import（SubTask 8.5）
-# 通过构造函数注入工厂/可调用对象，消除 core→services 跨层依赖。
-# ---------------------------------------------------------------------------
 
 
 class IPoolValidator(Protocol):
-    """池拓扑校验器接口（替代 services.pool_validator.validate_pool_topology）。
-
-    作为可调用对象注入：``validator(nodes, edges, **kwargs)``。
-    """
+    """池拓扑校验器接口（替代 services.pool_validator.validate_pool_topology）。"""
 
     def __call__(
         self,
@@ -283,30 +175,21 @@ class IPoolValidator(Protocol):
 
 
 class IDataQuery(Protocol):
-    """数据查询接口（替代 services.data.DataQuery / services.data_query.DataQuery）。
-
-    作为工厂可调用对象注入：``DataQuery(**kwargs)`` 返回实例。
-    """
+    """数据查询接口（替代 services.data.DataQuery / services.data_query.DataQuery）。"""
 
     def query(self, code: str, field: str, period: str = "1d", count: int = 100) -> Any: ...
     def query_tick(self, code: str) -> Dict[str, Any]: ...
 
 
 class IFormulaCache(Protocol):
-    """公式缓存接口（替代 services.formula_cache.FormulaCache）。
-
-    作为工厂可调用对象注入：``cache_factory()`` 返回实例。
-    """
+    """公式缓存接口（替代 services.formula_cache.FormulaCache）。"""
 
     def get(self, formula_ref: str, key: str) -> Any: ...
     def set(self, formula_ref: str, key: str, value: Any, ttl: int = 0) -> None: ...
 
 
 class IMarketDataPort(Protocol):
-    """行情数据端口接口（替代 services.market_data_port.TqAdapterMarketDataPort）。
-
-    作为工厂可调用对象注入：``port_factory(tq_adapter)`` 返回实例。
-    """
+    """行情数据端口接口（替代 services.market_data_port.TqAdapterMarketDataPort）。"""
 
     def get_market_data(self, code: str) -> Dict[str, Any]: ...
 
@@ -381,11 +264,7 @@ _TICK_SOURCE_FACTORIES: Dict[str, Callable[["PoolEngine", Dict[str, Any], List[s
 
 
 class PoolEngineMixin:
-    """PoolEngine 辅助方法集合。
-
-    将运行期辅助、生命周期、同步、模式入口等方法从核心类中剥离，
-    使 ``PoolEngine`` 仅保留构造函数与真相属性。
-    """
+    """PoolEngine 辅助方法集合。"""
 
     # ------------------------------------------------------------------
     # 内部辅助
@@ -455,11 +334,7 @@ class PoolEngineMixin:
 
     @staticmethod
     def _collect_source_codes(pool_config: Dict[str, Any]) -> List[str]:
-        """从 pool_config 的 source 节点与初始股票中收集所有股票代码。
-
-        用于为 TickSource 提供监控标的集合；非 source 节点的股票由转移事件动态产生，
-        不在此处收集。
-        """
+        """从 pool_config 的 source 节点与初始股票中收集所有股票代码。"""
         codes: List[str] = []
         seen: set = set()
         for node in pool_config.get("nodes", []):
@@ -480,11 +355,7 @@ class PoolEngineMixin:
 
     @staticmethod
     def _derive_trade_pools(pool_config: Dict[str, Any]) -> Tuple[List[str], List[str]]:
-        """从池配置推导自动买入/卖出池列表。
-
-        - auto_buy_pools：psatt.baimpool == 1 的节点（入池即买入）。
-        - auto_sell_pools：psatt.bdel == 1 且有 exit_action 的节点（TTL 出池即卖出）。
-        """
+        """从池配置推导自动买入/卖出池列表。"""
         auto_buy: List[str] = []
         auto_sell: List[str] = []
         for node in pool_config.get("nodes", []) or []:
@@ -504,12 +375,7 @@ class PoolEngineMixin:
         return auto_buy, auto_sell
 
     def _build_tick_source(self, ds_cfg: Dict[str, Any]) -> Optional[TickSource]:
-        """根据 data_source 配置行构建对应的 TickSource 实现。
-
-        表驱动：配置行中的 ``tick_source.impl`` 查注册表获取工厂函数，避免核心循环
-        出现 ``if is_simulation`` / ``if impl == "sim"`` 等模式分支。未配置
-        tick_source 时返回 None，由调用方通过外部传入 current_bar_data 驱动。
-        """
+        """根据 data_source 配置行构建对应的 TickSource 实现。"""
         ts_spec = ds_cfg.get("tick_source") if isinstance(ds_cfg, dict) else None
         if not ts_spec:
             return None
@@ -565,13 +431,7 @@ class PoolEngineMixin:
     # 核心 tick 循环
     # ------------------------------------------------------------------
     async def run_tick(self) -> None:
-        """新核心循环 async 入口：委托 ``_run_tick_body``（单一真相源）。
-
-        ``run_tick`` 自身不含 await；保留 async 签名仅为兼容
-        ``await engine.run_tick()`` 调用方（run_loop / _tick）。
-        I21：消除 run_tick 与 _run_tick_body 的 33 行逐行重复——async 包装器
-        不再维护逻辑副本，仅做同步委托。
-        """
+        """新核心循环 async 入口：委托 ``_run_tick_body``（单一真相源）。"""
         self._run_tick_body()
 
     def _run_tick_body(self) -> None:
@@ -606,12 +466,7 @@ class PoolEngineMixin:
 
     # SubTask 21.2: DataChanged 事件触发核心循环（可选订阅，默认关闭）
     def _on_data_changed_event(self, event: DataChanged) -> None:
-        """DataChanged 事件 handler：更新当前时间戳后驱动核心循环。
-
-        仅在 ``PoolEngine(subscribe_data_changed=True)`` 时注册。本 handler
-        直接调用 ``_run_tick_body``（driver.fire_due 统一驱动）。G2 后引擎只发
-        事件不执行计算，不存在 ExecutionModule per-edge 直接驱动路径。
-        """
+        """DataChanged 事件 handler：更新当前时间戳后驱动核心循环。"""
         self.state.time_source["current_ts"] = event.ts
         self._run_tick_body()
 
@@ -628,10 +483,6 @@ class PoolEngineMixin:
             return
         tick_data = {event.code: event.tick_data}
         # Task 3: waterline short-circuit - capture tick_table hash before
-        # apply_data (which internally calls tick_table.update via
-        # update_latest_tick). If hash unchanged after apply, waterline did not
-        # rise, skip downstream computation (node dirty marking, etc.).
-        # Additive: existing apply_data / mark_node_dirty logic preserved.
         _tt = getattr(self.state, 'tick_table', None)
         _pre_hash = _tt.hash if _tt is not None else None
         data_updater.apply_data(tick_data)
@@ -670,17 +521,7 @@ class PoolEngineMixin:
         self.state.node_stocks[tgt_id] = new_tgt
 
     def rebuild_timed_specs(self) -> None:
-        """清空 EventDriver heap 并用当前 state.time_source 重新注册边触发规格。
-
-        修复：``_init_pool_runtime`` 在 ``time_source.current_ts`` 设置前调用
-        ``build_timed_event_specs``，导致 ``first_fire_time`` 使用 wall clock
-        而非虚拟时钟。仿真模式下 ``fire_due(virtual_clock)`` 永远无法达到
-        wall_clock + interval 的 ``first_fire_time``，边触发永不执行。
-
-        此方法在 ``RuntimeSimulator.initialize()`` 设置 ``current_ts`` 后调用，
-        确保边触发 ``first_fire_time`` 与虚拟时钟对齐。tick 定时器由
-        ``_configure_sim_tick_source`` 在此方法之后注册，不受影响。
-        """
+        """清空 EventDriver heap 并用当前 state.time_source 重新注册边触发规格。"""
         event_driver = self._components.get("event_driver")
         if event_driver is None:
             return
@@ -763,12 +604,6 @@ class PoolEngineMixin:
             logger.error("新核心 run_tick 执行失败: %s", ex, exc_info=True)
 
         # I16：DZH TTL 路径收敛——_build_ttl_spec 编译期已解析 DZH endtime/hold 三模式，
-        # _run_ttl 按 check_type 分派，EventDriver.fire_due（_run_tick_body 内）统一驱动（G1 heapq）。
-        # 旧 apply_ttl post-tick 循环已删除，2 套 TTL 路径收敛为 1 套。
-        # Task 24+：三方法（_update_trackers / _emit_transfer_events / _post_tick）已删除，
-        # tracker 更新/事件生成/post_tick 流水线由 Statistics/Monitoring 模块通过事件订阅实现。
-        # DomainEvent(ENTER/EXIT) 发射已由 I23 合并入 Executed.details，_emit_transfer_events
-        # 的批量发射为冗余路径，删除后 _event_queue 不再收到 ENTER/EXIT（Executed.details 仍携带）。
         for ev in self._components["transfer_events"]:
             self.events.append({'event': 'flow_fired', **ev})
 
@@ -801,9 +636,6 @@ class PoolEngineMixin:
         self._components["_stopped"] = False
         self._components["_paused"] = False
         # I39: 表驱动时间源 — 从 time_sources.json 加载（含 driver_type），
-        # 替代手工构造 {"kind": "live", ...}（缺 driver_type 导致 _run_tick_body
-        # 的 wall_clock 刷新分支被跳过，current_ts 冻结，gate/TTL 评估使用过期时间）。
-        # 模式 ID 由 _current_mode_id 驱动（默认 live），不再硬编码 "live"。
         mode_id = self._current_mode_id or "live"
         mode_cfg = self._runtime_modes.get(mode_id, {})
         tick_interval = float(mode_cfg.get("tick_interval", 1.0))
@@ -815,9 +647,6 @@ class PoolEngineMixin:
         self.state.set_time_source(ts_cfg)
         self._init_node_stocks()
         # I90：移除 attach_to_loop——tick 调度本身已中断驱动（loop.call_at + Event），
-        # 边触发由 heapq 优先队列按 fire_time 独立触发（G6 运行时事件无序）。
-        # 原 attach_to_loop 注册的中断回调与 _run_tick_body 扫描路径双重执行边，
-        # 且中断路径无统一调度保证，破坏 A→B→C 拓扑传播。
         loop = asyncio.get_running_loop()
         tick_event = asyncio.Event()
         pause_event = self._components["_pause_event"]
@@ -852,24 +681,14 @@ class PoolEngineMixin:
         return self._read_config_row(table_name, key, default_key)
 
     def _now(self) -> _dt:
-        """PoolEngine 时间统一入口：wall_clock 委托 ``PoolEngine._now()``（保测试 patch），
-        virtual/sequence 委托 ``_time_source_to_now``（基于 ``time_at``）。
-
-        测试 patch ``engine._now()`` 时，wall_clock 分支委托 PoolEngine._now()，
-        gate 仍能读到 mock 时间。
-        """
+        """PoolEngine 时间统一入口：wall_clock 委托 ``PoolEngine._now()``（保测试 patch），。"""
         ts_cfg = self.state.time_source
         if ts_cfg.get("driver_type", "wall_clock") == "wall_clock":
             return self._now()
         return _time_source_to_now(self.state)
 
     async def run_mode(self, mode_id: str) -> Dict[str, Any]:
-        """三模式统一入口：仅替换 time/data/trade/side-effects 四张表行。
-
-        核心循环 ``run_tick()`` 不再按模式分支；模式差异完全体现在
-        ``state.time_source`` / ``state.data_source`` /
-        ``state.trade_interface`` / ``state.side_effects_scope`` 四行。
-        """
+        """三模式统一入口：仅替换 time/data/trade/side-effects 四张表行。"""
         mode_cfg = self._runtime_modes.get(mode_id, {})
         ts_cfg = self._time_sources.get(mode_cfg.get("time_source_id", "realtime"), {})
         ds_cfg = self._mode_config_row("data_sources", mode_cfg.get("data_source_id", ""))
@@ -945,9 +764,6 @@ class PoolEngineMixin:
         if current_bar_data:
             self._components["data_updater"].apply_data(current_bar_data)
         # I13：删除 _inject_bar_data + mode_state["inject"] 门控 ——
-        # apply_data 已是事件驱动唯一真相源，node_stocks 不再携带 bar 字段副本。
-        # mode_state["inject"] 标志仍由 run_mode 返回（replay 测试 oracle 比对依赖），但不再驱动注入。
-        # 镜像旧 _tick：检测 node_stocks 变更并标脏
         for nid in self.nodes:
             old = self.state.node_snapshots.get(nid)
             new = self._snapshot_stocks(self.state.get_pool(nid).get_stocks())
@@ -1011,9 +827,6 @@ class PoolEngine(PoolEngineMixin):
         from .execution_module import EventDriver
         event_driver = EventDriver(state=self.state, bus=event_bus)
         # 注入主 asyncio loop：replay/sim 步进经 schedule_periodic 走 loop.call_later
-        # wall-clock 路径（非 heapq 数据时间路径）。_init_pool_runtime 实际由 async 路由
-        # （tdx_execute_pool / websocket）同步调用链触发，运行在事件循环线程，
-        # 故 asyncio.get_running_loop() 可用；threadpool 路径会抛 RuntimeError，留 None。
         try:
             event_driver.set_loop(asyncio.get_running_loop())
         except RuntimeError:
@@ -1219,10 +1032,6 @@ class PoolEngine(PoolEngineMixin):
         role_ref = tpl.get('role_ref', '')
         context_fields = tpl.get('context_fields', {})
         # I71：pool_id 表驱动 — per-domain 声明 pool_id 来源字段，消除 hardcoded
-        # tid→nid fallback。move_exit pool_id=sid（源池，语义="离开源池"），pool_enter
-        # pool_id=tid（目标池，语义="进入目标池"），ttl_expire pool_id=nid。修复 move_exit
-        # DomainEvent(EXIT)+SELL 信号 pool_id=tid 语义错位（外部消费者 WS/API 收到错误池 ID）。
-        # I59: pool_id hoist (was duplicated in event loop + signal loop)
         pool_id_field = tpl.get('pool_id_field', 'tid')
         pool_id = domain_ctx.get(pool_id_field, domain_ctx.get('nid', ''))
 
@@ -1250,27 +1059,10 @@ class PoolEngine(PoolEngineMixin):
             self._push_event(etype, code, pool_id, detail)
 
         # 发射信号
-        # I42/I55：信号路由表驱动 — tpl.signal_route 声明路由方式：
-        #   "eventbus"=由上游 EdgeExecutor._action_baimpool 经 EventBus 发布（跳过此处），
-        #   "direct"=由此处经 EventBus.publish(Signal) 发布（I55：统一到 EventBus，
-        #            旧 _push_signal 直写已删除，SELL 亦经 _on_signal_event 订阅写入）。
-        # 消除原 signal_trigger=="pool_enter" 硬编码分支，路由决策入 edge_strategies.json 表。
         if tpl.get('signal_route') == 'eventbus':
             return
 
         # I77：require_holding_tracker — 表驱动 condition 求值收敛。signal_rules.json:26 声明
-        # move_exit condition 含 `tracker.status == 'holding'`（3-AND），但
-        # _should_emit_signal_for_domain（engine.py:1240-1255）运行期仅检 trigger.type +
-        # is_target（2-AND），第 3 条件路径死 → fallback 无条件发 SELL。预填股票
-        #（params.stocks，engine.py:235 / tdx.py:1753）无 _tracker（_init_entry_trackers
-        # 仅 edge-entered 创建，edge_executor.py:147-190）→ _tracker_detail 返回 {}
-        # → ctx['tracker.snapshot']={} → price resolve_field default 0 → SELL(price=0)
-        # 发给非持仓股票，经 WS(ui_renderer.py Signal 分支)/API(app.py:407-420) 转发给外部消费者。
-        # 本守卫在 Signal 发射前（DomainEvent 已发，不影响 EXIT/TIMEOUT 事件）校验 tracker
-        # 携带 status=='holding'，使运行期行为与声明 condition 语义等价。与 I76 同构
-        #（config 声明条件 vs runtime 消费子集 → 路径死 → fallback masks bug）。
-        # I78：守卫参数化 — tracker ctx key 由 require_holding_tracker_field 声明
-        #（move_exit=tracker.snapshot, ttl_expire=tracker.detail），消除 I77 形状硬编码。
         if tpl.get('require_holding_tracker'):
             tracker_key = tpl.get('require_holding_tracker_field', 'tracker.snapshot')
             tracker_info = ctx.get(tracker_key, {})
@@ -1278,11 +1070,6 @@ class PoolEngine(PoolEngineMixin):
                 return
 
         # I59: per-event 不变量分离（two-pass 范式）。Signal 除 signal_type 外所有字段
-        # （cond/price/profit_pct/hold_days/ts）均 per-event 不变量——依赖 ctx/domain_ctx，
-        # 不依赖 sig_type/sig_rule。旧 per-signal 解析在 N≥2 匹配时重复解析不变量 N 次。
-        # two-pass：先过滤匹配信号，再解析不变量一次（lazy，仅 ≥1 匹配时），最后发射。
-        # ts hoist 一次确保 tick 内时间戳一致（I57 开放关注点，作为 per-event 范式自然推论）。
-        # 逻辑隐于数据结构（Signal 字段除 signal_type 外均 per-event），差异显于 signal_type。
         field_res = tpl.get('field_resolution', {})
         price_spec = field_res.get('price', {'chain': ['quote.price'], 'default': 0})
         profit_pct_spec = field_res.get('profit_pct', {'chain': [], 'default': 0})
@@ -1524,11 +1311,6 @@ class PoolEngine(PoolEngineMixin):
         }
 
         # I72：transfer 事件自带 sid/tid/fid/mode（transfer 专属字段）。
-        # nid 非 transfer 专属——pool_enter 不需要、move_exit=source_id、ttl_expire=nid，
-        # 故 nid 不在此分支赋值，改由 role_source.backfill_ctx_key 表驱动回填（与 I42
-        # backfill 范式同构）。消除旧 if/elif nid 分支：pool_enter nid=source_id 死赋值
-        # （语义错位，pool_enter 语义节点=target_id）+ move_exit nid 与 backfill 冗余 +
-        # ttl_expire elif 分支特例。3 域 nid 统一收敛到 backfill_ctx_key 声明。
         if 'source_id' in code_ctx:
             ctx['sid'] = code_ctx['source_id']
             ctx['tid'] = code_ctx['target_id']
@@ -1546,10 +1328,7 @@ class PoolEngine(PoolEngineMixin):
 
         return ctx
     def _resolve_domain_source(self, source_key, resolver_category, tpl, ctx, code_ctx, base_ctx, code):
-        """通用域源解析器：按 resolvers[category][source.type] 表查 method 反射调用。
-
-        新增 source type 只需加 JSON 表行 + 1 个 handler 方法，零行 if/elif 改动。
-        """
+        """通用域源解析器：按 resolvers[category][source.type] 表查 method 反射调用。"""
         source_spec = tpl.get(source_key)
         if not source_spec:
             return
@@ -1563,10 +1342,7 @@ class PoolEngine(PoolEngineMixin):
         if method:
             method(source_spec, ctx, code_ctx, base_ctx, code, tpl)
     def _resolve_node_type(self, n):
-        """统一节点类型解析：先查 tdx_type_map，再查 dzh_type_map。
-
-        替代各处的内联 _rn() 闭包，保持类型解析逻辑一致。
-        """
+        """统一节点类型解析：先查 tdx_type_map，再查 dzh_type_map。"""
         rt = n.get('type', '')
         if isinstance(rt, int) or (isinstance(rt, str) and rt):
             k = str(rt)
@@ -1745,9 +1521,6 @@ class PoolEngine(PoolEngineMixin):
     def _build_exit_tracker_info(self, code, sid, prev_stock_index):
         """构建离开池时的 tracker 详情快照。"""
         # I73：修复声明 vs 运行分裂——prev_stock_index 值恒为 dict（_emit_transfer_events
-        # line 804 从 list 构建 {_stock_code(s): s}），frozenset 守卫恒 False 导致函数恒返回 {}。
-        # 守卫扩展为 (frozenset, dict)：dict 走 code in prev_entry（键集 = 股票代码集），
-        # frozenset 保留为防御性回退。修复后 tracker_info 非空，SELL 信号 price/profit_pct/hold_days 可解析。
         prev_entry = prev_stock_index.get(sid)
         stk_in_prev = code in prev_entry if isinstance(prev_entry, (frozenset, dict)) else False
         if not stk_in_prev:
@@ -1802,11 +1575,7 @@ class PoolEngine(PoolEngineMixin):
     # 外部 API 与生命周期方法（原 _MetaEngineCompat）
     # ------------------------------------------------------------------
     def _now(self):
-        """PoolEngine 时间统一入口：wall_clock 返回 ``_dt.now()``，
-        virtual/sequence 委托 ``_time_source_to_now``（基于 ``time_at``）。
-
-        ``_time_source_to_now`` 自动区分当日秒数偏移（< 1e8）与 Unix 绝对时间戳。
-        """
+        """PoolEngine 时间统一入口：wall_clock 返回 ``_dt.now()``，。"""
         pe = self._pool_engine
         ts = pe.state.time_source if pe is not None else {}
         driver = ts.get('driver_type', 'wall_clock') if ts else 'wall_clock'
@@ -1826,10 +1595,7 @@ class PoolEngine(PoolEngineMixin):
         return rows.get(key, {}) or rows.get(default_key, {})
 
     def _setup_mode(self, mode_id: str, pool_config: Dict[str, Any]) -> None:
-        """模式初始化：绑定时间源、数据源、交易接口，并创建/复用 PoolEngine。
-
-        供测试与旧调用方同步使用；不启动内部循环。
-        """
+        """模式初始化：绑定时间源、数据源、交易接口，并创建/复用 PoolEngine。"""
         self._current_mode_id = mode_id
         self._loop_pool_config = pool_config
         mode_cfg = self._runtime_modes.get(mode_id, {})
@@ -1852,13 +1618,7 @@ class PoolEngine(PoolEngineMixin):
         # 懒加载 formula_router（双引擎公式路由）
         if not hasattr(self, 'formula_router') or self.formula_router is None:
             try:
-                try:
-                    from .formula_module import FormulaRouter, PythonFormulaEngine
-                except ImportError:
-                    try:
-                        from ..core.formula_module import FormulaRouter, PythonFormulaEngine
-                    except ImportError:
-                        from core.formula_module import FormulaRouter, PythonFormulaEngine
+                from .formula_module import FormulaRouter, PythonFormulaEngine
                 # SubTask 8.5: 跨层 import 改为构造函数注入工厂
                 _cache_factory = getattr(self, '_formula_cache_factory', None)
                 _cache = _cache_factory() if _cache_factory is not None else None
@@ -1902,11 +1662,7 @@ class PoolEngine(PoolEngineMixin):
         self.minute_aggregator = ma
 
     def set_table_engine(self, config_store, rule_engine=None, panel_generator=None, ownership_manager=None):
-        """注入表驱动引擎组件（ConfigStore/RuleEngine/PanelGenerator/PropertyOwnershipManager）
-        
-        注入 ConfigStore 后，self.tables 将指向 ConfigStore._tables，
-        实现统一数据源，避免两份配置不同步。
-        """
+        """注入表驱动引擎组件（ConfigStore/RuleEngine/PanelGenerator/PropertyOwnershipManager）。"""
         self._config_store = config_store
         self._rule_engine = rule_engine
         self._panel_generator = panel_generator
@@ -1967,16 +1723,7 @@ class PoolEngine(PoolEngineMixin):
         self._loop_running = False; self._loop_paused = False; logger.info("已停止")
 
     def _run_module(self, module_type: str, inputs: Dict[str, Any]) -> Any:
-        """按 module_type 调度到 modules 表注册的 handler。
-
-        表驱动：通过 self.module_map[module_type]["handler"] 查得 handler 名，
-        再到 _HR（native.builtins 注册表）找到可调用对象。
-
-        解析顺序：
-          1) 直接按 module_type 查 module_map（如 candidate_provider / condition_filter）
-          2) 用 dzh_type_map 反查（202 → market_source → 进一步别名解析）
-          3) 用 dzh_type_map.aliases 反查（market_source → candidate_provider）
-        """
+        """按 module_type 调度到 modules 表注册的 handler。"""
         candidates = [module_type]
         # dzh 数值类型 → 字符串类型
         rt = self._dzh_type_map.get(str(module_type))
@@ -2008,12 +1755,7 @@ class PoolEngine(PoolEngineMixin):
         return {"error": f"未知模块类型: {module_type}", "module": module_type, "candidates_tried": candidates}
 
     def _build_node_stocks(self, nodes):
-        """从给定 nodes dict 构建并返回 node_stocks dict（不修改 state）。
-
-        与 PoolEngineMixin._init_node_stocks() 区分：后者从 self.nodes 读取并写入
-        self.state.node_stocks（mutate state）；本方法接受外部 nodes dict，返回
-        新构建的 dict，供 KLineReplayEngine 等外部调用方使用。
-        """
+        """从给定 nodes dict 构建并返回 node_stocks dict（不修改 state）。"""
         ns = {}; pa = self._param_aliases
         def _rp(p, k, ak=None):
             for a in pa.get(ak, [k]) if ak else [k]:
@@ -2076,8 +1818,6 @@ class PoolEngine(PoolEngineMixin):
 
     # ------------------------------------------------------------------
     # PoolState / EdgeState 写透视图（第 14 轮：移除本地 fallback）
-    # 这些属性不保存数据，只作为 EdgeState.exec_ctx / formula_results 的视图。
-    # ------------------------------------------------------------------
     class _ExecCtxView:
         __slots__ = ("_engine", "_field")
 
@@ -2141,10 +1881,6 @@ class PoolEngine(PoolEngineMixin):
         self._ExecCtxView(self, "first_fire").clear()
 
     # I28：删除 _flow_last_fire_ts 死属性（零生产读取——edge_executor.py:879 直接读 exec_ctx["last_fire"]，
-    # 不经此视图；仅 test_backward_compatibility + conftest 引用，已同步清理）
-    # I29：删除 _FilterCacheView 类 + _filter_cache property（68+10 行死代码，零生产读取——
-    # 生产公式缓存经 formula.py:134 直接读 state.formula_results，不经此视图；
-    # 仅测试 isinstance/dict() 检查 + setter 重置引用，已同步清理）
 
     def __init__(self, config_dir=None, *,
                  pool_config: Optional[Dict[str, Any]] = None,
@@ -2155,11 +1891,6 @@ class PoolEngine(PoolEngineMixin):
                  market_data_port_factory: Optional[Callable] = None,
                  subscribe_data_changed: bool = False):
         # Task 24: 合并 MetaEngine + PoolEngine 后的统一构造函数。
-        # pool_config：若提供则立即初始化池运行时（_init_pool_runtime）；
-        #              若不提供则延迟初始化（等 run_pool/_tick 等方法触发）。
-        # bus：注入共享 EventBus 实例；若不注入则 _init_pool_runtime 内部新建。
-        # subscribe_data_changed：是否订阅 DataChanged 事件触发核心循环（默认关闭，
-        #                        避免与 ExecutionModule._on_data_changed 双重触发）。
         self._injected_bus: Optional['EventBus'] = bus
         # SubTask 8.5: 跨层依赖改为构造函数注入工厂/可调用对象（替代 services.* import）
         self._pool_validator = pool_validator
@@ -2171,10 +1902,7 @@ class PoolEngine(PoolEngineMixin):
         # 保持一致：跳过 _archived/ 与 .locks.json，避免重复加载。
         _excluded_stems = {"api_routes", "ui_layouts", "field_definitions"}
         # RULES.md rule 87：通过 ConfigStore 统一加载，消除直接 open+json.load 绕过热加载。
-        try:
-            from .table_engine import ConfigStore, get_global_config_store
-        except ImportError:
-            from core.table_engine import ConfigStore, get_global_config_store
+        from .table_engine import ConfigStore, get_global_config_store
         _cs = ConfigStore(str(path)) if config_dir else (get_global_config_store() or ConfigStore(str(path)))
         self.tables = {k: v for k, v in _cs.tables.items() if k not in _excluded_stems}
         # I92：消除 defaults.json 双重加载——已在 self.tables（ConfigStore glob）中，
@@ -2225,10 +1953,7 @@ class PoolEngine(PoolEngineMixin):
             except Exception as e:
                 logger.warning("DataQuery 初始化失败: %s", e)
         try:
-            try:
-                from .formula_module import FormulaRouter
-            except ImportError:
-                from core.formula_module import FormulaRouter
+            from .formula_module import FormulaRouter
             self.formula_router = FormulaRouter(data_query=self._data_query)
         except Exception as e:
             logger.warning("FormulaRouter 初始化失败: %s", e)
@@ -2271,12 +1996,7 @@ class PoolEngine(PoolEngineMixin):
             self._init_pool_runtime(pool_config, subscribe_data_changed)
 
     def _attach_ui_layer(self, pe: 'PoolEngine') -> None:
-        """初始化 SnapshotBuilder（core 层内部组件），绑定到 PoolEngine 的 EventBus。
-
-        Web UI 层组件（UIRenderer / WebSocketPublisher）属于 web 层，
-        应由外部入口层（app.py）在 core 层之外创建并通过属性赋值注入，
-        core 层不直接依赖 web 包。
-        """
+        """初始化 SnapshotBuilder（core 层内部组件），绑定到 PoolEngine 的 EventBus。"""
         from .monitoring_module import _SnapshotBuilder
         self.snapshot_builder = _SnapshotBuilder(pe.event_bus, nodes=pe.nodes)
         self.ui_renderer = None

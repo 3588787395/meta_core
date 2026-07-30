@@ -231,3 +231,37 @@ def test_events_recent_responds(fastapi_client):
     """/api/events/recent 响应 200。"""
     resp = fastapi_client.get("/api/events/recent")
     assert resp.status_code == 200
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 1 P3 + 阶段 2 E4 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 P3 registry 路由 + E4 SSE asyncio.Queue 收敛回归。"""
+
+    def test_no_direct_converter_calls_in_api(self):
+        """api.py 不绕过 _CONVERTER_REGISTRY 直接调用解析器（P3 OOP 路由）。"""
+        import re
+        from pathlib import Path
+        src = Path(__file__).resolve().parent.parent.joinpath("api.py").read_text(encoding="utf-8")
+        count = len(re.findall(r"parse_dzh_xml\(|parse_tdx_xml\(|_build_tdx_xml\(", src))
+        assert count == 0, \
+            f"api.py 不应绕过 _CONVERTER_REGISTRY 直接调用解析器，实际 {count} 处"
+
+    def test_sse_uses_asyncio_queue(self):
+        """app.py events_stream 使用 asyncio.Queue（E4 替代 50ms 轮询）。"""
+        from pathlib import Path
+        src = Path(__file__).resolve().parent.parent.joinpath("app.py").read_text(encoding="utf-8")
+        assert "async def events_stream" in src, \
+            "app.py 应含 async def events_stream 函数（SSE 端点）"
+        assert "asyncio.Queue" in src, \
+            "events_stream 应使用 asyncio.Queue（E4 阻塞等待事件，替代 50ms 轮询）"
+
+    def test_no_run_in_executor_drain_in_app(self):
+        """app.py 不含 run_in_executor(drain) 旧 SSE 轮询（E4 已改 asyncio.Queue）。"""
+        import re
+        from pathlib import Path
+        src = Path(__file__).resolve().parent.parent.joinpath("app.py").read_text(encoding="utf-8")
+        count = len(re.findall(r"run_in_executor\(.*drain", src))
+        assert count == 0, \
+            f"app.py 不应含 run_in_executor(drain) 旧轮询，实际 {count} 处"

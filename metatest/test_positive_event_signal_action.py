@@ -293,3 +293,31 @@ def test_no_direct_side_effects_in_transfer():
         "core/ has direct side-effect calls (should be delegated via ActionDispatcher):\n  " +
         "\n  ".join(failures)
     )
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 3 C11 + 阶段 2 E1/E2 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 C11 _SUBSCRIPTIONS + E1/E2 heapq 收敛回归。"""
+
+    def test_base_module_subscriptions_table(self):
+        """event_bus.py 含 _BaseModule + _SUBSCRIPTIONS 表（C11 表驱动订阅）。"""
+        import ast
+        from pathlib import Path
+        tree = ast.parse((Path(__file__).resolve().parent.parent / "core" / "event_bus.py").read_text(encoding="utf-8"))
+        classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+        assert "_BaseModule" in classes, \
+            "event_bus.py 应含 _BaseModule 基类（C11 表驱动订阅）"
+        src = (Path(__file__).resolve().parent.parent / "core" / "event_bus.py").read_text(encoding="utf-8")
+        assert "_SUBSCRIPTIONS" in src, \
+            "event_bus.py 应含 _SUBSCRIPTIONS 类属性表（C11 表驱动）"
+
+    def test_eventdriver_heapq_used(self):
+        """execution_module EventDriver 使用 heapq（E1/E2 时间原语）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "execution_module.py").read_text(encoding="utf-8")
+        assert "import heapq" in src, \
+            "execution_module 应 import heapq（EventDriver 优先队列）"
+        assert "self._heap" in src, \
+            "EventDriver 应维护 self._heap 优先队列属性"

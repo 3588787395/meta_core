@@ -1,25 +1,31 @@
-"""metatest v3 12 维量化评分引擎。
+"""metatest v4 16 维量化评分引擎（三原语收敛度 + OOP 同源继承 + 轮询零容忍）。
 
-按「metatest 严格正反合测试量化评审规范」spec 实现 12 维加权评分，
-所有评分完全由 ``test_results`` 字段计算，禁止硬编码信用分。
+按「converge-meta-essence-v4-oop-event-driven」spec 实现 16 维加权评分，
+所有评分完全由 ``test_results`` 字段计算，禁止硬编码信用分。v4 在 v3 12 维
+基础上新增 4 维（oop_inheritance_depth / polling_zero_tolerance /
+primitive_convergence / essence_ratio），权重重新分配至总和 = 1.0。
 
   维度                         权重    评分逻辑
   ─────────────────────────── ────── ──────────────────────────────────────
-  module_coverage              10%    覆盖模块数 / 17 * 100
-  test_pass_rate               18%    通过数 / 总数 * 100（跳过计为失败）
-  assertion_density             8%    断言数 / (测试文件数 * 20) * 100
-  event_chain_integrity        10%    出现事件类型数 / 10 * 100（链顺序错误扣 20%）
-  performance_benchmark         8%    1000 tick 耗时 ≤10s 满分，线性衰减
-  frontend_e2e_pass_rate       10%    前端 E2E 真实通过数 / 总数 * 100（环境缺失给最低达标线 80）
-  logic_coverage                8%    5 项底层逻辑验证通过数 / 5 * 100
-  isomorphism_elimination      12%    15 项同构代码 Grep 检查，0 违规满分
-  line_convergence              8%    核心模块总行数 ≤ 23000 满分，线性衰减
-  rule_compliance               4%    RULES 91-100 Grep 违规数 / 10，0 违规满分
+  module_coverage               7%    覆盖模块数 / 17 * 100
+  test_pass_rate               13%    通过数 / 总数 * 100（跳过计为失败）
+  assertion_density             5%    断言数 / (测试文件数 * 20) * 100
+  event_chain_integrity         8%    出现事件类型数 / 10 * 100（链顺序错误扣 20%）
+  performance_benchmark         5%    1000 tick 耗时 ≤10s 满分，线性衰减
+  frontend_e2e_pass_rate        7%    前端 E2E 真实通过数 / 总数 * 100（环境缺失给最低达标线 80）
+  logic_coverage                5%    5 项底层逻辑验证通过数 / 5 * 100
+  isomorphism_elimination       9%    40 项同构代码 Grep 检查，0 违规满分
+  line_convergence              5%    核心模块总行数 ≤ 22500 满分，线性衰减
+  rule_compliance               3%    RULES 91-100 Grep 违规数 / 10，0 违规满分
   negative_test_coverage        2%    4 类反测试用例数 / 目标数（每类 ≥ 8）均值 * 100
-  synthesis_e2e                 2%    合测试通过数 / 总数 * 100
+  synthesis_e2e                 3%    合测试通过数 / 总数 * 100
+  oop_inheritance_depth         8%    BasePoolConverter + Dzh/TdxPoolConverter 继承 + 公共方法在基类 + 子类仅差异
+  polling_zero_tolerance        8%    12 处轮询模式 Grep 零匹配 + EventDriver heapq 验证 + 前端 setInterval fetch 零匹配
+  primitive_convergence         8%    三原语覆盖率（时间/分派/继承各 ≥ 95% 满分）
+  essence_ratio                 4%    净减行数 / 变更前行数 × 100（目标 ≥ 12%，净增 = 0 触发 redo）
 
 权重总和 = 1.0。总分 = Σ(维度得分 × 权重)。
-门槛：总分 ≥ 95 且 12 维均 ≥ 80（redo_list 为空）判定 PASS。
+门槛：总分 ≥ 95 且 16 维均 ≥ 80（redo_list 为空）判定 PASS。
 跳过测试计为失败；前端 E2E 环境缺失给予最低达标线 80（环境问题非代码问题）；无任何硬编码信用分。
 """
 from __future__ import annotations
@@ -57,9 +63,9 @@ class ScoreReport:
     """评分报告。
 
     Attributes:
-        dimensions: 12 个维度的评分明细列表
+        dimensions: 16 个维度的评分明细列表
         total_score: 加权总分（0-100）
-        passed: 总分是否 ≥ 门槛（95）且 12 维均 ≥ 80
+        passed: 总分是否 ≥ 门槛（95）且 16 维均 ≥ 80
         deductions: 扣分项描述列表
         redo_list: 需重做的维度名列表（得分 < 80）
     """
@@ -93,11 +99,11 @@ REDO_THRESHOLD: float = 80.0
 #: 底层逻辑验证项总数（5 项：水位线/编译-运行分离/三要素/角色表/正交化）
 LOGIC_COVERAGE_TOTAL: int = 5
 
-#: 同构代码检查项总数（v3 从 6 扩展到 15，对应 15 组模式 + 原 6 项保留项）
-ISOMORPHISM_CHECKS_TOTAL: int = 15
+#: 同构代码检查项总数（v4 从 v3 的 15 扩展到 40：v3 15 + 阶段 1 DZH/TDX 25 + 阶段 3 core 25，取核心 40 项）
+ISOMORPHISM_CHECKS_TOTAL: int = 40
 
-#: 核心模块行数收敛目标（核心模块总行数 ≤ 此值满分）
-CORE_LINES_TARGET: int = 23000
+#: 核心模块行数收敛目标（v4 从 v3 的 23000 调整为 22500，Data + Dispatcher 净减后行数）
+CORE_LINES_TARGET: int = 22500
 
 #: RULES 91-100 Grep 违规检查项总数
 RULE_CHECKS_TOTAL: int = 10
@@ -120,16 +126,17 @@ NEGATIVE_TEST_CATEGORIES: Tuple[str, ...] = (
 
 
 class ScoringEngine:
-    """12 维加权评分引擎。
+    """16 维加权评分引擎。
 
-    ``calculate(test_results)`` 接收测试结果字典，计算 12 维加权总分，
-    返回 ``ScoreReport``。总分 ≥ 95 且 12 维均 ≥ 80（redo_list 为空）判定 PASS。
+    ``calculate(test_results)`` 接收测试结果字典，计算 16 维加权总分，
+    返回 ``ScoreReport``。总分 ≥ 95 且 16 维均 ≥ 80（redo_list 为空）判定 PASS。
 
-    v3 严格规则：
+    v4 严格规则：
       - 所有评分完全由 ``test_results`` 字段计算，无硬编码信用分
       - 跳过测试计为失败（分子不含 skipped）
       - 前端 E2E 环境缺失给予最低达标线 80（环境问题非代码问题，不跌穿门槛）
-      - 12 维分数均需 ≥ 80 才达标（redo_list 为空）
+      - 16 维分数均需 ≥ 80 才达标（redo_list 为空）
+      - essence_ratio 净增 = 0 触发 redo（强制「合并非拆分」硬约束）
 
     使用方式::
 
@@ -149,9 +156,9 @@ class ScoringEngine:
             "logic_coverage_passed": 5,
             "logic_coverage_total": 5,
             "isomorphism_violations": 0,
-            "isomorphism_total_checks": 15,
+            "isomorphism_total_checks": 40,
             "core_total_lines": 22000,
-            "core_lines_target": 23000,
+            "core_lines_target": 22500,
             "rule_violations": 0,
             "rule_total_checks": 10,
             "negative_test_counts": {"invalid_config": 8, "runtime_errors": 8,
@@ -159,31 +166,50 @@ class ScoringEngine:
             "negative_test_target_per_category": 8,
             "synthesis_passed": 8,
             "synthesis_total": 8,
+            "oop_inheritance": {"base_exists": True, "subclasses_inherit": True,
+                                "public_methods_in_base": True,
+                                "subclasses_only_differential": True},
+            "polling_violations": {"pattern_counts": {...}, "total_patterns": 12,
+                                   "eventdriver_heapq_verified": True,
+                                   "frontend_setinterval_fetch_count": 0},
+            "primitive_convergence": {"time": 95.0, "dispatch": 95.0,
+                                      "inheritance": 95.0},
+            "essence_ratio": 12.0,
+            "essence_baseline_lines": 24000,
+            "essence_current_lines": 21000,
         })
         print(report.total_score, report.passed)
     """
 
-    #: 12 维度定义：(维度名, 权重) — 权重总和 = 1.0
+    #: 16 维度定义：(维度名, 权重) — 权重总和 = 1.0
+    #: v3 12 维降权（66%→72%，+6% 重分配以容纳 4 新维且总和=100%）
+    #: + oop_inheritance_depth 8% + polling_zero_tolerance 8%
+    #: + primitive_convergence 8% + essence_ratio 4% = 28%
     DIMENSIONS: List[Tuple[str, float]] = [
-        ("module_coverage", 0.10),            # 模块覆盖率
-        ("test_pass_rate", 0.18),             # 测试通过率（跳过计为失败）
-        ("assertion_density", 0.08),          # 断言密度
-        ("event_chain_integrity", 0.10),      # 事件链完整性
-        ("performance_benchmark", 0.08),      # 性能基准
-        ("frontend_e2e_pass_rate", 0.10),     # 前端 E2E 真实通过率
-        ("logic_coverage", 0.08),             # 底层逻辑覆盖度
-        ("isomorphism_elimination", 0.12),    # 同构代码消除度（15 项）
-        ("line_convergence", 0.08),           # 核心模块行数收敛
-        ("rule_compliance", 0.04),            # RULES 91-100 合规
-        ("negative_test_coverage", 0.02),     # 4 类反测试覆盖度
-        ("synthesis_e2e", 0.02),             # 合测试通过率
+        ("module_coverage", 0.07),            # 模块覆盖率（v3 10%→7%）
+        ("test_pass_rate", 0.13),             # 测试通过率（v3 18%→13%，跳过计为失败）
+        ("assertion_density", 0.05),          # 断言密度（v3 8%→5%）
+        ("event_chain_integrity", 0.08),      # 事件链完整性（v3 10%→8%）
+        ("performance_benchmark", 0.05),      # 性能基准（v3 8%→5%）
+        ("frontend_e2e_pass_rate", 0.07),     # 前端 E2E 真实通过率（v3 10%→7%）
+        ("logic_coverage", 0.05),             # 底层逻辑覆盖度（v3 8%→5%）
+        ("isomorphism_elimination", 0.09),    # 同构代码消除度（v3 12%→9%，40 项）
+        ("line_convergence", 0.05),           # 核心模块行数收敛（v3 8%→5%，目标 22500）
+        ("rule_compliance", 0.03),            # RULES 91-100 合规（v3 4%→3%）
+        ("negative_test_coverage", 0.02),     # 4 类反测试覆盖度（v3 2%→2%）
+        ("synthesis_e2e", 0.03),             # 合测试通过率（v3 2%→3%）
+        # --- v4 新增 4 维 ---
+        ("oop_inheritance_depth", 0.08),      # OOP 同源继承深度（BasePoolConverter + Dzh/Tdx 子类）
+        ("polling_zero_tolerance", 0.08),     # 轮询零容忍（12 处轮询模式 Grep 零匹配）
+        ("primitive_convergence", 0.08),      # 三原语收敛度（时间/分派/继承各 ≥ 95%）
+        ("essence_ratio", 0.04),              # 本质比（净减行数 / 变更前行数，目标 ≥ 12%）
     ]
 
     #: 通过门槛：总分 ≥ 95 判定 PASS
     THRESHOLD: float = 95.0
 
     def calculate(self, test_results: Dict[str, Any]) -> ScoreReport:
-        """计算 12 维加权总分。
+        """计算 16 维加权总分。
 
         Args:
             test_results: 测试结果字典，包含以下键：
@@ -200,19 +226,27 @@ class ScoringEngine:
                 - frontend_e2e_env_missing: bool (环境未就绪)
                 - logic_coverage_passed: int (5 项底层逻辑通过数)
                 - logic_coverage_total: int (5)
-                - isomorphism_violations: int (15 项 Grep 违规数)
-                - isomorphism_total_checks: int (15)
+                - isomorphism_violations: int (40 项 Grep 违规数)
+                - isomorphism_total_checks: int (40)
                 - core_total_lines: int (核心模块总行数，wc -l core/*.py 实测)
-                - core_lines_target: int (目标行数 23000)
+                - core_lines_target: int (目标行数 22500)
                 - rule_violations: int (RULES 91-100 Grep 违规数)
                 - rule_total_checks: int (10)
                 - negative_test_counts: Dict[str, int] (4 类反测试用例数)
                 - negative_test_target_per_category: int (8)
                 - synthesis_passed: int
                 - synthesis_total: int
+                - oop_inheritance: Dict (base_exists/subclasses_inherit/
+                  public_methods_in_base/subclasses_only_differential)
+                - polling_violations: Dict (pattern_counts/total_patterns/
+                  eventdriver_heapq_verified/frontend_setinterval_fetch_count)
+                - primitive_convergence: Dict (time/dispatch/inheritance 覆盖率)
+                - essence_ratio: float (净减行数 / 变更前行数 × 100)
+                - essence_baseline_lines: int (基线行数)
+                - essence_current_lines: int (当前行数)
 
         Returns:
-            ScoreReport: 评分报告（含 12 维明细、总分、PASS/FAIL、扣分项、重做列表）
+            ScoreReport: 评分报告（含 16 维明细、总分、PASS/FAIL、扣分项、重做列表）
         """
         dimensions: List[ScoreDimension] = []
         deductions: List[str] = []
@@ -233,7 +267,7 @@ class ScoringEngine:
                 redo_list.append(name)
 
         total_score = self._weighted_total(dimensions)
-        # v3: PASS 需总分 ≥ 95 且 12 维均 ≥ 80（redo_list 为空）
+        # v4: PASS 需总分 ≥ 95 且 16 维均 ≥ 80（redo_list 为空）
         passed = total_score >= self.THRESHOLD and len(redo_list) == 0
 
         return ScoreReport(
@@ -367,10 +401,10 @@ class ScoringEngine:
         return score, detail
 
     def _score_isomorphism_elimination(self, results: Dict[str, Any]) -> Tuple[float, str]:
-        """同构代码消除度：15 项 Grep 验证，0 违规满分。
+        """同构代码消除度：40 项 Grep 验证，0 违规满分。
 
-        v3 检查项从 6 扩展到 15（对应本次 15 组模式 + 原 6 项保留项）。
-        每项违规扣 100/15 分，最低 0 分。
+        v4 检查项从 v3 的 15 扩展到 40（v3 15 + 阶段 1 DZH/TDX 25 + 阶段 3 core 25，
+        取核心 40 项）。每项违规扣 100/40 分，最低 0 分。
         """
         violations = int(results.get("isomorphism_violations", 0) or 0)
         total_checks = int(results.get("isomorphism_total_checks", ISOMORPHISM_CHECKS_TOTAL) or ISOMORPHISM_CHECKS_TOTAL)
@@ -382,12 +416,14 @@ class ScoringEngine:
         return score, detail
 
     def _score_line_convergence(self, results: Dict[str, Any]) -> Tuple[float, str]:
-        """核心模块行数收敛度：总行数 ≤ 23000 满分，线性衰减。
+        """核心模块行数收敛度：总行数 ≤ 22500 满分，线性衰减。
+
+        v4 目标从 v3 的 23000 调整为 22500（Data + Dispatcher 净减后行数）。
 
         评分公式：``score = 100 * (target / max(lines, target))``
-        - lines ≤ 23000 → score = 100
-        - lines = 25000 → score = 92.0
-        - lines = 30000 → score ≈ 76.7
+        - lines ≤ 22500 → score = 100
+        - lines = 25000 → score = 90.0
+        - lines = 30000 → score = 75.0
 
         ``core_total_lines`` 由 runner.py 通过 ``wc -l core/*.py`` 实测填入。
         """
@@ -460,6 +496,166 @@ class ScoringEngine:
             return 0.0, "无合测试用例（synthesis_total=0）"
         score = min(100.0, (passed / total) * 100.0)
         detail = f"{passed}/{total} 合测试通过"
+        return score, detail
+
+    # ------------------------------------------------------------------
+    # v4 新增 4 维评分逻辑
+    # ------------------------------------------------------------------
+
+    def _score_oop_inheritance_depth(self, results: Dict[str, Any]) -> Tuple[float, str]:
+        """OOP 同源继承深度（v4 新增第 13 维，权重 8%）。
+
+        4 条件各占 25%，全部满足满分 100：
+          (a) ``BasePoolConverter`` 存在于 converters.py
+          (b) ``DzhPoolConverter`` / ``TdxPoolConverter`` 继承自 ``BasePoolConverter``
+          (c) 公共方法（``_parse_element`` / ``_add_element`` / ``_decode_pos``
+              / ``_decode_xml_bytes``）定义在基类
+          (d) 子类仅含差异方法（无重新引入的同构方法）
+
+        所有数据由 runner.py 通过 AST/Grep 采集填入
+        ``test_results["oop_inheritance"]``，无硬编码信用分。
+        """
+        oop = results.get("oop_inheritance", {}) or {}
+        if not isinstance(oop, dict):
+            return 0.0, "oop_inheritance 数据缺失或类型错误"
+        base_exists = bool(oop.get("base_exists", False))
+        subclasses_inherit = bool(oop.get("subclasses_inherit", False))
+        public_methods_in_base = bool(oop.get("public_methods_in_base", False))
+        subclasses_only_differential = bool(oop.get("subclasses_only_differential", False))
+        met = sum([base_exists, subclasses_inherit,
+                   public_methods_in_base, subclasses_only_differential])
+        score = (met / 4.0) * 100.0
+        parts = [
+            f"BasePoolConverter存在={'是' if base_exists else '否'}",
+            f"子类继承={'是' if subclasses_inherit else '否'}",
+            f"公共方法在基类={'是' if public_methods_in_base else '否'}",
+            f"子类仅差异={'是' if subclasses_only_differential else '否'}",
+        ]
+        detail = f"{'；'.join(parts)}（{met}/4 条件满足）"
+        return score, detail
+
+    def _score_polling_zero_tolerance(self, results: Dict[str, Any]) -> Tuple[float, str]:
+        """轮询零容忍（v4 新增第 14 维，权重 8%）。
+
+        评分构成（满分 100）：
+          - 12 处轮询模式 Grep 零匹配：占 80 分（每个模式零匹配 80/12 分）
+          - EventDriver heapq 调度验证（``add_spec`` / ``loop.call_at`` /
+            ``TimedEventSpec`` 注册站点存在）：占 10 分
+          - 前端 ``setInterval.*fetch`` Grep 零匹配：占 10 分
+
+        硬约束：若任一轮询模式 > 5 匹配，直接判 0 分（零容忍失败）。
+        所有数据由 runner.py 通过 Grep 采集填入
+        ``test_results["polling_violations"]``，无硬编码信用分。
+        """
+        pv = results.get("polling_violations", {}) or {}
+        if not isinstance(pv, dict):
+            return 0.0, "polling_violations 数据缺失或类型错误"
+        pattern_counts = pv.get("pattern_counts", {}) or {}
+        if not isinstance(pattern_counts, dict):
+            pattern_counts = {}
+        eventdriver_verified = bool(pv.get("eventdriver_heapq_verified", False))
+        frontend_count = int(pv.get("frontend_setinterval_fetch_count", 0) or 0)
+        total_patterns = int(pv.get("total_patterns", 12) or 12)
+        if total_patterns <= 0:
+            total_patterns = 12
+        zero_patterns = 0
+        over_threshold = 0
+        for _pat, cnt in pattern_counts.items():
+            try:
+                cnt = int(cnt or 0)
+            except (TypeError, ValueError):
+                cnt = 0
+            if cnt == 0:
+                zero_patterns += 1
+            if cnt > 5:
+                over_threshold += 1
+        # 0 if any pattern > 5 matches (零容忍硬约束)
+        if over_threshold > 0:
+            return 0.0, (f"{over_threshold} 处轮询模式匹配 > 5（零容忍失败，"
+                         f"零模式 {zero_patterns}/{total_patterns}）")
+        # 80 分来自轮询模式零匹配比例
+        score = (zero_patterns / total_patterns) * 80.0
+        # 10 分来自 EventDriver heapq 调度验证
+        if eventdriver_verified:
+            score += 10.0
+        # 10 分来自前端 setInterval fetch 零匹配
+        if frontend_count == 0:
+            score += 10.0
+        score = min(100.0, score)
+        detail = (f"{zero_patterns}/{total_patterns} 轮询模式零匹配；"
+                  f"EventDriver heapq={'已验证' if eventdriver_verified else '未验证'}；"
+                  f"前端 setInterval fetch={frontend_count} 匹配")
+        return score, detail
+
+    def _score_primitive_convergence(self, results: Dict[str, Any]) -> Tuple[float, str]:
+        """三原语收敛度（v4 新增第 15 维，权重 8%）。
+
+        三原语覆盖率均值，各 ≥ 95% 满分，线性衰减：
+          - 时间原语覆盖率 = (EventDriver.add_spec + asyncio.Queue + watchdog 触发数)
+            / 总时间触发数 × 100
+          - 分派原语覆盖率 = 表驱动分派数 / (表驱动 + if/elif + 同构函数) × 100
+          - 继承原语覆盖率 = 基类公共方法数 / (基类 + 子类同构方法总数) × 100
+
+        每个原语覆盖率 ≥ 95% 时该原语得 100 分，否则按 ``cov / 95 × 100`` 线性衰减。
+        三原语得分均值即为本维度得分。所有数据由 runner.py 通过 Grep 采集填入
+        ``test_results["primitive_convergence"]``，无硬编码信用分。
+        """
+        pc = results.get("primitive_convergence", {}) or {}
+        if not isinstance(pc, dict):
+            return 0.0, "primitive_convergence 数据缺失或类型错误"
+
+        def _to_float(v: Any) -> float:
+            try:
+                return float(v or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        time_cov = _to_float(pc.get("time", 0.0))
+        dispatch_cov = _to_float(pc.get("dispatch", 0.0))
+        inheritance_cov = _to_float(pc.get("inheritance", 0.0))
+
+        def _scaled(cov: float) -> float:
+            if cov >= 95.0:
+                return 100.0
+            return max(0.0, cov * (100.0 / 95.0))
+
+        time_score = _scaled(time_cov)
+        dispatch_score = _scaled(dispatch_cov)
+        inheritance_score = _scaled(inheritance_cov)
+        score = (time_score + dispatch_score + inheritance_score) / 3.0
+        detail = (f"时间原语={time_cov:.1f}% 分派原语={dispatch_cov:.1f}% "
+                  f"继承原语={inheritance_cov:.1f}%（各 ≥ 95% 满分，"
+                  f"线性衰减均值 {score:.1f}）")
+        return score, detail
+
+    def _score_essence_ratio(self, results: Dict[str, Any]) -> Tuple[float, str]:
+        """本质比（v4 新增第 16 维，权重 4%）。
+
+        essence_ratio = 净减行数 / 变更前行数 × 100，目标 ≥ 12% 满分。
+
+        评分公式：
+          - ratio ≥ 12% → score = 100
+          - 0% < ratio < 12% → score = ratio / 12 × 100（线性衰减）
+          - ratio ≤ 0%（净增或未减少）→ score = 0 且触发 redo
+            （强制「合并非拆分」硬约束）
+
+        ``essence_ratio`` 由 runner.py 通过 ``(baseline - current) / baseline × 100``
+        计算填入。无硬编码信用分。
+        """
+        ratio = float(results.get("essence_ratio", 0.0) or 0.0)
+        baseline = int(results.get("essence_baseline_lines", 0) or 0)
+        current = int(results.get("essence_current_lines", 0) or 0)
+        # Net increase (= 0 ratio) triggers redo (强制合并非拆分)
+        if ratio <= 0.0:
+            return 0.0, (f"净增行数或未减少（ratio={ratio:.2f}%，"
+                         f"基线 {baseline} → 当前 {current}，触发 redo 强制合并非拆分）")
+        # Target ≥ 12% for full score; linear scale below
+        if ratio >= 12.0:
+            score = 100.0
+        else:
+            score = max(0.0, (ratio / 12.0) * 100.0)
+        detail = (f"essence_ratio={ratio:.2f}%（基线 {baseline} → 当前 {current}，"
+                  f"目标 ≥ 12%）")
         return score, detail
 
     # ------------------------------------------------------------------

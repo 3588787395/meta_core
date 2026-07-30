@@ -498,3 +498,40 @@ class TestChangeKBuildAdjacencyMerge:
             "engine.py 应调用 _build_adjacency（变更 K 合并）"
         assert "_build_adjacency" in rt_src, \
             "runtime_mode_module.py 应调用 _build_adjacency（变更 K 合并）"
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 3 C11 + C9 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 C11 _SUBSCRIPTIONS + C9 _execute_trade 收敛回归。"""
+
+    def test_no_register_subscribers_in_seven_modules(self):
+        """7 个核心模块不含 def _register_subscribers（C11 已改 _SUBSCRIPTIONS 表）。"""
+        import re
+        from pathlib import Path
+        core_dir = Path(__file__).resolve().parent.parent / "core"
+        seven = ["runtime_mode_module.py", "execution_module.py", "formula_module.py",
+                 "trade_module.py", "tick_bar_module.py", "screening_module.py",
+                 "monitoring_module.py"]
+        for mod in seven:
+            src = (core_dir / mod).read_text(encoding="utf-8")
+            count = len(re.findall(r"def _register_subscribers\b", src))
+            assert count == 0, \
+                f"{mod} 不应含 def _register_subscribers（C11 已改 _SUBSCRIPTIONS 表），实际 {count} 处"
+
+    def test_trade_module_execute_trade_present(self):
+        """trade_module 含 _execute_trade 单一方法（C9 合并 buy/sell 查表分派）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "trade_module.py").read_text(encoding="utf-8")
+        assert "def _execute_trade" in src, \
+            "trade_module 应含 _execute_trade（C9 合并 buy/sell 查表分派）"
+
+    def test_no_execute_buy_sell_in_trade_module(self):
+        """trade_module 不含 def _execute_buy / _execute_sell（C9 已表驱动化）。"""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "trade_module.py").read_text(encoding="utf-8")
+        count = len(re.findall(r"def _execute_buy\b|def _execute_sell\b", src))
+        assert count == 0, \
+            f"trade_module 不应含 _execute_buy/_execute_sell（C9 已表驱动），实际 {count} 处"

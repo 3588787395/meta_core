@@ -299,3 +299,34 @@ def test_event_to_record_unknown_uses_default_adapter():
     assert record["ts"] == 99.0
     assert record["code"] == "FAKE"
     assert record["details"] == {"k": "v"}
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 3 C6 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 C6 _ADAPTER_SPECS 表驱动收敛回归。"""
+
+    def test_adapter_specs_table_present(self):
+        """monitoring_module 含 _ADAPTER_SPECS 表（C6 替代 24 个 _adapter_X）。"""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "monitoring_module.py").read_text(encoding="utf-8")
+        assert re.search(r"_ADAPTER_SPECS\s*[:=]", src), \
+            "monitoring_module 应含 _ADAPTER_SPECS 表（C6 表驱动）"
+
+    def test_no_adapter_functions_residue(self):
+        """monitoring_module 不含 def _adapter_X 同构函数（C6 已表驱动化）。"""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "monitoring_module.py").read_text(encoding="utf-8")
+        count = len(re.findall(r"def _adapter_\w+\b", src))
+        assert count == 0, \
+            f"monitoring_module 不应含 def _adapter_X（C6 已表驱动），实际 {count} 处"
+
+    def test_build_adapter_record_present(self):
+        """monitoring_module 含 _build_adapter_record 通用 builder（C6 表驱动分派）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "monitoring_module.py").read_text(encoding="utf-8")
+        assert "def _build_adapter_record" in src, \
+            "monitoring_module 应含 _build_adapter_record 通用 builder（C6 表驱动分派）"

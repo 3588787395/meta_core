@@ -278,3 +278,47 @@ def test_runtime_zero_parsing():
         "engine.py 应引用 _build_adjacency（变更 K：_build_topology 委托 core.domain._build_adjacency），"
         f"发现 {len(build_adjacency_refs)} 处引用"
     )
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 3 C8 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 C8 Step 基类 + _compile_spec 收敛回归（编译期 step）。"""
+
+    def test_step_base_class_present(self):
+        """execution_module 含 Step 基类（C8 合并 5 个 XStep）。"""
+        import ast
+        from pathlib import Path
+        tree = ast.parse((Path(__file__).resolve().parent.parent / "core" / "execution_module.py").read_text(encoding="utf-8"))
+        classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+        assert "Step" in classes, \
+            "execution_module.py 应含 Step 基类（C8 合并 5 个 XStep）"
+
+    def test_compile_spec_helper_present(self):
+        """execution_module 含 _compile_spec helper（C8 合并 3 个 _compile_X_spec）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "execution_module.py").read_text(encoding="utf-8")
+        assert "def _compile_spec" in src, \
+            "execution_module 应含 _compile_spec helper（C8 合并 _compile_X_spec）"
+
+    def test_no_isomorphic_compile_spec_residue(self):
+        """execution_module 不含独立 _compile_timing_spec / _compile_filter_spec 定义（C8 已表驱动化）。
+
+        注：允许 1 行薄包装委托，本测试验证方法体短（≤ 3 行）。
+        """
+        import ast
+        from pathlib import Path
+        tree = ast.parse((Path(__file__).resolve().parent.parent / "core" / "execution_module.py").read_text(encoding="utf-8"))
+        # _compile_timing_spec / _compile_filter_spec / _compile_propagate_spec 若存在应为薄包装（≤ 3 行方法体）
+        thin_wrappers = 0
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name in (
+                "_compile_timing_spec", "_compile_filter_spec", "_compile_propagate_spec"
+            ):
+                end = getattr(node, "end_lineno", node.lineno) or node.lineno
+                body_lines = end - node.lineno + 1
+                assert body_lines <= 3, \
+                    f"{node.name} 应为 ≤ 3 行薄包装委托（C8 已表驱动），实际 {body_lines} 行"
+                thin_wrappers += 1
+        # 允许 0（完全删除）或 ≤ 3（薄包装委托）

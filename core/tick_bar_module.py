@@ -13,12 +13,13 @@ import hashlib
 import logging
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set
+from typing import Any, Callable, ClassVar, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import numpy as np
 import pandas as pd
 
 from core.event_bus import (
+    _BaseModule,
     _event_handler,
     EVENT_DATA_CHANGED,
     BarComposed,
@@ -55,25 +56,12 @@ def _now() -> float:
 
 
 def _now_from_state(state: Any) -> float:
-    """统一委托 ``time_at(state=state)``，不二次包装、不 fallback。
-
-    G2 硬约束：仿真/实盘同代码，仅由 ``time_at`` 单一入口按 state.time_source
-    决定时间源。本函数不得对返回值做任何"为0则回退墙钟"的特殊处理——
-    那会绕过 time_at 在仿真模式返回 0 的语义、形成"仿真专用分支"分裂。
-    0 即 0（仿真冷启动前的合法值），由调用方按业务需要处理。
-    """
+    """统一委托 ``time_at(state=state)``，不二次包装、不 fallback。"""
     return time_at(state=state)
 
 
 def publish_data_changed(bus, state, source, codes, ts, data=None, period=None, bar_hash=""):
-    """统一 DataChanged 事件发布器。
-
-    合并原 _publish_tick_changed 和 _publish_bar_changed，消除同构重复。
-    - source="tick": 发布 DataChanged(tick)
-    - source="bar": 发布 DataChanged(bar) + 对每个 code 发布 BarComposed
-
-    G2 约束：ts 由调用方传入，不在此处调用 time_at(state)。
-    """
+    """统一 DataChanged 事件发布器。"""
     if not codes:
         return
     if not is_event_bus(bus):
@@ -104,21 +92,7 @@ def _publish_tick_batch(
     *,
     ts_fallback: float = 0.0,
 ) -> None:
-    """统一批量发布 TickReceived 事件。
-
-    消除 ``for code, tick in tick_data.items(): ... TickReceived(tick_data=tick_copy,
-    code=str(code), ts=ts)`` 样板，集中维护字段复制与发布逻辑。
-
-    Args:
-        bus: EventBus 实例。
-        tick_data: ``{code: tick_dict}`` 映射；空或非 dict 直接返回。
-        ts: 统一时间戳。若为 ``None``，则对每个 tick 使用
-            ``float(tick.get("_ts", ts_fallback))``（保留 _step_once_impl
-            "每 tick 自带 _ts 优先"语义）。
-        ts_fallback: ``ts`` 为 ``None`` 且 tick 缺失 ``_ts`` 时的回退值。
-
-    单个 tick 发布失败不影响后续 tick（per-tick try/except 错误隔离）。
-    """
+    """统一批量发布 TickReceived 事件。"""
     if not tick_data or not isinstance(tick_data, dict):
         return
     for code, tick in tick_data.items():
@@ -139,22 +113,7 @@ def _publish_tick_batch(
 # DataUpdater：行情数据更新器（来自 core/data_updater.py）
 # ====================================================================
 class DataUpdater:
-    """行情数据更新器。
-
-    属性（≤ 5）:
-      - state: PoolState 运行时表真相源
-      - bus: EventBus（可选）
-      - data_source: 当前绑定的数据源配置行
-      - _fundamentals: 基本面字段缓存（写入 state.fundamentals 前）
-      - _watermark: 每只股票最新 _ts 水位线（冗余缓存，避免遍历 state.latest_tick）
-
-    方法（≤ 5）:
-      - __init__
-      - bind
-      - apply_data
-      - _apply_code_tick
-      - _hash_aggregate
-    """
+    """行情数据更新器。"""
 
     def __init__(self, state: Any, bus: Optional[Any] = None) -> None:
         self.state = state
@@ -168,13 +127,7 @@ class DataUpdater:
         self.data_source = dict(data_source)
 
     def apply_data(self, tick_data: Optional[Dict[str, Any]]) -> bool:
-        """应用外部行情推送，返回是否有股票的行情发生推进。
-
-        ``tick_data`` 格式为 ``{code: {open, high, low, close, volume, amount, ...}}``。
-        首次出现的股票写入 ``latest_tick`` 并发布 ``DataChanged(tick)``（供 ``BarComposer``
-        同步合成 bars），但不置 ``dirty.data``（冷启动无意义推进）；后续仅当 ``_ts``
-        严格增大时才覆盖、置脏并再次发布事件。
-        """
+        """应用外部行情推送，返回是否有股票的行情发生推进。"""
         if not tick_data:
             return False
 
@@ -210,11 +163,7 @@ class DataUpdater:
         return False
 
     def _apply_code_tick(self, code: str, tick: Dict[str, Any]) -> tuple[bool, bool]:
-        """单只股票 tick 应用。返回 (是否写入, 是否推进)。
-
-        I13：覆盖前将旧 tick 快照到 ``state.prev_tick[code]``，激活 TickTable 双周期视图
-        （cross 模式 prev_column 不再恒 None）。
-        """
+        """单只股票 tick 应用。返回 (是否写入, 是否推进)。"""
         existing = self.state.latest_tick.get(code)
         new_ts = float(tick.get("_ts", _now_from_state(self.state)))
         new_hash = _hash_tick(tick)
@@ -266,12 +215,7 @@ class DataUpdater:
         return True, advanced
 
     def _hash_aggregate(self) -> str:
-        """对所有 per-code tick（不含顶层 _hash/_ts）做聚合摘要。
-
-        I26：委托 ``PoolState._hash_tick_data``，与 ``update_latest_tick`` 路径
-        使用同一算法。原算法（``md5("{code}:{tick._hash}" join \\x00)``）已被
-        ``PoolState._hash_tick_data`` 接管，本方法保留为命名访问器（语义清晰）。
-        """
+        """对所有 per-code tick（不含顶层 _hash/_ts）做聚合摘要。"""
         return type(self.state)._hash_tick_data(self.state.latest_tick)
 
 
@@ -279,11 +223,7 @@ class DataUpdater:
 # bar_composer 辅助函数
 # ====================================================================
 def _to_local_datetime(ts: float) -> datetime:
-    """将时间戳转换为本地datetime。
-    支持两种格式：
-    - Unix时间戳（>= 1e9，如1700000000）：直接转换
-    - 日内秒数（< 86400，如34500=09:30:00）：使用今天的日期作为基准
-    """
+    """将时间戳转换为本地datetime。"""
     if ts is None:
         return datetime.now()
     ts = float(ts)
@@ -298,13 +238,7 @@ def _to_local_datetime(ts: float) -> datetime:
 
 
 def _bar_bucket_ts(ts: float, period: str) -> int:
-    """根据时间戳计算该周期 bar 的桶起始时间戳（秒）。
-
-    使用本地时区计算K线桶，确保1分钟/5分钟K线在本地时间整点对齐
-    （如A股09:30/09:35等，而非UTC时间01:30/01:35）。
-    支持日内秒数（仿真模式）和Unix时间戳（实盘模式）。
-    返回值类型与输入ts一致：日内秒数输入返回日内秒数，Unix时间戳返回Unix时间戳。
-    """
+    """根据时间戳计算该周期 bar 的桶起始时间戳（秒）。"""
     is_virtual = float(ts) < 86400
     dt = _to_local_datetime(ts)
     midnight = datetime(dt.year, dt.month, dt.day)
@@ -317,11 +251,6 @@ def _bar_bucket_ts(ts: float, period: str) -> int:
     if is_virtual:
         return bucket * 60
     return int(midnight.timestamp() + bucket * 60)
-
-
-def _hash_bar(bar: Dict[str, Any]) -> str:
-    """per-content MD5——委托 core._hashing.hash_dict_content。"""
-    return hash_dict_content(bar, exclude={"_hash"})
 
 
 def _new_bar_from_tick(tick: Dict[str, Any], bucket_ts: int) -> Dict[str, Any]:
@@ -358,13 +287,7 @@ def _merge_tick(bar: Dict[str, Any], tick: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _compose_5m_from_1m(state: Any, code: str, bucket_ts: int, tick: Dict[str, Any]) -> Dict[str, Any]:
-    """由已闭合 1 分钟 K 线与当前未闭合 1 分钟 K 线合成 5 分钟 K 线。
-
-    取 ``bucket_ts`` 所在 5 分钟窗口内的所有 1 分钟 bar：
-    ``window_start <= bucket_ts_1m < window_start + 300``，
-    按时间顺序聚合 open/high/low/close/volume/amount。
-    当窗口内尚无 1 分钟数据时（首次 tick），退化为以当前 tick 生成新 bar。
-    """
+    """由已闭合 1 分钟 K 线与当前未闭合 1 分钟 K 线合成 5 分钟 K 线。"""
     window_start = bucket_ts
     window_end = bucket_ts + 300
 
@@ -420,23 +343,7 @@ def _append_closed_bar(state: Any, period: str, code: str, bar: Dict[str, Any]) 
 # BarComposer：多周期 K 线组合器（来自 core/bar_composer.py）
 # ====================================================================
 class BarComposer:
-    """多周期 K 线组合器。
-
-    属性（≤ 5）:
-      - state: PoolState 运行时表真相源
-      - bus: EventBus（可选）
-      - periods: 维护的周期列表
-      - _bar_hashes: 各周期 bars 内容摘要缓存
-      - _enabled: 是否已订阅事件
-
-    方法（≤ 6）:
-      - __init__
-      - subscribe
-      - on_data_changed
-      - on_tick
-      - get_bar
-      - bar_hash
-    """
+    """多周期 K 线组合器。"""
 
     def __init__(
         self,
@@ -473,20 +380,7 @@ class BarComposer:
         self.on_tick(event.codes or [], event.ts)
 
     def on_tick(self, codes: List[str], event_ts: Optional[float] = None) -> None:
-        """根据 ``latest_tick`` 更新 ``codes`` 对应的多周期 bars。
-
-        1 分钟 K 线由 tick 直接聚合；5 分钟 K 线由已闭合 1 分钟 K 线与当前
-        未闭合 1 分钟 K 线合成。仅当某个周期 bar 发生推进（新 bucket 或当前
-        bar 内容变化）时，发布 ``DataChanged(bar, period)`` 与 ``BarComposed``。
-
-        当 bar 闭合（bucket_ts 推进）时，将闭合 bar 追加到
-        ``state.bars_history[period][code]``。
-
-        G2 硬约束：``event_ts`` 来自上游 DataChanged(tick) 事件，由事件流传递，
-        不在此处重复调用 ``time_at(state)``。实盘模式下 ``event.ts`` 同样来自
-        ``time_at(state)``（PoolState），仿真/实盘同代码路径。``event_ts`` 为
-        ``None`` 时（异常路径）退化到 ``time_at(state)`` 以保证健壮性。
-        """
+        """根据 ``latest_tick`` 更新 ``codes`` 对应的多周期 bars。"""
         if not codes:
             return
 
@@ -517,12 +411,12 @@ class BarComposer:
                 else:
                     new_bar = _new_bar_from_tick(tick, bucket_ts)
 
-                new_bar["_hash"] = _hash_bar(new_bar)
+                new_bar["_hash"] = hash_dict_content(new_bar, exclude={"_hash"})
                 if existing is None or existing.get("_hash") != new_bar["_hash"]:
                     period_bars[code] = new_bar
                     period_advanced.append(code)
 
-            self._bar_hashes[period] = _hash_period_bars(period_bars)
+            self._bar_hashes[period] = hash_tick_aggregate(period_bars, lambda code, bar: bar.get("_hash", ""))
             if period_advanced:
                 publish_data_changed(self.bus, self.state, "bar", period_advanced, now, period=period, bar_hash=self._bar_hashes.get(period, ""))
 
@@ -531,10 +425,7 @@ class BarComposer:
         return self.state.bars.get(period, {}).get(code)
 
     def bar_hash(self, field_refs: Optional[List[str]] = None) -> str:
-        """按字段依赖聚合当前 bar_hash。
-
-        ``field_refs`` 中每项形如 ``bars:<period>:<field>``；未提供时返回全周期摘要。
-        """
+        """按字段依赖聚合当前 bar_hash。"""
         periods: List[str] = []
         if field_refs:
             for ref in field_refs:
@@ -553,18 +444,7 @@ class BarComposer:
 
 
 def make_bars_history_getter(state: Any, periods: Optional[List[str]] = None) -> Callable:
-    """构造 bars_history_getter 闭包，供 DataQuery 注入。
-
-    从 ``state.bars_history[period][code]`` 读取闭合 bar 历史序列，
-    转换为标准 K 线 DataFrame；末尾追加 ``state.bars[period][code]`` 当前未闭合 bar。
-
-    Args:
-        state: PoolState 实例。
-        periods: 支持的周期列表，默认 DEFAULT_PERIODS。
-
-    Returns:
-        Callable[[symbol, period], pd.DataFrame]: 注入 DataQuery 的 getter。
-    """
+    """构造 bars_history_getter 闭包，供 DataQuery 注入。"""
     import pandas as pd
 
     _periods = list(periods or DEFAULT_PERIODS)
@@ -610,14 +490,7 @@ def make_bars_history_getter(state: Any, periods: Optional[List[str]] = None) ->
 # Tick / Min1Aggregator：分钟线合成器（来自 services/minute_aggregator.py）
 # ====================================================================
 class Tick(NamedTuple):
-    """轻量 Tick 数据结构。
-
-    Attributes:
-        symbol: 标的代码
-        time: 成交时间，格式 HHMMSS；分钟部分通过 ``time // 100`` 取 HHMM
-        price: 最新价
-        volume: 本次 Tick 成交量（增量）
-    """
+    """轻量 Tick 数据结构。"""
 
     symbol: str
     time: int
@@ -626,15 +499,7 @@ class Tick(NamedTuple):
 
 
 class Min1Aggregator:
-    """全市场分钟线合成器（无锁、预分配、批量处理）。
-
-    设计要点：
-        - OHLCV 使用预分配 numpy 数组，避免逐标的 Python dict 开销
-        - 已闭合分钟线按标的分桶存入 ``deque(maxlen=240)``，保留一个交易日
-        - 非监控标的（不在 ``sym2idx``）直接丢弃
-        - ``on_tick`` 假设单线程热路径调用，如需并发由调用方加锁
-        - 支持冷热分级配置 ``tier_config``，用于区分实时 / 批量 / 惰性合成标的
-    """
+    """全市场分钟线合成器（无锁、预分配、批量处理）。"""
 
     def __init__(self, symbols: List[str], tier_config: dict = None):
         self.symbols = list(symbols)
@@ -698,12 +563,7 @@ class Min1Aggregator:
         })
 
     def get_today_series(self, symbol: str) -> pd.DataFrame:
-        """获取某标的今日已闭合分钟线 + 当前未闭合分钟。
-
-        Returns:
-            DataFrame，列: ``time, open, high, low, close, volume, confirmed``。
-            已闭合 bar 不含 ``confirmed`` 字段（或视为 True），当前未闭合 bar ``confirmed=False``。
-        """
+        """获取某标的今日已闭合分钟线 + 当前未闭合分钟。"""
         cols = ['time', 'open', 'high', 'low', 'close', 'volume', 'confirmed']
         # 已闭合 bar 统一标记 confirmed=True；复制避免修改原始归档数据
         rows = [{**row, 'confirmed': True} for row in self.closed_bars.get(symbol, ())]
@@ -725,13 +585,7 @@ class Min1Aggregator:
         return pd.DataFrame(rows, columns=cols)
 
     def get_5min_bar(self, symbol: str) -> Optional[dict]:
-        """从已闭合的 1min bar 聚合最新一根 5min OHLCV bar。
-
-        取最近 5 根已闭合 1min bar，合成一根 5min bar。
-        不足 5 根时返回 None。
-
-        用于 KDJ_5MIN_CROSS 等基于 5 分钟周期的公式求值。
-        """
+        """从已闭合的 1min bar 聚合最新一根 5min OHLCV bar。"""
         bars = self.closed_bars.get(symbol)
         if not bars or len(bars) < 5:
             return None
@@ -747,11 +601,7 @@ class Min1Aggregator:
         }
 
     def get_5min_bars(self, symbol: str) -> Optional[pd.DataFrame]:
-        """从已闭合的 1min bar 聚合所有 5min OHLCV bar 序列。
-
-        按每 5 根 1min bar 合成一根 5min bar，从最早一根开始。
-        不足 5 根时返回 None。
-        """
+        """从已闭合的 1min bar 聚合所有 5min OHLCV bar 序列。"""
         bars = list(self.closed_bars.get(symbol, ()))
         if not bars or len(bars) < 5:
             return None
@@ -782,19 +632,7 @@ class Min1Aggregator:
         return result
 
     def tier_symbols(self) -> Dict[str, List[str]]:
-        """返回冷热分级标的映射。
-
-        支持 ``tier_config`` 中的值为：
-            - ``'all'``：表示全部未分配标的
-            - ``list`` / ``set`` / ``tuple``：显式指定的标的列表
-            - 其他值：空列表
-
-        分级顺序为 ``tier1_realtime`` → ``tier2_batch`` → ``tier3_lazy``，
-        已分配的标的不参与后续分级。未提供 ``tier_config`` 时，全部标的归入 ``tier3_lazy``。
-
-        Returns:
-            Dict[str, List[str]]: {tier_name: [symbols]}
-        """
+        """返回冷热分级标的映射。"""
         result: Dict[str, List[str]] = {}
         assigned: Set[str] = set()
         order = ('tier1_realtime', 'tier2_batch', 'tier3_lazy')
@@ -820,11 +658,7 @@ class Min1Aggregator:
 # TickBarModule 内部状态
 # ====================================================================
 class _InternalState(BarHashMixin):
-    """TickBarModule 内部轻量状态，提供 DataUpdater/BarComposer 所需最小接口。
-
-    不依赖 PoolState；``time_source`` 由 SimulationStep/ReplayStep 事件更新，
-    使 ``time_at(state=...)`` 在仿真/回放模式下返回虚拟时钟。
-    """
+    """TickBarModule 内部轻量状态，提供 DataUpdater/BarComposer 所需最小接口。"""
 
     def __init__(self) -> None:
         self.latest_tick: Dict[str, Any] = {}
@@ -868,14 +702,8 @@ class _InternalState(BarHashMixin):
 # ====================================================================
 # TickBarModule：统一对外入口
 # ====================================================================
-class TickBarModule:
-    """TickBar 模块：最新 tick + K 线合成。仅与 EventBus 交互。
-
-    内部组合 4 个组件（TickSource / DataUpdater / BarComposer / Min1Aggregator），
-    不暴露给外部。外部仅通过事件与模块交互：
-      - 订阅：TickReceived / DataChanged / SimulationStep / ReplayStep
-      - 发布：DataChanged(source=tick) / BarComposed
-    """
+class TickBarModule(_BaseModule):
+    """TickBar 模块：最新 tick + K 线合成。仅与 EventBus 交互。"""
 
     def __init__(self, bus: EventBus, config: Optional[Dict[str, Any]] = None) -> None:
         self._bus = bus
@@ -910,35 +738,24 @@ class TickBarModule:
         # --- Min1Aggregator（1min K 线合成）---
         self._minute_aggregator = Min1Aggregator(symbols=codes)
 
-        self._register_subscribers()
+        self.register_subscribers()
 
-    # ------------------------------------------------------------------
-    # 事件订阅注册
-    # ------------------------------------------------------------------
-    def _register_subscribers(self) -> None:
-        # G2：TickDue 由 MockDataSource 定时器发布，TickBarModule 订阅后生成 tick 数据
-        self._bus.subscribe(TickDue, self._on_tick_due)
-        self._bus.subscribe(TickReceived, self._on_tick_received)
-        self._bus.subscribe(DataChanged, self._on_data_changed)
-        self._bus.subscribe(SimulationStep, self._on_simulation_step)
-        self._bus.subscribe(ReplayStep, self._on_replay_step)
-        self._bus.subscribe(ModeChanged, self._on_mode_changed)
-        # 订阅 PoolLoaded：从 pool_config 提取股票 codes 重建 MockDataSource，
-        # 解决 lifespan 创建时 config 无 codes 导致 _on_simulation_step 空转的问题
-        self._bus.subscribe(PoolLoaded, self._on_pool_loaded)
+    _SUBSCRIPTIONS: ClassVar[List[Tuple[type, str]]] = [
+        (TickDue, "_on_tick_due"),
+        (TickReceived, "_on_tick_received"),
+        (DataChanged, "_on_data_changed"),
+        (SimulationStep, "_on_simulation_step"),
+        (ReplayStep, "_on_replay_step"),
+        (ModeChanged, "_on_mode_changed"),
+        (PoolLoaded, "_on_pool_loaded"),
+    ]
 
     # ------------------------------------------------------------------
     # PoolLoaded → 提取 codes → 重建 MockDataSource
     # ------------------------------------------------------------------
     @_event_handler("_on_pool_loaded")
     def _on_pool_loaded(self, event: PoolLoaded) -> None:
-        """收到 PoolLoaded 事件时，从 pool_config.nodes 提取股票 codes 并重建 MockDataSource。
-
-        lifespan 创建 TickBarModule 时 config 来自 defaults.json，无 codes 字段，
-        导致 _tick_source.codes 为空，_on_simulation_step 永远 ticks_count=0。
-        本 handler 从 pool_config.nodes[*].params.stocks[*].code 提取所有股票代码，
-        用 codes 重建 MockDataSource，使后续 SimulationStep 事件能正确生成 tick。
-        """
+        """收到 PoolLoaded 事件时，从 pool_config.nodes 提取股票 codes 并重建 MockDataSource。"""
         pool_config = event.pool_config or {}
         nodes = pool_config.get("nodes", []) if isinstance(pool_config, dict) else []
         codes: List[str] = []
@@ -974,18 +791,7 @@ class TickBarModule:
     # ------------------------------------------------------------------
     @_event_handler("_on_mode_changed")
     def _on_mode_changed(self, event: ModeChanged) -> None:
-        """模式切换时调整内部 tick 处理逻辑。
-
-        TickBarModule 本身不直接持有 DataSource 实例（通过事件接收
-        ``TickReceived``），模式切换主要是切换内部 tick 处理逻辑：
-          - ``live``:        使用实时 tick 源（默认，等待外部 publish TickReceived）
-          - ``replay``:      使用历史 K 线 replay（由 ``ReplayStep`` 事件驱动）
-          - ``simulation``:  使用 mock tick 生成器（由 ``SimulationStep`` 事件驱动
-                              MockDataSource.next_ticks）
-
-        实现：仅记录 ``self._mode_id``，由 ``_on_simulation_step`` /
-        ``_on_replay_step`` / ``_on_tick_received`` 根据 mode_id 选择处理路径。
-        """
+        """模式切换时调整内部 tick 处理逻辑。"""
         new_mode = event.mode_id or "live"
         prev = self._mode_id
         self._mode_id = new_mode
@@ -998,14 +804,7 @@ class TickBarModule:
     # 公共 API：直接应用 tick 数据（不通过事件总线）
     # ------------------------------------------------------------------
     def apply_data(self, tick_data: Optional[Dict[str, Any]]) -> List[str]:
-        """直接应用 tick 数据并触发 K 线合成。
-
-        Args:
-            tick_data: {code: {open, high, low, close, volume, amount, ...}} 格式的行情数据
-
-        Returns:
-            有变化的股票代码列表
-        """
+        """直接应用 tick 数据并触发 K 线合成。"""
         if not tick_data:
             return []
 
@@ -1052,12 +851,7 @@ class TickBarModule:
     # ------------------------------------------------------------------
     @_event_handler("_on_tick_due")
     def _on_tick_due(self, event: TickDue) -> None:
-        """MockDataSource 定时器到时信号：生成实际 tick 数据并发布 TickReceived。
-
-        G2 要求引擎只发事件不执行计算，tick 数据生成由 TickBarModule 在订阅
-        TickDue 后调用 ``self._tick_source.get_tick`` 完成，再经 TickReceived
-        事件进入 _on_tick_received 写 latest_tick / 发布 DataChanged(tick)。
-        """
+        """MockDataSource 定时器到时信号：生成实际 tick 数据并发布 TickReceived。"""
         code = event.code
         # G2 硬约束：仿真/实盘同代码，统一通过 time_at(state) 决定 ts。
         # event.ts 优先（虚拟时钟秒），为 0 则用 state 虚拟时钟，
@@ -1096,9 +890,6 @@ class TickBarModule:
         tick_copy["code"] = code
         self._data_updater.apply_data({code: tick_copy})
         # G2 硬约束：仿真/实盘同代码，统一通过 time_at(state) 决定 ts。
-        # event.ts 优先（来自 TickDue 时的虚拟时钟）；为 0 则用 state 虚拟时钟；
-        # state.time_source.current_ts 也为 0（仿真冷启动前）则保持 0。
-        # 禁止 fallback 到 tick._ts（可能含真实 Unix 秒污染时间坐标系）。
         ts = event.ts or time_at(state=self._state) or 0.0
         self._bus.publish(DataChanged(
             ts=ts,
@@ -1126,9 +917,6 @@ class TickBarModule:
                 self._feed_minute_aggregator(code, tick, event.ts)
 
         # 2. BarComposer 合成多周期 K 线（读 state.latest_tick，写 state.bars）
-        # G2：传入 event.ts，使 publish_data_changed 发布的 DataChanged(bar)/BarComposed
-        # 与上游 DataChanged(tick) 同源，避免 time_at(state) 在 _InternalState 未初始化时
-        # 回落 time.time() 污染仿真坐标系。
         self._bar_composer.on_tick(codes, event.ts)
 
         # 3. 发布 BarComposed 事件
@@ -1170,8 +958,6 @@ class TickBarModule:
 
     # ------------------------------------------------------------------
     # SubTask 5.4：SimulationStep / ReplayStep → 生成 tick → 发 TickReceived
-    # 7 步同构骨架合并至 _on_step_event，两个入口仅构造 provider_fn 并委托。
-    # ------------------------------------------------------------------
     @_event_handler("_on_step_event")
     def _on_step_event(
         self,
@@ -1180,20 +966,7 @@ class TickBarModule:
         driver_type: str,
         provider_fn: Callable[[Dict[str, Any]], Optional[Dict[str, Any]]],
     ) -> None:
-        """SimulationStep / ReplayStep 统一处理骨架。
-
-        7 步：从 event.step 提取 ts → 设置 state.time_source →
-        调用 provider_fn(step) 取 ticks → 校验 dict → 批量发布 TickReceived。
-        异常由 ``_event_handler`` 装饰器统一捕获并记录日志。
-
-        Args:
-            event: SimulationStep 或 ReplayStep 事件。
-            driver_type: "virtual"（仿真，ts 字段 virtual_ts）或
-                "sequence"（回放，ts 字段 ts）。
-            provider_fn: 接受 step dict，返回 ``{code: tick}`` 映射；
-                调用方负责 _codes 非空 / replay_provider callable 等前置校验，
-                校验失败返回 ``{}`` 即可（_publish_tick_batch 会安全跳过）。
-        """
+        """SimulationStep / ReplayStep 统一处理骨架。"""
         step = event.step or {}
         ts_key = "virtual_ts" if driver_type == "virtual" else "ts"
         ts = float(step.get(ts_key, 0.0))

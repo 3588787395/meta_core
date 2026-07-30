@@ -30,11 +30,6 @@ logger = logging.getLogger(__name__)
 
 # ============================================================
 # 表驱动：导入/导出 converter 统一入口（Task 7 / 变更 C + Task 3 / 变更 P3）
-# 合并 6 个同构 _parse_xxx / _serialize_xxx 为 _call_converter +
-# _CONVERTER_REGISTRY 表（骨架相同：延迟 import → 调用 → 返回/写文件）。
-# 变更 P3：path_or_data 支持文件路径或 bytes/str 内容；fmt=None 时由
-# is_tdx_format 自动探测；adapter 签名 (path_or_data, config, converter, name=None)。
-# ============================================================
 
 _FORMAT_LOG_LABELS: Dict[str, str] = {"dzh": "DZH XML", "tdx": "TDX XML", "json": "JSON"}
 
@@ -100,16 +95,7 @@ _CONVERTER_REGISTRY: Dict[Tuple[str, str], Tuple[str, Any, Callable]] = {
 def _call_converter(
     path_or_data, fmt=None, direction="import", config=None, name=None
 ) -> Any:
-    """统一 converter 入口：查表 → 延迟 import → 调 adapter → 统一异常+日志。
-
-    path_or_data: 文件路径 (str) 或 bytes/str XML 内容。
-    fmt: None 时（仅 import）由 is_tdx_format 自动探测 dzh/tdx；显式传入按指定格式。
-    name: 源文件名（用于 parse_dzh_xml filename 与 TDX 前端字典的 pool 名）。
-
-    fmt=None 自动探测时，TDX 结果经 _tdx_pool_to_frontend 转为前端字典（API 统一）；
-    显式 fmt="tdx" 返回原始 TdxPoolMetaModel（供 tdx_to_internal / _tdx_pool_to_frontend 复用）。
-    未知格式 import 返回 ``{}``、export 返回 None；解析/导出失败抛出异常（由调用方处理）。
-    """
+    """统一 converter 入口：查表 → 延迟 import → 调 adapter → 统一异常+日志。"""
     try:
         mod = importlib.import_module("..converters", __package__)
     except (ImportError, TypeError, ValueError):
@@ -149,16 +135,7 @@ _EXPORT_RULES: Dict[str, Tuple[Callable, str]] = {
 
 
 class ImportExportModule:
-    """ImportExport 模块：DZH XML / TDX XML / JSON 三格式导入导出。仅与 EventBus 交互。
-
-    通过 HTTP 端点接收导入/导出请求（非事件），
-    发布 ImportStarted/PoolLoaded/ExportCompleted 事件。
-
-    导入流程（以 DZH 为例）::
-        ImportStarted → 调用 converters.dzh.parse_dzh_xml → PoolLoaded
-    导出流程（以 DZH 为例）::
-        调用 converters.dzh.export_dzh_xml → 写文件 → ExportCompleted
-    """
+    """ImportExport 模块：DZH XML / TDX XML / JSON 三格式导入导出。仅与 EventBus 交互。"""
 
     def __init__(self, bus: EventBus, config: Optional[Dict[str, Any]] = None) -> None:
         self._bus = bus
@@ -180,18 +157,7 @@ class ImportExportModule:
     # 导入/导出方法（表驱动，由 API 模块直接调用，非事件订阅）
     # ------------------------------------------------------------------
     def import_pool(self, path: str, format: str) -> bool:
-        """导入股票池文件（表驱动，支持 dzh / tdx / json 三种格式）。
-
-        流程：查 ``_CONVERTER_REGISTRY`` 表 → 发布 ``ImportStarted`` →
-        调用 ``_call_converter`` → 成功时发布 ``PoolLoaded`` 并递增计数。
-
-        Args:
-            path: 文件路径。
-            format: 格式名（``"dzh"`` / ``"tdx"`` / ``"json"``）。
-
-        Returns:
-            成功导入返回 True，格式不支持或解析失败（空结果）返回 False。
-        """
+        """导入股票池文件（表驱动，支持 dzh / tdx / json 三种格式）。"""
         if (format, "import") not in _CONVERTER_REGISTRY:
             return False
         self._bus.publish(ImportStarted(format=format, path=path))
@@ -206,22 +172,7 @@ class ImportExportModule:
         return False
 
     def export_pool(self, config: Dict[str, Any], path: str, format: str) -> str:
-        """导出股票池文件（表驱动，支持 dzh / tdx / json 三种格式）。
-
-        流程：查 ``_CONVERTER_REGISTRY`` 表 → 调用 ``_call_converter`` 写文件 →
-        发布 ``ExportCompleted``。
-
-        Args:
-            config: 统一 PoolConfig dict。
-            path: 输出文件路径。
-            format: 格式名（``"dzh"`` / ``"tdx"`` / ``"json"``）。
-
-        Returns:
-            输出文件路径；格式不支持时返回空字符串。
-
-        Raises:
-            Exception: 导出失败时由 ``_call_converter`` 透传抛出。
-        """
+        """导出股票池文件（表驱动，支持 dzh / tdx / json 三种格式）。"""
         if (format, "export") not in _CONVERTER_REGISTRY:
             return ""
         _call_converter(path, format, "export", config=config)

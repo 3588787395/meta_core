@@ -43,23 +43,14 @@ _ENTRY_ITERATORS: Dict[type, Callable[[Any], Iterator[Tuple[str, Any]]]] = {
 
 
 def _iter_entries(collection) -> Iterator[Tuple[str, Any]]:
-    """归一化 dict/list 集合为 (location_suffix, entry) 迭代器。
-
-    dict 集合 → location_suffix 为 ``.{entry_id}``（拼接 collection_key 后形如 ``layouts.{eid}``）；
-    list 集合 → location_suffix 为 ``[{idx}]``（拼接 collection_key 后形如 ``rules[{idx}]``）。
-    非集合类型不产出条目（与原 dict/list 双分支 elif 语义一致）。
-    """
+    """归一化 dict/list 集合为 (location_suffix, entry) 迭代器。"""
     iterate = _ENTRY_ITERATORS.get(type(collection))
     if iterate is not None:
         yield from iterate(collection)
 
 
 class ConfigStoreBase:
-    """配置存储基类——热加载与回滚的模板方法（合并双实现）。
-
-    合并 check_hot_reload/check_and_reload 的 10 步骨架与 rollback 双实现；
-    3 层校验由 ``_validate_three_tiers`` 收敛，子类仅 override ``_commit`` 等薄 hook。
-    """
+    """配置存储基类——热加载与回滚的模板方法（合并双实现）。"""
 
     def _iter_config_paths(self) -> List[Path]:
         """枚举配置文件（子类可覆盖，默认扫描 config_dir 下 *.json）。"""
@@ -366,15 +357,7 @@ class ConfigStore(ConfigStoreBase):
         return errors
 
     def validate_table_with_report(self, name: str, data: Dict) -> Dict[str, Any]:
-        """校验配置表并返回含 schema 级别的富报告。
-
-        schema 级别：
-        - "full": table_schemas 中存在完整 schema 定义（无 "schema": "partial" 标记）
-        - "partial": table_schemas 中标注了 "schema": "partial"
-        - "none": table_schemas 中无该表定义
-
-        对于 partial/none 级别，执行降级校验：结构存在性检查（非空 + 顶层类型）。
-        """
+        """校验配置表并返回含 schema 级别的富报告。"""
         errors = self._validate_table(name, data)
 
         # 判定 schema 级别
@@ -437,13 +420,7 @@ class ConfigStore(ConfigStoreBase):
         return self._tables.get(name, default)
 
     def get_table(self, name: str) -> Dict[str, Any]:
-        """获取配置表（统一入口，参与热加载）。
-
-        与 ``get()`` 的区别：默认返回空 dict 而非 None，与历史 ``_load_*`` 语义对齐。
-        表未加载时尝试按名递归查找并加载（兼容 ConfigStore 未 ``load_all`` 的场景）。
-
-        硬约束：模块级配置加载 SHALL 通过本方法，禁止直接 ``json.loads`` 绕过热加载。
-        """
+        """获取配置表（统一入口，参与热加载）。"""
         table = self._tables.get(name)
         if table is None:
             # 表未加载：尝试按名递归查找并加载（兼容独立实例/脚本用法）
@@ -457,13 +434,7 @@ class ConfigStore(ConfigStoreBase):
         return table if isinstance(table, dict) else {}
 
     def get_data_file(self, name: str) -> Dict[str, Any]:
-        """加载 ``data/`` 目录下的 JSON 文件（带缓存，不参与热加载）。
-
-        与 ``get_table`` 的区别：
-        - 路径为 ``data/{name}.json``（非 ``config/``）
-        - 仅缓存，不参与热加载
-        - 文件不存在或解析失败时返回空 dict
-        """
+        """加载 ``data/`` 目录下的 JSON 文件（带缓存，不参与热加载）。"""
         if name in self._data_files:
             return self._data_files[name]
         data_path = self._config_dir.parent / "data" / f"{name}.json"
@@ -482,13 +453,7 @@ class ConfigStore(ConfigStoreBase):
         return layouts.get(layout_id)
 
     def get_layout_for_type(self, target_type: str, pool_type: str = "dzh") -> Optional[Dict]:
-        """根据节点类型和池类型查找布局
-
-        支持三种匹配方式：
-        1. 通过 target_type 字段匹配（数字类型如 "200"，或数组如 ["3", "201"]）
-        2. 通过 layout key 匹配（字符串类型如 "stock_state_pool"）
-        3. 通过别名映射匹配（如 transfer_condition → condition_filter）
-        """
+        """根据节点类型和池类型查找布局。"""
         # 先尝试别名映射
         type_aliases = self._tables.get("cell_type_registry", {}).get("type_aliases", {})
         lookup_type = type_aliases.get(target_type, target_type)
@@ -528,11 +493,7 @@ class ConfigStore(ConfigStoreBase):
         return False
 
     def get_layout_with_fallback(self, node_type: str, pool_type: str) -> Optional[Dict]:
-        """获取布局，按 pool_types.json 的 layout_fallback_chain 回退查找。
-
-        例如 custom 模式声明 layout_fallback_chain=["dzh","tdx"]，
-        当 custom 自身无布局时依次尝试 dzh、tdx 布局。
-        """
+        """获取布局，按 pool_types.json 的 layout_fallback_chain 回退查找。"""
         layout = self.get_layout_for_type(node_type, pool_type)
         if layout:
             return layout
@@ -599,11 +560,7 @@ class ConfigStore(ConfigStoreBase):
         return dict(self._load_times)
 
     def invalidate_all_caches(self) -> None:
-        """使所有关联引擎缓存失效，热加载后调用。
-        
-        当 ConfigStore 的配置表发生变更时，需要通知所有依赖
-        ConfigStore 的引擎组件刷新缓存，确保下次操作使用最新配置。
-        """
+        """使所有关联引擎缓存失效，热加载后调用。"""
         logger.info(f"ConfigStore.invalidate_all_caches: 刷新 {len(self._tables)} 张表的缓存引用")
         # 清除 schema_validator 的缓存（如果有）
         if self._schema_validator is not None:
@@ -691,10 +648,7 @@ _global_config_store: Optional["ConfigStore"] = None
 
 
 def set_global_config_store(store: "ConfigStore") -> None:
-    """注入全局 ConfigStore 引用，供无法通过构造函数获取 config_store 的模块级函数使用。
-
-    在 app.py / api.py 初始化 ConfigStore 后调用。
-    """
+    """注入全局 ConfigStore 引用，供无法通过构造函数获取 config_store 的模块级函数使用。"""
     global _global_config_store
     _global_config_store = store
 
@@ -705,15 +659,7 @@ def get_global_config_store() -> Optional["ConfigStore"]:
 
 
 def load_config_table(name: str) -> Dict[str, Any]:
-    """按表名加载配置表（模块级配置加载统一入口）。
-
-    硬约束：模块级配置加载 SHALL 通过本函数，禁止业务模块直接 ``json.loads``
-    绕过热加载。
-
-    ConfigStore 已初始化时走 ``get_table()``（支持热加载）；
-    未初始化时（模块导入早期）回退到递归查找并直接读取文件。
-    本函数位于 ``table_engine.py``（基础设施层），``json.loads`` 合法使用。
-    """
+    """按表名加载配置表（模块级配置加载统一入口）。"""
     store = get_global_config_store()
     if store is not None:
         return store.get_table(name)
@@ -740,10 +686,7 @@ class RuleEngine:
         self._context: Dict[str, Any] = {}
 
     def invalidate_cache(self) -> None:
-        """使 RuleEngine 内部缓存失效，热加载后调用。
-
-        清除执行上下文，确保下次规则执行使用最新配置。
-        """
+        """使 RuleEngine 内部缓存失效，热加载后调用。"""
         self._context = {}
         logger.info("RuleEngine 缓存已失效")
 
@@ -972,18 +915,12 @@ class PanelGenerator:
         self._binder = DataBinder()
 
     def invalidate_cache(self) -> None:
-        """使 PanelGenerator 内部缓存失效，热加载后调用。
-
-        确保下次生成面板时使用最新的布局配置。
-        """
+        """使 PanelGenerator 内部缓存失效，热加载后调用。"""
         logger.info("PanelGenerator 缓存已失效")
 
     def generate_panel(self, node_type: str, pool_type: str,
                    data: Dict) -> Dict:
-        """生成面板描述（供前端渲染），自动根据属性所有权规则标记 disabled 字段
-
-        pool_type='custom' 时，所有 DZH 和 TDX 的属性均可编辑，不允许禁用任何字段。
-        """
+        """生成面板描述（供前端渲染），自动根据属性所有权规则标记 disabled 字段。"""
         layout = self._store.get_layout_with_fallback(node_type, pool_type)
         if not layout:
             return {"error": f"未找到布局: type={node_type}, pool_type={pool_type}"}
@@ -1083,10 +1020,7 @@ class PanelGenerator:
         return result
 
     def _resolve_comp_value(self, rule: Dict, field_config: Dict, value: Any) -> Any:
-        """通用组件值解析器：按 comp_type_rules 表的 decode_method/empty_mode 解析。
-
-        差异隐含于表结构：decode_method 决定解码函数，empty_mode 决定空值取值规则。
-        """
+        """通用组件值解析器：按 comp_type_rules 表的 decode_method/empty_mode 解析。"""
         decode_method = rule.get("decode_method")
         if value is not None and decode_method:
             fn = getattr(self._binder, decode_method)
@@ -1127,10 +1061,7 @@ class PanelGenerator:
 
     def _apply_comp_change(self, rule: Dict, data: Dict, data_path: str,
                            field_config: Dict, value: Any) -> None:
-        """通用组件变更处理器：按 comp_type_rules 表的 apply_mode 执行。
-
-        差异隐含于表结构：apply_mode 决定编码/合并/直设策略，方法名由表内容指定。
-        """
+        """通用组件变更处理器：按 comp_type_rules 表的 apply_mode 执行。"""
         apply_mode = rule.get("apply_mode", "direct_set")
         if apply_mode == "direct_set":
             self._binder.set_value(data, data_path, value)
@@ -1212,48 +1143,25 @@ class PanelGenerator:
 # ─── 属性所有权管理器 ───────────────────────────────────────────
 
 class PropertyOwnershipManager:
-    """属性所有权管理器：基于 property_ownership.json 配置表，
-    管理每种节点类型在不同池类型下的属性所有权。
-    确保导入DZH配置时禁用TDX独有属性，导入TDX配置时禁用DZH独有属性。
-
-    底层运行逻辑洞察（Code = Data + Dispatcher）：5 个查询方法共享
-    ``if self._bypasses_ownership(pool_type): return <默认值>`` 守卫 + 4 处
-    ``self.ownership.get("pool_type_attrs", {}).get(pool_type, {})`` 查表，
-    统一为 ``_pool_attr`` helper（Dispatcher）+ ``_bypass_or`` 装饰器短路，
-    方法体仅保留差异 Data。
-    """
+    """属性所有权管理器：基于 property_ownership.json 配置表，。"""
 
     def __init__(self, store: "ConfigStore"):
         self._store = store
         self._ownership = None
 
     def _bypasses_ownership(self, pool_type: str) -> bool:
-        """查表判断该池类型是否绕过所有权限制（如 custom 模式所有属性均可编辑）。
-
-        由 pool_types.json 的 bypass_ownership_restrictions 字段驱动，
-        避免在各查询方法中硬编码 pool_type == "custom"。
-        """
+        """查表判断该池类型是否绕过所有权限制（如 custom 模式所有属性均可编辑）。"""
         pool_cfg = self._store.get("pool_types", {}).get("pool_types", {}).get(pool_type, {})
         return bool(pool_cfg.get("bypass_ownership_restrictions", False))
 
     def _pool_attr(self, pool_type: str, key: str, default: Any = None) -> Any:
-        """从 ownership.pool_type_attrs[pool_type] 取 key（合并 4 处查表副本）。
-
-        property_ownership.json 的 pool_type_attrs 段按 pool_type 索引规则元数据
-        （type_prefix / rules_key / other_pool / bypass_ownership_restrictions），
-        本 helper 消除各方法内重复的 ``self.ownership.get("pool_type_attrs", {})
-        .get(pool_type, {})`` + ``.get(key)`` 两步链。
-        """
+        """从 ownership.pool_type_attrs[pool_type] 取 key（合并 4 处查表副本）。"""
         pool_cfg = self.ownership.get("pool_type_attrs", {}).get(pool_type, {})
         return pool_cfg.get(key, default)
 
     @staticmethod
     def _bypass_or(default_factory: Callable[[], Any]):
-        """装饰器：``_bypasses_ownership(pool_type)`` 为真时短路返回 default_factory()。
-
-        合并 5 处 ``if self._bypasses_ownership(pool_type): return <默认值>`` 守卫，
-        差异（默认值 [] / True / None / data）通过 default_factory 闭包注入。
-        """
+        """装饰器：``_bypasses_ownership(pool_type)`` 为真时短路返回 default_factory()。"""
         def decorator(method):
             @functools.wraps(method)
             def wrapper(self, pool_type, *args, **kwargs):
@@ -1264,17 +1172,10 @@ class PropertyOwnershipManager:
         return decorator
 
     def _resolve_node_type(self, node_type: str, pool_type: str = "dzh") -> str:
-        """将节点类型名解析为 type_ownership 中的 key
-
-        支持 pool_type 感知：当 pool_type='tdx' 时，优先检查 tdx_{node_type} 前缀 key，
-        以区分 TDX 和 DZH 中相同数字但不同含义的类型（如 type 3 在 DZH 为状态列，在 TDX 为转移条件）。
-        """
+        """将节点类型名解析为 type_ownership 中的 key。"""
         type_ownership = self.ownership.get("type_ownership", {})
 
         # 表驱动：按 pool_type 查 pool_type_attrs 获取 type_prefix，消除 if pool_type == 分支
-        # TDX 池需优先查 tdx_ 前缀 key，因为同一数字类型在 DZH/TDX 含义不同
-        # （如 type 3 在 DZH 为状态列、在 TDX 为转移条件），前缀命名空间隔离是
-        # property_ownership.json 的结构前提
         prefix = self._pool_attr(pool_type, "type_prefix")
         if prefix:
             prefixed_key = f"{prefix}{node_type}"
@@ -1302,19 +1203,13 @@ class PropertyOwnershipManager:
 
     @_bypass_or(list)
     def get_blocked_attrs(self, pool_type: str) -> List[str]:
-        """获取指定池类型下被封锁的属性列表
-
-        绕过所有权限制的池类型（如 custom）没有封锁属性，所有属性均可编辑。
-        """
+        """获取指定池类型下被封锁的属性列表。"""
         rules = self.ownership.get("rules", {})
         rules_key = self._pool_attr(pool_type, "rules_key")
         return rules.get(rules_key, {}).get("blocked_attrs", []) if rules_key else []
 
     def is_attr_allowed(self, pool_type: str, node_type: str, attr_name: str) -> bool:
-        """检查指定属性在指定池类型和节点类型下是否允许编辑
-
-        绕过所有权限制的池类型（如 custom）下所有属性均可编辑。
-        """
+        """检查指定属性在指定池类型和节点类型下是否允许编辑。"""
         if self._bypasses_ownership(pool_type):
             return True
 
@@ -1345,10 +1240,7 @@ class PropertyOwnershipManager:
 
     @_bypass_or(lambda: None)
     def get_allowed_attrs(self, pool_type: str, node_type: str) -> Optional[List[str]]:
-        """获取指定池类型和节点类型下允许编辑的属性列表
-
-        绕过所有权限制的池类型（如 custom）下返回 None（表示所有属性均允许，无限制）。
-        """
+        """获取指定池类型和节点类型下允许编辑的属性列表。"""
         resolved_type = self._resolve_node_type(node_type, pool_type)
         type_ownership = self.ownership.get("type_ownership", {})
         type_info = type_ownership.get(resolved_type)
@@ -1389,10 +1281,7 @@ class PropertyOwnershipManager:
         return self.ownership.get("type_mapping", {}).get(mapping_key, {})
 
     def filter_data(self, pool_type: str, node_type: str, data: Dict) -> Dict:
-        """过滤数据对象，移除不属于当前池类型的属性
-
-        绕过所有权限制的池类型（如 custom）下不过滤，返回原始数据。
-        """
+        """过滤数据对象，移除不属于当前池类型的属性。"""
         if self._bypasses_ownership(pool_type):
             return data
 
@@ -1404,15 +1293,7 @@ class PropertyOwnershipManager:
 
     @_bypass_or(list)
     def get_disabled_fields(self, pool_type: str, node_type: str) -> List[str]:
-        """获取指定池类型下应禁用的字段名列表（用于前端灰显）
-
-        绕过所有权限制的池类型（如 custom）下所有字段均可编辑，无禁用字段。
-
-        逻辑：
-        1. 如果 type_ownership 中有精确匹配，取另一种池类型允许但当前池类型不允许的属性
-        2. 如果另一种池类型的允许属性为 null（该类型在另一种池类型下不存在），
-           则使用全局独占属性列表来确定 disabled 字段
-        """
+        """获取指定池类型下应禁用的字段名列表（用于前端灰显）。"""
         resolved_type = self._resolve_node_type(node_type, pool_type)
         type_ownership = self.ownership.get("type_ownership", {})
         type_info = type_ownership.get(resolved_type)
@@ -1449,15 +1330,6 @@ class PropertyOwnershipManager:
 
 # ════════════════════════════════════════════════════════════════════
 # === 热加载层（自 services/hot_reload.py 合并，SubTask 28.6）===
-# ════════════════════════════════════════════════════════════════════
-# 独立的热加载模块，从 ConfigStore.check_hot_reload() 提取而来。
-# 支持：
-# 1. Watchdog 文件监控 config/ 目录
-# 2. 三级校验闭环（语法→逻辑→业务规则）
-# 3. HotSwap 原子替换
-# 4. WebSocket 推送配置变更事件
-# 5. 版本记录与回滚
-# 6. 事件驱动：发布 ConfigChanged 事件（Task 14）
 
 
 class HotReloadManager(ConfigStoreBase):
@@ -1471,15 +1343,7 @@ class HotReloadManager(ConfigStoreBase):
     def __init__(self, config_dir: str, config_store=None, storage=None,
                  schema_validator=None, on_change: Optional[Callable] = None,
                  bus: Optional[EventBus] = None):
-        """
-        Args:
-            config_dir: 配置目录路径
-            config_store: ConfigStore 实例（用于加载和替换配置）
-            storage: Storage 实例（用于版本记录和回滚）
-            schema_validator: SchemaValidator 实例（用于三级校验）
-            on_change: 配置变更后的回调函数，签名为 on_change(changed: List[str])
-            bus: EventBus 实例（注入后发布 ConfigChanged 事件；None 保持原行为）
-        """
+        """Args:."""
         self._config_dir = Path(config_dir)
         self._config_store = config_store
         self._storage = storage
@@ -1579,11 +1443,7 @@ class HotReloadManager(ConfigStoreBase):
         return changed_tables
 
     def on_file_modified(self, event) -> None:
-        """watchdog 文件变更回调（带防抖）。
-
-        - ``bus=None`` 时保持原行为（仅标记 ``_pending_changes``）
-        - ``bus`` 注入时调用 ``check_changes()``，由其发布 ``ConfigChanged`` 事件
-        """
+        """watchdog 文件变更回调（带防抖）。"""
         if self._bus is None:
             # 向后兼容：保留原 _pending_changes 标记逻辑
             try:

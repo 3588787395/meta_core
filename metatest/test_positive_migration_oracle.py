@@ -279,3 +279,45 @@ class TestReplayModeOracle:
         assert "signals" in data, "应含 signals 键"
         assert isinstance(data["signals"], list), \
             f"signals 应为 list，实际 {type(data['signals'])}"
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 1 P2 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 P2 dzh_type_map 逆映射 + DZH type 3 唯一值收敛回归。"""
+
+    def test_dzh_type_3_unique_value(self):
+        """dzh_to_tdx['3'] == 3（P2 消除原 3 vs 0 矛盾）。"""
+        import json
+        from pathlib import Path
+        tm_path = Path(__file__).resolve().parent.parent / "config" / "architecture" / "dzh_type_map.json"
+        data = json.loads(tm_path.read_text(encoding="utf-8"))
+        assert data["dzh_to_tdx"]["3"] == 3, \
+            "dzh_to_tdx['3'] 应为 3（P2 消除原 _DZH_TO_TDX_TYPE=3 与 _DZH_TO_TDX_TYPE_EXPORT=0 矛盾）"
+
+    def test_execution_type_inverse_mapping(self):
+        """dzh_to_tdx 与 tdx_to_dzh 在执行类型上互为逆映射（P2 round-trip 一致）。"""
+        import json
+        from pathlib import Path
+        tm_path = Path(__file__).resolve().parent.parent / "config" / "architecture" / "dzh_type_map.json"
+        data = json.loads(tm_path.read_text(encoding="utf-8"))
+        # 执行类型 tdx 3/7/8 ↔ dzh 201/202/200 严格逆映射
+        assert data["dzh_to_tdx"]["201"] == 3 and data["tdx_to_dzh"]["3"] == 201
+        assert data["dzh_to_tdx"]["202"] == 7 and data["tdx_to_dzh"]["7"] == 202
+        assert data["dzh_to_tdx"]["200"] == 8 and data["tdx_to_dzh"]["8"] == 200
+
+    def test_no_load_dzh_type_map_definition(self):
+        """core/*.py 不含 def _load_dzh_type_map（P2 已改 ConfigStore.get_table）。"""
+        import re
+        from pathlib import Path
+        core_dir = Path(__file__).resolve().parent.parent / "core"
+        total = 0
+        for py in core_dir.glob("*.py"):
+            try:
+                src = py.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            total += len(re.findall(r"def _load_dzh_type_map\b", src))
+        assert total == 0, \
+            f"core/*.py 不应含 def _load_dzh_type_map（P2 已改 ConfigStore.get_table），实际 {total} 处"

@@ -766,3 +766,37 @@ class TestChangeETradeattrFieldMap:
             "_apply_tradeattr 应查 _TRADEATTR_FIELD_MAP 表（变更 E 表驱动）"
         assert "_TRADEATTR_TARGET_KEYS" in method_text, \
             "_apply_tradeattr 应引用 _TRADEATTR_TARGET_KEYS（变更 E 表驱动）"
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 3 C9 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 阶段 3 C9 trade_module 表驱动收敛回归。"""
+
+    def test_side_specs_table_present(self):
+        """trade_module 含 _SIDE_SPECS 表（C9 BUY/SELL 差异表驱动）。"""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "trade_module.py").read_text(encoding="utf-8")
+        assert re.search(r"_SIDE_SPECS\s*[:=]", src), \
+            "trade_module.py 应含 _SIDE_SPECS 表（C9 BUY/SELL 表驱动）"
+
+    def test_psatt_side_effects_table_present(self):
+        """trade_module 含 _PSATT_SIDE_EFFECTS 表（C9 5 条副作用表驱动）。"""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "trade_module.py").read_text(encoding="utf-8")
+        assert re.search(r"_PSATT_SIDE_EFFECTS\s*[:=]", src), \
+            "trade_module.py 应含 _PSATT_SIDE_EFFECTS 表（C9 5 条副作用）"
+
+    def test_no_execute_buy_sell_isomorphism(self):
+        """trade_module 不含 def _execute_buy / _execute_sell（已合并为 _execute_trade）。"""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "trade_module.py").read_text(encoding="utf-8")
+        count = len(re.findall(r"def _execute_buy\b|def _execute_sell\b", src))
+        assert count == 0, \
+            f"trade_module 不应含 _execute_buy/_execute_sell（C9 已表驱动），实际 {count} 处"
+        assert "def _execute_trade" in src, \
+            "trade_module 应含 _execute_trade（C9 合并 buy/sell 查表分派）"

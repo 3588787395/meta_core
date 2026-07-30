@@ -12,13 +12,7 @@ from typing import Dict
 
 
 class TickTable:
-    """最新 tick 数据水位线表。
-
-    三字段：
-      - ``data``：``{code -> bar_dict}`` 全量最新 tick
-      - ``ts``：水位线时间戳，hash 变化时刷新
-      - ``hash``：``data`` 内容的 sha256 指纹
-    """
+    """最新 tick 数据水位线表。"""
 
     def __init__(self) -> None:
         self.data: Dict[str, Dict] = {}
@@ -31,12 +25,7 @@ class TickTable:
         return int.from_bytes(hashlib.sha256(payload.encode("utf-8")).digest(), "big")
 
     def update(self, tick_data: Dict[str, Dict]) -> bool:
-        """用新 tick 数据刷新水位线。
-
-        比较新数据 sha256 与旧 hash：相同则水位线未涨返回 False（调用方可短路）；
-        不同则更新 data/ts/hash 并返回 True。``ts`` 取 ``time.time()`` 并保证
-        单调递增（水位线语义：数据变化时 ts 必须上涨）。
-        """
+        """用新 tick 数据刷新水位线。"""
         new_hash = self._compute_hash(tick_data)
         if new_hash == self.hash:
             return False

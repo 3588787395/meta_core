@@ -593,3 +593,39 @@ class TestChangeNEventHandlerDecorator:
         decorator = _event_handler("TestEvent")
         assert callable(decorator), \
             "_event_handler(name) 应返回可调用装饰器"
+
+
+# === Task 28.6 回归断言：converge-meta-essence-v4 阶段 2 E1/E2 + 阶段 3 C11 收敛状态 ===
+
+
+class TestConvergenceRegressionV4:
+    """SubTask 28.6：converge-meta-essence-v4 E1/E2 EventDriver heapq + C11 _BaseModule 收敛回归。"""
+
+    def test_event_driver_heapq_scheduling(self):
+        """execution_module EventDriver 使用 heapq 调度（E1/E2 时间原语）。"""
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "execution_module.py").read_text(encoding="utf-8")
+        assert "class EventDriver" in src, "execution_module 应含 EventDriver 类（时间原语）"
+        assert "import heapq" in src, "execution_module 应 import heapq（EventDriver 优先队列）"
+        assert "self._heap" in src, "EventDriver 应维护 self._heap 优先队列属性"
+
+    def test_no_sync_play_sim_loop_residue(self):
+        """runtime_mode_module 不含 _sync_play_loop / _sync_sim_loop / auto_step_loop（E1/E2 已改 heapq）。"""
+        import re
+        from pathlib import Path
+        src = (Path(__file__).resolve().parent.parent / "core" / "runtime_mode_module.py").read_text(encoding="utf-8")
+        count = len(re.findall(r"def _sync_play_loop\b|def _sync_sim_loop\b|async def auto_step_loop\b", src))
+        assert count == 0, \
+            f"runtime_mode_module 不应含 _sync_play_loop/_sync_sim_loop/auto_step_loop（E1/E2 heapq），实际 {count} 处"
+
+    def test_base_module_subscriptions_table(self):
+        """event_bus.py 含 _BaseModule + _SUBSCRIPTIONS 表（C11 表驱动订阅）。"""
+        import ast
+        from pathlib import Path
+        tree = ast.parse((Path(__file__).resolve().parent.parent / "core" / "event_bus.py").read_text(encoding="utf-8"))
+        classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+        assert "_BaseModule" in classes, \
+            "event_bus.py 应含 _BaseModule 基类（C11 表驱动订阅）"
+        src = (Path(__file__).resolve().parent.parent / "core" / "event_bus.py").read_text(encoding="utf-8")
+        assert "_SUBSCRIPTIONS" in src, \
+            "event_bus.py 应含 _SUBSCRIPTIONS 类属性表（C11 表驱动）"

@@ -253,3 +253,66 @@ class TestImportExportRoundtrip:
         modules = report_state.setdefault("modules_covered", [])
         if "core.import_export_module" not in modules:
             modules.append("core.import_export_module")
+
+
+# ====================================================================
+# v4 端到端收敛验证（Task 30 SubTask 30.5）—— OOP 继承 + Registry 分派
+# ====================================================================
+
+
+class TestV4ConverterOopAndRegistryConvergence:
+    """v4 变更 P1/P3 端到端：BasePoolConverter OOP 继承 + _CONVERTER_REGISTRY 分派。
+
+    验证 DZH/TDX 转换器同源继承（``DzhPoolConverter`` / ``TdxPoolConverter`` 继承
+    ``BasePoolConverter``，公共方法在基类）+ ``_CONVERTER_REGISTRY`` 按
+    ``(fmt, direction)`` 元组表驱动分派（消除 api.py/app.py 绕过 registry 直调）。
+    """
+
+    def test_converter_registry_has_dzh_tdx_bidirectional(self, report_state) -> None:
+        """_CONVERTER_REGISTRY 含 DZH/TDX 双向 4 条表驱动分派条目。"""
+        from core.import_export_module import _CONVERTER_REGISTRY
+
+        for key in [("dzh", "import"), ("dzh", "export"),
+                    ("tdx", "import"), ("tdx", "export")]:
+            assert key in _CONVERTER_REGISTRY, \
+                f"_CONVERTER_REGISTRY 缺 {key} 表驱动条目"
+            entry = _CONVERTER_REGISTRY[key]
+            assert isinstance(entry, tuple) and len(entry) == 3, \
+                f"{key} entry 应为 (module_path, func_name, adapter) 三元组"
+
+    def test_base_pool_converter_inheritance_structure(self, report_state) -> None:
+        """DzhPoolConverter/TdxPoolConverter 继承 BasePoolConverter（OOP 同源继承）。"""
+        from converters import (
+            BasePoolConverter, DzhPoolConverter, TdxPoolConverter,
+        )
+
+        assert issubclass(DzhPoolConverter, BasePoolConverter), \
+            "DzhPoolConverter 应继承 BasePoolConverter（OOP 同源继承）"
+        assert issubclass(TdxPoolConverter, BasePoolConverter), \
+            "TdxPoolConverter 应继承 BasePoolConverter（OOP 同源继承）"
+        # 公共方法在基类定义（继承原语）
+        for method in ("_parse_element", "_add_element", "_decode_pos",
+                       "_decode_xml_bytes"):
+            assert method in BasePoolConverter.__dict__, \
+                f"{method} 应在 BasePoolConverter 基类定义"
+        # 子类不重定义基类公共方法（继承而非复制）
+        assert "_parse_element" not in DzhPoolConverter.__dict__, \
+            "DzhPoolConverter 不应重定义 _parse_element（应继承基类）"
+        assert "_parse_element" not in TdxPoolConverter.__dict__, \
+            "TdxPoolConverter 不应重定义 _parse_element（应继承基类）"
+
+    def test_no_isomorphic_parser_residue(self, report_state) -> None:
+        """converters.py 无旧同构解析器残留（_parse_func_element/_add_func 已删除）。"""
+        import re
+        conv_file = _PROJECT_ROOT / "converters.py"
+        content = conv_file.read_text(encoding="utf-8")
+        residue = len(re.compile(
+            r"def _parse_func_element\b|def _add_func\b|def _parse_psatt_element\b",
+            re.MULTILINE).findall(content))
+        assert residue == 0, (
+            f"converters.py 旧同构解析器残留 {residue} 处，"
+            "应已收敛到 BasePoolConverter._parse_element 基类")
+        modules = report_state.setdefault("modules_covered", [])
+        for m in ("converters.BasePoolConverter", "core.import_export_module"):
+            if m not in modules:
+                modules.append(m)
