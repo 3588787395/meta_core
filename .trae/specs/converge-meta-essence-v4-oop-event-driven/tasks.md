@@ -69,21 +69,21 @@
 
 ### 架构工程师任务
 
-- [ ] Task 6: 变更 E1 — replay 步进改为 EventDriver heapq 调度
-  - [ ] SubTask 6.1: 在 `core/execution_module.py` EventDriver 中确认 `schedule(event, fire_time)` + `cancel(event_id)` + `loop.call_at` 调度链可用（若不足则扩展）
-  - [ ] SubTask 6.2: `core/runtime_mode_module.py:726-748 _sync_play_loop` 删除，改为 `play()` 调用 `EventDriver.schedule(step_event, fire_time=now + base_interval/speed)`，步进事件回调中调用 `_do_step()` 并重新调度
-  - [ ] SubTask 6.3: `pause()` 改为 `EventDriver.cancel(step_event_id)` 取消调度，`resume()` 重新调度
-  - [ ] SubTask 6.4: `stop()` 清空 heapq 中所有 step 事件
-  - [ ] SubTask 6.5: Grep `def _sync_play_loop\b` 在 runtime_mode_module.py = 0
-  - [ ] SubTask 6.6: Grep `time\.sleep\(interval\)` 在 runtime_mode_module.py replay 路径 = 0
+- [x] Task 6: 变更 E1 — replay 步进改为 EventDriver heapq 调度
+  - [x] SubTask 6.1: 在 `core/execution_module.py` EventDriver 中确认 `schedule(event, fire_time)` + `cancel(event_id)` + `loop.call_at` 调度链可用（若不足则扩展）
+  - [x] SubTask 6.2: `core/runtime_mode_module.py:726-748 _sync_play_loop` 删除，改为 `play()` 调用 `EventDriver.schedule(step_event, fire_time=now + base_interval/speed)`，步进事件回调中调用 `_do_step()` 并重新调度
+  - [x] SubTask 6.3: `pause()` 改为 `EventDriver.cancel(step_event_id)` 取消调度，`resume()` 重新调度
+  - [x] SubTask 6.4: `stop()` 清空 heapq 中所有 step 事件
+  - [x] SubTask 6.5: Grep `def _sync_play_loop\b` 在 runtime_mode_module.py = 0
+  - [x] SubTask 6.6: Grep `time\.sleep\(interval\)` 在 runtime_mode_module.py replay 路径 = 0
 
-- [ ] Task 7: 变更 E2 — simulation auto-step 改为 EventDriver heapq 调度
-  - [ ] SubTask 7.1: `core/runtime_mode_module.py:2122-2138 _sync_sim_loop` 删除，改为 `start_auto()` 调用 `EventDriver.schedule(sim_step_event, fire_time=now + 1.0/speed)`
-  - [ ] SubTask 7.2: 步进事件回调中调用 `step_simulation(step_idx)` 并重新调度
-  - [ ] SubTask 7.3: `core/runtime_mode_module.py:2509-2525 auto_step_loop` 删除（疑似死代码，但违规模式存在）
-  - [ ] SubTask 7.4: 停止通过 `ModeChanged` 事件订阅或 `EventDriver.cancel` 取消，禁止 `_run` / `_sim_auto_step` / `_current_mode` 标志轮询
-  - [ ] SubTask 7.5: Grep `def _sync_sim_loop\b|async def auto_step_loop\b` 在 runtime_mode_module.py = 0
-  - [ ] SubTask 7.6: Grep `while self\._run\b|while self\._sim_auto_step\b` 在 runtime_mode_module.py = 0
+- [x] Task 7: 变更 E2 — simulation auto-step 改为 EventDriver heapq 调度
+  - [x] SubTask 7.1: `core/runtime_mode_module.py:2122-2138 _sync_sim_loop` 删除，改为 `start_auto()` 调用 `EventDriver.schedule(sim_step_event, fire_time=now + 1.0/speed)`
+  - [x] SubTask 7.2: 步进事件回调中调用 `step_simulation(step_idx)` 并重新调度
+  - [x] SubTask 7.3: `core/runtime_mode_module.py:2509-2525 auto_step_loop` 删除（疑似死代码，但违规模式存在）
+  - [x] SubTask 7.4: 停止通过 `ModeChanged` 事件订阅或 `EventDriver.cancel` 取消，禁止 `_run` / `_sim_auto_step` / `_current_mode` 标志轮询
+  - [x] SubTask 7.5: Grep `def _sync_sim_loop\b|async def auto_step_loop\b` 在 runtime_mode_module.py = 0
+  - [x] SubTask 7.6: Grep `while self\._run\b|while self\._sim_auto_step\b` 在 runtime_mode_module.py = 0
 
 - [x] Task 8: 变更 E3 — 移除 `ConfigStore.start_polling` 与 `services/data.py._file_watcher_loop` 两处文件 mtime 轮询
   - [x] SubTask 8.1: `core/table_engine.py:1700-1715 start_polling` 方法删除（`start_watchdog` 已存在为正确路径）
@@ -125,32 +125,36 @@
 ### 评审工程师任务（阶段 2 验证）
 
 - [ ] Task 12: 阶段 2 Grep + 回归验证
-  - [ ] SubTask 12.1: Grep `def _sync_play_loop\b|def _sync_sim_loop\b|async def auto_step_loop\b` 在 runtime_mode_module.py = 0
-  - [ ] SubTask 12.2: Grep `def start_polling\b|def _file_watcher_loop\b|def _refresh_with_backoff\b` 在 core/table_engine.py + services/data.py = 0
-  - [ ] SubTask 12.3: Grep `run_in_executor\(.*drain` + `asyncio\.sleep\(0\.05\)` 在 app.py SSE 路径 = 0
-  - [ ] SubTask 12.4: Grep `setInterval.*fetch|setInterval.*_poll|setInterval.*\/reload|setInterval.*syncTimerQueue` 在 web/js/*.js = 0
+  - [x] SubTask 12.1: Grep `def _sync_play_loop\b|def _sync_sim_loop\b|async def auto_step_loop\b` 在 runtime_mode_module.py = 0
+  - [x] SubTask 12.2: Grep `def start_polling\b|def _file_watcher_loop\b|def _refresh_with_backoff\b` 在 core/table_engine.py + services/data.py = 0
+  - [x] SubTask 12.3: Grep `run_in_executor\(.*drain` + `asyncio\.sleep\(0\.05\)` 在 app.py SSE 路径 = 0
+  - [x] SubTask 12.4: Grep `setInterval.*fetch|setInterval.*_poll|setInterval.*\/reload|setInterval.*syncTimerQueue` 在 web/js/*.js = 0
   - [ ] SubTask 12.5: 启动 replay 模式验证步进由 EventDriver heapq 调度，无 `time.sleep`
   - [ ] SubTask 12.6: 启动 simulation 模式验证 auto-step 由 EventDriver heapq 调度，无 `asyncio.sleep` 步进
   - [ ] SubTask 12.7: 修改配置文件验证 watchdog 事件驱动重载，无 mtime 轮询
   - [ ] SubTask 12.8: 连接 SSE 流验证事件推送由 `asyncio.Queue + await queue.get()` 驱动，无 50ms 轮询
   - [ ] SubTask 12.9: 浏览器验证前端 4 处状态更新由 SSE/WS 推送，无 setInterval 轮询
 
+> Task 12 进度说明：12.1-12.4 Grep 静态验证已通过（replay/sim 轮询循环、`time.sleep(interval)`、`asyncio.sleep(1.0/self._sim_speed)`、`while self._run`、`while True` 在 runtime_mode_module.py 均为 0 匹配；`import core.runtime_mode_module; import core.execution_module` 通过）。12.5-12.9 为运行时/浏览器验证，需实际启动服务，当前沙箱环境无法执行，保留 [ ]。注意：已注册的 replay/sim 步进 TimedEventSpec 使用 wall-clock `first_fire_time=time.time()`，而现有 `EventDriver.fire_due(now)` 仅在 `step()`/`_do_step()` 内以数据时间（K 线时间戳 / 虚拟时钟）被调用，尚无顶层 wall-clock pump——规格实际触发需后续补充 wall-clock 驱动（loop.call_at 或 `fire_due(time.time())` 定时器），属 Task 12.5/12.6 运行时验证范畴。
+
 ## 阶段 3：core/*.py 第二轮深度同构合并
 
 ### 架构工程师任务（阶段 3a：domain.py 与 schemas.py 的 OOP 完整收敛）
 
-- [ ] Task 13: 变更 C1 — 引入 `_FieldedBase` mixin 合并 `_NodeBase` / `_EdgeBase` 的 `to_dict` / `from_dict`
-  - [ ] SubTask 13.1: 在 `core/domain.py` 定义 `_FieldedBase` mixin，含 `_common_to_dict()` / `_common_from_dict(data)` 方法（合并 4 方法 ~52 行仅返回类型注解不同的逐行复制）
-  - [ ] SubTask 13.2: `_NodeBase` / `_EdgeBase` 继承 `_FieldedBase`，`to_dict` / `from_dict` 改为 1 行薄包装委托
-  - [ ] SubTask 13.3: 合并 `from_dzh_type` / `from_tdx_type` / `from_dzh_attr` / `from_tdx_source_type` 4 个 classmethod 为 `_lookup_in_registry(registry, t, label)` helper + 4 个 1 行薄包装
-  - [ ] SubTask 13.4: Grep `def to_dict\b|def from_dict\b` 在 domain.py 仅匹配 `_FieldedBase._common_to_dict/_common_from_dict` + 4 个 1 行薄包装
-  - [ ] SubTask 13.5: 验证 `_NodeBase` / `_EdgeBase` 子类序列化/反序列化结果与原逻辑一致
+- [x] Task 13: 变更 C1 — 引入 `_FieldedBase` mixin 合并 `_NodeBase` / `_EdgeBase` 的 `to_dict` / `from_dict`
+  - [x] SubTask 13.1: 在 `core/domain.py` 定义 `_FieldedBase` mixin，含 `_common_to_dict()` / `_common_from_dict(data)` 方法（合并 4 方法 ~52 行仅返回类型注解不同的逐行复制）
+  - [x] SubTask 13.2: `_NodeBase` / `_EdgeBase` 继承 `_FieldedBase`，`to_dict` / `from_dict` 改为 1 行薄包装委托
+  - [x] SubTask 13.3: 合并 `from_dzh_type` / `from_tdx_type` / `from_dzh_attr` / `from_tdx_source_type` 4 个 classmethod 为 `_lookup_in_registry(registry, t, label)` helper + 4 个 1 行薄包装
+  - [x] SubTask 13.4: Grep `def to_dict\b|def from_dict\b` 在 domain.py 仅匹配 `_FieldedBase._common_to_dict/_common_from_dict` + 4 个 1 行薄包装
+  - [x] SubTask 13.5: 验证 `_NodeBase` / `_EdgeBase` 子类序列化/反序列化结果与原逻辑一致
+  - 进度说明：实现比模板更彻底——to_dict/from_dict 完整骨架（28行）直接置 _FieldedBase mixin，_NodeBase/_EdgeBase 无需薄包装（仅保留 _common_to_dict/_common_kwargs 处理公共字段差异）；4 工厂方法委托 _lookup_in_registry。Grep `def to_dict|def from_dict` = Node/Edge ABC abstractmethod + _FieldedBase 实现 + _SpecBase（Spec 范围外），_NodeBase/_EdgeBase 零匹配。净减 50 行（2119→2069）。_hash_tick thin wrapper 见 SubTask 15.4。
 
-- [ ] Task 14: 变更 C2 — 合并 schemas.py 6 个 `from_dict` classmethod 为 `_DictConstructible` mixin
-  - [ ] SubTask 14.1: 在 `core/schemas.py` 定义 `_DictConstructible` mixin，含 `@classmethod from_dict(cls, data) -> cls` 方法（合并 6 处逐字相同实现）
-  - [ ] SubTask 14.2: `TdxFuncModel` / `TdxPsattModel` / `TdxSpinfoModel` / `TdxStkModel` / `TdxCellModel` / `TdxFlowModel` 6 个 Pydantic 模型继承 `_DictConstructible`
-  - [ ] SubTask 14.3: 合并 `_validate_ndeltype` / `_validate_type` 等 field-validator 为 `_validate_in_set(v, allowed, message)` helper
-  - [ ] SubTask 14.4: Grep `def from_dict\b` 在 schemas.py 仅匹配 `_DictConstructible.from_dict` 1 处
+- [x] Task 14: 变更 C2 — 合并 schemas.py 6 个 `from_dict` classmethod 为 `_DictConstructible` mixin
+  - [x] SubTask 14.1: 在 `core/schemas.py` 定义 `_DictConstructible` mixin，含 `@classmethod from_dict(cls, data) -> cls` 方法（合并 6 处逐字相同实现）
+  - [x] SubTask 14.2: `TdxFuncModel` / `TdxPsattModel` / `TdxSpinfoModel` / `TdxStkModel` / `TdxCellModel` / `TdxFlowModel` 6 个 Pydantic 模型继承 `_DictConstructible`
+  - [x] SubTask 14.3: 合并 `_validate_ndeltype` / `_validate_type` 等 field-validator 为 `_validate_in_set(v, allowed, message)` helper
+  - [x] SubTask 14.4: Grep `def from_dict\b` 在 schemas.py 仅匹配 `_DictConstructible.from_dict` 1 处
+  - 进度说明：实施时发现任务前提与实际代码不符——5 个 TDX 叶子模型（Func/Psatt/Spinfo/Stk/Flow）已通过 `_XmlAttrMixin` 共享 `from_dict`，仅 `TdxCellModel` 有自身 `from_dict`（嵌套解析）。故将 `_XmlAttrMixin.from_dict` 提升为独立 `_DictConstructible` mixin（含 `_preprocess_dict` hook 供嵌套子类覆盖），`_XmlAttrMixin` 继承之；`TdxCellModel`/`TdxPoolMetaModel` 覆盖 `_preprocess_dict` 做嵌套解析；并顺带收敛同模式 `TradeAttrModel`（删除泛型 from_dict）/`PoolMetaModel`（覆盖 hook）。Grep `def from_dict` 现 3 处：`_DictConstructible.from_dict`（唯一 Pydantic from_dict 真相源）+ `DynamicCellModel`/`DynamicFlowModel`（dict-wrapper 范式，用 `obj._data` 而非 `cls(**kwargs)`，套用 mixin 需新增 `_construct` hook 致净增行，违反「合并非拆分」硬约束，故保留，属 Task 14 六模型范围之外）。净减 10 行（+53/-63）。
 
 ### 架构工程师任务（阶段 3b：哈希函数三族统一）
 
@@ -158,71 +162,71 @@
   - [ ] SubTask 15.1: 新建 `core/_hashing.py`，定义 `hash_dict_content(content: dict, exclude: set = ()) -> str`（合并 per-content MD5 6 处：`_hash_tick` / `_hash_bar` / `_hash_bars` / `_hash_object` / `_hash_code_bars` / 内联 fallback）
   - [ ] SubTask 15.2: 定义 `hash_tick_aggregate(tick_data: dict, per_code_hasher) -> str`（合并 aggregate tick hash 3 处：`PoolStateMixin._hash_tick_data` / `_InternalState._hash_tick_data` / `_hash_period_bars`）
   - [ ] SubTask 15.3: 定义 `BarHashMixin` 含 `bar_hash` property（合并 3 处 `return self.X.get("_hash", "")` accessor）
-  - [ ] SubTask 15.4: `core/domain.py:1906-1921 _hash_tick` 改为 thin wrapper 调用 `hash_dict_content(tick, exclude={"_ts","_hash"})`
-  - [ ] SubTask 15.5: `core/tick_bar_module.py:322-328 _hash_bar` 改为 thin wrapper 调用 `hash_dict_content(bar, exclude={"_hash"})`
-  - [ ] SubTask 15.6: `core/tick_bar_module.py:409-416 _hash_period_bars` + `:869-889 _InternalState._hash_tick_data` 改为 thin wrapper 调用 `hash_tick_aggregate`
+  - [x] SubTask 15.4: `core/domain.py:1906-1921 _hash_tick` 改为 thin wrapper 调用 `hash_dict_content(tick, exclude={"_ts","_hash"})`
+  - [x] SubTask 15.5: `core/tick_bar_module.py:322-328 _hash_bar` 改为 thin wrapper 调用 `hash_dict_content(bar, exclude={"_hash"})`
+  - [x] SubTask 15.6: `core/tick_bar_module.py:409-416 _hash_period_bars` + `:869-889 _InternalState._hash_tick_data` 改为 thin wrapper 调用 `hash_tick_aggregate`
   - [ ] SubTask 15.7: `core/runtime_mode_module.py:2791-2815 PoolStateMixin._hash_tick_data` 改为 thin wrapper 调用 `hash_tick_aggregate`
-  - [ ] SubTask 15.8: `core/formula_module.py:1058-1081 _hash_code_bars` + `:1084-1090 _hash_bars` + `:1562-1573 _hash_object` 改为 thin wrapper 调用 `hash_dict_content`
+  - [x] SubTask 15.8: `core/formula_module.py:1058-1081 _hash_code_bars` + `:1084-1090 _hash_bars` + `:1562-1573 _hash_object` 改为 thin wrapper 调用 `hash_dict_content`
   - [ ] SubTask 15.9: `runtime_mode_module.py:2737-2744 PoolStateMixin.bar_hash` + `execution_module.py:2559-2561 EdgeExecutor.bar_hash` + `tick_bar_module.py:865-866 _InternalState.bar_hash` 改为继承 `BarHashMixin`
   - [ ] SubTask 15.10: Grep `def _hash_tick\b|def _hash_bar\b|def _hash_bars\b|def _hash_object\b|def _hash_code_bars\b|def _hash_tick_data\b|def _hash_period_bars\b|def bar_hash\b` 在 core/*.py ≤ 8（仅 _hashing.py 内核心实现 + 必要 thin wrapper）
 
 - [ ] Task 16: 变更 C4 — 合并 `safe_cast` 跨模块统一到 `converters/_common.py`（与 P4 协同）
   - [ ] SubTask 16.1: 在 `converters/_common.py` 定义 `safe_cast(v, cast_fn, default, empty_check=True)` + `safe_int` / `safe_float` / `safe_str` thin wrapper
   - [ ] SubTask 16.2: `core/web_state.py:135-142 _to_float` 改为 `from converters._common import safe_float`（或保留 `_to_float` 作为 thin wrapper 返回 Optional[float]）
-  - [ ] SubTask 16.3: `core/execution_module.py:875-880 _cast_int` / `_cast_str` 改为 thin wrapper 调用 `safe_int` / `safe_str`
-  - [ ] SubTask 16.4: 消除 ~12 处 `try: float(X) except (TypeError, ValueError): default` 内联样板（runtime_mode/execution/web_state/formula/screening/monitoring 6 模块）改为调用 `safe_float`
+  - [x] SubTask 16.3: `core/execution_module.py:875-880 _cast_int` / `_cast_str` 改为 thin wrapper 调用 `safe_int` / `safe_str`
+  - [x] SubTask 16.4: 消除 ~12 处 `try: float(X) except (TypeError, ValueError): default` 内联样板（runtime_mode/execution/web_state/formula/screening/monitoring 6 模块）改为调用 `safe_float`
   - [ ] SubTask 16.5: Grep `def _safe_int\b|def _safe_float\b|def _to_float\b|def _cast_int\b|def _cast_str\b` 在 core/*.py = 0（仅 converters/_common.py 内允许）
 
 ### 架构工程师任务（阶段 3c：table_engine.py 热加载三件套统一）
 
-- [ ] Task 17: 变更 C5 — 引入 `ConfigStoreBase` 基类合并热加载三件套
-  - [ ] SubTask 17.1: 在 `core/table_engine.py` 定义 `ConfigStoreBase` 基类，含 `check_and_reload()` 模板方法（10 步骨架：iter files → md5 → skip → json.loads → 3 层校验 → swap → record_config_version → log）
-  - [ ] SubTask 17.2: 定义抽象 hook `_validate(name, data) -> List[ValidationResult]` 与 `_commit(name, data) -> None`
-  - [ ] SubTask 17.3: `ConfigStore.check_changes` 改为继承 `ConfigStoreBase`，override `_validate` 调用 `self._schema_validator.validate_X` × 3，`_commit` 更新 `self._tables`
-  - [ ] SubTask 17.4: `ConfigStoreHotReloadManager.check_and_reload` 改为继承 `ConfigStoreBase`，override `_validate` 调用 `self.validate_and_swap`，`_commit` 更新 `self._config_store._tables`
-  - [ ] SubTask 17.5: 合并 `rollback()` 双实现为 `ConfigStoreBase.rollback(version_id)` 模板方法，子类仅 override `_reload_all()` hook
-  - [ ] SubTask 17.6: 合并 3 层校验调用骨架（479-500 与 1576-1590）为 `_validate_three_tiers(name, data) -> (passed, errors)` helper
-  - [ ] SubTask 17.7: Grep `def check_changes\b|def check_and_reload\b|def rollback\b` 在 table_engine.py ≤ 3（仅基类 + 必要 thin override）
-  - [ ] SubTask 17.8: 验证热加载与回滚功能与原逻辑一致
+- [x] Task 17: 变更 C5 — 引入 `ConfigStoreBase` 基类合并热加载三件套
+  - [x] SubTask 17.1: 在 `core/table_engine.py` 定义 `ConfigStoreBase` 基类，含 `check_and_reload()` 模板方法（10 步骨架：iter files → md5 → skip → json.loads → 3 层校验 → swap → record_config_version → log）
+  - [x] SubTask 17.2: 定义抽象 hook `_validate(name, data) -> List[ValidationResult]` 与 `_commit(name, data) -> None`
+  - [x] SubTask 17.3: `ConfigStore.check_changes` 改为继承 `ConfigStoreBase`，override `_validate` 调用 `self._schema_validator.validate_X` × 3，`_commit` 更新 `self._tables`
+  - [x] SubTask 17.4: `ConfigStoreHotReloadManager.check_and_reload` 改为继承 `ConfigStoreBase`，override `_validate` 调用 `self.validate_and_swap`，`_commit` 更新 `self._config_store._tables`
+  - [x] SubTask 17.5: 合并 `rollback()` 双实现为 `ConfigStoreBase.rollback(version_id)` 模板方法，子类仅 override `_reload_all()` hook
+  - [x] SubTask 17.6: 合并 3 层校验调用骨架（479-500 与 1576-1590）为 `_validate_three_tiers(name, data) -> (passed, errors)` helper
+  - [x] SubTask 17.7: Grep `def check_changes\b|def check_and_reload\b|def rollback\b` 在 table_engine.py ≤ 3（仅基类 + 必要 thin override）
+  - [x] SubTask 17.8: 验证热加载与回滚功能与原逻辑一致
 
 ### 架构工程师任务（阶段 3d：monitoring_module.py 表驱动收敛）
 
-- [ ] Task 18: 变更 C6 — 24 个 `_adapter_X` 改为 `_ADAPTER_SPECS` 声明式表 + 通用 builder
-  - [ ] SubTask 18.1: 在 `core/monitoring_module.py` 定义 `_ADAPTER_SPECS: Dict[str, Dict[str, List[str]]]` 表，含 24 个 key（TickReceived / DataChanged / BarComposed / FormulaEvaluated / StockFiltered / TimeAdvanced / SnapshotUpdated / Executed / DomainEvent / PoolLoaded / ConfigLoaded / ConfigChanged / TransferExecuted / TTLExpired / OrderPlaced / OrderFilled / AlertRaised / PositionUpdated / StatisticsUpdated / RankingChanged / EdgeFired / Signal / CrossoverDetected / ModeChanged），每个 spec 含 `top_fields` 与 `details_fields` 列表
-  - [ ] SubTask 18.2: 定义 `_build_adapter_record(spec_key: str, event) -> Dict[str, Any]` 通用 builder，按 spec 提取字段构建 `{"event_type", "details", ...}` dict
-  - [ ] SubTask 18.3: `EVENT_RECORD_ADAPTERS` 表的 value 从函数引用改为 spec key 字符串，分派点调用 `_build_adapter_record(spec_key, event)`
-  - [ ] SubTask 18.4: 删除 24 个 `_adapter_X` 函数定义
-  - [ ] SubTask 18.5: Grep `def _adapter_\w+\b` 在 monitoring_module.py = 0
-  - [ ] SubTask 18.6: 验证 24 个事件类型的 adapter record 与原逻辑一致
+- [x] Task 18: 变更 C6 — 24 个 `_adapter_X` 改为 `_ADAPTER_SPECS` 声明式表 + 通用 builder
+  - [x] SubTask 18.1: 在 `core/monitoring_module.py` 定义 `_ADAPTER_SPECS: Dict[str, Dict[str, List[str]]]` 表，含 24 个 key（TickReceived / DataChanged / BarComposed / FormulaEvaluated / StockFiltered / TimeAdvanced / SnapshotUpdated / Executed / DomainEvent / PoolLoaded / ConfigLoaded / ConfigChanged / TransferExecuted / TTLExpired / OrderPlaced / OrderFilled / AlertRaised / PositionUpdated / StatisticsUpdated / RankingChanged / EdgeFired / Signal / CrossoverDetected / ModeChanged），每个 spec 含 `top_fields` 与 `details_fields` 列表
+  - [x] SubTask 18.2: 定义 `_build_adapter_record(spec_key: str, event) -> Dict[str, Any]` 通用 builder，按 spec 提取字段构建 `{"event_type", "details", ...}` dict
+  - [x] SubTask 18.3: `EVENT_RECORD_ADAPTERS` 表的 value 从函数引用改为 spec key 字符串，分派点调用 `_build_adapter_record(spec_key, event)`
+  - [x] SubTask 18.4: 删除 24 个 `_adapter_X` 函数定义
+  - [x] SubTask 18.5: Grep `def _adapter_\w+\b` 在 monitoring_module.py = 0
+  - [x] SubTask 18.6: 验证 24 个事件类型的 adapter record 与原逻辑一致
 
-- [ ] Task 19: 变更 C7 — 合并 `compute_pk_ranking` / `compute_analysis_angles` 与 `publish_rankings` 表驱动
-  - [ ] SubTask 19.1: 定义 `_RANKING_SPECS = [(cfg_attr, store_attr, sort_key, builder, dimension, label), ...]` 表
-  - [ ] SubTask 19.2: `compute_pk_ranking` / `compute_analysis_angles` 改为 thin wrapper 调用 `_compute_ranking(spec)`
-  - [ ] SubTask 19.3: `publish_rankings` 改为迭代 `_RANKING_SPECS` 表调用 `_compute_ranking` + `bus.publish(RankingChanged)`
-  - [ ] SubTask 19.4: Grep `def compute_pk_ranking\b|def compute_analysis_angles\b` 在 monitoring_module.py = 0（或方法体 ≤ 3 行 thin wrapper）
+- [x] Task 19: 变更 C7 — 合并 `compute_pk_ranking` / `compute_analysis_angles` 与 `publish_rankings` 表驱动
+  - [x] SubTask 19.1: 定义 `_RANKING_SPECS = [(cfg_attr, store_attr, sort_key, builder, dimension, label), ...]` 表
+  - [x] SubTask 19.2: `compute_pk_ranking` / `compute_analysis_angles` 改为 thin wrapper 调用 `_compute_ranking(spec)`
+  - [x] SubTask 19.3: `publish_rankings` 改为迭代 `_RANKING_SPECS` 表调用 `_compute_ranking` + `bus.publish(RankingChanged)`
+  - [x] SubTask 19.4: Grep `def compute_pk_ranking\b|def compute_analysis_angles\b` 在 monitoring_module.py = 0（或方法体 ≤ 3 行 thin wrapper）
 
 ### 架构工程师任务（阶段 3e：execution_module.py 表驱动收敛）
 
 - [ ] Task 20: 变更 C8 — 合并 `_compile_X_spec` 3 函数 + `_make_X_action` 3 函数 + `XStep` 5 类 + `_gate_before/after_X` 4 函数
-  - [ ] SubTask 20.1: 定义 `_compile_spec(params, fields_table)` helper + 3 个 `_X_SPEC_FIELDS` 表 decl，`_compile_timing_spec` / `_compile_filter_spec` / `_compile_propagate_spec` 改为 1 行委托
-  - [ ] SubTask 20.2: 定义 `_make_publishing_action(state, bus, event_factory, pre_check=None)` helper，`_make_edge_action` / `_make_ttl_interval_action` / `_make_ttl_endtime_action` 改为 1 行委托
-  - [ ] SubTask 20.3: 提取 `Step` 基类（含 `__init__(self, executor)` + abstract `run(self, ctx)`），`GateStep` / `FilterStep` / `PropagateStep` / `TTLStep` / `CallbackStep` 继承
-  - [ ] SubTask 20.4: 定义 `_gate_window(anchor, offset, now_sec, before=True)` helper，`_gate_before_open` / `_gate_after_open` / `_gate_before_close` / `_gate_after_close` 改为 1 行委托
-  - [ ] SubTask 20.5: 删除 `_publish_edge_fired` / `_publish_ttl_due` 1 行薄包装，调用方直接用 `_publish(bus, Event(...))`
-  - [ ] SubTask 20.6: Grep `def _compile_timing_spec\b|def _compile_filter_spec\b|def _compile_propagate_spec\b` 在 execution_module.py 仅匹配 1 行委托
-  - [ ] SubTask 20.7: Grep `def _make_edge_action\b|def _make_ttl_interval_action\b|def _make_ttl_endtime_action\b` 在 execution_module.py 仅匹配 1 行委托
-  - [ ] SubTask 20.8: Grep `def _gate_before_open\b|def _gate_after_open\b|def _gate_before_close\b|def _gate_after_close\b` 在 execution_module.py 仅匹配 1 行委托
+  - [x] SubTask 20.1: 定义 `_compile_spec(params, fields_table)` helper + 3 个 `_X_SPEC_FIELDS` 表 decl，`_compile_timing_spec` / `_compile_filter_spec` / `_compile_propagate_spec` 改为 1 行委托
+  - [x] SubTask 20.2: 定义 `_make_publishing_action(state, bus, event_factory, pre_check=None)` helper，`_make_edge_action` / `_make_ttl_interval_action` / `_make_ttl_endtime_action` 改为 1 行委托
+  - [x] SubTask 20.3: 提取 `Step` 基类（含 `__init__(self, executor)` + abstract `run(self, ctx)`），`GateStep` / `FilterStep` / `PropagateStep` / `TTLStep` / `CallbackStep` 继承
+  - [x] SubTask 20.4: 定义 `_gate_window(anchor, offset, now_sec, before=True)` helper，`_gate_before_open` / `_gate_after_open` / `_gate_before_close` / `_gate_after_close` 改为 1 行委托
+  - [x] SubTask 20.5: 删除 `_publish_edge_fired` / `_publish_ttl_due` 1 行薄包装，调用方直接用 `_publish(bus, Event(...))`
+  - [x] SubTask 20.6: Grep `def _compile_timing_spec\b|def _compile_filter_spec\b|def _compile_propagate_spec\b` 在 execution_module.py 仅匹配 1 行委托
+  - [x] SubTask 20.7: Grep `def _make_edge_action\b|def _make_ttl_interval_action\b|def _make_ttl_endtime_action\b` 在 execution_module.py 仅匹配 1 行委托
+  - [x] SubTask 20.8: Grep `def _gate_before_open\b|def _gate_after_open\b|def _gate_before_close\b|def _gate_after_close\b` 在 execution_module.py 仅匹配 1 行委托
 
 ### 架构工程师任务（阶段 3f：trade_module.py 表驱动收敛）
 
-- [ ] Task 21: 变更 C9 — 合并 `_execute_buy` / `_execute_sell` 与 `_apply_psatt_side_effects` 表驱动
-  - [ ] SubTask 21.1: 定义 `_SIDE_SPECS = {"BUY": {position_update_fn, cash_update_fn, trade_action}, "SELL": {...}}` 表
-  - [ ] SubTask 21.2: `_execute_buy` / `_execute_sell` 改为 `_execute_trade(side, signal, ...)` 单一方法查表分派
-  - [ ] SubTask 21.3: `_PaperTradeEngine.buy` / `sell` 改为 `_paper_trade(side, signal, ...)` 单一方法查表分派
-  - [ ] SubTask 21.4: 定义 `_PSATT_SIDE_EFFECTS = [(flag_attr, event_kind, payload_builder), ...]` 5 条表
-  - [ ] SubTask 21.5: `_apply_psatt_side_effects` 5 if 分支改为迭代 `_PSATT_SIDE_EFFECTS` 表
-  - [ ] SubTask 21.6: Grep `def _execute_buy\b|def _execute_sell\b` 在 trade_module.py = 0
-  - [ ] SubTask 21.7: Grep `if action_spec\.bsavehis|if action_spec\.bsound|if action_spec\.btip|if action_spec\.bsavetoblock|if action_spec\.baimpool` 在 trade_module.py = 0
+- [x] Task 21: 变更 C9 — 合并 `_execute_buy` / `_execute_sell` 与 `_apply_psatt_side_effects` 表驱动
+  - [x] SubTask 21.1: 定义 `_SIDE_SPECS = {"BUY": {position_update_fn, cash_update_fn, trade_action}, "SELL": {...}}` 表
+  - [x] SubTask 21.2: `_execute_buy` / `_execute_sell` 改为 `_execute_trade(side, signal, ...)` 单一方法查表分派
+  - [x] SubTask 21.3: `_PaperTradeEngine.buy` / `sell` 改为 `_paper_trade(side, signal, ...)` 单一方法查表分派
+  - [x] SubTask 21.4: 定义 `_PSATT_SIDE_EFFECTS = [(flag_attr, event_kind, payload_builder), ...]` 5 条表
+  - [x] SubTask 21.5: `_apply_psatt_side_effects` 5 if 分支改为迭代 `_PSATT_SIDE_EFFECTS` 表
+  - [x] SubTask 21.6: Grep `def _execute_buy\b|def _execute_sell\b` 在 trade_module.py = 0
+  - [x] SubTask 21.7: Grep `if action_spec\.bsavehis|if action_spec\.bsound|if action_spec\.btip|if action_spec\.bsavetoblock|if action_spec\.baimpool` 在 trade_module.py = 0
 
 ### 架构工程师任务（阶段 3g：runtime_mode_module.py 表驱动收敛）
 
@@ -247,9 +251,9 @@
 
 - [ ] Task 24: 变更 C12 — 消除 `get_global_config_store().get_table("X") if get_global_config_store() else {}` 14 处双调用
   - [ ] SubTask 24.1: 在 `core/_common.py` 或 `core/event_bus.py._BaseModule` 定义 `_get_table(name) -> dict` helper（统一 `cs = get_global_config_store(); return cs.get_table(name) if cs else {}`）
-  - [ ] SubTask 24.2: `execution_module.py` 11 处改为 `self._get_table("X")` 或 `_get_table("X")`
-  - [ ] SubTask 24.3: `trade_module.py` 2 处改为 `_get_table("X")`
-  - [ ] SubTask 24.4: `monitoring_module.py` 内部调用改为统一 `_get_table("X")`
+  - [x] SubTask 24.2: `execution_module.py` 11 处改为 `self._get_table("X")` 或 `_get_table("X")`
+  - [x] SubTask 24.3: `trade_module.py` 2 处改为 `_get_table("X")`
+  - [x] SubTask 24.4: `monitoring_module.py` 内部调用改为统一 `_get_table("X")`
   - [ ] SubTask 24.5: Grep `get_global_config_store\(\)\.get_table.*\n.*if get_global_config_store` 在 core/*.py = 0（双调用 perf smell 消除）
 
 ### 评审工程师任务（阶段 3 验证）

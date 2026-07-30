@@ -23,6 +23,7 @@ SubTask 27.4：将原 4 个 Execution 模块相关源文件高内聚合并到本
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import heapq
 import json
@@ -34,6 +35,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Protocol, Set, Tuple, Type, TYPE_CHECKING
 
 from pydantic import BaseModel, Field
+
+from converters_common import safe_float, safe_int
 
 from .event_bus import (
     _event_handler,
@@ -131,8 +134,15 @@ class _FilterEvalDeps:
 
 # ---------------------------------------------------------------------------
 # 配置表加载：已统一到 ConfigStore.get_table(name)（Task 9.9）
-# 模块级 _load_config 帮助函数已删除，调用方通过 get_global_config_store().get_table(name) 访问
+# 调用方通过 _get_table(name) 防御性访问（消除 get_global_config_store() 双调用）
 # ---------------------------------------------------------------------------
+
+
+def _get_table(name: str) -> dict:
+    """统一 get_table 防御性调用——消除双调用 perf smell。"""
+    cs = get_global_config_store()
+    return cs.get_table(name) if cs else {}
+
 
 _CONFIG_DIR = Path(__file__).parent.parent / "config"
 
@@ -186,6 +196,26 @@ class EventDriver:
         self._heap: List[tuple[float, int, TimedEventSpec]] = []
         self._seq = 0
         self._tick_seq = self._TICK_SEQ_BASE
+        self._cancelled: set[int] = set()
+        # wall-clock 调度所需的 asyncio loop 引用：由组装层 set_loop 注入。
+        # replay/sim 步进经 schedule_periodic 走 loop.call_later 路径（非 heapq 数据时间路径）。
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def cancel(self, spec: "TimedEventSpec") -> None:
+        """标记 spec 已取消：fire_due 跳过且不再 _register_next。"""
+        self._cancelled.add(id(spec))
+
+    def clear_cancelled(self) -> None:
+        """清空取消集合（stop 全清，释放 id 引用）。"""
+        self._cancelled.clear()
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """注入主 asyncio loop，供 schedule_periodic 的 loop.call_later 使用。"""
+        self._loop = loop
+
+    def get_loop(self) -> Optional[asyncio.AbstractEventLoop]:
+        """返回已注入的 asyncio loop（未注入时返回 None）。"""
+        return self._loop
 
     def _next_seq(self, spec: TimedEventSpec) -> int:
         """按 spec 类型分配 seq：tick 优先，其余按全局顺序。"""
@@ -202,8 +232,37 @@ class EventDriver:
         """注册到时事件规格到 heapq（边触发和 TTL 统一入口）。"""
         heapq.heappush(self._heap, (first_fire_time, self._next_seq(spec), spec))
 
+    def schedule_periodic(self, spec: "TimedEventSpec", loop: asyncio.AbstractEventLoop, first_delay: float) -> None:
+        """在 asyncio loop 上调度周期 spec（wall-clock pacing，非 heapq 数据时间路径）。
+
+        用于 replay/sim 步进等 wall-clock 节拍场景：每个 step 是离散的 loop.call_later
+        事件，回调内重新调度下一个。非轮询、非 sleep。取消经 cancel(spec)。
+
+        与 fire_due（按数据时间 now 弹 heapq）分离：replay/sim 步进用 time.time() 注册，
+        fire_due 以虚拟时钟（如 34500）调用，wall-clock fire_time 永远 > now 故永不弹出。
+        本方法改走 loop.call_later 直接由 asyncio loop 按墙钟触发，绕过 heapq 数据时间路径。
+        """
+        def _callback() -> None:
+            if id(spec) in self._cancelled:
+                return
+            try:
+                spec.action(spec.params, time.time())
+            except Exception:
+                logger.warning("TimedEventSpec action 异常", exc_info=True)
+            if id(spec) in self._cancelled:
+                return
+            # 续程判定与 _register_next 一致：interval>0 且未到 end_fn。replay/sim 的
+            # end_fn 返回 inf（运行中）/0.0（停止），故 next_time <= inf 续程、<=0 停止。
+            if spec.interval and spec.interval > 0:
+                next_time = time.time() + spec.interval
+                if spec.end_fn is None or next_time <= spec.end_fn():
+                    loop.call_later(spec.interval, _callback)
+        loop.call_later(first_delay, _callback)
+
     def _register_next(self, fire_time: float, spec: TimedEventSpec) -> None:
         """按规则为周期规格注册下次触发时间。"""
+        if id(spec) in self._cancelled:
+            return
         if spec.interval is not None and spec.interval > 0:
             next_time = fire_time + spec.interval
             if spec.end_fn is None or next_time <= spec.end_fn():
@@ -226,6 +285,8 @@ class EventDriver:
             buffered: List[tuple[float, int, TimedEventSpec]] = []
             while self._heap and self._heap[0][0] <= now:
                 fire_time, seq, spec = heapq.heappop(self._heap)
+                if id(spec) in self._cancelled:
+                    continue
                 kind = spec.params.get("kind") if isinstance(spec.params, dict) else None
                 if kind == "tick":
                     try:
@@ -468,7 +529,7 @@ def _resolve_node_type(node: Dict[str, Any]) -> str:
     raw = node.get("type", "")
     dzh_cell = node.get("dzh_cell_type")
 
-    dzh_cfg = get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}
+    dzh_cfg = _get_table("dzh_type_map")
     type_map = dzh_cfg.get("type_map", {})
     aliases = dzh_cfg.get("aliases", {})
     tdx_map = dzh_cfg.get("tdx_type_map", {})
@@ -493,7 +554,7 @@ def _resolve_node_type(node: Dict[str, Any]) -> str:
 
 def _load_source_types() -> Set[str]:
     """从 modules.json 读取所有 source 类型模块的 dzh_cell_types + node_type + layout_id，作为源节点判定集合。"""
-    cfg = get_global_config_store().get_table("modules") if get_global_config_store() else {}
+    cfg = _get_table("modules")
     modules = cfg.get("modules", {}) if isinstance(cfg, dict) else {}
     source_types: Set[str] = set()
     for mod in modules.values():
@@ -523,7 +584,7 @@ def _is_source_node(node: Dict[str, Any]) -> bool:
 
 def _resolve_edge_type(src_type: str) -> Literal["conditional", "unconditional"]:
     """查 edge_semantics.json，按源节点类型判定边类型。"""
-    sem_cfg = get_global_config_store().get_table("edge_semantics") if get_global_config_store() else {}
+    sem_cfg = _get_table("edge_semantics")
     edge_types = sem_cfg.get("edge_types", {})
     conditional_sources = set(edge_types.get("conditional", {}).get("source_types", []))
     unconditional_sources = set(edge_types.get("unconditional", {}).get("source_types", []))
@@ -540,7 +601,7 @@ def _group_transformation_units(
     edges: List[Dict[str, Any]], nodes: Dict[str, Any]
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """将边分组为变换单元（三元组），返回 (units, standalone_edges)。"""
-    sem_cfg = get_global_config_store().get_table("edge_semantics") if get_global_config_store() else {}
+    sem_cfg = _get_table("edge_semantics")
     tu_cfg = sem_cfg.get("transformation_unit", {})
     hub_types = set(tu_cfg.get("hub_node_types", []))
     if not hub_types:
@@ -579,7 +640,7 @@ def _group_transformation_units(
 
 def _build_action_spec(tid: str, nodes: Dict[str, Any]) -> ActionSpec:
     """从目标节点 tdx_psatt 与 action_table.json 编译动作规则。"""
-    action_table = get_global_config_store().get_table("action_table") if get_global_config_store() else {}
+    action_table = _get_table("action_table")
     pool_actions = action_table.get("pool_enter_actions", {})
     callbacks_cfg = action_table.get("callback_ops", {})
 
@@ -665,8 +726,8 @@ def _build_ttl_spec(tid: str, nodes: Dict[str, Any]) -> TTLSpec:
       2. tdx_psatt.bdel=1 → check_type="interval"（ndelnum × ttl_units[ndeltype]）
       3. hold>0 → check_type="interval"（hold × ttl_units[deltype_map[deltype]]）
     """
-    psatt_cfg = get_global_config_store().get_table("tdx_psatt") if get_global_config_store() else {}
-    defaults = get_global_config_store().get_table("defaults") if get_global_config_store() else {}
+    psatt_cfg = _get_table("tdx_psatt")
+    defaults = _get_table("defaults")
     ttl_units = psatt_cfg.get("ttl_units", {"0": 86400, "1": 3600, "2": 60, "3": 1, "4": 1})
 
     tgt_node = nodes.get(tid, {}) if nodes else {}
@@ -752,7 +813,7 @@ def _normalize_nodes(pool_config: Dict[str, Any]) -> Dict[str, Any]:
 # 加载 ntjindexno → formula_name/args 映射表，用于把前端指标选择解析为 builtin formula
 _TDX_INDICATOR_FORMULA_MAP: Dict[int, Dict[str, Any]] = {}
 try:
-    _tdx_indi_map_cfg = get_global_config_store().get_table("tdx_indicator_formula_map") if get_global_config_store() else {}
+    _tdx_indi_map_cfg = _get_table("tdx_indicator_formula_map")
     for rec in _tdx_indi_map_cfg.get("records", []):
         ntj = rec.get("ntjindexno")
         if ntj is not None:
@@ -872,8 +933,8 @@ def _to_bool(v) -> bool:
     return False
 
 
-def _cast_int(v) -> int:
-    return int(v or 0)
+def _cast_int(v, default=0) -> int:
+    return safe_int(v, default)
 
 
 def _cast_str(v) -> str:
@@ -955,7 +1016,7 @@ class Compiler:
     def _build_timing_spec(edge: Dict[str, Any]) -> TimingSpec:
         """从 edge params 与 timing.json 编译时机规则。"""
         params = _extract_edge_params(edge)
-        timing_cfg = get_global_config_store().get_table("timing") if get_global_config_store() else {}
+        timing_cfg = _get_table("timing")
         tfields = {name: cast(params.get(name)) for name, cast in _TIMING_SPEC_FIELDS.items()}
         jgtime = int(params.get("jgtime", 0) or 0) or int(params.get("time_gate_interval", 0) or 0)
         cxtime_units = timing_cfg.get("cxtime_units", {"0": 1, "1": 60, "2": 3600, "3": 86400})
@@ -987,7 +1048,7 @@ class Compiler:
     def _build_filter_spec(edge: Dict[str, Any], nodes: Dict[str, Any]) -> FilterSpec:
         """从 edge params、dispatch.json 编译筛选分派规则，4 个构造分支查 ``_FILTER_SPEC_BUILDERS`` 表路由。"""
         params = _extract_edge_params(edge)
-        dispatch_cfg = get_global_config_store().get_table("dispatch") if get_global_config_store() else {}
+        dispatch_cfg = _get_table("dispatch")
         nset_dispatch = dispatch_cfg.get("nset_dispatch", {})
 
         # 解析 tdx_func：边 params → 面板参数合成 → 条件节点继承（前置预处理，非分派分支）
@@ -1085,7 +1146,7 @@ class Compiler:
                       if isinstance(edge, dict) and (edge.get("id") or edge.get("flow_id"))}
 
         # 步骤表驱动：从 edge_strategies.json 读取 steps 序列（编译期产出）
-        edge_strategies_cfg = get_global_config_store().get_table("edge_strategies") if get_global_config_store() else {}
+        edge_strategies_cfg = _get_table("edge_strategies")
         steps_cfg = edge_strategies_cfg.get("steps", [
             {"step_name": "gate"},
             {"step_name": "filter"},
@@ -1277,37 +1338,36 @@ def _is_conditional_edge(params: Dict[str, Any]) -> bool:
     return False
 
 
+_COMPILE_TIMING_FIELDS: Dict[str, tuple] = {
+    "starttype": (0, int), "cxtype": (0, int), "starttime": (0, int),
+    "cxtime": (0, int), "cxtimetype": (0, int), "jgtime": (0, int),
+}
+_COMPILE_FILTER_FIELDS: Dict[str, tuple] = {
+    "evaluator_type": ("indicator", str), "nset": (0, int), "noperate": (0, int),
+    "formula_ref": ("", str), "rank_rule": ("", str),
+}
+_COMPILE_PROPAGATE_FIELDS: Dict[str, tuple] = {
+    "mode": ("copy", str), "tran": (0, int), "emptyps": (False, bool),
+}
+
+
+def _compile_spec(params: Dict[str, Any], fields_table: Dict[str, tuple]) -> Dict[str, Any]:
+    """编译 spec——合并 _compile_timing/filter/propagate_spec 的字段提取骨架。"""
+    return {field: cast(params.get(field, default) or default) for field, (default, cast) in fields_table.items()}
+
+
 def _compile_timing_spec(params: Dict[str, Any]) -> Dict[str, Any]:
-    """从 edge params 编译 timing spec 字典。"""
-    return {
-        "starttype": int(params.get("starttype", 0) or 0),
-        "cxtype": int(params.get("cxtype", 0) or 0),
-        "starttime": int(params.get("starttime", 0) or 0),
-        "cxtime": int(params.get("cxtime", 0) or 0),
-        "cxtimetype": int(params.get("cxtimetype", 0) or 0),
-        "jgtime": int(params.get("jgtime", 0) or 0),
-    }
+    return _compile_spec(params, _COMPILE_TIMING_FIELDS)
 
 
 def _compile_filter_spec(params: Dict[str, Any]) -> Dict[str, Any]:
-    """从 edge params 编译 filter spec 字典。"""
-    return {
-        "evaluator_type": str(params.get("evaluator_type", "indicator") or "indicator"),
-        "nset": int(params.get("nset", 0) or 0),
-        "noperate": int(params.get("noperate", 0) or 0),
-        "formula_ref": str(params.get("formula_ref", "") or ""),
-        "fsecond": params.get("fsecond", 0),
-        "rank_rule": str(params.get("rank_rule", "") or ""),
-    }
+    spec = _compile_spec(params, _COMPILE_FILTER_FIELDS)
+    spec["fsecond"] = params.get("fsecond", 0)
+    return spec
 
 
 def _compile_propagate_spec(params: Dict[str, Any]) -> Dict[str, Any]:
-    """从 edge params 编译 propagate spec 字典。"""
-    return {
-        "mode": str(params.get("mode", "copy") or "copy"),
-        "tran": int(params.get("tran", 0) or 0),
-        "emptyps": bool(params.get("emptyps", False)),
-    }
+    return _compile_spec(params, _COMPILE_PROPAGATE_FIELDS)
 
 
 @dataclass
@@ -1821,18 +1881,6 @@ def _publish(bus: Optional[EventBus], event: Any) -> None:
         bus.publish(event)
 
 
-def _publish_edge_fired(bus: Optional[EventBus], eid: str, ts: float) -> None:
-    """统一发布 EdgeFired 事件（bus 为 None 时跳过）。"""
-    if bus is not None:
-        bus.publish(EdgeFired(eid=eid, ts=ts))
-
-
-def _publish_ttl_due(bus: Optional[EventBus], node_id: str, code: str, ts: float) -> None:
-    """统一发布 TTLDue 事件（bus 为 None 时跳过）。"""
-    if bus is not None:
-        bus.publish(TTLDue(node_id=node_id, code=code, ts=ts))
-
-
 # ---------------------------------------------------------------------------
 # TTL check_type 表驱动分派（I17：消除 if/else，差异显于注册表内容）
 # ---------------------------------------------------------------------------
@@ -2047,10 +2095,7 @@ def _is_suspended(code: str, state: "PoolState") -> bool:
     if not isinstance(tick, dict):
         return False
     vol = tick.get("volume", tick.get("vol", 0))
-    try:
-        vol_val = float(vol or 0)
-    except (TypeError, ValueError):
-        vol_val = 0
+    vol_val = safe_float(vol or 0)
     if vol_val <= 0:
         return True
     return False
@@ -2295,19 +2340,13 @@ def _eval_formula_path(
             if xg_line is None:
                 line1 = _extract_line_from_series(sres, cfirst, nfirst)
                 if line1 and len(line1) > 0:
-                    try:
-                        if float(line1[-1]) > 0:
-                            passed.append(code)
-                    except (TypeError, ValueError):
-                        pass
+                    if safe_float(line1[-1]) > 0:
+                        passed.append(code)
                 continue
             if isinstance(xg_line, list) and len(xg_line) > 0:
-                try:
-                    last_val = xg_line[-1]
-                    if last_val is not None and float(last_val) > 0:
-                        passed.append(code)
-                except (TypeError, ValueError):
-                    pass
+                last_val = xg_line[-1]
+                if last_val is not None and safe_float(last_val) > 0:
+                    passed.append(code)
         return passed
 
     passed = _apply_noperate_mode_series(
@@ -3153,11 +3192,14 @@ class EdgeExecutor:
 # 模块级辅助函数。STEP_REGISTRY 编译期由 edge_strategies.json:steps 驱动。
 
 
-class GateStep:
-    """步骤1：时机门控。"""
+class Step:
+    """Step 基类——合并 GateStep/FilterStep/PropagateStep/TTLStep/CallbackStep 的 __init__ 骨架。"""
     def __init__(self, executor):
         self._executor = executor
 
+
+class GateStep(Step):
+    """步骤1：时机门控。"""
     def run(self, ctx):
         eid = ctx["eid"]
         timing_spec = ctx.get("timing_spec")
@@ -3167,11 +3209,8 @@ class GateStep:
         return StepResult(should_continue=True)
 
 
-class FilterStep:
+class FilterStep(Step):
     """步骤2：强弱筛选 + 发布 FormulaEvaluated/StockFiltered。"""
-    def __init__(self, executor):
-        self._executor = executor
-
     def run(self, ctx):
         eid = ctx["eid"]
         ec = ctx["ec"]
@@ -3198,11 +3237,8 @@ class FilterStep:
         return StepResult(should_continue=True)
 
 
-class PropagateStep:
+class PropagateStep(Step):
     """步骤3：状态流转 + 发布 Executed/TransferExecuted。"""
-    def __init__(self, executor):
-        self._executor = executor
-
     def run(self, ctx):
         ec = ctx["ec"]
         propagate_spec = ctx.get("propagate_spec")
@@ -3215,11 +3251,8 @@ class PropagateStep:
         return StepResult(should_continue=True)
 
 
-class TTLStep:
+class TTLStep(Step):
     """步骤4：TTL 注册。"""
-    def __init__(self, executor):
-        self._executor = executor
-
     def run(self, ctx):
         eid = ctx["eid"]
         ec = ctx["ec"]
@@ -3245,11 +3278,8 @@ class TTLStep:
         return StepResult(should_continue=True)
 
 
-class CallbackStep:
+class CallbackStep(Step):
     """步骤5：回调执行。"""
-    def __init__(self, executor):
-        self._executor = executor
-
     def run(self, ctx):
         ec = ctx["ec"]
         action_spec = ctx.get("action_spec")
@@ -3294,67 +3324,32 @@ STEP_REGISTRY = {
 # ===========================================================================
 
 
-def _make_edge_action(bus: Any, eid: str, state: Any) -> Callable[..., None]:
-    """构造边触发的 action：只发布 EdgeFired 事件（G2/G3 只携带 eid+ts）。
+def _make_publishing_action(state: Any, bus: Any, event_factory: Callable, pre_check: Optional[Callable] = None) -> Callable[..., None]:
+    """发布动作工厂——合并 _make_edge_action / _make_ttl_interval_action 的 action 包装骨架。
 
-    G1 heapq 驱动：定时器到时→action 发布 EdgeFired + fire_due 立即注册下次。
-    EdgeExecutor 订阅 EdgeFired 后执行 gate→filter→propagate→callback。
-    脏股票由 EdgeExecutor._on_edge_fired 从源池 StatePoolView.get_dirty_codes() 取，
-    action 不再计算/携带 changed_codes，也不调用 edge_executor.run()。
-
-    fire_time 由 EventDriver.fire_due 注入（spec 在 heapq 中实际到期的时刻），
-    使 EdgeFired.ts 反映真实触发顺序，避免同一仿真步内所有边触发共享
-    self.clock 导致前端时间轴堆叠为一条线。
+    pre_check 通过后用 fire_time（heapq 精确时刻）或 time_at(state) 作为 ts，
+    经 _publish 发布 event_factory(params, ts) 构造的事件。
     """
-
     def action(params: Any, fire_time: Optional[float] = None) -> None:
-        # G2：action 只发布 EdgeFired 事件，不执行计算
-        # fire_time 优先（来自 heapq 弹出的精确时刻），None 时退回 time_at(state)
+        if pre_check and not pre_check(state, params):
+            return
         ts = fire_time if fire_time is not None else time_at(state=state)
-        _publish_edge_fired(bus, eid, ts)
+        _publish(bus, event_factory(params, ts))
 
     return action
+
+
+def _make_edge_action(bus: Any, eid: str, state: Any) -> Callable[..., None]:
+    """构造边触发的 action：到时发布 EdgeFired 事件（G2/G3 只携带 eid+ts）。"""
+    return _make_publishing_action(state, bus, lambda params, ts: EdgeFired(eid=eid, ts=ts))
 
 
 def _make_ttl_interval_action(state: Any, tgt: str, eid: str, ttl_sec: float, bus: Any) -> Callable[..., None]:
-    """构造 TTL interval 类型的 action（G1 per-code 一次性触发，G2 只发事件）。
-
-    每只股票入池时注册独立的 TimedEventSpec（interval=None 一次性），
-    到时 action 从 params 读取 code，发布 TTLDue(node_id=tgt, code=code, ts)。
-    不执行删除/卖出逻辑（由 TradeModule 订阅 TTLDue 后自行完成）。
-    若股票已出池（惰性删除），action 检测后跳过。
-
-    Args:
-        state:   PoolState 实例
-        tgt:     目标池 ID
-        eid:     边/流程 ID
-        ttl_sec: TTL 间隔秒数（用于事件 details）
-        bus:     EventBus 实例
-
-    fire_time 由 EventDriver.fire_due 注入，使 TTLDue.ts 反映真实触发时刻，
-    避免 self.clock 在仿真步内为常量导致前端时间轴堆叠。
-    """
-
-    def action(params: Any, fire_time: Optional[float] = None) -> None:
+    """构造 TTL interval action：股票在池时发布 TTLDue（G1 per-code 一次性，G2 只发事件）。"""
+    def _in_pool(state, params):
         code = params.get("code")
-        if not code:
-            return
-        pool = state.get_pool(tgt)
-        stocks = pool.get_stocks()
-        # 惰性删除：若股票已出池则跳过（由 move 边传播移除）
-        code_in_pool = False
-        for s in stocks:
-            if isinstance(s, dict) and _stock_code(s) == code:
-                code_in_pool = True
-                break
-        if not code_in_pool:
-            return
-        # G2：action 只发布 TTLDue 事件，不执行删除/卖出逻辑
-        # fire_time 优先（来自 heapq 弹出的精确时刻），None 时退回 time_at(state)
-        now_val = fire_time if fire_time is not None else time_at(state=state)
-        _publish_ttl_due(bus, tgt, code, now_val)
-
-    return action
+        return bool(code) and any(isinstance(s, dict) and _stock_code(s) == code for s in state.get_pool(tgt).get_stocks())
+    return _make_publishing_action(state, bus, lambda params, ts: TTLDue(node_id=tgt, code=params.get("code"), ts=ts), pre_check=_in_pool)
 
 
 def _make_ttl_endtime_action(state: Any, ttl_spec: "TTLSpec", tgt: str, bus: Any, eid: str) -> Callable[..., None]:
@@ -3395,7 +3390,7 @@ def _make_ttl_endtime_action(state: Any, ttl_spec: "TTLSpec", tgt: str, bus: Any
                 expired_codes.append(code)
         # G2：action 只发布 TTLDue 事件，不执行删除/卖出逻辑
         for code in expired_codes:
-            _publish_ttl_due(bus, tgt, code, event_ts)
+            _publish(bus, TTLDue(node_id=tgt, code=code, ts=event_ts))
 
     return action
 
@@ -3822,7 +3817,7 @@ class ExecutionModule:
         self._filter_results[event.eid] = (list(event.passed), list(event.rejected))
         if not new_arch and event.eid not in self._fired_edges:
             self._fired_edges.add(event.eid)
-            _publish_edge_fired(self._bus, event.eid, event.ts or time.time())
+            _publish(self._bus, EdgeFired(eid=event.eid, ts=event.ts or time.time()))
 
     def _is_new_arch_active(self) -> bool:
         """检测新 EventDriver 架构是否已激活（通过 meta_engine 或 self._engine 判断）。"""

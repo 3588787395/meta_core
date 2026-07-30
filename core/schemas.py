@@ -682,7 +682,25 @@ class PositionModel(BaseModel):
         return (self.x, self.y, self.x + self.width, self.y + self.height)
 
 
-class TradeAttrModel(BaseModel):
+class _DictConstructible:
+    """from_dict mixin——合并 schemas.py 中 Pydantic 模型的 from_dict 实现。
+
+    子类覆盖 ``_preprocess_dict`` 做嵌套解析；默认按 ``model_fields`` 过滤未知键。
+    """
+
+    @classmethod
+    def _preprocess_dict(cls, data: dict) -> dict:
+        if data is None:
+            data = {}
+        known = set(getattr(cls, "model_fields", {}).keys())
+        return {k: v for k, v in data.items() if k in known}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "_DictConstructible":
+        return cls(**cls._preprocess_dict(data))
+
+
+class TradeAttrModel(_DictConstructible, BaseModel):
     accountno: Optional[str] = None
     entertradetype: Optional[str] = None
     enterrate: Optional[str] = None
@@ -702,10 +720,6 @@ class TradeAttrModel(BaseModel):
     leavesellpricetype: Optional[str] = None
     buycontrolnbhs: Optional[str] = None
     buycontrolmbsc: Optional[str] = None
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> TradeAttrModel:
-        return cls(**{k: v for k, v in data.items() if k in cls.model_fields})
 
 
 def _get_action_type_map() -> Dict[int, str]:
@@ -823,7 +837,7 @@ def parse_cell(data: Dict[str, Any]) -> CellType:
 # PoolMetaModel（更新为使用 DynamicFlowModel）
 # ═══════════════════════════════════════════════════
 
-class PoolMetaModel(BaseModel):
+class PoolMetaModel(_DictConstructible, BaseModel):
     pool_type: str = "ss-pool"
     ver: str = "1.0"
     mode: str = "1"
@@ -877,21 +891,14 @@ class PoolMetaModel(BaseModel):
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> PoolMetaModel:
+    def _preprocess_dict(cls, data):
+        data = data or {}
         cells_raw = data.get("cells") or data.get("nodes", [])
-        cells = []
-        for c in cells_raw:
-            if isinstance(c, dict):
-                cells.append(parse_cell(c))
-            else:
-                cells.append(c)
         flows_raw = data.get("flows") or data.get("edges", [])
-        flows = [DynamicFlowModel.from_dict(f) if isinstance(f, dict) else f for f in flows_raw]
-        kwargs = {k: v for k, v in data.items() if k not in ("cells", "flows", "nodes", "edges")}
-        kwargs["cells"] = cells
-        kwargs["flows"] = flows
-        obj = cls(**kwargs)
-        return obj
+        kws = {k: v for k, v in data.items() if k not in ("cells", "flows", "nodes", "edges")}
+        kws["cells"] = [parse_cell(c) if isinstance(c, dict) else c for c in cells_raw]
+        kws["flows"] = [DynamicFlowModel.from_dict(f) if isinstance(f, dict) else f for f in flows_raw]
+        return kws
 
 
 # ═══════════════════════════════════════════════════
@@ -915,7 +922,7 @@ SETCODE_REVERSE = {v: k for k, v in SETCODE_MAP.items()}
 # ═══════════════════════════════════════════════════
 # 子类只需声明 _XML_FIELDS 列表，即可自动生成 XML 属性字典：
 #   str 字段保持原值，float 字段格式化为 :.6f，其它字段 str() 转换。
-class _XmlAttrMixin:
+class _XmlAttrMixin(_DictConstructible):
     _XML_FIELDS: ClassVar[List[str]] = []
 
     def to_xml_attrs(self) -> Dict[str, str]:
@@ -929,18 +936,6 @@ class _XmlAttrMixin:
             else:
                 result[field] = str(val)
         return result
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> "_XmlAttrMixin":
-        """通用 ``from_dict``：按 ``model_fields`` 过滤未知键后构造实例。
-
-        底层运行逻辑洞察（Code = Data + Dispatcher）：5 个 TDX 叶子模型
-        （Func/Psatt/Spinfo/Stk/Flow）的 ``from_dict`` 逐字相同，仅返回类型注解不同。
-        提升至 mixin 后子类零实现 ``from_dict``，新增模型自动获得该能力。
-        ``TdxCellModel`` / ``TdxPoolMetaModel`` 含嵌套解析，保留各自 ``from_dict``。
-        """
-        known = set(cls.model_fields.keys())
-        return cls(**{k: v for k, v in data.items() if k in known})
 
 
 class TdxFuncModel(_XmlAttrMixin, BaseModel):
@@ -968,6 +963,12 @@ class TdxFuncModel(_XmlAttrMixin, BaseModel):
     _XML_FIELDS: ClassVar[List[str]] = ["nset", "ntjindexno", "accode", "nperiod", "nfirst", "cfirst",
                    "noperate", "nsecond", "csecond", "fsecond", "nbeginday", "nendday",
                    "bnost", "bnotp", "bnotq", "nperiodnum"]
+
+
+def _validate_in_set(v, allowed, message):
+    if v not in allowed:
+        raise ValueError(message)
+    return v
 
 
 class TdxPsattModel(_XmlAttrMixin, BaseModel):
@@ -999,9 +1000,7 @@ class TdxPsattModel(_XmlAttrMixin, BaseModel):
     @field_validator('ndeltype')
     @classmethod
     def _validate_ndeltype(cls, v: int) -> int:
-        if v not in (0, 1, 2, 3, 4):
-            raise ValueError(f'ndeltype must be 0(days)/1(hours)/2(minutes)/3(seconds)/4(seconds_DZH), got {v}')
-        return v
+        return _validate_in_set(v, (0, 1, 2, 3, 4), f'ndeltype must be 0(days)/1(hours)/2(minutes)/3(seconds)/4(seconds_DZH), got {v}')
 
     _XML_FIELDS: ClassVar[List[str]] = ["bdel", "ndelnum", "ndeltype", "baimpool", "bsound", "nsoundtype",
                    "nsyssound", "soundfile", "btip", "bsavetoblock", "blockfile",
@@ -1035,15 +1034,7 @@ class TdxSpinfoModel(_XmlAttrMixin, BaseModel):
     @field_validator("type")
     @classmethod
     def _validate_type(cls, v: int) -> int:
-        """校验 type 只能是合法枚举值：0 ~ 7。
-
-        0=自设监控品种; 1=沪深300+中证500; 2=所有A股; 3=自选股;
-        4=自定义板块; 5=板块指数; 6=ETF基金; 7=可转债。
-        """
-        allowed = {0, 1, 2, 3, 4, 5, 6, 7}
-        if v not in allowed:
-            raise ValueError(f"spinfo.type 必须为 {sorted(allowed)} 之一，实际值为 {v}")
-        return v
+        return _validate_in_set(v, {0, 1, 2, 3, 4, 5, 6, 7}, f"spinfo.type 必须为 [0, 1, 2, 3, 4, 5, 6, 7] 之一，实际值为 {v}")
 
     _XML_FIELDS: ClassVar[List[str]] = ["type", "customblockname", "size", "market", "sector_type"]
 
@@ -1099,7 +1090,7 @@ _NESTED_MODELS: Dict[str, tuple] = {
 }
 
 
-class TdxCellModel(BaseModel):
+class TdxCellModel(_DictConstructible, BaseModel):
     id: int = 0
     type: int = 0
     attr: int = 0
@@ -1119,18 +1110,18 @@ class TdxCellModel(BaseModel):
     stks: List[TdxStkModel] = Field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, data: Dict) -> TdxCellModel:
-        known = set(cls.model_fields.keys())
-        kws = {k: v for k, v in data.items() if k in known}
-        if "func" in data and isinstance(data["func"], dict):
+    def _preprocess_dict(cls, data):
+        data = data or {}
+        kws = super()._preprocess_dict(data)
+        if isinstance(data.get("func"), dict):
             kws["func"] = TdxFuncModel.from_dict(data["func"])
-        if "psatt" in data and isinstance(data["psatt"], dict):
+        if isinstance(data.get("psatt"), dict):
             kws["psatt"] = TdxPsattModel.from_dict(data["psatt"])
-        if "spinfo" in data and isinstance(data["spinfo"], dict):
+        if isinstance(data.get("spinfo"), dict):
             kws["spinfo"] = TdxSpinfoModel.from_dict(data["spinfo"])
-        if "stks" in data and isinstance(data["stks"], list):
+        if isinstance(data.get("stks"), list):
             kws["stks"] = [TdxStkModel.from_dict(s) if isinstance(s, dict) else s for s in data["stks"]]
-        return cls(**kws)
+        return kws
 
 
 class TdxFlowModel(_XmlAttrMixin, BaseModel):
@@ -1158,22 +1149,21 @@ class TdxFlowModel(_XmlAttrMixin, BaseModel):
                    "cxtimetype", "jgtime"]
 
 
-class TdxPoolMetaModel(BaseModel):
+class TdxPoolMetaModel(_DictConstructible, BaseModel):
     nextid: int = 0
     backcolor: int = 16777216
     cells: List[TdxCellModel] = Field(default_factory=list)
     flows: List[TdxFlowModel] = Field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> TdxPoolMetaModel:
-        cells_raw = data.get("cells", [])
-        cells = [TdxCellModel.from_dict(c) if isinstance(c, dict) else c for c in cells_raw]
-        flows_raw = data.get("flows", [])
-        flows = [TdxFlowModel.from_dict(f) if isinstance(f, dict) else f for f in flows_raw]
-        kwargs = {k: v for k, v in data.items() if k not in ("cells", "flows")}
-        kwargs["cells"] = cells
-        kwargs["flows"] = flows
-        return cls(**kwargs)
+    def _preprocess_dict(cls, data):
+        data = data or {}
+        kws = super()._preprocess_dict(data)
+        if isinstance(data.get("cells"), list):
+            kws["cells"] = [TdxCellModel.from_dict(c) if isinstance(c, dict) else c for c in data["cells"]]
+        if isinstance(data.get("flows"), list):
+            kws["flows"] = [TdxFlowModel.from_dict(f) if isinstance(f, dict) else f for f in data["flows"]]
+        return kws
 
 
 # ═══════════════════════════════════════════════════

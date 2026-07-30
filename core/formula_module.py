@@ -47,6 +47,7 @@ from .event_bus import (
     PoolLoaded,
 )
 from .table_engine import load_config_table
+from ._hashing import hash_dict_content
 
 logger = logging.getLogger(__name__)
 
@@ -1056,20 +1057,15 @@ class PythonFormulaEngine:
 
 
 def _hash_code_bars(bars_data: Any) -> str:
-    """计算单只股票的K线数据哈希，用于per-code缓存粒度。
-
-    Args:
-        bars_data: 单只股票的K线数据，可以是list/dict/DataFrame
-
-    Returns:
-        32位md5哈希字符串
-    """
+    """计算单只股票的K线数据哈希，用于per-code缓存粒度。"""
     if bars_data is None:
         return "0" * 32
+    if isinstance(bars_data, dict):
+        return hash_dict_content(bars_data, exclude=set())
     try:
         if isinstance(bars_data, pd.DataFrame):
             payload = bars_data.to_json(orient="records", date_format="iso")
-        elif isinstance(bars_data, (list, dict)):
+        elif isinstance(bars_data, list):
             payload = json.dumps(bars_data, sort_keys=True, ensure_ascii=False, default=str)
         else:
             payload = repr(bars_data)
@@ -1082,12 +1078,8 @@ def _hash_code_bars(bars_data: Any) -> str:
 
 
 def _hash_bars(bars: Dict[str, Any]) -> str:
-    """对 bars 做确定性摘要，生成 bar_hash。"""
-    try:
-        payload = json.dumps(bars, sort_keys=True, ensure_ascii=False, default=str)
-    except (TypeError, ValueError):
-        payload = str(sorted(bars.items())) if isinstance(bars, dict) else str(bars)
-    return hashlib.md5(payload.encode("utf-8")).hexdigest()
+    """per-content MD5——委托 core._hashing.hash_dict_content。"""
+    return hash_dict_content(bars, exclude=set())
 
 
 def _get_period_bars(state: Any, period: str = "1d") -> Dict[str, Any]:
@@ -1563,13 +1555,12 @@ def _hash_object(obj: Any) -> str:
     """对任意对象做确定性 md5 哈希，生成 32 位十六进制字符串。"""
     if obj is None:
         return "0" * 32
+    if isinstance(obj, dict):
+        return hash_dict_content(obj, exclude=set())
     try:
         serialized = json.dumps(obj, sort_keys=True, default=str, ensure_ascii=False)
     except Exception:
-        try:
-            serialized = repr(obj)
-        except Exception:
-            serialized = str(obj)
+        serialized = repr(obj)
     return hashlib.md5(serialized.encode("utf-8", errors="replace")).hexdigest()
 
 

@@ -57,16 +57,16 @@
 ## 评审工程师检查点（阶段 2：彻底事件驱动）
 
 ### 变更 E1 — replay 步进 heapq 调度
-- [ ] Grep `def _sync_play_loop\b` 在 runtime_mode_module.py = 0
-- [ ] Grep `time\.sleep\(interval\)` 在 runtime_mode_module.py replay 路径 = 0
-- [ ] `play()` 调用 `EventDriver.schedule(step_event, fire_time=...)` 入 heapq
-- [ ] `pause()` 通过 `EventDriver.cancel(step_event_id)` 取消调度
+- [x] Grep `def _sync_play_loop\b` 在 runtime_mode_module.py = 0
+- [x] Grep `time\.sleep\(interval\)` 在 runtime_mode_module.py replay 路径 = 0
+- [x] `play()` 调用 `EventDriver.schedule(step_event, fire_time=...)` 入 heapq
+- [x] `pause()` 通过 `EventDriver.cancel(step_event_id)` 取消调度
 
 ### 变更 E2 — simulation auto-step heapq 调度
-- [ ] Grep `def _sync_sim_loop\b|async def auto_step_loop\b` 在 runtime_mode_module.py = 0
-- [ ] Grep `while self\._run\b|while self\._sim_auto_step\b` 在 runtime_mode_module.py = 0
-- [ ] `start_auto()` 调用 `EventDriver.schedule(sim_step_event, fire_time=...)` 入 heapq
-- [ ] 停止通过 `ModeChanged` 事件订阅或 `EventDriver.cancel` 取消
+- [x] Grep `def _sync_sim_loop\b|async def auto_step_loop\b` 在 runtime_mode_module.py = 0
+- [x] Grep `while self\._run\b|while self\._sim_auto_step\b` 在 runtime_mode_module.py = 0
+- [x] `start_auto()` 调用 `EventDriver.schedule(sim_step_event, fire_time=...)` 入 heapq
+- [x] 停止通过 `ModeChanged` 事件订阅或 `EventDriver.cancel` 取消
 
 ### 变更 E3 — 文件监视 watchdog 事件驱动
 - [ ] Grep `def start_polling\b` 在 table_engine.py = 0
@@ -99,15 +99,15 @@
 ## 评审工程师检查点（阶段 3：core/*.py 第二轮深度同构合并）
 
 ### 变更 C1 — _FieldedBase mixin
-- [ ] `_FieldedBase` mixin 在 core/domain.py 中定义，含 `_common_to_dict` / `_common_from_dict` 方法
-- [ ] `_NodeBase` / `_EdgeBase` 继承 `_FieldedBase`，`to_dict` / `from_dict` 方法体 ≤ 2 行
-- [ ] `from_dzh_type` / `from_tdx_type` / `from_dzh_attr` / `from_tdx_source_type` 4 个 classmethod 委托 `_lookup_in_registry`
-- [ ] Grep `def to_dict\b|def from_dict\b` 在 domain.py 仅匹配 `_FieldedBase._common_to_dict/_common_from_dict` + 4 个 1 行薄包装
+- [x] `_FieldedBase` mixin 在 core/domain.py 中定义，含 `_common_to_dict` / `_common_from_dict` 方法
+- [x] `_NodeBase` / `_EdgeBase` 继承 `_FieldedBase`，`to_dict` / `from_dict` 方法体 ≤ 2 行
+- [x] `from_dzh_type` / `from_tdx_type` / `from_dzh_attr` / `from_tdx_source_type` 4 个 classmethod 委托 `_lookup_in_registry`
+- [x] Grep `def to_dict\b|def from_dict\b` 在 domain.py 仅匹配 `_FieldedBase._common_to_dict/_common_from_dict` + 4 个 1 行薄包装
 
 ### 变更 C2 — schemas.py _DictConstructible mixin
-- [ ] `_DictConstructible` mixin 在 core/schemas.py 中定义，含 `from_dict` classmethod
-- [ ] 6 个 Pydantic 模型继承 `_DictConstructible`
-- [ ] Grep `def from_dict\b` 在 schemas.py 仅匹配 `_DictConstructible.from_dict` 1 处
+- [x] `_DictConstructible` mixin 在 core/schemas.py 中定义，含 `from_dict` classmethod
+- [x] 6 个 Pydantic 模型继承 `_DictConstructible`
+- [x] Grep `def from_dict\b` 在 schemas.py 仅匹配 `_DictConstructible.from_dict` 1 处（注：6 个 TDX 模型范围内唯一 from_dict 真相源；`DynamicCellModel`/`DynamicFlowModel` 为 dict-wrapper 范式保留自身 from_dict，非本变更范围）
 
 ### 变更 C3 — _hashing.py 模块
 - [ ] `core/_hashing.py` 模块定义 `hash_dict_content` / `hash_tick_aggregate` / `BarHashMixin`
@@ -121,32 +121,32 @@
 - [ ] Grep `try:\s+float\(.*\)\s+except\s+\(TypeError,\s*ValueError\)` 在 core/*.py ≤ 3（仅业务必要的保留）
 
 ### 变更 C5 — ConfigStoreBase 基类
-- [ ] `ConfigStoreBase` 基类在 core/table_engine.py 中定义，含 `check_and_reload` / `rollback` 模板方法
-- [ ] Grep `def check_changes\b|def check_and_reload\b|def rollback\b` 在 table_engine.py ≤ 3
-- [ ] 热加载与回滚功能与原逻辑一致
+- [x] `ConfigStoreBase` 基类在 core/table_engine.py 中定义，含 `check_and_reload` / `rollback` 模板方法
+- [x] Grep `def check_changes\b|def check_and_reload\b|def rollback\b` 在 table_engine.py ≤ 3
+- [x] 热加载与回滚功能与原逻辑一致
 
 ### 变更 C6 — _ADAPTER_SPECS 声明式表
-- [ ] `_ADAPTER_SPECS` 表在 core/monitoring_module.py 中定义，含 24 个 key
-- [ ] `_build_adapter_record(spec_key, event)` 通用 builder 定义
-- [ ] Grep `def _adapter_\w+\b` 在 monitoring_module.py = 0
-- [ ] 24 个事件类型的 adapter record 与原逻辑一致
+- [x] `_ADAPTER_SPECS` 表在 core/monitoring_module.py 中定义，含 24 个 key
+- [x] `_build_adapter_record(spec_key, event)` 通用 builder 定义
+- [x] Grep `def _adapter_\w+\b` 在 monitoring_module.py = 0
+- [x] 24 个事件类型的 adapter record 与原逻辑一致
 
 ### 变更 C7 — ranking 表驱动
-- [ ] `_RANKING_SPECS` 表定义，含 pk_ranking / analysis_angles 2 条
-- [ ] Grep `def compute_pk_ranking\b|def compute_analysis_angles\b` 在 monitoring_module.py = 0（或方法体 ≤ 3 行 thin wrapper）
+- [x] `_RANKING_SPECS` 表定义，含 pk_ranking / analysis_angles 2 条
+- [x] Grep `def compute_pk_ranking\b|def compute_analysis_angles\b` 在 monitoring_module.py = 0（或方法体 ≤ 3 行 thin wrapper）
 
 ### 变更 C8 — execution_module 表驱动收敛
-- [ ] Grep `def _compile_timing_spec\b|def _compile_filter_spec\b|def _compile_propagate_spec\b` 在 execution_module.py 仅匹配 1 行委托
-- [ ] Grep `def _make_edge_action\b|def _make_ttl_interval_action\b|def _make_ttl_endtime_action\b` 在 execution_module.py 仅匹配 1 行委托
-- [ ] `Step` 基类定义，5 个 `XStep` 类继承
-- [ ] Grep `def _gate_before_open\b|def _gate_after_open\b|def _gate_before_close\b|def _gate_after_close\b` 在 execution_module.py 仅匹配 1 行委托
-- [ ] Grep `def _publish_edge_fired\b|def _publish_ttl_due\b` 在 execution_module.py = 0
+- [x] Grep `def _compile_timing_spec\b|def _compile_filter_spec\b|def _compile_propagate_spec\b` 在 execution_module.py 仅匹配 1 行委托
+- [x] Grep `def _make_edge_action\b|def _make_ttl_interval_action\b|def _make_ttl_endtime_action\b` 在 execution_module.py 仅匹配 1 行委托
+- [x] `Step` 基类定义，5 个 `XStep` 类继承
+- [x] Grep `def _gate_before_open\b|def _gate_after_open\b|def _gate_before_close\b|def _gate_after_close\b` 在 execution_module.py 仅匹配 1 行委托
+- [x] Grep `def _publish_edge_fired\b|def _publish_ttl_due\b` 在 execution_module.py = 0
 
 ### 变更 C9 — trade_module 表驱动
-- [ ] `_SIDE_SPECS` 表定义，含 BUY / SELL 2 条
-- [ ] Grep `def _execute_buy\b|def _execute_sell\b` 在 trade_module.py = 0
-- [ ] `_PSATT_SIDE_EFFECTS` 表定义，含 5 条
-- [ ] Grep `if action_spec\.bsavehis|if action_spec\.bsound|if action_spec\.btip|if action_spec\.bsavetoblock|if action_spec\.baimpool` 在 trade_module.py = 0
+- [x] `_SIDE_SPECS` 表定义，含 BUY / SELL 2 条
+- [x] Grep `def _execute_buy\b|def _execute_sell\b` 在 trade_module.py = 0
+- [x] `_PSATT_SIDE_EFFECTS` 表定义，含 5 条
+- [x] Grep `if action_spec\.bsavehis|if action_spec\.bsound|if action_spec\.btip|if action_spec\.bsavetoblock|if action_spec\.baimpool` 在 trade_module.py = 0
 
 ### 变更 C10 — runtime_mode_module 表驱动收敛
 - [ ] `_aggregate_ohlcv(group)` helper 定义
@@ -162,7 +162,7 @@
 - [ ] Grep `self\._bus\.subscribe\(EventType, self\._on_` 在 7 模块 = 0（仅 _BaseModule.register_subscribers 内允许）
 
 ### 变更 C12 — get_table 防御性调用统一
-- [ ] `_get_table(name)` helper 定义
+- [x] `_get_table(name)` helper 定义
 - [ ] Grep `get_global_config_store\(\)\.get_table.*\n.*if get_global_config_store` 在 core/*.py = 0（双调用 perf smell 消除）
 
 ## 评审工程师检查点（阶段 4：metatest v4 重建）

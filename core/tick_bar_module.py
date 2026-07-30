@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 from collections import defaultdict, deque
 from datetime import datetime, timedelta, timezone
@@ -35,6 +34,7 @@ from core.event_bus import (
 )
 from core.domain import MockDataSource, TickSource, _hash_tick, time_at
 from core.tick_table import TickTable
+from core._hashing import BarHashMixin, hash_dict_content, hash_tick_aggregate
 
 logger = logging.getLogger(__name__)
 
@@ -320,12 +320,8 @@ def _bar_bucket_ts(ts: float, period: str) -> int:
 
 
 def _hash_bar(bar: Dict[str, Any]) -> str:
-    content = {k: v for k, v in bar.items() if k != "_hash"}
-    try:
-        payload = json.dumps(content, sort_keys=True, ensure_ascii=False, default=str)
-    except (TypeError, ValueError):
-        payload = str(sorted(content.items()))
-    return hashlib.md5(payload.encode("utf-8")).hexdigest()
+    """per-content MD5——委托 core._hashing.hash_dict_content。"""
+    return hash_dict_content(bar, exclude={"_hash"})
 
 
 def _new_bar_from_tick(tick: Dict[str, Any], bucket_ts: int) -> Dict[str, Any]:
@@ -407,13 +403,8 @@ def _compose_5m_from_1m(state: Any, code: str, bucket_ts: int, tick: Dict[str, A
 
 
 def _hash_period_bars(period_bars: Dict[str, Any]) -> str:
-    parts: List[str] = []
-    for code in sorted(period_bars.keys()):
-        bar = period_bars[code]
-        if isinstance(bar, dict):
-            parts.append(f"{code}:{bar.get('_hash', '')}")
-    payload = "\x00".join(parts)
-    return hashlib.md5(payload.encode("utf-8")).hexdigest()
+    """aggregate hash——委托 core._hashing.hash_tick_aggregate。"""
+    return hash_tick_aggregate(period_bars, lambda code, bar: bar.get("_hash", ""))
 
 
 def _append_closed_bar(state: Any, period: str, code: str, bar: Dict[str, Any]) -> None:
@@ -828,7 +819,7 @@ class Min1Aggregator:
 # ====================================================================
 # TickBarModule 内部状态
 # ====================================================================
-class _InternalState:
+class _InternalState(BarHashMixin):
     """TickBarModule 内部轻量状态，提供 DataUpdater/BarComposer 所需最小接口。
 
     不依赖 PoolState；``time_source`` 由 SimulationStep/ReplayStep 事件更新，
@@ -862,31 +853,16 @@ class _InternalState:
         self.changed_codes.clear()
         return result
 
-    def bar_hash(self) -> str:
-        return self.latest_tick.get("_hash", "")
+    def _get_bar_hash_container(self) -> Dict[str, Any]:
+        return self.latest_tick or {}
 
     @staticmethod
     def _hash_tick_data(tick_data: Dict[str, Any]) -> str:
-        """聚合 hash，与 PoolStateMixin._hash_tick_data 算法一致。"""
-        parts: List[str] = []
-        for code in sorted(tick_data.keys()):
-            if isinstance(code, str) and code.startswith("_"):
-                continue
-            tick = tick_data[code]
-            if not isinstance(tick, dict):
-                continue
-            per_hash = tick.get("_hash")
-            if not per_hash:
-                content = {k: v for k, v in tick.items()
-                           if k not in ("_ts", "_hash")}
-                try:
-                    payload = json.dumps(content, sort_keys=True,
-                                         ensure_ascii=False, default=str)
-                except (TypeError, ValueError):
-                    payload = str(sorted(content.items()))
-                per_hash = hashlib.md5(payload.encode("utf-8")).hexdigest()
-            parts.append(f"{code}:{per_hash}")
-        return hashlib.md5("\x00".join(parts).encode("utf-8")).hexdigest()
+        """aggregate hash——委托 core._hashing.hash_tick_aggregate。"""
+        return hash_tick_aggregate(
+            tick_data,
+            lambda code, tick: tick.get("_hash") or hash_dict_content(tick, exclude={"_ts", "_hash"}),
+        )
 
 
 # ====================================================================
@@ -1062,7 +1038,7 @@ class TickBarModule:
         # 4. 发布 DataChanged(source=tick) 事件（同步触发 _on_data_changed 合成 K 线）
         self._bus.publish(DataChanged(
             ts=ts,
-            bar_hash=self._state.bar_hash(),
+            bar_hash=self._state.bar_hash,
             codes=updated_codes,
             source="tick",
             data=tick_data,
@@ -1126,7 +1102,7 @@ class TickBarModule:
         ts = event.ts or time_at(state=self._state) or 0.0
         self._bus.publish(DataChanged(
             ts=ts,
-            bar_hash=self._state.bar_hash(),
+            bar_hash=self._state.bar_hash,
             codes=[code],
             source="tick",
             data=tick_copy,

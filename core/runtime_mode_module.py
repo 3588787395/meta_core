@@ -23,12 +23,11 @@ import 白名单：``core.event_bus`` / ``core.domain`` / ``core.engine`` /
 from __future__ import annotations
 
 # === 合并自 core/runtime.py ===
-# 以下 import 中的 copy / hashlib / typing.Iterable / typing.Tuple /
+# 以下 import 中的 copy / typing.Iterable / typing.Tuple /
 # execution_module.EdgeState / execution_module.time_at 来自原 runtime.py，
 # 与本文件原有 import 去重后合并。
 import asyncio
 import copy
-import hashlib
 import heapq
 import json
 import logging
@@ -44,8 +43,9 @@ from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Se
 
 import pandas as pd
 
-from core.domain import DZH_COL_MAP, MockDataSource, _hash_tick, _normalize_to_fz, _stock_code, time_at, _safe_timestamp, EdgeState, _build_adjacency
+from core.domain import DZH_COL_MAP, MockDataSource, _hash_tick, _normalize_to_fz, _stock_code, time_at, _safe_timestamp, EdgeState, _build_adjacency, TimedEventSpec
 from core.table_engine import get_global_config_store
+from core._hashing import BarHashMixin, hash_dict_content, hash_tick_aggregate
 
 if TYPE_CHECKING:
     from core.engine import PoolEngine
@@ -267,6 +267,11 @@ def _run_coro_sync(coro, loop_holder, loop_attr="_sim_loop"):
         return result[0] if result else None
 
 
+def _status(status: str, **extra) -> Dict[str, Any]:
+    """状态返回值——合并 replay 控制方法的 {"success": True, "status": X, **extra}。"""
+    return {"success": True, "status": status, **extra}
+
+
 class KLineReplayEngine:
     def __init__(self, meta_engine: PoolEngine, storage: Optional[Any] = None,
                  bus: Optional[Any] = None):
@@ -299,13 +304,12 @@ class KLineReplayEngine:
         self._synthesized_bars: Dict[str, Dict[str, List[Dict]]] = {}
         self._mode_state: Optional[Dict] = None
 
-        self._replay_thread: Optional[threading.Thread] = None
         self._thread_lock = threading.Lock()
-        self._resume_event = threading.Event()
-        self._resume_event.set()  # 初始非暂停态
         self._event_log: List[Dict] = []
         self._last_bar_events: List[Dict] = []
         self._replay_loop: Optional[asyncio.AbstractEventLoop] = None
+        # Task 6：replay 步进改为 EventDriver heapq 调度（取消 while+sleep 轮询）。
+        self._replay_step_spec: Optional[TimedEventSpec] = None
         self._db_write_counter: int = 0
 
         # Task 24+（Item 3）：订阅 ReplayStarted 事件，记录会话信息。
@@ -717,53 +721,50 @@ class KLineReplayEngine:
         with self._thread_lock:
             self._playing = True
             self._paused = False
-            self._resume_event.set()
-            if self._replay_thread is None or not self._replay_thread.is_alive():
-                self._replay_thread = threading.Thread(target=self._sync_play_loop, daemon=True)
-                self._replay_thread.start()
-        return {"success": True, "status": "playing", "speed": self._speed}
+            # Task 6：步进由 EventDriver heapq 调度；spec 已存在（暂停恢复）则复用。
+            if self._replay_step_spec is None:
+                pe = self._engine._pool_engine
+                ed = pe._components.get("event_driver") if pe is not None else None
+                if ed is not None:
+                    spec = TimedEventSpec(action=self._replay_step_action, params={"kind": "tick"},
+                                          interval=BASE_INTERVAL.get(self._base_period, 0.5) / self._speed,
+                                          end_fn=lambda: float('inf') if self._playing else 0.0)
+                    loop = ed.get_loop()
+                    if loop is not None:
+                        ed.schedule_periodic(spec, loop, first_delay=0)
+                    else:
+                        logger.warning("EventDriver loop 未设置，replay 步进降级 heapq（wall-clock 不触发）")
+                        ed.add_spec(spec, time.time())
+                    self._replay_step_spec = spec
+        return _status("playing", speed=self._speed)
 
-    def _sync_play_loop(self) -> None:
-        base_interval = BASE_INTERVAL.get(self._base_period, 0.5)
-        try:
-            while True:
-                if not self._playing:
-                    break
-                if self._paused:
-                    self._resume_event.wait()
-                    self._resume_event.clear()
-                    continue
-                if self._current_index >= self._total_bars - 1:
-                    self._playing = False
-                    self._paused = True
-                    logger.info("回放结束: 已到达最后一根K线")
-                    break
-                self._do_step()
-                interval = base_interval / self._speed if self._speed < 1000 else 0
-                if interval > 0:
-                    time.sleep(interval)
-        finally:
-            if self._replay_loop and not self._replay_loop.is_closed():
-                self._replay_loop.close()
-            self._replay_loop = None
+    def _replay_step_action(self, params, fire_time=None) -> None:
+        """EventDriver 回调：推进一格 K 线（未播放/暂停时跳过，由 heapq 自然续程）。"""
+        if not self._playing or self._paused:
+            return
+        self._do_step()
+        if self._current_index >= self._total_bars - 1:
+            self._playing = False
+            logger.info("回放结束: 已到达最后一根K线")
 
     def pause(self) -> Dict:
         self._paused = True
-        self._resume_event.clear()
-        return {"success": True, "status": "paused"}
+        return _status("paused")
 
     def stop(self) -> Dict:
         self._playing = False
         self._paused = True
-        self._resume_event.set()  # 唤醒可能阻塞在 wait() 的循环
         with self._thread_lock:
-            if self._replay_thread and self._replay_thread.is_alive():
-                self._replay_thread.join(timeout=2.0)
-            self._replay_thread = None
+            if self._replay_step_spec is not None:
+                pe = self._engine._pool_engine
+                ed = pe._components.get("event_driver") if pe is not None else None
+                if ed is not None:
+                    ed.cancel(self._replay_step_spec)
+                self._replay_step_spec = None
         if self._replay_loop and not self._replay_loop.is_closed():
             self._replay_loop.close()
         self._replay_loop = None
-        return {"success": True, "status": "stopped"}
+        return _status("stopped")
 
     def step(self) -> Dict:
         if self._current_index >= self._total_bars - 1:
@@ -782,6 +783,15 @@ class KLineReplayEngine:
 
     def set_speed(self, speed: Any) -> Dict:
         self._speed = SPEED_MAP.get(speed, 1.0)
+        # Task 6：速度变更需重建 spec（interval 不可变），取消旧 spec 后由 play() 重注册。
+        if self._replay_step_spec is not None:
+            pe = self._engine._pool_engine
+            ed = pe._components.get("event_driver") if pe is not None else None
+            if ed is not None:
+                ed.cancel(self._replay_step_spec)
+            self._replay_step_spec = None
+            if self._playing and not self._paused:
+                self.play()
         return {"success": True, "speed": self._speed}
 
     def get_current_snapshot(self) -> Dict:
@@ -1005,35 +1015,37 @@ _PERIOD_BARS_1MIN: Dict[str, int] = {"5min": 5, "15min": 15, "30min": 30, "60min
 _PERIOD_BARS_5MIN: Dict[str, int] = {"15min": 3, "30min": 6, "60min": 12}
 
 
+def _aggregate_ohlcv(group: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """OHLCV 聚合——合并 _aggregate_bars / _group_and_synthesize 的 7 字段字面量。"""
+    return {
+        "time": group[0]["time"],
+        "open": group[0]["open"],
+        "close": group[-1]["close"],
+        "high": max(b["high"] for b in group),
+        "low": min(b["low"] for b in group),
+        "volume": sum(b["volume"] for b in group),
+        "amount": sum(b["amount"] for b in group),
+    }
+
+
 def _aggregate_bars(bars: List[Dict], n: int) -> List[Dict]:
     result: List[Dict] = []
     for i in range(0, len(bars), n):
         group = bars[i : i + n]
         if len(group) < n:
             break
-        result.append({
-            "time": group[0]["time"],
-            "open": group[0]["open"],
-            "close": group[-1]["close"],
-            "high": max(b["high"] for b in group),
-            "low": min(b["low"] for b in group),
-            "volume": sum(b["volume"] for b in group),
-            "amount": sum(b["amount"] for b in group),
-        })
+        result.append(_aggregate_ohlcv(group))
     return result
 
 
-def _get_week_key(dt: datetime) -> str:
-    monday = dt - timedelta(days=dt.weekday())
-    return monday.strftime("%Y-%m-%d")
+_DATE_KEYS: Dict[str, str] = {"day": "%Y-%m-%d", "month": "%Y-%m"}
 
 
-def _get_month_key(dt: datetime) -> str:
-    return dt.strftime("%Y-%m")
-
-
-def _day_key(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%d")
+def _get_date_key(dt: datetime, kind: str) -> str:
+    """日期键——合并 _get_week_key / _get_month_key / _day_key。week 取周一。"""
+    if kind == "week":
+        return (dt - timedelta(days=dt.weekday())).strftime("%Y-%m-%d")
+    return dt.strftime(_DATE_KEYS[kind])
 
 
 def _group_and_synthesize(bars: List[Dict], key_func) -> List[Dict]:
@@ -1046,33 +1058,20 @@ def _group_and_synthesize(bars: List[Dict], key_func) -> List[Dict]:
             groups[key] = []
             order.append(key)
         groups[key].append(bar)
-
-    result: List[Dict] = []
-    for key in order:
-        group = groups[key]
-        result.append({
-            "time": group[0]["time"],
-            "open": group[0]["open"],
-            "close": group[-1]["close"],
-            "high": max(b["high"] for b in group),
-            "low": min(b["low"] for b in group),
-            "volume": sum(b["volume"] for b in group),
-            "amount": sum(b["amount"] for b in group),
-        })
-    return result
+    return [_aggregate_ohlcv(groups[key]) for key in order]
 
 
-# SubTask 13.1: 周期 → 分组 key 函数表
+# SubTask 13.1: 周期 → 分组 key 函数表（委托 _get_date_key）
 _PERIOD_KEY_FUNCS: Dict[str, Callable[[datetime], str]] = {
-    "day": _day_key,
-    "week": _get_week_key,
-    "month": _get_month_key,
+    "day": lambda dt: _get_date_key(dt, "day"),
+    "week": lambda dt: _get_date_key(dt, "week"),
+    "month": lambda dt: _get_date_key(dt, "month"),
 }
 
 
 def _synthesize_intraday_to_day(bars: List[Dict]) -> List[Dict]:
     """分钟级 → day：按日分组并将 time 重写为当日 ``00:00:00``。"""
-    result = _group_and_synthesize(bars, _day_key)
+    result = _group_and_synthesize(bars, lambda dt: _get_date_key(dt, "day"))
     for bar in result:
         dt = datetime.strptime(bar["time"], "%Y-%m-%d %H:%M:%S")
         bar["time"] = dt.strftime("%Y-%m-%d") + " 00:00:00"
@@ -1186,10 +1185,9 @@ class RuntimeSimulator:
         self._tracemalloc_started: bool = False
         self.speed: float = 1.0
         self._bar_agg = bar_aggregator
-        self._sim_thread: Optional[threading.Thread] = None
         self._thread_lock = threading.Lock()
-        self._resume_event = threading.Event()
-        self._resume_event.set()
+        # Task 7：auto-step 改为 EventDriver heapq 调度（取消 while+sleep 轮询）。
+        self._sim_step_spec: Optional[TimedEventSpec] = None
         self._astep_mode: bool = False
 
     # ------------------------------------------------------------------
@@ -2099,53 +2097,50 @@ class RuntimeSimulator:
 
     def pause(self):
         self._pau = True
-        self._resume_event.clear()
 
     def resume(self):
         self._pau = False
-        self._resume_event.set()
-        if self._sim_thread is None or not self._sim_thread.is_alive():
-            if self._ini:
-                self.start_auto()
+        if self._sim_step_spec is None and self._ini:
+            self.start_auto()
 
     def start_auto(self):
-        """启动后台自动步进线程（daemon），持续调用step(d)推进仿真。"""
+        """启动自动步进：注册 sim_step TimedEventSpec 到 EventDriver heapq。"""
         with self._thread_lock:
             self._run = True
             self._pau = False
-            self._resume_event.set()
-            if self._sim_thread is None or not self._sim_thread.is_alive():
-                self._sim_thread = threading.Thread(target=self._sync_sim_loop, daemon=True)
-                self._sim_thread.start()
-        logger.info("simulator auto-step thread started, speed=%.1fx", self.speed)
+            if self._sim_step_spec is None:
+                pe = self._engine._pool_engine
+                ed = pe._components.get("event_driver") if pe is not None else None
+                if ed is not None:
+                    spec = TimedEventSpec(action=self._sim_step_action, params={"kind": "tick"},
+                                          interval=1.0 / max(self.speed, 0.1),
+                                          end_fn=lambda: float('inf') if self._run else 0.0)
+                    loop = ed.get_loop()
+                    if loop is not None:
+                        ed.schedule_periodic(spec, loop, first_delay=0)
+                    else:
+                        logger.warning("EventDriver loop 未设置，sim 步进降级 heapq（wall-clock 不触发）")
+                        ed.add_spec(spec, time.time())
+                    self._sim_step_spec = spec
+        logger.info("simulator auto-step started, speed=%.1fx", self.speed)
 
-    def _sync_sim_loop(self):
-        """后台线程主循环：按speed步进虚拟时间，检查_run/_pau标志。"""
-        try:
-            while self._run:
-                if self._pau:
-                    self._resume_event.wait()
-                    self._resume_event.clear()
-                    continue
-                step_seconds = 1.0
-                real_sleep = step_seconds / max(self.speed, 0.1)
-                self.step(d=step_seconds)
-                if real_sleep > 0:
-                    time.sleep(min(real_sleep, 0.5))
-        except Exception as ex:
-            logger.error("simulator auto-step thread error: %s", ex, exc_info=True)
-        finally:
-            logger.info("simulator auto-step thread stopped")
+    def _sim_step_action(self, params, fire_time=None) -> None:
+        """EventDriver 回调：推进虚拟时间一格（未运行/暂停时跳过，heapq 自然续程）。"""
+        if not self._run or self._pau:
+            return
+        self.step(d=1.0)
 
     def stop(self):
-        """停止仿真：停止后台线程，重置状态。"""
+        """停止仿真：取消步进 spec，重置状态。"""
         self._run = False
         self._pau = False
-        self._resume_event.set()
         with self._thread_lock:
-            if self._sim_thread and self._sim_thread.is_alive():
-                self._sim_thread.join(timeout=2.0)
-            self._sim_thread = None
+            if self._sim_step_spec is not None:
+                pe = self._engine._pool_engine
+                ed = pe._components.get("event_driver") if pe is not None else None
+                if ed is not None:
+                    ed.cancel(self._sim_step_spec)
+                self._sim_step_spec = None
 
     # ------------------------------------------------------------------
     # 时间表达解析（统一入口）
@@ -2505,24 +2500,6 @@ class RuntimeModeModule:
             self._sim_auto_step = False
         except Exception as ex:
             logger.warning("stop_auto_step 失败: %s", ex)
-
-    async def auto_step_loop(self) -> None:
-        """自动步进循环（异步）。
-
-        调用方需在 asyncio 事件循环中 ``await`` 本协程；
-        通过 ``stop_auto_step()`` 或切换模式退出。
-        """
-        try:
-            step_idx = self._sim_step_idx
-            while self._sim_auto_step and self._current_mode == "simulation":
-                self.step_simulation(step_idx)
-                step_idx += 1
-                self._sim_step_idx = step_idx
-                await asyncio.sleep(1.0 / self._sim_speed)
-        except asyncio.CancelledError:
-            logger.info("auto_step_loop 已取消")
-        except Exception as ex:
-            logger.warning("auto_step_loop 异常: %s", ex)
 
     # ------------------------------------------------------------------
     # 查询接口（供 API 层读取当前状态，非事件路径）

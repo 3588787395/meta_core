@@ -54,7 +54,107 @@ def _iter_entries(collection) -> Iterator[Tuple[str, Any]]:
         yield from iterate(collection)
 
 
-class ConfigStore:
+class ConfigStoreBase:
+    """配置存储基类——热加载与回滚的模板方法（合并双实现）。
+
+    合并 check_hot_reload/check_and_reload 的 10 步骨架与 rollback 双实现；
+    3 层校验由 ``_validate_three_tiers`` 收敛，子类仅 override ``_commit`` 等薄 hook。
+    """
+
+    def _iter_config_paths(self) -> List[Path]:
+        """枚举配置文件（子类可覆盖，默认扫描 config_dir 下 *.json）。"""
+        return list(self._config_dir.glob("*.json"))
+
+    def _validate_three_tiers(self, name: str, data: Any) -> List[str]:
+        """三级校验共享骨架（语法→逻辑→业务规则，逐级短路），返回错误消息列表。"""
+        errors: List[str] = []
+        if self._schema_validator is None:
+            return errors
+        for validate in (
+            self._schema_validator.validate_syntax,
+            self._schema_validator.validate_logic,
+            self._schema_validator.validate_business,
+        ):
+            tier_errors = [r.message for r in validate(name, data) if r.level == "error"]
+            errors.extend(tier_errors)
+            if tier_errors:
+                break
+        return errors
+
+    def _validate(self, name: str, data: Any) -> List[str]:
+        """校验配置数据，返回错误消息列表（空=通过）。默认委托三级校验，子类可覆盖。"""
+        return self._validate_three_tiers(name, data)
+
+    def _commit(self, name: str, data: Any, file_hash: str) -> Any:
+        """子类覆盖：提交配置到存储，返回旧配置数据（用于版本追踪）。"""
+        raise NotImplementedError
+
+    def _post_reload(self, changed: List[str]) -> None:
+        """子类覆盖：重载后回调（默认空）。"""
+        return None
+
+    def _reload_all(self) -> None:
+        """子类覆盖：回滚后重载所有配置。"""
+        raise NotImplementedError
+
+    def check_and_reload(self) -> List[str]:
+        """热加载模板方法（10 步骨架）：检测→解析→校验→替换→版本记录。"""
+        changed: List[str] = []
+        for path in self._iter_config_paths():
+            name = path.stem
+            try:
+                raw = path.read_text(encoding="utf-8")
+                file_hash = hashlib.md5(raw.encode()).hexdigest()
+                if self._hashes.get(name) == file_hash:
+                    continue
+                try:
+                    new_data = json.loads(raw)
+                except json.JSONDecodeError as e:
+                    logger.error(f"热加载 {name} 失败: JSON解析错误 {e}，保留旧配置")
+                    continue
+                errors = self._validate(name, new_data)
+                if errors:
+                    for err in errors:
+                        logger.error(f"热加载 {name} 校验失败: {err}")
+                    logger.warning(f"热加载 {name} 校验失败，保留旧配置不变")
+                    continue
+                old_data = self._commit(name, new_data, file_hash)
+                changed.append(name)
+                if self._storage is not None:
+                    try:
+                        self._storage.record_config_version(
+                            table_name=name,
+                            change_type='update' if old_data else 'create',
+                            old_content=json.dumps(old_data, ensure_ascii=False) if old_data else None,
+                            new_content=json.dumps(new_data, ensure_ascii=False),
+                            created_by='hot_reload',
+                        )
+                    except Exception as e:
+                        logger.warning(f"记录配置版本 {name} 失败: {e}")
+                logger.info(f"热加载 {name} 成功 (hash={file_hash[:8]})")
+            except Exception as e:
+                logger.error(f"热加载检测 {name} 失败: {e}")
+        self._post_reload(changed)
+        return changed
+
+    def rollback(self, version_id: str) -> bool:
+        """回滚模板方法：委托 Storage 回滚后重载所有配置。"""
+        if self._storage is None:
+            logger.error("回滚失败: 未设置 Storage 引用")
+            return False
+        try:
+            if not self._storage.rollback_config(version_id):
+                logger.error(f"回滚配置版本 {version_id} 失败")
+                return False
+            self._reload_all()
+            logger.info(f"回滚配置版本 {version_id} 成功")
+            return True
+        except Exception as e:
+            logger.error(f"回滚配置版本 {version_id} 异常: {e}")
+            return False
+
+
+class ConfigStore(ConfigStoreBase):
     """配置表存储：加载、缓存、校验、热加载"""
 
     def __init__(self, config_dir: Optional[str] = None, storage=None, bus: Optional[EventBus] = None):
@@ -450,113 +550,29 @@ class ConfigStore:
             rules = [r for r in rules if any(t in r.get("tags", []) for t in tags)]
         return sorted(rules, key=lambda r: r.get("priority", 100))
 
+    def _iter_config_paths(self) -> List[Path]:
+        """覆盖基类：递归扫描 config_dir，跳过 _archived/ 与 .locks.json。"""
+        return self._iter_config_files()
+
+    def _commit(self, name: str, data: Any, file_hash: str) -> Any:
+        """覆盖基类 hook：写入本地 _tables/_hashes/_load_times，返回旧配置。"""
+        old = self._tables.get(name)
+        self._tables[name] = data
+        self._hashes[name] = file_hash
+        self._load_times[name] = time.time()
+        return old
+
+    def _reload_all(self) -> None:
+        """覆盖基类 hook：回滚后重载所有配置。"""
+        self.load_all()
+
     def check_hot_reload(self) -> List[str]:
-        """检测配置表变更并热加载，返回变更的表名列表。
-
-        三级校验闭环：
-        1. 加载新配置前，先进行三级校验
-        2. 如果校验失败，保留旧配置不变，记录错误日志
-        3. 如果校验通过，替换为新配置
-        4. 配置变更时，调用 Storage.record_config_version 记录版本历史
-        """
-        changed = []
-        for path in self._iter_config_files():
-            name = path.stem
-            try:
-                raw = path.read_text(encoding="utf-8")
-                file_hash = hashlib.md5(raw.encode()).hexdigest()
-                if self._hashes.get(name) != file_hash:
-                    # 检测到变更，先解析新配置
-                    try:
-                        new_data = json.loads(raw)
-                    except json.JSONDecodeError as e:
-                        logger.error(f"热加载 {name} 失败: JSON解析错误 {e}，保留旧配置")
-                        continue
-
-                    # 三级校验
-                    validation_passed = True
-                    if self._schema_validator is not None:
-                        # 语法校验
-                        syntax_results = self._schema_validator.validate_syntax(name, new_data)
-                        syntax_errors = [r for r in syntax_results if r.level == "error"]
-                        if syntax_errors:
-                            validation_passed = False
-                            for r in syntax_errors:
-                                logger.error(f"热加载 {name} 语法校验失败: {r.message}")
-
-                        # 逻辑校验
-                        logic_results = self._schema_validator.validate_logic(name, new_data)
-                        logic_errors = [r for r in logic_results if r.level == "error"]
-                        if logic_errors:
-                            validation_passed = False
-                            for r in logic_errors:
-                                logger.error(f"热加载 {name} 逻辑校验失败: {r.message}")
-
-                        # 业务规则校验
-                        business_results = self._schema_validator.validate_business(name, new_data)
-                        business_errors = [r for r in business_results if r.level == "error"]
-                        if business_errors:
-                            validation_passed = False
-                            for r in business_errors:
-                                logger.error(f"热加载 {name} 业务规则校验失败: {r.message}")
-
-                    if not validation_passed:
-                        logger.warning(f"热加载 {name} 校验失败，保留旧配置不变")
-                        continue
-
-                    # 校验通过，记录旧配置用于版本追踪
-                    old_data = self._tables.get(name)
-                    old_content = json.dumps(old_data, ensure_ascii=False) if old_data else None
-                    new_content = json.dumps(new_data, ensure_ascii=False)
-
-                    # 替换为新配置
-                    self._tables[name] = new_data
-                    self._hashes[name] = file_hash
-                    self._load_times[name] = time.time()
-                    changed.append(name)
-
-                    # 记录配置版本
-                    if self._storage is not None:
-                        try:
-                            change_type = 'update' if old_data else 'create'
-                            self._storage.record_config_version(
-                                table_name=name,
-                                change_type=change_type,
-                                old_content=old_content,
-                                new_content=new_content,
-                                created_by='hot_reload'
-                            )
-                        except Exception as e:
-                            logger.warning(f"记录配置版本 {name} 失败: {e}")
-
-                    logger.info(f"热加载 {name} 成功 (hash={file_hash[:8]})")
-            except Exception as e:
-                logger.error(f"热加载检测 {name} 失败: {e}")
-        return changed
+        """检测配置表变更并热加载（委托基类 ``check_and_reload`` 模板方法）。"""
+        return self.check_and_reload()
 
     def rollback_config(self, version_id: str) -> bool:
-        """回滚配置到指定版本。
-
-        通过 Storage.rollback_config 实现，回滚后重新加载配置。
-        返回 True 表示回滚成功，False 表示失败。
-        """
-        if self._storage is None:
-            logger.error("回滚失败: 未设置 Storage 引用")
-            return False
-
-        try:
-            success = self._storage.rollback_config(version_id)
-            if not success:
-                logger.error(f"回滚配置版本 {version_id} 失败: Storage 回滚返回 False")
-                return False
-
-            # 回滚成功后，重新加载所有配置以同步状态
-            self.load_all()
-            logger.info(f"回滚配置版本 {version_id} 成功，已重新加载所有配置")
-            return True
-        except Exception as e:
-            logger.error(f"回滚配置版本 {version_id} 异常: {e}")
-            return False
+        """回滚配置到指定版本（委托基类 ``rollback`` 模板方法）。"""
+        return self.rollback(version_id)
 
     def start_watch(self, interval: float = 2.0) -> None:
         """启动配置表热加载监控"""
@@ -1444,7 +1460,7 @@ class PropertyOwnershipManager:
 # 6. 事件驱动：发布 ConfigChanged 事件（Task 14）
 
 
-class HotReloadManager:
+class HotReloadManager(ConfigStoreBase):
     """热加载管理器：文件监控 + 原子替换 + WebSocket 推送。
 
     事件驱动（Task 14）：
@@ -1587,140 +1603,32 @@ class HotReloadManager:
         except Exception as ex:
             logger.warning("HotReload 文件变更处理失败: %s", ex)
 
-    def validate_and_swap(self, table_name: str, new_data: Dict) -> tuple:
-        """校验并原子替换单个配置表
+    def _commit(self, name: str, data: Any, file_hash: str) -> Any:
+        """覆盖基类 hook：原子替换 ConfigStore 中的表，返回旧配置。"""
+        old = None
+        if self._config_store:
+            old = self._config_store.get(name)
+            self._config_store._tables[name] = data
+            self._config_store._hashes[name] = file_hash
+            self._config_store._load_times[name] = time.time()
+        self._hashes[name] = file_hash
+        return old
 
-        Returns:
-            (success: bool, errors: List[str])
-        """
-        errors = []
-
-        # 三级校验
-        if self._schema_validator is not None:
-            # 语法校验
-            syntax_results = self._schema_validator.validate_syntax(table_name, new_data)
-            syntax_errors = [r for r in syntax_results if r.level == "error"]
-            errors.extend(r.message for r in syntax_errors)
-
-            if not syntax_errors:
-                # 逻辑校验
-                logic_results = self._schema_validator.validate_logic(table_name, new_data)
-                logic_errors = [r for r in logic_results if r.level == "error"]
-                errors.extend(r.message for r in logic_errors)
-
-                if not logic_errors:
-                    # 业务规则校验
-                    business_results = self._schema_validator.validate_business(table_name, new_data)
-                    business_errors = [r for r in business_results if r.level == "error"]
-                    errors.extend(r.message for r in business_errors)
-
-        return len(errors) == 0, errors
-
-    def check_and_reload(self) -> List[str]:
-        """检测变更并执行热加载，返回变更的表名列表
-
-        三级校验闭环：
-        1. 检测文件变更
-        2. 解析新配置
-        3. 三级校验（语法→逻辑→业务规则）
-        4. 校验通过→原子替换 + 版本记录
-        5. 校验失败→保留旧配置，记录错误
-        """
-        changed = []
-
-        for path in self._config_dir.glob("*.json"):
-            name = path.stem
-            try:
-                raw = path.read_text(encoding="utf-8")
-                file_hash = hashlib.md5(raw.encode()).hexdigest()
-
-                if self._hashes.get(name) == file_hash:
-                    continue  # 无变更
-
-                # 检测到变更，先解析新配置
-                try:
-                    new_data = json.loads(raw)
-                except json.JSONDecodeError as e:
-                    logger.error(f"热加载 {name} 失败: JSON解析错误 {e}，保留旧配置")
-                    continue
-
-                # 三级校验
-                success, errors = self.validate_and_swap(name, new_data)
-                if not success:
-                    for err in errors:
-                        logger.error(f"热加载 {name} 校验失败: {err}")
-                    logger.warning(f"热加载 {name} 校验失败，保留旧配置不变")
-                    continue
-
-                # 校验通过，记录旧配置用于版本追踪
-                old_data = self._config_store.get(name) if self._config_store else None
-                old_content = json.dumps(old_data, ensure_ascii=False) if old_data else None
-                new_content = json.dumps(new_data, ensure_ascii=False)
-
-                # 原子替换：更新 ConfigStore
-                if self._config_store:
-                    self._config_store._tables[name] = new_data
-                    self._config_store._hashes[name] = file_hash
-                    self._config_store._load_times[name] = time.time()
-
-                # 更新本地哈希
-                self._hashes[name] = file_hash
-                changed.append(name)
-
-                # 记录配置版本
-                if self._storage is not None:
-                    try:
-                        change_type = 'update' if old_data else 'create'
-                        self._storage.record_config_version(
-                            table_name=name,
-                            change_type=change_type,
-                            old_content=old_content,
-                            new_content=new_content,
-                            created_by='hot_reload'
-                        )
-                    except Exception as e:
-                        logger.warning(f"记录配置版本 {name} 失败: {e}")
-
-                logger.info(f"热加载 {name} 成功 (hash={file_hash[:8]})")
-
-            except Exception as e:
-                logger.error(f"热加载检测 {name} 失败: {e}")
-
-        # 触发变更回调
+    def _post_reload(self, changed: List[str]) -> None:
+        """覆盖基类 hook：触发 on_change 回调并发布 ConfigChanged 事件。"""
         if changed and self._on_change:
             try:
                 self._on_change(changed)
             except Exception as e:
                 logger.warning(f"热加载回调执行失败: {e}")
-
-        # 事件驱动：发布 ConfigChanged 事件（Task 14）
-        # Config 模块订阅后自行重载，Execution 模块订阅后重建 CompiledSchedule
         if changed:
             self._notify_changed(changed)
 
-        return changed
-
-    def rollback(self, version_id: str) -> bool:
-        """回滚配置到指定版本"""
-        if self._storage is None:
-            logger.error("回滚失败: 未设置 Storage 引用")
-            return False
-
-        try:
-            success = self._storage.rollback_config(version_id)
-            if not success:
-                logger.error(f"回滚配置版本 {version_id} 失败")
-                return False
-
-            # 回滚后重新加载所有配置
-            if self._config_store:
-                self._config_store.load_all()
-            self._snapshot_hashes()
-            logger.info(f"回滚配置版本 {version_id} 成功")
-            return True
-        except Exception as e:
-            logger.error(f"回滚配置版本 {version_id} 异常: {e}")
-            return False
+    def _reload_all(self) -> None:
+        """覆盖基类 hook：回滚后重载 ConfigStore 并刷新哈希快照。"""
+        if self._config_store:
+            self._config_store.load_all()
+        self._snapshot_hashes()
 
     # ─── Watchdog 模式 ───────────────────────────────────────
 

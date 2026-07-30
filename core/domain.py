@@ -102,7 +102,56 @@ class Edge(ABC):
     @classmethod
     @abstractmethod
     def from_dict(cls, d: Dict[str, Any]) -> "Edge":
-        """从字典反序列化，与 to_dict 互逆。"""
+        """从字典反序列化，与 to_dict 互逆."""
+
+
+# Section: _FieldedBase mixin — 合并 _NodeBase / _EdgeBase to_dict/from_dict/工厂查表（Task 13 C1）
+
+
+class _FieldedBase:
+    """to_dict/from_dict + 工厂查表 mixin——合并 _NodeBase/_EdgeBase 逐行复制（C1）。
+
+    子类覆盖 _common_to_dict / _common_kwargs 处理公共字段差异。
+    """
+
+    _FIELDS: Tuple[_FieldMeta, ...] = ()
+
+    def to_dict(self) -> Dict[str, Any]:
+        """统一序列化：公共字段 + 遍历 _FIELDS 序列化类型特有字段。"""
+        d = self._common_to_dict()
+        for fm in self._FIELDS:
+            val = getattr(self, fm.name)
+            ser = fm.serializer
+            if ser == "list":
+                d[fm.name] = list(val)
+            elif ser == "dict":
+                d[fm.name] = dict(val)
+            elif isinstance(ser, tuple) and ser[0] == "spec":
+                d[fm.name] = val.to_dict() if val else None
+            else:  # None / "plain"
+                d[fm.name] = val
+        return d
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "_FieldedBase":
+        """统一反序列化：公共字段 + 遍历 _FIELDS 解析类型特有字段。"""
+        kwargs = cls._common_kwargs(d)
+        for fm in cls._FIELDS:
+            ser = fm.serializer
+            if isinstance(ser, tuple) and ser[0] == "spec":
+                v = d.get(fm.name)
+                spec_cls = globals()[ser[1]]
+                kwargs[fm.name] = spec_cls.from_dict(v) if v else None
+            else:
+                kwargs[fm.name] = d.get(fm.name, fm.default)
+        return cls(**kwargs)
+
+    @staticmethod
+    def _lookup_in_registry(registry, key, label):
+        klass = registry.get(int(key))
+        if klass is None:
+            raise KeyError(f"未注册的{label}: {key}")
+        return klass
 
 
 # ════════════════════════════════════════════════════════════════
@@ -120,17 +169,11 @@ def _norm_pos(pos: Any) -> Tuple[float, float]:
     return (0.0, 0.0)
 
 
-class _NodeBase(Node):
-    """Node ABC 的具体基类，处理 6 个公共字段的序列化与工厂分派。
-
-    Task 11.3：基类提供统一的 to_dict / from_dict，遍历子类 _FIELDS
-    自动序列化/反序列化类型特有字段，消除子类手写样板。
-    """
+class _NodeBase(_FieldedBase, Node):
+    """Node ABC 的具体基类——公共字段序列化与工厂分派委托 _FieldedBase mixin。"""
 
     DZH_TYPE: Optional[int] = None
     TDX_TYPE: Optional[int] = None
-    # 子类覆盖：声明类型特有字段的序列化规则（见 _FieldMeta 注释）
-    _FIELDS: Tuple[_FieldMeta, ...] = ()
 
     def __init__(
         self,
@@ -169,52 +212,13 @@ class _NodeBase(Node):
             "attr": d.get("attr", 0),
         }
 
-    def to_dict(self) -> Dict[str, Any]:
-        """统一序列化：公共字段 + 遍历 _FIELDS 序列化类型特有字段。"""
-        d = self._common_to_dict()
-        for fm in self._FIELDS:
-            val = getattr(self, fm.name)
-            ser = fm.serializer
-            if ser == "list":
-                d[fm.name] = list(val)
-            elif ser == "dict":
-                d[fm.name] = dict(val)
-            elif isinstance(ser, tuple) and ser[0] == "spec":
-                d[fm.name] = val.to_dict() if val else None
-            else:  # None / "plain"
-                d[fm.name] = val
-        return d
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "_NodeBase":
-        """统一反序列化：公共字段 + 遍历 _FIELDS 解析类型特有字段。"""
-        kwargs = cls._common_kwargs(d)
-        for fm in cls._FIELDS:
-            ser = fm.serializer
-            if isinstance(ser, tuple) and ser[0] == "spec":
-                v = d.get(fm.name)
-                spec_cls = globals()[ser[1]]
-                kwargs[fm.name] = spec_cls.from_dict(v) if v else None
-            else:
-                kwargs[fm.name] = d.get(fm.name, fm.default)
-        return cls(**kwargs)
-
-    # ── 工厂方法（表驱动分派，忽略 cls，按 type 查注册表）──
     @classmethod
     def from_dzh_type(cls, t: int) -> Type[Node]:
-        """按 DZH 节点 type 返回对应 Node 子类。"""
-        klass = _DZH_TYPE_REGISTRY.get(int(t))
-        if klass is None:
-            raise KeyError(f"未注册的 DZH 节点 type: {t}")
-        return klass
+        return cls._lookup_in_registry(_DZH_TYPE_REGISTRY, t, "DZH 节点 type")
 
     @classmethod
     def from_tdx_type(cls, t: int) -> Type[Node]:
-        """按 TDX 节点 type 返回对应 Node 子类。"""
-        klass = _TDX_TYPE_REGISTRY.get(int(t))
-        if klass is None:
-            raise KeyError(f"未注册的 TDX 节点 type: {t}")
-        return klass
+        return cls._lookup_in_registry(_TDX_TYPE_REGISTRY, t, "TDX 节点 type")
 
 
 class DecorativeNode(_NodeBase):
@@ -452,15 +456,8 @@ def all_tdx_types() -> List[int]:
 # ════════════════════════════════════════════════════════════════
 
 
-class _EdgeBase(Edge):
-    """Edge ABC 的具体基类，处理 6 个公共字段的序列化与工厂分派。
-
-    Task 11.3：基类提供统一的 to_dict / from_dict，遍历子类 _FIELDS
-    自动序列化/反序列化类型特有字段，消除子类手写样板。
-    """
-
-    # 子类覆盖：声明类型特有字段的序列化规则（见 _FieldMeta 注释）
-    _FIELDS: Tuple[_FieldMeta, ...] = ()
+class _EdgeBase(_FieldedBase, Edge):
+    """Edge ABC 的具体基类——公共字段序列化与工厂分派委托 _FieldedBase mixin。"""
 
     def __init__(
         self,
@@ -499,52 +496,13 @@ class _EdgeBase(Edge):
             "size": d.get("size", 1),
         }
 
-    def to_dict(self) -> Dict[str, Any]:
-        """统一序列化：公共字段 + 遍历 _FIELDS 序列化类型特有字段。"""
-        d = self._common_to_dict()
-        for fm in self._FIELDS:
-            val = getattr(self, fm.name)
-            ser = fm.serializer
-            if ser == "list":
-                d[fm.name] = list(val)
-            elif ser == "dict":
-                d[fm.name] = dict(val)
-            elif isinstance(ser, tuple) and ser[0] == "spec":
-                d[fm.name] = val.to_dict() if val else None
-            else:  # None / "plain"
-                d[fm.name] = val
-        return d
-
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "_EdgeBase":
-        """统一反序列化：公共字段 + 遍历 _FIELDS 解析类型特有字段。"""
-        kwargs = cls._common_kwargs(d)
-        for fm in cls._FIELDS:
-            ser = fm.serializer
-            if isinstance(ser, tuple) and ser[0] == "spec":
-                v = d.get(fm.name)
-                spec_cls = globals()[ser[1]]
-                kwargs[fm.name] = spec_cls.from_dict(v) if v else None
-            else:
-                kwargs[fm.name] = d.get(fm.name, fm.default)
-        return cls(**kwargs)
-
-    # ── 工厂方法（表驱动分派）──
     @classmethod
     def from_dzh_attr(cls, attr: int) -> Type[Edge]:
-        """按 DZH 边 attr 返回对应 Edge 子类（8192=条件边, 8193=无条件边）。"""
-        klass = _DZH_ATTR_REGISTRY.get(int(attr))
-        if klass is None:
-            raise KeyError(f"未注册的 DZH 边 attr: {attr}")
-        return klass
+        return cls._lookup_in_registry(_DZH_ATTR_REGISTRY, attr, "DZH 边 attr")
 
     @classmethod
     def from_tdx_source_type(cls, src_type: int) -> Type[Edge]:
-        """按源节点 type 返回对应 Edge 子类。"""
-        klass = _EDGE_SOURCE_TYPE_REGISTRY.get(int(src_type))
-        if klass is None:
-            raise KeyError(f"未注册的边源节点 type: {src_type}")
-        return klass
+        return cls._lookup_in_registry(_EDGE_SOURCE_TYPE_REGISTRY, src_type, "边源节点 type")
 
 
 class ConditionalEdge(_EdgeBase):
@@ -1904,21 +1862,13 @@ class MockDataSource(TickSource):
 
 
 def _hash_tick(tick: Dict[str, Any]) -> str:
-    """对单只股票 tick 做确定性摘要（I26：与 data_updater 路径统一的 per-code hash）。
+    """per-content MD5——委托 core._hashing.hash_dict_content（Task 15：继承原语收敛）。
 
-    排除 ``_ts`` / ``_hash`` 元数据字段，使 per-code _hash 仅依赖行情内容
-    （open/high/low/close/volume/...），不受时间戳影响。这保证：
-      - 相同行情内容在不同时间到达（replay vs live）产生相同 per-code _hash
-      - ``update_latest_tick``（全量替换）与 ``apply_data``（增量更新）两条路径
-        对相同内容产生相同 per-code _hash，进而相同聚合 hash 与缓存键
-      - ``update_latest_tick`` 重复调用（无 ``_ts`` 输入）保持幂等
+    排除 _ts / _hash 元数据字段，与 data_updater 路径统一。
+    等价性已由 Wave 1 验证：hash_dict_content(tick, exclude={"_ts","_hash"}) == _hash_tick(tick)。
     """
-    content = {k: v for k, v in tick.items() if k not in ("_ts", "_hash")}
-    try:
-        payload = json.dumps(content, sort_keys=True, ensure_ascii=False, default=str)
-    except (TypeError, ValueError):
-        payload = str(sorted(content.items()))
-    return hashlib.md5(payload.encode("utf-8")).hexdigest()
+    from ._hashing import hash_dict_content
+    return hash_dict_content(tick, exclude={"_ts", "_hash"})
 
 
 # ════════════════════════════════════════════════════════════════

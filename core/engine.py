@@ -1010,6 +1010,14 @@ class PoolEngine(PoolEngineMixin):
         trade_executor = trade_module._trade_executor
         from .execution_module import EventDriver
         event_driver = EventDriver(state=self.state, bus=event_bus)
+        # 注入主 asyncio loop：replay/sim 步进经 schedule_periodic 走 loop.call_later
+        # wall-clock 路径（非 heapq 数据时间路径）。_init_pool_runtime 实际由 async 路由
+        # （tdx_execute_pool / websocket）同步调用链触发，运行在事件循环线程，
+        # 故 asyncio.get_running_loop() 可用；threadpool 路径会抛 RuntimeError，留 None。
+        try:
+            event_driver.set_loop(asyncio.get_running_loop())
+        except RuntimeError:
+            logger.debug("EventDriver 创建时无运行中 loop，schedule_periodic 将降级")
         from .monitoring_module import _EventPanel
         event_panel = _EventPanel(event_bus, event_driver)
         event_panel.subscribe()

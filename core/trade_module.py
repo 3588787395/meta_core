@@ -24,7 +24,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime as _dt
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.event_bus import (
     _event_handler,
@@ -67,8 +67,10 @@ _TRADEATTR_TARGET_KEYS = ["tradetype", "price", "qty", "condition", "delay", "on
 
 
 # Task 9.5: _load_json_cache 已删除，改为通过 ConfigStore.get_table 加载
-_get_history_schema = lambda: (get_global_config_store().get_table("history_schema") if get_global_config_store() else {})
-_get_action_table = lambda: (get_global_config_store().get_table("action_table") if get_global_config_store() else {})
+# Task 24 (C12): 统一 get_table 防御性调用，消除 get_global_config_store() 双调用 perf smell
+def _get_table(name: str) -> Dict[str, Any]:
+    cs = get_global_config_store()
+    return cs.get_table(name) if cs else {}
 
 _STOCK_NAMES = {}
 try:
@@ -104,7 +106,7 @@ def _quote_filename(fn):
 
 
 def _extract_stk_fields(stk, schema_fields, today):
-    defaults_cfg = _get_history_schema()['write_defaults']['non_dict_defaults']
+    defaults_cfg = _get_table("history_schema")['write_defaults']['non_dict_defaults']
     is_dict = isinstance(stk, dict)
     code = (stk.get('code', '') or stk.get('label', '')) if is_dict else str(stk)
     result = {}
@@ -138,7 +140,7 @@ def _write_stk_xml(path, fields, stocks, today, schema):
 
 
 def _read_history_log(pool_name, node_id, date_str):
-    schema = _get_history_schema()
+    schema = _get_table("history_schema")
     base = _TDXPOOL_DIR / pool_name / node_id
     if not base.exists():
         return []
@@ -169,7 +171,7 @@ def _read_history_log(pool_name, node_id, date_str):
 
 
 def _write_history_for_node(pool_name, node_id, stocks, today):
-    schema = _get_history_schema()
+    schema = _get_table("history_schema")
     d = _TDXPOOL_DIR / pool_name / node_id
     d.mkdir(parents=True, exist_ok=True)
     for ek in ('dat_format', 'log_format'):
@@ -244,7 +246,7 @@ def _dispatch_pool_enter_actions(pool_name, node_id, node, new_stocks, saved_cou
         psatt = node.get('params', {}) if isinstance(node, dict) else {}
     ctx = {'$pool_name': pool_name, '$node_id': node_id, '$node': node, '$new_stocks': new_stocks}
     total = 0
-    action_cfg = _get_action_table()
+    action_cfg = _get_table("action_table")
     ops_table = action_cfg.get('callback_ops', {})
     for ak, ad in action_cfg.get('pool_enter_actions', {}).items():
         if int(psatt.get(ak, 0)) != 1:
@@ -281,6 +283,16 @@ def _dispatch_pool_enter_actions(pool_name, node_id, node, new_stocks, saved_cou
 # ═══════════════════════════════════════════════════════════════
 
 
+# _SIDE_SPECS: BUY/SELL 共享 _execute_trade 骨架的差异项（action / cash 方向 /
+# trade dict amount 键 / log 格式）。多步差异（qty/precheck/position/pnl）按 side 内联。
+_SIDE_SPECS: Dict[str, Dict[str, Any]] = {
+    "BUY": {"action": "BUY", "sign": -1, "amount_key": "cost",
+            "log": lambda c, q, p, a, pnl, cash: logger.info("BUY %s qty=%d price=%.2f cost=%.2f cash=%.2f", c, q, p, a, cash)},
+    "SELL": {"action": "SELL", "sign": 1, "amount_key": "proceeds",
+             "log": lambda c, q, p, a, pnl, cash: logger.info("SELL %s qty=%d price=%.2f proceeds=%.2f pnl=%.4f cash=%.2f", c, q, p, a, pnl, cash)},
+}
+
+
 class _TradeExecutor:
     """交易执行器（内部组件，对外请使用 ``TradeModule``）。
 
@@ -314,67 +326,50 @@ class _TradeExecutor:
     def on_signal(self, event: Any) -> None:
         if not isinstance(event, Signal):
             return
-        if event.signal_type == "BUY":
-            self._execute_buy(event)
-        elif event.signal_type == "SELL":
-            self._execute_sell(event)
+        if event.signal_type in _SIDE_SPECS:
+            self._execute_trade(event.signal_type, event)
 
-    def _execute_buy(self, signal: Signal) -> None:
-        quantity = signal.quantity if signal.quantity > 0 else 100
-        price = signal.price
-        cost = quantity * price
-        if cost > self._cash:
-            logger.warning("insufficient cash for BUY %s: cost=%.2f cash=%.2f",
-                           signal.code, cost, self._cash)
-            return
-        pos = self._positions.get(signal.code)
-        if pos:
-            total_qty = pos["quantity"] + quantity
-            avg_cost = (pos["quantity"] * pos["cost_price"] + cost) / total_qty
-            pos["quantity"] = total_qty
-            pos["cost_price"] = round(avg_cost, 4)
-        else:
-            self._positions[signal.code] = {
-                "quantity": quantity,
-                "cost_price": round(price, 4),
-            }
-        self._cash -= cost
-        self._trades.append({
-            "action": "BUY",
-            "code": signal.code,
-            "quantity": quantity,
-            "price": price,
-            "cost": cost,
-        })
-        self._persist_trade(signal, "BUY", quantity, price, cost, None)
-        logger.info("BUY %s qty=%d price=%.2f cost=%.2f cash=%.2f",
-                     signal.code, quantity, price, cost, self._cash)
+    def _execute_trade(self, side: str, signal: Signal) -> None:
+        """交易执行——合并 _execute_buy / _execute_sell，按 _SIDE_SPECS 分派差异。
 
-    def _execute_sell(self, signal: Signal) -> None:
+        共享骨架：取持仓 → 按 side 计算 qty/amount/pnl 与 position 更新 → 更新 cash →
+        append trade → persist → log。BUY 加仓（均价）/扣资金；SELL 减仓/加资金+pnl。
+        """
+        spec = _SIDE_SPECS[side]
         pos = self._positions.get(signal.code)
-        if not pos:
+        if side == "SELL" and not pos:
             return
-        quantity = pos["quantity"] if signal.quantity <= 0 else min(signal.quantity, pos["quantity"])
-        price = signal.price
-        proceeds = quantity * price
-        pnl = (price - pos["cost_price"]) * quantity
-        remaining = pos["quantity"] - quantity
-        if remaining <= 0:
-            del self._positions[signal.code]
+        if side == "BUY":
+            quantity = signal.quantity if signal.quantity > 0 else 100
+            amount = quantity * signal.price
+            if amount > self._cash:
+                logger.warning("insufficient cash for BUY %s: cost=%.2f cash=%.2f",
+                               signal.code, amount, self._cash)
+                return
+            if pos:
+                total_qty = pos["quantity"] + quantity
+                pos["cost_price"] = round((pos["quantity"] * pos["cost_price"] + amount) / total_qty, 4)
+                pos["quantity"] = total_qty
+            else:
+                self._positions[signal.code] = {"quantity": quantity, "cost_price": round(signal.price, 4)}
+            pnl = None
         else:
-            pos["quantity"] = remaining
-        self._cash += proceeds
-        self._trades.append({
-            "action": "SELL",
-            "code": signal.code,
-            "quantity": quantity,
-            "price": price,
-            "proceeds": proceeds,
-            "pnl": round(pnl, 4),
-        })
-        self._persist_trade(signal, "SELL", quantity, price, proceeds, pnl)
-        logger.info("SELL %s qty=%d price=%.2f proceeds=%.2f pnl=%.4f cash=%.2f",
-                     signal.code, quantity, price, proceeds, pnl, self._cash)
+            quantity = pos["quantity"] if signal.quantity <= 0 else min(signal.quantity, pos["quantity"])
+            amount = quantity * signal.price
+            pnl = (signal.price - pos["cost_price"]) * quantity
+            remaining = pos["quantity"] - quantity
+            if remaining <= 0:
+                del self._positions[signal.code]
+            else:
+                pos["quantity"] = remaining
+        self._cash += spec["sign"] * amount
+        trade = {"action": spec["action"], "code": signal.code, "quantity": quantity,
+                 "price": signal.price, spec["amount_key"]: amount}
+        if side == "SELL":
+            trade["pnl"] = round(pnl, 4)
+        self._trades.append(trade)
+        self._persist_trade(signal, spec["action"], quantity, signal.price, amount, pnl)
+        spec["log"](signal.code, quantity, signal.price, amount, pnl, self._cash)
 
     def _persist_trade(self, signal: Signal, action: str, quantity: int,
                        price: float, amount: float, pnl: Optional[float]) -> None:
@@ -457,6 +452,17 @@ class _TradeRecord:
     profit: float = 0.0  # 仅sell时有值
 
 
+# _PAPER_SIDE_SPECS: buy/sell 共享 _paper_trade 骨架的差异项（sign / direction / log）。
+# sign=+1 买入（slippage 加价 / 成本含手续费 / cash 减），sign=-1 卖出（slippage 减价 /
+# 收入扣手续费 / cash 加）；cash_sign = -sign。多步差异（qty/precheck/position/profit）按 side 内联。
+_PAPER_SIDE_SPECS: Dict[str, Dict[str, Any]] = {
+    "buy": {"sign": 1, "direction": "buy",
+            "log": lambda c, q, ap, comm, prof: logger.info("模拟买入 %s ×%d @%.2f 手续费%.2f", c, q, ap, comm)},
+    "sell": {"sign": -1, "direction": "sell",
+             "log": lambda c, q, ap, comm, prof: logger.info("模拟卖出 %s ×%d @%.2f 盈亏%.2f", c, q, ap, prof)},
+}
+
+
 class _PaperTradeEngine:
     """模拟成交引擎（内部组件，对外请使用 ``TradeModule``）。
 
@@ -488,81 +494,67 @@ class _PaperTradeEngine:
             default_quantity=methods.get("default_quantity", 100),
         )
 
-    def buy(self, code: str, price: float, quantity: Optional[int] = None,
-            timestamp: Optional[float] = None) -> Optional[_TradeRecord]:
-        """模拟买入"""
+    def _paper_trade(self, side: str, code: str, price: float,
+                     quantity: Optional[int] = None,
+                     timestamp: Optional[float] = None) -> Optional[_TradeRecord]:
+        """模拟交易——合并 buy/sell，按 _PAPER_SIDE_SPECS 分派差异。
+
+        共享骨架：frozen 检查 → 查表得 sign/direction → slippage 按 sign 偏移 →
+        commission → 资金/持仓校验 → 更新 cash + positions → 记录 + log。
+        BUY 加仓/扣资金；SELL 减仓/加资金+profit。
+        """
+        spec = _PAPER_SIDE_SPECS[side]
+        sign = spec["sign"]
         if self._frozen:
-            logger.debug("PaperTrade冻结中，跳过买入 %s", code)
+            logger.debug("PaperTrade冻结中，跳过%s %s", side, code)
             return None
-
-        quantity = quantity or self.default_quantity
+        pos = self.positions.get(code)
+        if sign < 0 and not pos:
+            logger.warning("无持仓，无法卖出 %s", code)
+            return None
+        quantity = quantity or (self.default_quantity if sign > 0 else pos.quantity)
         slippage = price * self.slippage_pct
-        actual_price = price + slippage
+        actual_price = price + sign * slippage
         commission = actual_price * quantity * self.commission_rate
-        total_cost = actual_price * quantity + commission
-
-        if total_cost > self.cash:
-            logger.warning("资金不足，无法买入 %s: 需%.2f 可用%.2f",
-                           code, total_cost, self.cash)
-            return None
-
-        self.cash -= total_cost
-        ts = timestamp or time.time()
-        pos = _Position(
-            code=code,
-            entry_price=actual_price,
-            entry_time=ts,
-            quantity=quantity,
-            current_price=price,
-        )
-        self.positions[code] = pos
-
+        profit = 0.0
+        if sign > 0:
+            total_cost = actual_price * quantity + commission
+            if total_cost > self.cash:
+                logger.warning("资金不足，无法买入 %s: 需%.2f 可用%.2f",
+                               code, total_cost, self.cash)
+                return None
+            self.cash -= total_cost
+            ts = timestamp or time.time()
+            self.positions[code] = _Position(
+                code=code, entry_price=actual_price, entry_time=ts,
+                quantity=quantity, current_price=price,
+            )
+        else:
+            profit = (actual_price - pos.entry_price) * quantity - commission
+            self.cash += actual_price * quantity - commission
+            ts = timestamp or time.time()
+            if quantity >= pos.quantity:
+                del self.positions[code]
+            else:
+                pos.quantity -= quantity
         record = _TradeRecord(
-            code=code, direction="buy", price=actual_price,
+            code=code, direction=spec["direction"], price=actual_price,
             quantity=quantity, timestamp=ts,
-            commission=commission, slippage=slippage,
+            commission=commission, slippage=slippage, profit=profit,
         )
         self.trade_history.append(record)
-        logger.info("模拟买入 %s ×%d @%.2f 手续费%.2f", code, quantity, actual_price, commission)
+        spec["log"](code, quantity, actual_price, commission, profit)
         return record
+
+    def buy(self, code: str, price: float, quantity: Optional[int] = None,
+            timestamp: Optional[float] = None) -> Optional[_TradeRecord]:
+        """模拟买入（thin wrapper 委托 _paper_trade）。"""
+        return self._paper_trade("buy", code, price, quantity, timestamp)
 
     def sell(self, code: str, price: float, quantity: Optional[int] = None,
              timestamp: Optional[float] = None) -> Optional[_TradeRecord]:
-        """模拟卖出"""
-        if self._frozen:
-            logger.debug("PaperTrade冻结中，跳过卖出 %s", code)
-            return None
-
-        pos = self.positions.get(code)
-        if not pos:
-            logger.warning("无持仓，无法卖出 %s", code)
-            return None
-
-        quantity = quantity or pos.quantity
-        slippage = price * self.slippage_pct
-        actual_price = price - slippage
-        commission = actual_price * quantity * self.commission_rate
-        total_income = actual_price * quantity - commission
-
-        profit = (actual_price - pos.entry_price) * quantity - commission
-        self.cash += total_income
-        ts = timestamp or time.time()
-
-        # 清仓
-        if quantity >= pos.quantity:
-            del self.positions[code]
-        else:
-            pos.quantity -= quantity
-
-        record = _TradeRecord(
-            code=code, direction="sell", price=actual_price,
-            quantity=quantity, timestamp=ts,
-            commission=commission, slippage=slippage,
-            profit=profit,
-        )
-        self.trade_history.append(record)
-        logger.info("模拟卖出 %s ×%d @%.2f 盈亏%.2f", code, quantity, actual_price, profit)
-        return record
+        """模拟卖出（thin wrapper 委托 _paper_trade）。"""
+        return self._paper_trade("sell", code, price, quantity, timestamp)
 
     def update_prices(self, price_map: Dict[str, float]):
         """更新持仓的当前价格"""
@@ -618,6 +610,18 @@ _PaperTrade = _PaperTradeEngine
 class _HistoryManager:
     """历史记录管理器（兼容别名，原 history_manager.py 中的函数仍以模块级函数形式提供）。"""
     pass
+
+
+# _PSATT_SIDE_EFFECTS: 5 个 psatt 副作用共享 _apply_psatt_side_effects 骨架的差异项
+# (flag_attr, event_factory)。flag_attr 为 ActionSpec 开关属性；event_factory 接收
+# (action_spec, codes) 返回待 publish 事件列表。bsavehis 按 code 逐条发，其余单条。
+_PSATT_SIDE_EFFECTS: List[Tuple[str, Callable[[ActionSpec, List[str]], List[Any]]]] = [
+    ("bsavehis", lambda a, codes: [EventLogged(event={"action": "save_history", "code": c}, event_kind="psatt_bsavehis") for c in codes]),
+    ("bsound", lambda a, codes: [EventLogged(event={"action": "play_sound", "soundfile": a.soundfile, "nsoundtype": a.nsoundtype}, event_kind="psatt_bsound")]),
+    ("btip", lambda a, codes: [AlertRaised(alert={"rule_id": "psatt_btip", "code": ",".join(codes), "severity": "info", "message": "TDX tip"})]),
+    ("bsavetoblock", lambda a, codes: [EventLogged(event={"action": "save_to_block", "blockfile": a.blockfile, "bclearblock": int(bool(a.bclearblock)), "codes": list(codes)}, event_kind="psatt_bsavetoblock")]),
+    ("baimpool", lambda a, codes: [EventLogged(event={"action": "aim_pool", "codes": list(codes)}, event_kind="psatt_baimpool")]),
+]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1132,7 +1136,7 @@ class TradeModule:
     def _apply_psatt_side_effects(
         self, action_spec: ActionSpec, codes: List[str]
     ) -> None:
-        """应用 TDX psatt 副作用（bsavehis/bsound/btip/bsavetoblock/baimpool）。
+        """应用 TDX psatt 副作用——迭代 _PSATT_SIDE_EFFECTS 表逐项查 flag 分派。
 
         通过 EventLogged / AlertRaised 事件通知下游模块（Database/Monitoring）处理，
         本模块不直接执行文件 IO 或播放声音，保持事件驱动纯度。
@@ -1140,50 +1144,10 @@ class TradeModule:
         if not action_spec:
             return
         codes = codes or []
-        if action_spec.bsavehis:
-            # 持久化历史记录（通过 EventLogged 事件由 Database 模块订阅）
-            for code in codes:
-                self._bus.publish(EventLogged(
-                    event={"action": "save_history", "code": code},
-                    event_kind="psatt_bsavehis",
-                ))
-        if action_spec.bsound:
-            # 播放声音（通过事件通知，前端处理）
-            self._bus.publish(EventLogged(
-                event={
-                    "action": "play_sound",
-                    "soundfile": action_spec.soundfile,
-                    "nsoundtype": action_spec.nsoundtype,
-                },
-                event_kind="psatt_bsound",
-            ))
-        if action_spec.btip:
-            # 弹窗通知
-            self._bus.publish(AlertRaised(
-                alert={
-                    "rule_id": "psatt_btip",
-                    "code": ",".join(codes),
-                    "severity": "info",
-                    "message": "TDX tip",
-                },
-            ))
-        if action_spec.bsavetoblock:
-            # 保存到板块
-            self._bus.publish(EventLogged(
-                event={
-                    "action": "save_to_block",
-                    "blockfile": action_spec.blockfile,
-                    "bclearblock": int(bool(action_spec.bclearblock)),
-                    "codes": list(codes),
-                },
-                event_kind="psatt_bsavetoblock",
-            ))
-        if action_spec.baimpool:
-            # 目标池标记（aim pool）
-            self._bus.publish(EventLogged(
-                event={"action": "aim_pool", "codes": list(codes)},
-                event_kind="psatt_baimpool",
-            ))
+        for flag_attr, factory in _PSATT_SIDE_EFFECTS:
+            if getattr(action_spec, flag_attr, False):
+                for ev in factory(action_spec, codes):
+                    self._bus.publish(ev)
 
 
 # === Task 13/14: Three-layer orthogonal architecture (Event / Signal / Action) ===

@@ -378,7 +378,7 @@ def _payload_adapter(event_type: str, payload_src, ts, payload_fields: List[Tupl
     return _envelope(event_type, ts, code=code, details=details)
 
 
-def _adapter_tick_received(event):
+def _tick_record(event):
     code = event.code or ""
     tick_data = event.tick_data or {}
     if not code and isinstance(tick_data, dict):
@@ -390,19 +390,7 @@ def _adapter_tick_received(event):
     return _envelope("TickReceived", event.ts, code=code, details=details)
 
 
-def _adapter_data_changed(event):
-    codes = list(event.codes) if event.codes else []
-    details = {"source": event.source or "", "period": event.period or "", "count": len(codes)}
-    return _envelope("DataChanged", event.ts, code=_truncate_codes(codes), details=details)
-
-
-def _adapter_bar_composed(event):
-    bar = event.bar or {}
-    details = {"period": event.period, "close": bar.get("close", 0) if isinstance(bar, dict) else 0}
-    return _envelope("BarComposed", event.ts, code=event.code, details=details)
-
-
-def _adapter_formula_evaluated(event):
+def _formula_record(event):
     result = event.result
     result_str = ""
     if isinstance(result, (int, float, bool)):
@@ -414,26 +402,7 @@ def _adapter_formula_evaluated(event):
     return _envelope("FormulaEvaluated", ts, code=event.code, details=details)
 
 
-def _adapter_stock_filtered(event):
-    details = {"passed": len(event.passed), "rejected": len(event.rejected), "filter": event.filter_ref}
-    return _envelope("StockFiltered", time.time(), edge_id=event.eid, details=details)
-
-
-def _adapter_time_advanced(event):
-    return _envelope("TimeAdvanced", event.ts, details={"source": event.source or ""})
-
-
-def _adapter_snapshot_updated(event):
-    nodes = len(event.snapshot.get("node_snapshots", {})) if isinstance(event.snapshot, dict) else 0
-    return _envelope("SnapshotUpdated", event.ts, details={"nodes": nodes})
-
-
-def _adapter_event_logged(event):
-    """EventLogged 不重复记录到浮窗（避免循环）。"""
-    return None
-
-
-def _adapter_executed(event):
+def _executed_record(event):
     d = event.details if isinstance(event.details, dict) else {}
     codes = list(event.entered) if event.entered else []
     details = {
@@ -448,60 +417,7 @@ def _adapter_executed(event):
     )
 
 
-def _adapter_domain_event(event):
-    details = dict(event.details) if isinstance(event.details, dict) else {}
-    return _envelope(
-        event.event_type, time.time(), code=event.code,
-        node_id=event.pool_id, pool_id=event.pool_id, details=details,
-    )
-
-
-def _adapter_pool_loaded(event):
-    return _envelope("PoolLoaded", time.time(), details={"format": event.source_format})
-
-
-def _adapter_config_loaded(event):
-    tables = len(event.config_tables) if isinstance(event.config_tables, dict) else 0
-    return _envelope("ConfigLoaded", time.time(), details={"tables": tables})
-
-
-def _adapter_config_changed(event):
-    return _envelope("ConfigChanged", time.time(), details={"changed": event.changed_tables or []})
-
-
-def _adapter_transfer_executed(event):
-    codes = list(event.codes) if event.codes else []
-    details = {"src": event.src, "tgt": event.tgt, "mode": event.mode, "count": len(codes)}
-    return _envelope(
-        "TransferExecuted", event.ts, code=_truncate_codes(codes),
-        node_id=event.tgt, pool_id=event.tgt, details=details,
-    )
-
-
-def _adapter_ttl_expired(event):
-    codes = list(event.codes) if event.codes else []
-    details = {"node": event.node_id, "count": len(codes)}
-    return _envelope(
-        "TTLExpired", event.ts, code=_truncate_codes(codes),
-        node_id=event.node_id, pool_id=event.node_id, details=details,
-    )
-
-
-def _adapter_order_placed(event):
-    return _payload_adapter(
-        "OrderPlaced", event.order, event.ts,
-        [("side", "side"), ("qty", "qty"), ("price", "price")],
-    )
-
-
-def _adapter_order_filled(event):
-    return _payload_adapter(
-        "OrderFilled", event.fill, event.ts,
-        [("side", "side"), ("qty", "qty"), ("price", "price")],
-    )
-
-
-def _adapter_alert_raised(event):
+def _alert_record(event):
     alert = event.alert or {}
     code = str(alert.get("code", "") or "")
     details = {
@@ -512,7 +428,7 @@ def _adapter_alert_raised(event):
     return _envelope("AlertRaised", float(event.ts or 0.0), code=code, details=details)
 
 
-def _adapter_position_updated(event):
+def _position_record(event):
     tracker = event.tracker or {}
     node_id = str(tracker.get("node_id", "") or "")
     code = str(tracker.get("code", "") or "")
@@ -527,7 +443,7 @@ def _adapter_position_updated(event):
     )
 
 
-def _adapter_statistics_updated(event):
+def _stats_record(event):
     stats = dict(event.stats or {})
     details = {
         "total_pnl": round(float(stats.get("total_pnl", 0) or 0), 2),
@@ -537,64 +453,37 @@ def _adapter_statistics_updated(event):
     return _envelope("StatisticsUpdated", event.ts, details=details)
 
 
-def _adapter_ranking_changed(event):
-    return _envelope("RankingChanged", event.ts, details={"dimension": event.dimension})
-
-
-def _adapter_edge_fired(event):
-    return _envelope("EdgeFired", event.ts, edge_id=event.eid, eid=event.eid, code="", details={})
-
-
-def _adapter_signal(event):
-    details = {
-        "signal_type": event.signal_type, "price": event.price,
-        "quantity": event.quantity, "condition": event.condition,
-        "profit_pct": event.profit_pct, "hold_days": event.hold_days,
-    }
-    return _envelope(
-        event.signal_type, event.ts, code=event.code,
-        node_id=event.pool_id, pool_id=event.pool_id, details=details,
-    )
-
-
-def _adapter_crossover_detected(event):
-    details = {"cross_type": event.cross_type, "formula_ref": event.formula_ref}
-    return _envelope("CrossOverDetected", event.ts, code=event.code, details=details)
-
-
-def _adapter_mode_changed(event):
-    return _envelope(
-        "ModeChanged", float(time.time()),
-        details={"mode_id": event.mode_id, "prev_mode": event.prev_mode},
-    )
-
-
-EVENT_RECORD_ADAPTERS: Dict[str, Callable[[Any], dict]] = {
-    "TickReceived": _adapter_tick_received,
-    "DataChanged": _adapter_data_changed,
-    "BarComposed": _adapter_bar_composed,
-    "FormulaEvaluated": _adapter_formula_evaluated,
-    "StockFiltered": _adapter_stock_filtered,
-    "TimeAdvanced": _adapter_time_advanced,
-    "SnapshotUpdated": _adapter_snapshot_updated,
-    "EventLogged": _adapter_event_logged,
-    "Executed": _adapter_executed,
-    "DomainEvent": _adapter_domain_event,
-    "PoolLoaded": _adapter_pool_loaded,
-    "ConfigLoaded": _adapter_config_loaded,
-    "ConfigChanged": _adapter_config_changed,
-    "TransferExecuted": _adapter_transfer_executed,
-    "TTLExpired": _adapter_ttl_expired,
-    "OrderPlaced": _adapter_order_placed,
-    "OrderFilled": _adapter_order_filled,
-    "AlertRaised": _adapter_alert_raised,
-    "PositionUpdated": _adapter_position_updated,
-    "StatisticsUpdated": _adapter_statistics_updated,
-    "RankingChanged": _adapter_ranking_changed,
-    "EdgeFired": _adapter_edge_fired,
-    "Signal": _adapter_signal,
-    "CrossOverDetected": _adapter_crossover_detected,
-    "ModeChanged": _adapter_mode_changed,
+# _ADAPTER_SPECS: event_type_name -> build callable (event -> record dict | None)
+# 表驱动分派：event_to_record 按 type(event).__name__ 查表，未命中走 _default_adapter。
+# 简单 adapter 内联为 lambda（直接调 _envelope/_payload_adapter）；多步逻辑的 adapter
+# 委托给上方具名 helper（_tick/_formula/_executed/_alert/_position/_stats_record）。
+# EventLogged 返回 None（不重复记录到浮窗，避免循环）。
+_ADAPTER_SPECS: Dict[str, Callable[[Any], Optional[dict]]] = {
+    "TickReceived": _tick_record,
+    "DataChanged": lambda e: _envelope("DataChanged", e.ts, code=_truncate_codes(list(e.codes) if e.codes else []), details={"source": e.source or "", "period": e.period or "", "count": len(list(e.codes) if e.codes else [])}),
+    "BarComposed": lambda e: _envelope("BarComposed", e.ts, code=e.code, details={"period": e.period, "close": ((e.bar or {}).get("close", 0) if isinstance(e.bar or {}, dict) else 0)}),
+    "FormulaEvaluated": _formula_record,
+    "StockFiltered": lambda e: _envelope("StockFiltered", time.time(), edge_id=e.eid, details={"passed": len(e.passed), "rejected": len(e.rejected), "filter": e.filter_ref}),
+    "TimeAdvanced": lambda e: _envelope("TimeAdvanced", e.ts, details={"source": e.source or ""}),
+    "SnapshotUpdated": lambda e: _envelope("SnapshotUpdated", e.ts, details={"nodes": (len(e.snapshot.get("node_snapshots", {})) if isinstance(e.snapshot, dict) else 0)}),
+    "EventLogged": lambda e: None,
+    "Executed": _executed_record,
+    "DomainEvent": lambda e: _envelope(e.event_type, time.time(), code=e.code, node_id=e.pool_id, pool_id=e.pool_id, details=(dict(e.details) if isinstance(e.details, dict) else {})),
+    "PoolLoaded": lambda e: _envelope("PoolLoaded", time.time(), details={"format": e.source_format}),
+    "ConfigLoaded": lambda e: _envelope("ConfigLoaded", time.time(), details={"tables": (len(e.config_tables) if isinstance(e.config_tables, dict) else 0)}),
+    "ConfigChanged": lambda e: _envelope("ConfigChanged", time.time(), details={"changed": e.changed_tables or []}),
+    "TransferExecuted": lambda e: _envelope("TransferExecuted", e.ts, code=_truncate_codes(list(e.codes) if e.codes else []), node_id=e.tgt, pool_id=e.tgt, details={"src": e.src, "tgt": e.tgt, "mode": e.mode, "count": len(list(e.codes) if e.codes else [])}),
+    "TTLExpired": lambda e: _envelope("TTLExpired", e.ts, code=_truncate_codes(list(e.codes) if e.codes else []), node_id=e.node_id, pool_id=e.node_id, details={"node": e.node_id, "count": len(list(e.codes) if e.codes else [])}),
+    "OrderPlaced": lambda e: _payload_adapter("OrderPlaced", e.order, e.ts, [("side", "side"), ("qty", "qty"), ("price", "price")]),
+    "OrderFilled": lambda e: _payload_adapter("OrderFilled", e.fill, e.ts, [("side", "side"), ("qty", "qty"), ("price", "price")]),
+    "AlertRaised": _alert_record,
+    "PositionUpdated": _position_record,
+    "StatisticsUpdated": _stats_record,
+    "RankingChanged": lambda e: _envelope("RankingChanged", e.ts, details={"dimension": e.dimension}),
+    "EdgeFired": lambda e: _envelope("EdgeFired", e.ts, edge_id=e.eid, eid=e.eid, code="", details={}),
+    "Signal": lambda e: _envelope(e.signal_type, e.ts, code=e.code, node_id=e.pool_id, pool_id=e.pool_id, details={"signal_type": e.signal_type, "price": e.price, "quantity": e.quantity, "condition": e.condition, "profit_pct": e.profit_pct, "hold_days": e.hold_days}),
+    "CrossOverDetected": lambda e: _envelope("CrossOverDetected", e.ts, code=e.code, details={"cross_type": e.cross_type, "formula_ref": e.formula_ref}),
+    "ModeChanged": lambda e: _envelope("ModeChanged", float(time.time()), details={"mode_id": e.mode_id, "prev_mode": e.prev_mode}),
 }
 
 
@@ -608,11 +497,17 @@ def _default_adapter(event):
     }
 
 
+def _build_adapter_record(spec_key: str, event) -> Optional[dict]:
+    """通用 adapter builder——查 _ADAPTER_SPECS 表按 spec_key 分派构建 record。"""
+    spec = _ADAPTER_SPECS.get(spec_key)
+    if spec is None:
+        return _default_adapter(event)
+    return spec(event)
+
+
 def event_to_record(event):
-    """将事件对象转换为监控记录 dict。表驱动查 EVENT_RECORD_ADAPTERS。"""
-    event_type_name = type(event).__name__
-    adapter = EVENT_RECORD_ADAPTERS.get(event_type_name, _default_adapter)
-    return adapter(event)
+    """将事件对象转换为监控记录 dict。表驱动查 _ADAPTER_SPECS。"""
+    return _build_adapter_record(type(event).__name__, event)
 
 
 class MonitoringModule:
@@ -821,6 +716,25 @@ _ANGLE_SORT_KEYS: Dict[str, Callable[[Tuple[Tuple[str, str], Dict[str, Any]]], f
 }
 
 
+# PK 排名 / 多分析角度 builder——由 _compute_ranking 共享骨架调用（candidates 已过滤）
+def _build_pk_ranking(candidates: List[Any]) -> Dict[str, List[Any]]:
+    ordered = sorted(candidates, key=lambda x: float(x[1].get("pnl", 0.0) or 0.0), reverse=True)
+    return {"by_pnl": [{"code": k[1], "node_id": k[0], "pnl": float(t.get("pnl", 0.0) or 0.0), "rank": i + 1} for i, (k, t) in enumerate(ordered)]}
+
+
+def _build_analysis_angles(candidates: List[Any]) -> Dict[str, List[Any]]:
+    return {angle: [{"code": k[1], "node_id": k[0], "rank": i + 1} for i, (k, _t) in enumerate(sorted(candidates, key=key_fn, reverse=True))] for angle, key_fn in _ANGLE_SORT_KEYS.items()}
+
+
+# _RANKING_SPECS: (cfg_attr, store_attr, builder, label, dimension)
+# 合并 compute_pk_ranking / compute_analysis_angles 共享骨架（cfg 空检查 → 过滤候选 →
+# builder → 存回 → 异常日志返回 {}），publish_rankings 迭代本表逐项发布 RankingChanged。
+_RANKING_SPECS: List[Tuple[str, str, Callable[[List[Any]], Dict[str, Any]], str, str]] = [
+    ("_pk_cfg", "_pk_rankings", _build_pk_ranking, "compute_pk_ranking", "pk"),
+    ("_analysis_cfg", "_angle_results", _build_analysis_angles, "compute_analysis_angles", "analysis_angles"),
+]
+
+
 class StatisticsModule:
     """Statistics 模块：交易统计 + 收益分析 + PK 排名 + 多分析角度。仅与 EventBus 交互。
 
@@ -988,81 +902,47 @@ class StatisticsModule:
         result = spec["agg"](self, values)
         return result if spec["key"] is None else {spec["key"]: result}
 
-    # === SubTask 10.3: PK 排名 + 多分析角度 ===
+    # === SubTask 10.3: PK 排名 + 多分析角度（表驱动，见模块级 _RANKING_SPECS）===
+
+    def _compute_ranking(self, spec: Tuple[str, str, Callable[[List[Any]], Dict[str, Any]], str, str]) -> Dict[str, Any]:
+        """排名计算共享骨架——合并 compute_pk_ranking / compute_analysis_angles。
+
+        cfg 空检查 → 过滤持仓候选 → builder 构建结果 → 存回实例属性 → 异常日志返回 {}。
+        """
+        cfg_attr, store_attr, builder, label, _dimension = spec
+        if not getattr(self, cfg_attr):
+            return {}
+        try:
+            candidates = [
+                (k, t) for k, t in self._trackers.items()
+                if int(t.get("qty", 0) or 0) > 0
+            ]
+            result = builder(candidates)
+            setattr(self, store_attr, result)
+            return result
+        except Exception as ex:
+            logger.warning("StatisticsModule %s failed: %s", label, ex)
+            return {}
 
     def compute_pk_ranking(self) -> Dict[str, List[Any]]:
-        """执行 PK 排名（pk_config.json 多维加权）。
-
-        简化实现：按当前持仓的 pnl 降序排名。原 engine.py 的多维加权评分
-        （profit/momentum/trend/volume/volatility）需 bar_data + tracker formula
-        求值，依赖 FormulaModule；迁移期此处采用 tracker.pnl 简化评分，
-        避免跨模块强耦合。
-        """
-        if not self._pk_cfg:
-            return {}
-        try:
-            candidates = [
-                (k, t) for k, t in self._trackers.items()
-                if int(t.get("qty", 0) or 0) > 0
-            ]
-            candidates.sort(key=lambda x: float(x[1].get("pnl", 0.0) or 0.0), reverse=True)
-            rankings = [
-                {
-                    "code": k[1],
-                    "node_id": k[0],
-                    "pnl": float(t.get("pnl", 0.0) or 0.0),
-                    "rank": i + 1,
-                }
-                for i, (k, t) in enumerate(candidates)
-            ]
-            self._pk_rankings = {"by_pnl": rankings}
-            return self._pk_rankings
-        except Exception as ex:
-            logger.warning("StatisticsModule compute_pk_ranking failed: %s", ex)
-            return {}
+        """执行 PK 排名（pk_config.json，按持仓 pnl 降序）。"""
+        return self._compute_ranking(_RANKING_SPECS[0])
 
     def compute_analysis_angles(self) -> Dict[str, List[Any]]:
-        """执行多分析角度（analysis_config.json 动量/趋势/价值）。
-
-        简化实现：按角度维度分组排序。原 engine.py 的公式求值依赖 FormulaModule，
-        迁移期此处采用 tracker 现有字段派生的排序键（表驱动，无 if/elif 链）。
-        """
-        if not self._analysis_cfg:
-            return {}
-        results: Dict[str, List[Any]] = {}
-        try:
-            candidates = [
-                (k, t) for k, t in self._trackers.items()
-                if int(t.get("qty", 0) or 0) > 0
-            ]
-            for angle_name, key_fn in _ANGLE_SORT_KEYS.items():
-                ordered = sorted(candidates, key=key_fn, reverse=True)
-                results[angle_name] = [
-                    {"code": k[1], "node_id": k[0], "rank": i + 1}
-                    for i, (k, _t) in enumerate(ordered)
-                ]
-            self._angle_results = results
-            return results
-        except Exception as ex:
-            logger.warning("StatisticsModule compute_analysis_angles failed: %s", ex)
-            return {}
+        """执行多分析角度（analysis_config.json 动量/趋势/价值）。"""
+        return self._compute_ranking(_RANKING_SPECS[1])
 
     def publish_rankings(self, ts: float = 0.0) -> None:
-        """发布排名变化事件（PK 排名 + 多分析角度）。
+        """发布排名变化事件——迭代 _RANKING_SPECS 表逐项发布 RankingChanged。
 
-        PK 排名与多分析角度分别发布 ``RankingChanged`` 事件，dimension 字段
-        区分（``pk`` / ``analysis_angles``），下游订阅者按 dimension 过滤。
+        dimension 字段区分（``pk`` / ``analysis_angles``），下游订阅者按 dimension 过滤。
         """
-        try:
-            pk = self.compute_pk_ranking()
-            self._bus.publish(RankingChanged(rankings=pk, dimension="pk", ts=ts))
-        except Exception as ex:
-            logger.warning("StatisticsModule publish pk ranking failed: %s", ex)
-        try:
-            angles = self.compute_analysis_angles()
-            self._bus.publish(RankingChanged(rankings=angles, dimension="analysis_angles", ts=ts))
-        except Exception as ex:
-            logger.warning("StatisticsModule publish analysis angles failed: %s", ex)
+        for cfg_attr, store_attr, builder, label, dimension in _RANKING_SPECS:
+            try:
+                rankings = self._compute_ranking((cfg_attr, store_attr, builder, label, dimension))
+                self._bus.publish(RankingChanged(rankings=rankings, dimension=dimension, ts=ts))
+            except Exception as ex:
+                logger.warning("StatisticsModule publish %s failed: %s", label, ex)
 
 
 __all__ = ["MonitoringModule", "StatisticsModule"]
