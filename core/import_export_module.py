@@ -8,6 +8,7 @@ import tempfile
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from .event_bus import (
+    _event_handler,
     EventBus,
     ExportCompleted,
     ImportStarted,
@@ -80,6 +81,14 @@ _CONVERTER_REGISTRY: Dict[Tuple[str, str], Tuple[str, Any, Callable]] = {
         lambda p, c, fn, name=None: fn(c, file_path=p)),
 }
 
+# G1: fmt → 转换器单例属性名（_to_frontend 钩子分派；None 表示该格式无转换器实例）。
+# 与 _CONVERTER_REGISTRY 解耦，保持 registry 条目为 (module_path, func_name, adapter) 三元组。
+_FORMAT_CONVERTER_ATTR: Dict[str, Optional[str]] = {
+    "dzh": "_DZH_CONVERTER",
+    "tdx": "_TDX_CONVERTER",
+    "json": None,
+}
+
 
 def _call_converter(
     path_or_data, fmt=None, direction="import", config=None, name=None
@@ -103,9 +112,14 @@ def _call_converter(
         converters = (tuple(getattr(mod, n) for n in func_name)
                       if isinstance(func_name, tuple) else getattr(mod, func_name))
         result = adapter(path_or_data, config, converters, name=name)
-        if auto and fmt == "tdx":
-            pool_name = (name.rsplit(".", 1)[0] if name and "." in name else (name or "tdx_pool"))
-            result = mod._tdx_pool_to_frontend(result, pool_name)
+        # G1: 统一 _to_frontend 钩子（默认透传；TdxPoolConverter 覆盖为前端 dict），
+        # 消除 TDX 专属格式分支。仅在自动检测导入时应用，保留显式 import 返回原始模型的契约。
+        conv_attr = _FORMAT_CONVERTER_ATTR.get(fmt)
+        if auto and conv_attr:
+            converter = getattr(mod, conv_attr, None)
+            if converter is not None:
+                pool_name = (name.rsplit(".", 1)[0] if name and "." in name else (name or "tdx_pool"))
+                result = converter._to_frontend(result, pool_name)
         return result
     except Exception as ex:
         logger.warning("%s %s失败 path=%s: %s", label, action, path_or_data, ex, exc_info=True)
@@ -138,6 +152,7 @@ class ImportExportModule:
     # ------------------------------------------------------------------
     # 内部事件 handler
     # ------------------------------------------------------------------
+    @_event_handler("_on_export_completed")
     def _on_export_completed(self, event: ExportCompleted) -> None:
         """订阅 ExportCompleted 用于内部状态同步。"""
         self._export_count += 1

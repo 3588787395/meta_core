@@ -5397,7 +5397,6 @@ def create_dzh_router() -> APIRouter:
         }
 
         if execute:
-            from converters import DZHPoolExecutor
             engine = request.app.state.engine
             try:
                 exec_result = engine.execute_pool(parsed)
@@ -5467,7 +5466,6 @@ def create_dzh_router() -> APIRouter:
         }
 
         if execute:
-            from converters import DZHPoolExecutor
             engine = request.app.state.engine
             try:
                 exec_result = engine.execute_pool(parsed)
@@ -6162,9 +6160,7 @@ def create_dzh_router() -> APIRouter:
         if not col_ids:
             col_ids = [2, -1, -2, -3, 7, 14, 8, 10, 17, 45]
         tq = request.app.state.tq
-        if mode == 'real':
-            tq = TqAdapter(mock_mode=False)
-        elif mode == 'sdk':
+        if mode in ('real', 'sdk'):
             tq = TqAdapter(mock_mode=False)
         result = tq.get_stock_table_data(code_list, col_ids)
         return {'success': True, 'data': result['data'], 'columns': result['columns']}
@@ -6211,9 +6207,7 @@ def create_dzh_router() -> APIRouter:
             col_ids = [2, -1, -2, -3, 7, 14, 8, 10, 17, 45]
         hold_sec = int(params.get('hold_sec', 0))
         tq = request.app.state.tq
-        if mode == 'real':
-            tq = TqAdapter(mock_mode=False)
-        elif mode == 'sdk':
+        if mode in ('real', 'sdk'):
             tq = TqAdapter(mock_mode=False)
         result = tq.get_stock_table_data(codes, col_ids, stk_info=stk_info, hold_sec=hold_sec)
         return {'success': True, 'data': result['data'], 'columns': result['columns'], 'node_label': target.get('label', ''), 'stock_count': len(codes)}
@@ -6360,17 +6354,31 @@ def create_dzh_router() -> APIRouter:
         config = body.get('config') or body
         if not config or 'nodes' not in config:
             return {"code": 1, "msg": "配置无效，缺少nodes", "data": None}
-        from converters import DZHPoolExecutor
-        executor = DZHPoolExecutor(config)
-        result = executor.execute_once()
+        engine = request.app.state.engine
+        result = engine.execute_pool(config)
+        # execute_pool 返回 {success, error, node_states, total_transferred, events}；
+        # 映射为旧 execute_once 的响应结构 {output_count, output_stocks, events, node_states}。
+        node_states = result.get('node_states', {}) or {}
+        _EXCLUDE_TYPES = {'market_source', 'discard_pool', 'text_label', 'flow_arrow', 'container', 'state_column', 'drawing_tool'}
+        output_stocks = []
+        seen = set()
+        for nid, info in node_states.items():
+            if isinstance(info, dict) and info.get('type') in _EXCLUDE_TYPES:
+                continue
+            stocks = info.get('stocks', []) if isinstance(info, dict) else []
+            for s in stocks:
+                code = s.get('code', '') if isinstance(s, dict) else str(s)
+                if code and code not in seen:
+                    seen.add(code)
+                    output_stocks.append(code)
         return {
             "code": 0,
             "msg": "ok",
             "data": {
-                "output_count": result['output_count'],
-                "output_stocks": result['output_stocks'],
-                "events": result['events'],
-                "node_states": result['node_states']
+                "output_count": len(output_stocks),
+                "output_stocks": output_stocks,
+                "events": result.get('events', []),
+                "node_states": node_states
             }
         }
 

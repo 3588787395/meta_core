@@ -35,9 +35,9 @@ except ImportError:
     from core.tick_bar_module import Min1Aggregator
 
 try:
-    from .services.data import DataQueryService
+    from .services.data import DataQueryService, _normalize_period
 except ImportError:
-    from services.data import DataQueryService
+    from services.data import DataQueryService, _normalize_period
 
 try:
     from .services.data import DataSyncService
@@ -245,18 +245,6 @@ def load_global_config() -> dict:
             return json.load(f)
     except Exception:
         return {}
-
-
-def _normalize_period(period: str) -> str:
-    """将前端传入的周期标识统一为后端使用的键。"""
-    mapping = {
-        "1min": "1m", "5min": "5m", "15min": "15m",
-        "30min": "30m", "60min": "60m",
-        "day": "1d", "d": "1d", "1d": "1d",
-        "1m": "1m", "5m": "5m", "15m": "15m",
-        "30m": "30m", "60m": "60m",
-    }
-    return mapping.get(str(period).lower(), period)
 
 
 def _generate_mock_kline_bars(stock_code: str, period: str, limit: int = 300) -> List[Dict[str, Any]]:

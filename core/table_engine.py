@@ -839,64 +839,6 @@ class DataBinder:
         """编码enter/exit动作"""
         return (action_type << 28) | (param & 0xFFFF)
 
-    @staticmethod
-    def decode_tdx_action_hex(action_int):
-        """解码 TDX 动作十六进制编码为结构化动作字典"""
-        if action_int is None or action_int == 0 or action_int == "":
-            return None
-        action_int = safe_int(action_int, 0)
-        if action_int == 0:
-            return None
-
-        high_type = (action_int >> 28) & 0xF
-        if high_type != 0:
-            param = action_int & 0xFFFF
-            type_map = {1: "buy_amount", 2: "buy_shares", 3: "sell_shares"}
-            if high_type in type_map:
-                return {"type": type_map[high_type], "param": param, "raw": action_int}
-            return {"type": "unknown", "action_type": high_type, "param": param, "raw": action_int}
-
-        byte_type = (action_int >> 16) & 0xFF
-        if byte_type != 0:
-            param1 = (action_int >> 8) & 0xFF
-            param2 = action_int & 0xFF
-            byte_type_map = {6: "buy", 7: "sell"}
-            if byte_type in byte_type_map:
-                return {
-                    "type": byte_type_map[byte_type],
-                    "type_id": byte_type,
-                    "param1": param1,
-                    "param2": param2,
-                    "raw": action_int,
-                }
-            return {
-                "type": "unknown",
-                "type_id": byte_type,
-                "param1": param1,
-                "param2": param2,
-                "raw": action_int,
-            }
-
-        return None
-
-    @staticmethod
-    def encode_tdx_action_hex(action_type, param=0, param2=0):
-        """编码 TDX 动作为十六进制整数"""
-        hi_type_map = {"none": 0, "buy_amount": 1, "buy_shares": 2, "sell_shares": 3}
-        tid = hi_type_map.get(action_type)
-        if tid is not None and tid != 0:
-            param = max(0, min(param, 0xFFFF))
-            return (tid << 28) | param
-
-        byte_type_map = {"buy": 6, "sell": 7}
-        btid = byte_type_map.get(action_type)
-        if btid is not None:
-            param1 = max(0, min(param, 0xFF))
-            param3 = max(0, min(param2, 0xFF))
-            return (btid << 16) | (param1 << 8) | param3
-
-        return 0
-
 
 # ─── 面板生成引擎 ───────────────────────────────────────────────
 

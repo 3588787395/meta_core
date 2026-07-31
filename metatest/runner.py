@@ -1,4 +1,4 @@
-"""metatest v6 量化测试运行器（21 维 + MetaDispatcher 统一 + 运行时验证 + 跨模块 import + adapter 转发同构）。
+"""metatest v10 量化测试运行器（21 维 + MetaDispatcher 统一 + 运行时验证 + 跨模块 import + adapter 转发同构 + handler 异常保护覆盖）。
 
 运行 ``metatest/`` 目录下所有 ``test_*.py``，采集真实测试结果与量化数据，
 调用 ``ScoringEngine`` 计算加权总分，输出量化评分报告。
@@ -12,7 +12,7 @@ v6 21 维评分（与 scoring.py v6 对齐）：v5 20 维权重等比降权 4%�
    5. performance_benchmark      4.0%   1000 tick 耗时基准（≤10s 满分）
    6. frontend_e2e_pass_rate     5.6%   前端 E2E 真实通过数 / 总数 * 100
    7. logic_coverage             4.0%   5 项底层逻辑验证通过数 / 5 * 100
-   8. isomorphism_elimination    7.2%   40 项同构代码 Grep 检查，0 违规满分
+   8. isomorphism_elimination    7.2%   41 项同构代码 Grep/AST 检查（v10 含 handler_exception_coverage），0 违规满分
    9. line_convergence           4.0%   核心模块总行数 ≤ 22500 满分
   10. rule_compliance            2.4%   RULES 91-100 Grep 零违规
   11. negative_test_coverage     1.6%   4 类反测试覆盖率
@@ -38,7 +38,7 @@ v6 严格规则：
 
 数据采集方式（禁止硬编码，所有评分由真实 Grep/AST/行数统计计算）：
   - 核心模块总行数：``wc -l core/*.py`` 等价的 Path 读取统计
-  - 同构检查：40 项 Grep / AST 验证（v3 15 + 阶段 1 DZH/TDX 25 + 阶段 3 core 25）
+  - 同构检查：41 项 Grep / AST 验证（v3 15 + 阶段 1 DZH/TDX 25 + 阶段 3 core 25 + v10 handler_exception_coverage 1）
   - 规则合规：RULES 91-100 共 10 项 Grep / AST 验证
   - 反测试用例数：4 类文件中 ``def test_`` 计数
   - 合测试通过数：_StatsPlugin 按文件名分类统计
@@ -134,8 +134,8 @@ CORE_LINES_TARGET: int = 22500
 #: v4 反测试每类目标用例数
 NEGATIVE_TEST_TARGET_PER_CATEGORY: int = 8
 
-#: v4 同构检查项总数（40 项：v3 15 + 阶段 1 DZH/TDX 25 + 阶段 3 core 25，取核心 40）
-ISOMORPHISM_CHECKS_TOTAL_V4: int = 40
+#: v4 同构检查项总数（v10：41 项 = v4 40 项 + v10 handler_exception_coverage 1 项）
+ISOMORPHISM_CHECKS_TOTAL_V4: int = 41
 
 #: 向后兼容别名（v3 命名）
 ISOMORPHISM_CHECKS_TOTAL_V3: int = ISOMORPHISM_CHECKS_TOTAL_V4
@@ -752,10 +752,16 @@ def _check_handler_try_except(file_path: Path) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _check_isomorphism() -> Tuple[int, int]:
-    """检测 40 项同构代码模式，返回违规项数。
+def _check_isomorphism(
+    handler_exception_coverage: Optional[Dict[str, Any]] = None,
+) -> Tuple[int, int]:
+    """检测 41 项同构代码模式，返回违规项数。
 
-    40 项检查（每项匹配数应为 0，非 0 则该计 1 项违规）。
+    41 项检查（每项匹配数应为 0，非 0 则该计 1 项违规）。
+
+    v10 新增第 41 项：handler_exception_coverage < 100% 计 1 违规
+    （所有 ``self._bus.subscribe(EventType, self._handler_name)`` 手动订阅的
+    handler 必须使用 ``@_event_handler`` 装饰，防止异常中断 EventBus.publish 同步扇出链）。
 
     v3 原 15 项（保留，第 2 项已修复：移除 ``_build_adjacency`` 禁用）：
       1. ``state.latest_tick[`` = 0（除 runtime_mode_module.py 中 TickTable 内部）
@@ -802,9 +808,11 @@ def _check_isomorphism() -> Tuple[int, int]:
      38. web/js/app.js ``setInterval.*_poll`` = 0（E6，前端 SSE 订阅）
      39. core/*.py（除 event_bus.py）``def _register_subscribers`` = 0（C11，_SUBSCRIPTIONS 表）
      40. core/*.py（除 event_bus.py）``self._bus.subscribe(EventType, self._on_`` = 0（C11）
+     41. v10：handler_exception_coverage < 100% 计 1 违规（手动 subscribe 的 handler
+         未全部使用 ``@_event_handler`` 装饰，存在异常中断事件链风险）
 
     Returns:
-        (violations, total_checks) — 违规项数 / 总检查项(40)
+        (violations, total_checks) — 违规项数 / 总检查项(41)
     """
     total_checks = ISOMORPHISM_CHECKS_TOTAL_V4
     violations = 0
@@ -1133,6 +1141,13 @@ def _check_isomorphism() -> Tuple[int, int]:
         exclude_files=["event_bus.py"],
     )
     if count40 > 0:
+        violations += 1
+
+    # 41. v10：handler_exception_coverage < 100% 计 1 违规
+    #     手动 subscribe 的 handler 必须使用 @_event_handler 装饰（异常保护全覆盖）
+    if handler_exception_coverage is None:
+        handler_exception_coverage = _collect_handler_exception_coverage()
+    if float(handler_exception_coverage.get("coverage", 0.0) or 0.0) < 100.0:
         violations += 1
 
     return violations, total_checks
@@ -2040,6 +2055,133 @@ def _collect_adapter_isomorphism() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# v10 新增：handler 异常保护覆盖采集（第十层洞察）
+# ---------------------------------------------------------------------------
+
+
+def _collect_handler_exception_coverage() -> Dict[str, Any]:
+    """v10: 采集 handler 异常保护覆盖数据（第十层洞察：异常处理覆盖完整性是运行时安全本质）。
+
+    AST 解析 ``core/*.py``，对所有 ``self._bus.subscribe(EventType, self._handler_name)``
+    形式的手动订阅调用，检查 ``_handler_name`` 方法的 ``decorator_list`` 是否含
+    ``_event_handler`` 装饰器。覆盖率 = 已装饰 handler 数 / 手动 subscribe handler
+    总数 × 100。
+
+    **排除项**：``_BaseModule._register_subscribers`` 中的表驱动订阅
+    （``self._bus.subscribe(event_type, getattr(self, handler_name))``，第二参数为
+    ``getattr`` Call 而非 ``self._handler_name`` Attribute）——这些 handler 通过
+    ``_SUBSCRIPTIONS`` 表注册，由各自模块的 ``@_event_handler`` 装饰保障，非手动
+    subscribe，不计入本覆盖率统计。
+
+    EventBus.publish 同步扇出（``_dispatch_impl`` 遍历订阅者逐个调用），若某 handler
+    抛未捕获异常，后续订阅者不执行——事件链断裂。``_event_handler`` 装饰器将异常
+    处理从 handler 体内部上提到装饰器层（AOP 横切），统一了"handler 不应中断事件链"
+    的运行时契约。本采集驱动该契约 100% 覆盖。
+
+    Returns:
+        dict 含 ``covered``/``total``/``coverage``/``uncovered_handlers`` 字段。
+        ``coverage`` = 已装饰数 / 总数 × 100（总数为 0 时返回 100.0）。
+        ``uncovered_handlers`` 为 ``"文件名:类名.handler名"`` 列表。
+    """
+    uncovered: List[str] = []
+    total = 0
+    covered = 0
+
+    if not _CORE_DIR.is_dir():
+        return {
+            "covered": 0, "total": 0, "coverage": 100.0,
+            "uncovered_handlers": [],
+        }
+
+    def _decorator_names(dec_list) -> set:
+        names: set = set()
+        for dec in dec_list:
+            if isinstance(dec, ast.Name):
+                names.add(dec.id)
+            elif isinstance(dec, ast.Attribute):
+                names.add(dec.attr)
+            elif isinstance(dec, ast.Call):
+                f = dec.func
+                if isinstance(f, ast.Name):
+                    names.add(f.id)
+                elif isinstance(f, ast.Attribute):
+                    names.add(f.attr)
+        return names
+
+    def _is_self_bus_subscribe(call: ast.Call) -> bool:
+        """判断 call 是否为 ``self._bus.subscribe(...)`` 调用。"""
+        func = call.func
+        if not isinstance(func, ast.Attribute) or func.attr != "subscribe":
+            return False
+        bus = func.value
+        if not (isinstance(bus, ast.Attribute) and bus.attr == "_bus"):
+            return False
+        return isinstance(bus.value, ast.Name) and bus.value.id == "self"
+
+    def _extract_handler_name(call: ast.Call) -> Optional[str]:
+        """从 subscribe 调用第二参数提取 ``self._handler_name`` 的 handler_name。
+
+        仅匹配 ``self._handler_name``（Attribute）形式；``getattr(self, handler_name)``
+        （Call）形式返回 None（表驱动订阅，不计入手动 subscribe 统计）。
+        """
+        if len(call.args) < 2:
+            return None
+        arg = call.args[1]
+        if (isinstance(arg, ast.Attribute) and isinstance(arg.value, ast.Name)
+                and arg.value.id == "self"):
+            return arg.attr
+        return None
+
+    for py_file in _CORE_DIR.glob("*.py"):
+        tree = _parse_ast(py_file)
+        if tree is None:
+            continue
+
+        # 第一遍：收集每个 ClassDef 的直接方法名→装饰器名集合映射
+        class_method_decorators: Dict[str, Dict[str, set]] = {}
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            method_decs: Dict[str, set] = {}
+            for sub in node.body:
+                if not isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                method_decs[sub.name] = _decorator_names(sub.decorator_list)
+            class_method_decorators[node.name] = method_decs
+
+        # 第二遍：递归遍历，跟踪当前类上下文，定位手动 subscribe 调用
+        def _visit(node, current_class: Optional[str]) -> None:
+            nonlocal total, covered
+            if isinstance(node, ast.ClassDef):
+                current_class = node.name
+            if isinstance(node, ast.Call) and _is_self_bus_subscribe(node):
+                handler_name = _extract_handler_name(node)
+                if handler_name is not None and current_class is not None:
+                    total += 1
+                    decs = class_method_decorators.get(
+                        current_class, {}
+                    ).get(handler_name, set())
+                    if "_event_handler" in decs:
+                        covered += 1
+                    else:
+                        uncovered.append(
+                            f"{py_file.name}:{current_class}.{handler_name}"
+                        )
+            for child in ast.iter_child_nodes(node):
+                _visit(child, current_class)
+
+        _visit(tree, None)
+
+    coverage = (covered / total * 100.0) if total > 0 else 100.0
+    return {
+        "covered": covered,
+        "total": total,
+        "coverage": round(coverage, 2),
+        "uncovered_handlers": uncovered,
+    }
+
+
+# ---------------------------------------------------------------------------
 # v3 补充维度评分（当 scoring.py 尚未升级到 v3 时使用）
 # ---------------------------------------------------------------------------
 
@@ -2252,7 +2394,7 @@ def _print_report(
         print(f"                → 得分 {lc.score:.1f}/100 — {lc.details}")
 
     print(f"同构代码消除度:  {iso_violations} 违规 / {iso_checks} 项检查 "
-          f"(权重 9%, 40 项检查)")
+          f"(权重 9%, 41 项检查)")
     if ie:
         print(f"                → 得分 {ie.score:.1f}/100 — {ie.details}")
 
@@ -2532,8 +2674,13 @@ def main() -> int:
     # v3: 底层逻辑覆盖度检测（5 项）
     logic_coverage_passed, logic_coverage_total = _check_logic_coverage()
 
-    # v4: 同构代码消除度检测（40 项 Grep / AST 验证）
-    isomorphism_violations, isomorphism_total_checks = _check_isomorphism()
+    # v10: handler 异常保护覆盖采集（第十层洞察，供 isomorphism 第 41 项检查 + test_results 字段）
+    handler_exception_coverage = _collect_handler_exception_coverage()
+
+    # v4: 同构代码消除度检测（v10：41 项 Grep / AST 验证，含 handler_exception_coverage 项）
+    isomorphism_violations, isomorphism_total_checks = _check_isomorphism(
+        handler_exception_coverage=handler_exception_coverage,
+    )
 
     # v3 新增数据采集
     # 核心模块总行数（wc -l core/*.py 等价）
@@ -2594,7 +2741,7 @@ def main() -> int:
         "logic_coverage_passed": logic_coverage_passed,
         "logic_coverage_total": logic_coverage_total,
         "isomorphism_violations": isomorphism_violations,
-        "isomorphism_total_checks": isomorphism_total_checks,  # v4: 40
+        "isomorphism_total_checks": isomorphism_total_checks,  # v10: 41
         # --- v3 新增字段 ---
         "core_total_lines": core_total_lines,
         "core_lines_target": CORE_LINES_TARGET,
@@ -2619,6 +2766,8 @@ def main() -> int:
         "cross_module_import_discipline": cross_module_import_discipline,
         # --- v6 新增 1 维字段 ---
         "adapter_isomorphism": adapter_isomorphism,
+        # --- v10 新增字段（handler 异常保护覆盖，isomorphism 第 41 项检查依据）---
+        "handler_exception_coverage": handler_exception_coverage,
     }
 
     # 计算评分

@@ -1,8 +1,8 @@
-# metatest v9 严格正反合量化测试套件
+# metatest v10 严格正反合量化测试套件
 
 ## 概述
 
-metatest v8 是股票池平台的严格正反合量化测试套件，覆盖前端与后端所有模块。
+metatest v10 是股票池平台的严格正反合量化测试套件，覆盖前端与后端所有模块。
 v6 在 v5 20 维基础上扩展为 **21 维**加权评分：v5 20 维等比降权 4%（每维 × 0.96），
 新增第 21 维 adapter_isomorphism 占 4%（TqProvider/TqSdkBridge 转发方法表驱动覆盖率），
 权重重新分配至总和 = 100%。v7 在 v6 21 维结构基础上，新增 per-code 循环表
@@ -30,6 +30,21 @@ v9 将 10 个钩子改为 `@abstractmethod` 装饰（construction-time 早失败
 同构收敛上限——10 个钩子方法体是「结构同构但数据/派发异构」，强行合并会引入表条目爆炸 + roundtrip 回归风险。
 v9 文档化此上限（「知止」纪律），防止后续过度抽象。
 
+**第十层洞察（handler 异常保护全覆盖，异常处理覆盖完整性是运行时安全本质）**：EventBus.publish
+同步扇出（`_dispatch_impl` 遍历订阅者逐个调用），若某 handler 抛未捕获异常，后续订阅者不执行——
+事件链断裂。`_event_handler` 装饰器（`event_bus.py`）将异常处理从 handler 体内部上提到装饰器层
+（AOP 横切），统一了"handler 不应中断事件链"的运行时契约。该装饰器已被 6 个模块 25+ handler 使用，
+但 4 个手动 `self._bus.subscribe()` 的 handler（`ImportExportModule._on_export_completed` /
+`KLineReplayEngine._on_replay_started` / `SignalDeriver._on_stock_changed` /
+`ActionDispatcher._on_signal`）此前未装饰，存在未捕获异常中断事件链的运行时风险。v10 补齐这 4 处
+装饰器，实现 handler 异常保护 100% 覆盖。**v10 不新增第 22 维**（避免权重重分配），而是在
+`isomorphism_elimination` 维度（v4 40 项同构检查）中新增第 41 项 `handler_exception_coverage`
+检查（AST 检查所有手动 subscribe 的 handler 是否使用 `@_event_handler` 装饰，覆盖率 < 100% 计 1 违规），
+权重保持 21 维不变，总和 = 100%。同时深度调研确认全局元模式收敛已达上限——converters（v8/v9）/
+订阅（`_BaseModule` + `_SUBSCRIPTIONS` 覆盖 7 主模块）/adapter（v6/v7 四表四通用器）/MetaDispatcher
+（v5）/轮询（v4）五维均已达标，v10 文档化此「全局知止」结论，禁止强行合并结构同构但数据/派发异构
+的代码。
+
 门槛：总分 ≥ 95 且 21 维均 ≥ 80 判定 PASS。
 
 ## 21 维评分规则与权重
@@ -47,7 +62,7 @@ v9 文档化此上限（「知止」纪律），防止后续过度抽象。
 | 5 | performance_benchmark | 3.84% | 1000 tick 耗时 ≤ 10s 满分，线性衰减 |
 | 6 | frontend_e2e_pass_rate | 5.376% | 前端 E2E 真实通过数 / 总数 × 100（环境缺失给最低达标线 80） |
 | 7 | logic_coverage | 3.84% | 5 项底层逻辑验证通过数 / 5 × 100 |
-| 8 | isomorphism_elimination | 6.912% | 40 项同构代码 Grep 检查，0 违规满分 |
+| 8 | isomorphism_elimination | 6.912% | 41 项同构代码 Grep/AST 检查（v10 含 handler_exception_coverage），0 违规满分 |
 | 9 | line_convergence | 3.84% | 核心模块总行数 ≤ 22500 满分，线性衰减 |
 | 10 | rule_compliance | 2.304% | RULES 91-100 Grep 违规数 / 10，0 违规满分 |
 | 11 | negative_test_coverage | 1.536% | 4 类反测试用例数 / 目标数（每类 ≥ 8）均值 × 100 |
@@ -234,13 +249,14 @@ python -m metatest.runner
 ```
 metatest/
 ├── conftest.py                              # 共享 pytest 夹具
-├── scoring.py                               # 21 维量化评分引擎（v9）
-├── runner.py                                # 测试运行器 + 21 维数据采集（v9，含 adapter_forward_coverage 等字段）
+├── scoring.py                               # 21 维量化评分引擎（v10）
+├── runner.py                                # 测试运行器 + 21 维数据采集（v10，含 handler_exception_coverage 等字段）
 ├── test_positive_dispatcher_isomorphism.py  # v5 MetaDispatcher 继承断言
 ├── test_positive_runtime_verification.py     # v5 3 个 in-process 测试全绿
 ├── test_negative_cross_module_import.py     # v5 8 处违规模式零匹配
 ├── test_positive_adapter_isomorphism.py     # v6 adapter 转发表驱动覆盖率断言
 ├── test_positive_oop_inheritance.py         # v9 主流程模板方法 + 10 钩子 @abstractmethod + 薄包装断言
+├── test_positive_handler_exception.py       # v10 handler 异常保护全覆盖 + _event_handler 异常隔离断言
 ├── test_runtime_replay_heapq.py             # v5 harness（replay）
 ├── test_runtime_simulation_heapq.py         # v5 harness（simulation）
 ├── test_runtime_mode_switch.py              # v5 harness（mode-switch）
@@ -248,7 +264,7 @@ metatest/
 └── report.json                              # 21 维 + meta_unification 结构化报告
 ```
 
-## v9 严格规则总结
+## v10 严格规则总结
 
 - 跳过测试计为失败（不在 passed 分子）
 - 前端 E2E 环境缺失计 `frontend_e2e_passed=0`，给最低达标线 80（非信用分）
@@ -263,3 +279,4 @@ metatest/
 - adapter 转发同构覆盖率 ≥ 90% 才达标（v7 提升至 90%，外部 SDK 适配器表驱动硬约束；4 表 / 4 通用转发器 / 34 方法）
 - Converter 主流程必须模板方法化（v8 新增）：`parse_pool` / `export_pool` 在 `BasePoolConverter` 编排骨架，子类仅覆盖 10 个差异钩子，模块级函数仅作薄包装委托，禁止重新引入模块级并行主流程函数
 - 模板方法差异钩子必须使用 @abstractmethod 装饰（v9 新增）：禁止 raise NotImplementedError 占位，实现 construction-time 早失败契约执行
+- 所有事件 handler 必须使用 @_event_handler 装饰（v10 新增）：禁止裸 handler，所有通过 `self._bus.subscribe()` 注册的 handler 必须经 `@_event_handler` 装饰（异常保护全覆盖），防止 handler 异常中断 EventBus.publish 同步扇出链；handler_exception_coverage < 100% 计为 isomorphism_elimination 第 41 项违规

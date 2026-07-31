@@ -274,6 +274,11 @@ class BasePoolConverter(ABC):
     @abstractmethod
     def _finalize_xml(self, root): ...
 
+    # ---- 7. 前端化钩子（G1：默认透传；子类可覆盖为格式特定的前端 dict 转换）----
+    def _to_frontend(self, result, name: str):
+        """将 parse 结果转为前端可用结构。默认透传，由子类按需覆盖。"""
+        return result
+
 
 class DzhPoolConverter(BasePoolConverter):
     """DZH 股票池转换器：GB18030 优先解码 + DZH pos(dict) + 编码声明清洗。"""
@@ -1038,6 +1043,264 @@ class TdxPoolConverter(BasePoolConverter):
         with open(filepath, 'wb') as fh:
             fh.write(b'<?xml version="1.0" encoding="GBK"?>\n')
             fh.write(ET.tostring(root, encoding='gbk', xml_declaration=False))
+
+    # G2: 覆盖 BasePoolConverter._to_frontend，将 TdxPoolMetaModel 转为前端 dict
+    def _to_frontend(self, result, name: str) -> dict:
+        mapping = _get_xml_mapping()
+        node_cfg, edge_cfg = mapping['frontend_node'], mapping['frontend_edge']
+        _type_map = get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}
+        tdx_type_map = {int(k): v for k, v in _type_map.get("tdx_to_frontend", {}).items()}
+        pos_cfg = node_cfg['position']
+        nodes = []
+        for cell in result.cells:
+            node = {}
+            for fd in node_cfg['fields']:
+                src = fd['source']
+                if src == 'id':
+                    val = str(cell.id)
+                elif src == 'type' and 'lookup' in fd:
+                    val = tdx_type_map.get(cell.type, fd.get('default', ''))
+                elif src == 'text':
+                    val = cell.text or fd.get('default', '')
+                else:
+                    val = getattr(cell, src, fd.get('default', ''))
+                if fd.get('transform') in _TRANSFORMS:
+                    val = _TRANSFORMS[fd['transform']](val, cell)
+                node[fd['target']] = val
+            node['position'] = {
+                k: max(getattr(cell, pos_cfg[k], 0), pos_cfg[f'min_{k}']) if k in ('width', 'height') else getattr(cell, pos_cfg[k], 0)
+                for k in ('x', 'y', 'width', 'height')
+            }
+            node['params'] = {}
+            for pd in node_cfg['params']:
+                v = getattr(cell, pd['source'], None)
+                node['params'][pd['target']] = _TRANSFORMS[pd['transform']](v, cell) if pd.get('transform') in _TRANSFORMS else v
+            for sd in node_cfg['sub_objects']:
+                sub = getattr(cell, sd['source_attr'], None)
+                if sub is not None:
+                    sd_data = [_model_to_dict(i) for i in sub] if isinstance(sub, list) else _model_to_dict(sub)
+                    for tk in sd['target_keys']:
+                        node['params'][tk] = sd_data
+                    if 'count_key' in sd and isinstance(sd_data, list):
+                        node['params'][sd['count_key']] = len(sd_data)
+            nodes.append(node)
+        edges = []
+        for flow in result.flows:
+            fid = str(getattr(flow, 'startid', getattr(flow, 'from', '0')))
+            tid = str(getattr(flow, 'endid', getattr(flow, 'to', '0')))
+            edge = {'id': f"{fid}_{tid}", 'source': {'node_id': fid}, 'target': {'node_id': tid}, 'params': {}}
+            fd = _model_to_dict(flow)
+            if fd:
+                edge['params'].update({k: v for k, v in fd.items() if k != 'id'})
+            for sp in edge_cfg['special_params']:
+                val = getattr(flow, sp['source'], None)
+                if val is not None:
+                    edge['params'][sp['target']] = val
+                    if sp.get('transform') in _TRANSFORMS:
+                        edge['params'][sp['target']] = _TRANSFORMS[sp['transform']](val, flow)
+                    cond = sp.get('conditional_set')
+                    if cond and val == cond['when_value']:
+                        edge['params'].update(cond['also_set'])
+                elif 'default' in sp:
+                    edge['params'][sp['target']] = sp['default']
+            edges.append(edge)
+        return {
+            'name': name,
+            'nodes': nodes,
+            'edges': edges,
+            'pool_meta': {'type': 'tdx', 'ver': '1.0', 'mode': '1', 'nextid': result.nextid, 'backcolor': result.backcolor},
+        }
+
+    @staticmethod
+    def tdx_to_internal(tdx_pool: TdxPoolMetaModel) -> PoolMetaModel:
+        """
+        将 TdxPoolMetaModel 转换为内部统一模型 PoolMetaModel。
+
+        映射规则：
+          - TDX type=0,1 → internal type=1 (LabelCellModel)
+          - TDX type=2   → internal type=2 (ContainerCellModel)
+          - TDX type=3   → internal type=201 (ConditionCellModel) + tdx_func
+          - TDX type=7   → internal type=202 (CandidateCellModel) + tdx_spinfo
+          - TDX type=8   → internal type=200 (StatePoolCellModel) + tdx_psatt
+          - TDX flow tran=1 → move mode; tran=0 → copy mode
+
+        Args:
+            tdx_pool: 解析后的 TDX 池模型。
+
+        Returns:
+            PoolMetaModel 统一内部模型，pool_type="tdx"。
+        """
+        internal_cells: List[Any] = []
+
+        _tdx_to_dzh = (get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}).get("tdx_to_dzh", {})
+        for tdx_cell in tdx_pool.cells:
+            internal_type = int(_tdx_to_dzh.get(str(tdx_cell.type), 1))
+
+            pos = PositionModel(
+                x=tdx_cell.pos_x,
+                y=tdx_cell.pos_y,
+                width=tdx_cell.width,
+                height=tdx_cell.height,
+            )
+
+            if internal_type == 201:
+                # type=3 → 条件单元
+                cell = _make_tdx_cell(201, tdx_cell, pos, tdx_func=tdx_cell.func)
+
+            elif internal_type == 202:
+                # type=7 → 候选池/股票源
+                # 保留原始 spinfo（可能为 None），不创建推断 spinfo 以保证 roundtrip 保真度
+                spinfo = tdx_cell.spinfo
+
+                # 当 spinfo 存在但 market 为空时，从 stk 推断 market 存为运行时属性
+                inferred_market = None
+                if spinfo is not None and not spinfo.market and tdx_cell.stks:
+                    setcodes = set(stk.setcode for stk in tdx_cell.stks)
+                    market_parts = []
+                    if 0 in setcodes:
+                        market_parts.append("SZ")
+                    if 1 in setcodes:
+                        market_parts.append("SH")
+                    if 2 in setcodes:
+                        market_parts.append("BJ")
+                    inferred_market = ",".join(market_parts) if market_parts else ""
+
+                cell = _make_tdx_cell(202, tdx_cell, pos,
+                                      tdx_spinfo=spinfo, tdx_stocks=tdx_cell.stks)
+                # 运行时推断的 market 信息（不影响导出）
+                if inferred_market is not None:
+                    cell.inferred_market = inferred_market
+
+            elif internal_type == 200:
+                # type=8 → 输出/状态池
+                stocks: List[StockSnapshotModel] = []
+                for stk in tdx_cell.stks:
+                    stocks.append(StockSnapshotModel(
+                        label=stk.tq_code, t=stk.indate, p=stk.inprice,
+                        setcode=stk.setcode, code=stk.code,
+                        indate=stk.indate, intime=stk.intime, inprice=stk.inprice,
+                        income=stk.income, now=stk.now, rise=stk.rise,
+                        volume=stk.volume, maxrate=stk.maxrate, maxperiod=stk.maxperiod,
+                        maxtime=stk.maxtime, maxprice=stk.maxprice, idaynum=stk.idaynum,
+                    ))
+                cell = _make_tdx_cell(200, tdx_cell, pos,
+                                      stocks=stocks, stk_list=stocks,
+                                      tdx_psatt=tdx_cell.psatt)
+
+            elif internal_type == 2:
+                # type=2 → 容器
+                cell = DynamicCellModel.from_dict({
+                    'id': str(tdx_cell.id),
+                    'type': 2,
+                    'attr': tdx_cell.attr,
+                    'pos': pos.to_tuple(),
+                    'clr': tdx_cell.clr,
+                    'text': tdx_cell.text,
+                })
+                cell.clrtext = tdx_cell.clrtext
+                cell.solid = tdx_cell.solid
+                cell.tdx_type = tdx_cell.type
+
+            else:
+                # type=0,1,4,5,6 等 → 标签/装饰
+                cell = DynamicCellModel.from_dict({
+                    'id': str(tdx_cell.id),
+                    'type': 1,
+                    'attr': tdx_cell.attr,
+                    'pos': pos.to_tuple(),
+                    'clr': tdx_cell.clr,
+                    'text': tdx_cell.text,
+                })
+                cell.clrtext = tdx_cell.clrtext
+                cell.solid = tdx_cell.solid
+                cell.tdx_type = tdx_cell.type
+
+            internal_cells.append(cell)
+
+        # 转换 flows
+        internal_flows: List[DynamicFlowModel] = []
+        for tdx_flow in tdx_pool.flows:
+            # tran=1 → move (delete_source=0x1)
+            # tran=0 → copy (keep_source=0x1000)
+            if tdx_flow.tran == 1:
+                flow_attr = 0x1      # move mode
+            else:
+                flow_attr = 0x1000   # copy mode
+
+            flow = DynamicFlowModel.from_dict({
+                'from': str(tdx_flow.startid),
+                'to': str(tdx_flow.endid),
+                'attr': flow_attr,
+                'clr': tdx_flow.clr,
+            })
+            # Attach TDX-specific metadata as extra attributes
+            flow.tdx_clr = tdx_flow.clr
+            flow.tdx_size = tdx_flow.size
+            flow.tdx_tran = tdx_flow.tran
+            flow.tdx_emptyps = tdx_flow.emptyps
+            flow.tdx_starttype = tdx_flow.starttype
+            flow.tdx_starttime = tdx_flow.starttime
+            flow.tdx_starttimetype = tdx_flow.starttimetype
+            flow.tdx_starttimehms = tdx_flow.starttimehms
+            flow.tdx_cxtype = tdx_flow.cxtype
+            flow.tdx_cxtime = tdx_flow.cxtime
+            flow.tdx_cxtimetype = tdx_flow.cxtimetype
+            flow.tdx_jgtime = tdx_flow.jgtime
+            internal_flows.append(flow)
+
+        return PoolMetaModel(
+            pool_type="tdx",
+            ver="1.0",
+            mode="1",
+            nextid=tdx_pool.nextid,
+            backcolor=tdx_pool.backcolor,
+            cells=internal_cells,
+            flows=internal_flows,
+        )
+
+    @staticmethod
+    def convert_tdx_to_config(pool_meta: PoolMetaModel) -> Dict[str, Any]:
+        """
+        将 TDX PoolMetaModel 转换为执行引擎可用的配置字典。
+
+        Args:
+            pool_meta: pool_type="tdx" 的 PoolMetaModel 实例。
+
+        Returns:
+            配置字典，包含以下键:
+              - "pool_meta": 池级别元数据 {type, backcolor, nextid}
+              - "nodes":     节点列表，每项含 id, type, position, params, label
+              - "edges":     边列表，每项含 source, target, params
+        """
+        nodes: List[Dict[str, Any]] = []
+        for cell in pool_meta.cells:
+            ct = _get_dzh_cell_type(cell)
+            converter = _CELL_CONVERTERS.get(ct)
+            if converter is not None:
+                nodes.append(converter(cell))
+            else:
+                nodes.append(_convert_decoration_cell(cell))
+
+        edges: List[Dict[str, Any]] = [_convert_flow(f) for f in pool_meta.flows]
+
+        return _assemble_pool_result(
+            nodes, edges,
+            pool_meta={"type": "tdx",
+                       "backcolor": _safe_get(pool_meta, "backcolor", 16777216),
+                       "nextid": _safe_get(pool_meta, "nextid", 0)})
+
+    @staticmethod
+    def load_tdx_pool_config(xml_path):
+        try:
+            _HR = getattr(TdxPoolConverter, '_HR', None)
+            if _HR is None:
+                _HR = {"fn": parse_tdx_xml}
+                setattr(TdxPoolConverter, '_HR', _HR)
+            return _TDX_CONVERTER._to_frontend(_HR["fn"](xml_path), os.path.basename(xml_path).replace('.xml', ''))
+        except Exception as ex:
+            # fail-fast 标记：返回带 error 字段的结构，禁止静默回退空字典
+            logger.warning("加载TDX池配置失败: %s（已标记 error 字段）", ex, exc_info=True)
+            return {"error": f"加载TDX池配置失败: {ex}", "xml_path": str(xml_path)}
 
 
 # 模块级单例
@@ -2922,13 +3185,6 @@ class DZHPoolExecutor:
         self.tq_adapter = tq_adapter
         self.formula_router = formula_router
         self.state = NodeStateMachine()
-        self.running = False
-        self._timers: List[threading.Timer] = []
-        self._thread: Optional[threading.Thread] = None
-        self._stop_event = threading.Event()
-        self._events: List[Dict] = []
-        self._start_time: Optional[float] = None
-        self._edge_last_trigger: Dict[str, float] = {}
         self._nodes: Dict[str, dict] = {}
         self._edges: List[dict] = []
         self._init_nodes_edges()
@@ -2947,15 +3203,6 @@ class DZHPoolExecutor:
         if not node:
             return DEFAULT_HOLD_SEC
         return safe_int(node.get('params', {}).get('hold_sec'), DEFAULT_HOLD_SEC)
-
-    def _log_event(self, event_type: str, data: Dict):
-        event = {
-            'event_type': event_type,
-            'timestamp': datetime.now().isoformat(),
-            'timestamp_ts': time.time(),
-            **data,
-        }
-        self._events.append(event)
 
     def _init_mock_stocks(self):
         """初始化备选池的模拟股票数据（兼容旧版行为）"""
@@ -2996,12 +3243,6 @@ class DZHPoolExecutor:
             removed = self.state.check_hold_expiry(node_id, hold_sec, ct)
             if removed:
                 total_removed += len(removed)
-                self._log_event('hold_expiry', {
-                    'node_id': node_id,
-                    'removed_count': len(removed),
-                    'removed_codes': removed,
-                    'hold_sec': hold_sec,
-                })
         return total_removed
 
     def _resolve_transfer_condition(self, edge: dict) -> Optional[dict]:
@@ -3168,70 +3409,7 @@ class DZHPoolExecutor:
         result['rejected'] = len(rejected)
         result['transferred'] = len(stocks_to_write)
 
-        self._log_event('edge_execute', {
-            'edge_id': edge_id,
-            'source': src_node_id,
-            'target': tgt_node_id,
-            'mode': mode,
-            'passed': result['passed'],
-            'rejected': result['rejected'],
-            'flags': result['flags_applied'],
-        })
-
         return result
-
-    def _run_loop(self):
-        logger.info("执行循环启动")
-        while self.running and not self._stop_event.is_set():
-            try:
-                self._check_all_hold_expiry()
-
-                for edge in self._edges:
-                    if not self.running or self._stop_event.is_set():
-                        break
-                    edge_id = edge.get('id', '')
-                    params = edge.get('params', {})
-                    interval_sec = safe_int(params.get('interval_sec'), 60)
-
-                    if should_trigger(edge):
-                        last = self._edge_last_trigger.get(edge_id, 0)
-                        if time.time() - last >= interval_sec:
-                            self._execute_edge(edge)
-                            self._edge_last_trigger[edge_id] = time.time()
-                        else:
-                            self._stop_event.wait(1)
-                    else:
-                        self._stop_event.wait(1)
-
-                self._stop_event.wait(1)
-            except Exception as e:
-                logger.error("执行循环错误: %s", e)
-                self._stop_event.wait(5)
-        logger.info("执行循环结束")
-
-    def start(self):
-        if self.running:
-            logger.warning("执行器已在运行中")
-            return
-        self.running = True
-        self._stop_event.clear()
-        self._start_time = time.time()
-        self._init_mock_stocks()
-        self._thread = threading.Thread(target=self._run_loop, daemon=True)
-        self._thread.start()
-        self._log_event('executor_start', {'config_nodes': len(self._nodes), 'config_edges': len(self._edges)})
-        logger.info("DZH执行器已启动")
-
-    def stop(self):
-        self.running = False
-        self._stop_event.set()
-        for timer in self._timers:
-            timer.cancel()
-        self._timers.clear()
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=5)
-        self._log_event('executor_stop', {'total_events': len(self._events)})
-        logger.info("DZH执行器已停止")
 
     def execute_once(self) -> Dict[str, Any]:
         """单次执行所有边（兼容旧版API）"""
@@ -3288,9 +3466,6 @@ class DZHPoolExecutor:
                 seen_set.add(s)
                 seen.append(s)
         return seen[:limit]
-
-    def get_events(self, limit: int = 50) -> List[Dict]:
-        return self._events[-limit:]
 
     def get_node_full_state(self, node_id: str) -> Dict[str, Any]:
         """获取节点完整状态（含股票详情和历史）"""
@@ -3979,308 +4154,6 @@ NODE_TYPE_NAME_MAP = {
 }
 
 
-class DzhXmlExporter:
-    def __init__(self, pretty: bool = True):
-        self.pretty = pretty
-        self.indent = "  "
-
-    def export(self, graph_data: Dict) -> str:
-        """将图数据导出为DZH XML格式"""
-        lines = ['<?xml version="1.0" encoding="GB2312"?>']
-
-        pool_meta = graph_data.get("pool_meta", {})
-        pool_type = pool_meta.get("type", "ss-pool")
-        ver = pool_meta.get("ver", "1.0")
-        mode = pool_meta.get("mode", "1")
-        nextid = pool_meta.get("nextid", 0)
-        backcolor = pool_meta.get("backcolor", _DEFAULT_BACKCOLOR)
-
-        attrs = [f'type="{pool_type}"', f'ver="{ver}"', f'mode="{mode}"',
-                 f'nextid="{nextid}"', f'backcolor="{backcolor}"']
-        if pool_meta.get("ency"):
-            attrs.append(f'ency="{pool_meta["ency"]}"')
-        if pool_meta.get("warning"):
-            attrs.append(f'warning="{pool_meta["warning"]}"')
-        if pool_meta.get("system") is not None:
-            attrs.append(f'system="{pool_meta["system"]}"')
-
-        lines.append(f'<pool {" ".join(attrs)}>')
-
-        nodes = graph_data.get("nodes", [])
-        for node in nodes:
-            cell_xml = self._export_node(node)
-            lines.append(cell_xml)
-
-        edges = graph_data.get("edges", [])
-        edges = sorted(edges, key=lambda e: e.get("params", {}).get("_order", 0))
-        for edge in edges:
-            flow_xml = self._export_flow(edge)
-            lines.append(flow_xml)
-
-        def _emit_trade_section(tag, items, exporter):
-            if items:
-                lines.append(f"<{tag}>")
-                for it in items:
-                    lines.append(exporter(it))
-                lines.append(f"</{tag}>")
-
-        _emit_trade_section("trades", graph_data.get("trades", []), self._export_trade)
-        _emit_trade_section("opentrades", graph_data.get("opentrades", []), self._export_opentrade)
-
-        lines.append("</pool>")
-        return "\n".join(lines) if self.pretty else "".join(lines)
-
-    @staticmethod
-    def _safe_attr_val(val) -> str:
-        """将值转为 XML 属性安全字符串，保留 \\n 为 &#10;。"""
-        s = str(val)
-        s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-        s = s.replace("\n", "&#10;")
-        s = s.replace("\t", "__DZH_TAB__")
-        return s
-
-    def _export_node(self, node: Dict) -> str:
-        params = node.get("params", {})
-        pos = node.get("position", {})
-
-        # 兼容两种格式：dzh_cell_type 在顶层或在 params 中
-        dzh_type = node.get("dzh_cell_type", 0)
-        if dzh_type == 0:
-            dzh_type = params.get("dzh_cell_type", 0)
-
-        if dzh_type == 0:
-            node_type = node.get("type", "")
-            # 尝试从 type 字符串解析为整数
-            if isinstance(node_type, str) and node_type.isdigit():
-                dzh_type = int(node_type)
-            else:
-                dzh_type = NODE_TYPE_NAME_MAP.get(node_type, 0)
-
-        if dzh_type == 0:
-            return ""
-
-        cell_attrs = [f'id="{node.get("id", "")}"', f'type="{dzh_type}"']
-
-        attr_int = params.get("attr_int", params.get("attr", 0))
-        if isinstance(attr_int, str):
-            try:
-                attr_int = int(attr_int)
-            except (ValueError, TypeError):
-                attr_int = 0
-        if attr_int or "attr" in params.get("_present_attrs", set()):
-            cell_attrs.append(f'attr="{attr_int}"')
-
-        x = pos.get("x", 0)
-        y = pos.get("y", 0)
-        w = pos.get("width", 100)
-        h = pos.get("height", 50)
-        cell_attrs.append(f'pos="{x},{y},{x + w},{y + h}"')
-
-        clr = params.get("clr", -1)
-        if clr != -1:
-            cell_attrs.append(f'clr="{clr}"')
-
-        # text 属性：空字符串也要保留（原始 XML 中 text="" 是合法的）
-        text = params.get("text", params.get("_orig_text", node.get("label", "")))
-        if text is not None:
-            safe_text = self._safe_attr_val(text)
-            cell_attrs.append(f'text="{safe_text}"')
-
-        # ── 按节点类型将关键字段写入 <cell> 属性（表驱动分派，非 if/elif）──
-        # 原始 DZH XML 中这些字段是 <cell> 的属性，parse_dzh_xml 也从属性读取，
-        # 因此导出时必须写为属性才能保证往返一致。
-        _appender_name = _TYPE_ATTR_APPENDERS.get(dzh_type)
-        if _appender_name:
-            getattr(self, _appender_name)(params, cell_attrs)
-
-        lines = [f"<cell {' '.join(cell_attrs)}>"]
-
-        # type 200/203 的 tradeattr 仍作为子元素
-        if dzh_type in _TRADEATTR_TYPES:
-            self._export_tradeattr_lines(params, lines)
-        # type 4 无子元素
-
-        stocks = params.get("stocks", [])
-        if stocks:
-            for stk in stocks:
-                stk_attrs = [f'label="{stk.get("label", "")}"']
-                if stk.get("t"):
-                    stk_attrs.append(f't="{stk.get("t")}"')
-                if stk.get("p"):
-                    stk_attrs.append(f'p="{stk.get("p")}"')
-                if stk.get("tid"):
-                    stk_attrs.append(f'tid="{stk.get("tid")}"')
-                lines.append(f"<stk {' '.join(stk_attrs)}/>")
-
-        anas = params.get("anas", [])
-        if anas:
-            for ana in anas:
-                ana_attrs = [f'label="{ana.get("label", "")}"']
-                if ana.get("t"):
-                    ana_attrs.append(f't="{ana.get("t")}"')
-                if ana.get("p"):
-                    ana_attrs.append(f'p="{ana.get("p")}"')
-                lines.append(f"<ana {' '.join(ana_attrs)}/>")
-
-        lines.append("</cell>")
-        return "\n".join(lines) if self.pretty else "".join(lines)
-
-    # ── 将各类型节点的字段追加为 <cell> 属性 ──
-
-    def _append_state_pool_attrs(self, params: Dict, cell_attrs: List) -> None:
-        """type=200/203 状态池/结果池：将 hold/col/width/histana/wizd 等写入属性。"""
-        # hold: 优先使用 hold_sec（秒数），否则使用 hold（天数格式）
-        hold_sec = params.get("hold_sec")
-        hold = params.get("hold")
-        if hold_sec is not None and hold_sec != 0:
-            cell_attrs.append(f'hold="{hold_sec}"')
-        elif hold is not None and hold != 0:
-            cell_attrs.append(f'hold="{hold}"')
-
-        # col: 从 col_list 列表还原为逗号分隔字符串
-        col_list = params.get("col_list", [])
-        if col_list:
-            col_str = ",".join(str(x) for x in col_list)
-            cell_attrs.append(f'col="{col_str}"')
-
-        # width: 从 width_list 列表还原
-        width_list = params.get("width_list", [])
-        if width_list:
-            width_str = ",".join(str(x) for x in width_list)
-            cell_attrs.append(f'width="{width_str}"')
-
-        for key in ("histana", "wizd", "stocknum", "sorttype", "enter", "exit",
-                     "deltype", "tmpl", "intersection_status", "reload", "lastload",
-                     "attrtext", "delstocktype", "endtime", "staattr", "result_type"):
-            val = params.get(key)
-            if val is not None and val != "" and val != 0:
-                cell_attrs.append(f'{key}="{self._safe_attr_val(val)}"')
-
-        # enter/exit 的 action 编码值（如果 enter_action/exit_action 存在且 enter/exit 不存在）
-        enter_action = params.get("enter_action")
-        if enter_action and "enter" not in params:
-            enter_val = encode_action(enter_action)
-            if enter_val:
-                cell_attrs.append(f'enter="{enter_val}"')
-        exit_action = params.get("exit_action")
-        if exit_action and "exit" not in params:
-            exit_val = encode_action(exit_action)
-            if exit_val:
-                cell_attrs.append(f'exit="{exit_val}"')
-
-    def _append_condition_attrs(self, params: Dict, cell_attrs: List) -> None:
-        """type=201 条件节点：将 inditype/crc/indi/sorttype/indiparam 写入属性。"""
-        for key in ("inditype", "crc", "sorttype", "indiparam"):
-            val = params.get(key)
-            if val is not None and val != "":
-                cell_attrs.append(f'{key}="{self._safe_attr_val(val)}"')
-
-        indi = params.get("indi")
-        if indi is not None and indi != "":
-            # 如果 indi 已经是合法 base64，直接使用；否则先编码
-            if not all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in indi):
-                indi = encode_formula(indi)
-            cell_attrs.append(f'indi="{self._safe_attr_val(indi)}"')
-
-    def _append_source_attrs(self, params: Dict, cell_attrs: List) -> None:
-        """type=202 源节点：将 attrtext/reload/lastload 写入属性。"""
-        raw_attrtext = params.get("raw_attrtext", params.get("attrtext", ""))
-        if raw_attrtext:
-            cell_attrs.append(f'attrtext="{self._safe_attr_val(raw_attrtext)}"')
-
-        reload_val = params.get("reload_sec", params.get("reload"))
-        if reload_val is not None and reload_val != 0:
-            cell_attrs.append(f'reload="{reload_val}"')
-
-        lastload = params.get("lastload")
-        if lastload is not None and lastload != 0:
-            cell_attrs.append(f'lastload="{lastload}"')
-
-    def _export_tradeattr_lines(self, params: Dict, lines: List) -> None:
-        """导出 tradeattr 子元素（仅 type=200/203）。"""
-        tradeattr = params.get("tradeattr")
-        if tradeattr and isinstance(tradeattr, dict):
-            ta_attrs = []
-            for key, val in tradeattr.items():
-                if val is not None and val != "":
-                    ta_attrs.append(f'{key}="{self._safe_attr_val(val)}"')
-            if ta_attrs:
-                lines.append(f'<tradeattr {" ".join(ta_attrs)}/>')
-
-    def _export_flow(self, edge: Dict) -> str:
-        params = edge.get("params", {})
-
-        # 兼容两种格式：source/target dict 或 from/to 字符串
-        source = edge.get("source", {})
-        target = edge.get("target", {})
-        if isinstance(source, dict) and "node_id" in source:
-            src_id = source.get("node_id", "")
-            tgt_id = target.get("node_id", "")
-        else:
-            src_id = str(edge.get("from", source if isinstance(source, str) else ""))
-            tgt_id = str(edge.get("to", target if isinstance(target, str) else ""))
-
-        if src_id.startswith("m_"):
-            src_id = src_id[2:]
-        if tgt_id.startswith("m_"):
-            tgt_id = tgt_id[2:]
-
-        flow_attrs = [f'from="{src_id}"', f'to="{tgt_id}"']
-
-        attr_int = params.get("dzh_attr", params.get("attr_int", 0))
-        if isinstance(attr_int, str):
-            try:
-                attr_int = int(attr_int)
-            except (ValueError, TypeError):
-                attr_int = 0
-        if attr_int:
-            flow_attrs.append(f'attr="{attr_int}"')
-
-        clr = params.get("clr", -1)
-        if clr != -1:
-            flow_attrs.append(f'clr="{clr}"')
-
-        if params.get("count"):
-            flow_attrs.append(f'count="{params["count"]}"')
-
-        begin = params.get("begin", 0)
-        begint = params.get("begint", "0")
-        end = params.get("end", 0)
-        endt = params.get("endt", str(_NEVER_EXPIRE))
-        interval = params.get("interval_sec", params.get("interval", 60))
-
-        if begin != 0:
-            flow_attrs.append(f'begin="{begin}"')
-        if begint and begint != "0":
-            flow_attrs.append(f'begint="{begint}"')
-        if end != 0:
-            flow_attrs.append(f'end="{end}"')
-        if endt and endt != "0":
-            flow_attrs.append(f'endt="{endt}"')
-        if interval != 60:
-            flow_attrs.append(f'interval="{interval}"')
-
-        if params.get("mid"):
-            flow_attrs.append(f'mid="{params["mid"]}"')
-
-        return f"<flow {' '.join(flow_attrs)}/>"
-
-    _TRADE_KEYS = ["code", "name", "market", "price", "volume", "buyprice", "sellprice",
-                   "direction", "tradetime", "accountno", "tradetype", "rate", "fee"]
-    _OPENTRADE_KEYS = ["code", "name", "market", "targetprice", "orderprice", "volume",
-                       "direction", "tradetype", "accountno", "condition"]
-
-    def _export_trade_elem(self, d: Dict, keys) -> str:
-        attrs = [f'{k}="{d[k]}"' for k in keys if d.get(k)]
-        return f"<trade {' '.join(attrs)}/>"
-
-    def _export_trade(self, trade: Dict) -> str:
-        return self._export_trade_elem(trade, self._TRADE_KEYS)
-
-    def _export_opentrade(self, ot: Dict) -> str:
-        return self._export_trade_elem(ot, self._OPENTRADE_KEYS)
-
-
 # ======================================================================
 # TDX 股票池转换器（原 converters/tdx.py）
 # ======================================================================
@@ -4482,150 +4355,8 @@ def parse_tdx_xml(filepath: str) -> TdxPoolMetaModel:
 # ═══════════════════════════════════════════════════════════════
 
 def tdx_to_internal(tdx_pool: TdxPoolMetaModel) -> PoolMetaModel:
-    """
-    将 TdxPoolMetaModel 转换为内部统一模型 PoolMetaModel。
-
-    映射规则：
-      - TDX type=0,1 → internal type=1 (LabelCellModel)
-      - TDX type=2   → internal type=2 (ContainerCellModel)
-      - TDX type=3   → internal type=201 (ConditionCellModel) + tdx_func
-      - TDX type=7   → internal type=202 (CandidateCellModel) + tdx_spinfo
-      - TDX type=8   → internal type=200 (StatePoolCellModel) + tdx_psatt
-      - TDX flow tran=1 → move mode; tran=0 → copy mode
-
-    Args:
-        tdx_pool: 解析后的 TDX 池模型。
-
-    Returns:
-        PoolMetaModel 统一内部模型，pool_type="tdx"。
-    """
-    internal_cells: List[Any] = []
-
-    _tdx_to_dzh = (get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}).get("tdx_to_dzh", {})
-    for tdx_cell in tdx_pool.cells:
-        internal_type = int(_tdx_to_dzh.get(str(tdx_cell.type), 1))
-
-        pos = PositionModel(
-            x=tdx_cell.pos_x,
-            y=tdx_cell.pos_y,
-            width=tdx_cell.width,
-            height=tdx_cell.height,
-        )
-
-        if internal_type == 201:
-            # type=3 → 条件单元
-            cell = _make_tdx_cell(201, tdx_cell, pos, tdx_func=tdx_cell.func)
-
-        elif internal_type == 202:
-            # type=7 → 候选池/股票源
-            # 保留原始 spinfo（可能为 None），不创建推断 spinfo 以保证 roundtrip 保真度
-            spinfo = tdx_cell.spinfo
-
-            # 当 spinfo 存在但 market 为空时，从 stk 推断 market 存为运行时属性
-            inferred_market = None
-            if spinfo is not None and not spinfo.market and tdx_cell.stks:
-                setcodes = set(stk.setcode for stk in tdx_cell.stks)
-                market_parts = []
-                if 0 in setcodes:
-                    market_parts.append("SZ")
-                if 1 in setcodes:
-                    market_parts.append("SH")
-                if 2 in setcodes:
-                    market_parts.append("BJ")
-                inferred_market = ",".join(market_parts) if market_parts else ""
-
-            cell = _make_tdx_cell(202, tdx_cell, pos,
-                                  tdx_spinfo=spinfo, tdx_stocks=tdx_cell.stks)
-            # 运行时推断的 market 信息（不影响导出）
-            if inferred_market is not None:
-                cell.inferred_market = inferred_market
-
-        elif internal_type == 200:
-            # type=8 → 输出/状态池
-            stocks: List[StockSnapshotModel] = []
-            for stk in tdx_cell.stks:
-                stocks.append(StockSnapshotModel(
-                    label=stk.tq_code, t=stk.indate, p=stk.inprice,
-                    setcode=stk.setcode, code=stk.code,
-                    indate=stk.indate, intime=stk.intime, inprice=stk.inprice,
-                    income=stk.income, now=stk.now, rise=stk.rise,
-                    volume=stk.volume, maxrate=stk.maxrate, maxperiod=stk.maxperiod,
-                    maxtime=stk.maxtime, maxprice=stk.maxprice, idaynum=stk.idaynum,
-                ))
-            cell = _make_tdx_cell(200, tdx_cell, pos,
-                                  stocks=stocks, stk_list=stocks,
-                                  tdx_psatt=tdx_cell.psatt)
-
-        elif internal_type == 2:
-            # type=2 → 容器
-            cell = DynamicCellModel.from_dict({
-                'id': str(tdx_cell.id),
-                'type': 2,
-                'attr': tdx_cell.attr,
-                'pos': pos.to_tuple(),
-                'clr': tdx_cell.clr,
-                'text': tdx_cell.text,
-            })
-            cell.clrtext = tdx_cell.clrtext
-            cell.solid = tdx_cell.solid
-            cell.tdx_type = tdx_cell.type
-
-        else:
-            # type=0,1,4,5,6 等 → 标签/装饰
-            cell = DynamicCellModel.from_dict({
-                'id': str(tdx_cell.id),
-                'type': 1,
-                'attr': tdx_cell.attr,
-                'pos': pos.to_tuple(),
-                'clr': tdx_cell.clr,
-                'text': tdx_cell.text,
-            })
-            cell.clrtext = tdx_cell.clrtext
-            cell.solid = tdx_cell.solid
-            cell.tdx_type = tdx_cell.type
-
-        internal_cells.append(cell)
-
-    # 转换 flows
-    internal_flows: List[DynamicFlowModel] = []
-    for tdx_flow in tdx_pool.flows:
-        # tran=1 → move (delete_source=0x1)
-        # tran=0 → copy (keep_source=0x1000)
-        if tdx_flow.tran == 1:
-            flow_attr = 0x1      # move mode
-        else:
-            flow_attr = 0x1000   # copy mode
-
-        flow = DynamicFlowModel.from_dict({
-            'from': str(tdx_flow.startid),
-            'to': str(tdx_flow.endid),
-            'attr': flow_attr,
-            'clr': tdx_flow.clr,
-        })
-        # Attach TDX-specific metadata as extra attributes
-        flow.tdx_clr = tdx_flow.clr
-        flow.tdx_size = tdx_flow.size
-        flow.tdx_tran = tdx_flow.tran
-        flow.tdx_emptyps = tdx_flow.emptyps
-        flow.tdx_starttype = tdx_flow.starttype
-        flow.tdx_starttime = tdx_flow.starttime
-        flow.tdx_starttimetype = tdx_flow.starttimetype
-        flow.tdx_starttimehms = tdx_flow.starttimehms
-        flow.tdx_cxtype = tdx_flow.cxtype
-        flow.tdx_cxtime = tdx_flow.cxtime
-        flow.tdx_cxtimetype = tdx_flow.cxtimetype
-        flow.tdx_jgtime = tdx_flow.jgtime
-        internal_flows.append(flow)
-
-    return PoolMetaModel(
-        pool_type="tdx",
-        ver="1.0",
-        mode="1",
-        nextid=tdx_pool.nextid,
-        backcolor=tdx_pool.backcolor,
-        cells=internal_cells,
-        flows=internal_flows,
-    )
+    """向后兼容包装：委托到 TdxPoolConverter.tdx_to_internal（G2 归入类内）。"""
+    return TdxPoolConverter.tdx_to_internal(tdx_pool)
 # ================================================================
 # 转换器（原 tdx_converter.py）
 # ================================================================
@@ -4876,34 +4607,8 @@ def _convert_flow(flow: Any) -> Dict[str, Any]:
 # ═══════════════════════════════════════════════════════════════
 
 def convert_tdx_to_config(pool_meta: PoolMetaModel) -> Dict[str, Any]:
-    """
-    将 TDX PoolMetaModel 转换为执行引擎可用的配置字典。
-
-    Args:
-        pool_meta: pool_type="tdx" 的 PoolMetaModel 实例。
-
-    Returns:
-        配置字典，包含以下键:
-          - "pool_meta": 池级别元数据 {type, backcolor, nextid}
-          - "nodes":     节点列表，每项含 id, type, position, params, label
-          - "edges":     边列表，每项含 source, target, params
-    """
-    nodes: List[Dict[str, Any]] = []
-    for cell in pool_meta.cells:
-        ct = _get_dzh_cell_type(cell)
-        converter = _CELL_CONVERTERS.get(ct)
-        if converter is not None:
-            nodes.append(converter(cell))
-        else:
-            nodes.append(_convert_decoration_cell(cell))
-
-    edges: List[Dict[str, Any]] = [_convert_flow(f) for f in pool_meta.flows]
-
-    return _assemble_pool_result(
-        nodes, edges,
-        pool_meta={"type": "tdx",
-                   "backcolor": _safe_get(pool_meta, "backcolor", 16777216),
-                   "nextid": _safe_get(pool_meta, "nextid", 0)})
+    """向后兼容包装：委托到 TdxPoolConverter.convert_tdx_to_config（G2 归入类内）。"""
+    return TdxPoolConverter.convert_tdx_to_config(pool_meta)
 
 
 
@@ -5906,81 +5611,11 @@ _TRANSFORMS = {
 
 
 def _tdx_pool_to_frontend(tdx_pool, name: str) -> dict:
-    mapping = _get_xml_mapping()
-    node_cfg, edge_cfg = mapping['frontend_node'], mapping['frontend_edge']
-    _type_map = get_global_config_store().get_table("dzh_type_map") if get_global_config_store() else {}
-    tdx_type_map = {int(k): v for k, v in _type_map.get("tdx_to_frontend", {}).items()}
-    pos_cfg = node_cfg['position']
-    nodes = []
-    for cell in tdx_pool.cells:
-        node = {}
-        for fd in node_cfg['fields']:
-            src = fd['source']
-            if src == 'id':
-                val = str(cell.id)
-            elif src == 'type' and 'lookup' in fd:
-                val = tdx_type_map.get(cell.type, fd.get('default', ''))
-            elif src == 'text':
-                val = cell.text or fd.get('default', '')
-            else:
-                val = getattr(cell, src, fd.get('default', ''))
-            if fd.get('transform') in _TRANSFORMS:
-                val = _TRANSFORMS[fd['transform']](val, cell)
-            node[fd['target']] = val
-        node['position'] = {
-            k: max(getattr(cell, pos_cfg[k], 0), pos_cfg[f'min_{k}']) if k in ('width', 'height') else getattr(cell, pos_cfg[k], 0)
-            for k in ('x', 'y', 'width', 'height')
-        }
-        node['params'] = {}
-        for pd in node_cfg['params']:
-            v = getattr(cell, pd['source'], None)
-            node['params'][pd['target']] = _TRANSFORMS[pd['transform']](v, cell) if pd.get('transform') in _TRANSFORMS else v
-        for sd in node_cfg['sub_objects']:
-            sub = getattr(cell, sd['source_attr'], None)
-            if sub is not None:
-                sd_data = [_model_to_dict(i) for i in sub] if isinstance(sub, list) else _model_to_dict(sub)
-                for tk in sd['target_keys']:
-                    node['params'][tk] = sd_data
-                if 'count_key' in sd and isinstance(sd_data, list):
-                    node['params'][sd['count_key']] = len(sd_data)
-        nodes.append(node)
-    edges = []
-    for flow in tdx_pool.flows:
-        fid = str(getattr(flow, 'startid', getattr(flow, 'from', '0')))
-        tid = str(getattr(flow, 'endid', getattr(flow, 'to', '0')))
-        edge = {'id': f"{fid}_{tid}", 'source': {'node_id': fid}, 'target': {'node_id': tid}, 'params': {}}
-        fd = _model_to_dict(flow)
-        if fd:
-            edge['params'].update({k: v for k, v in fd.items() if k != 'id'})
-        for sp in edge_cfg['special_params']:
-            val = getattr(flow, sp['source'], None)
-            if val is not None:
-                edge['params'][sp['target']] = val
-                if sp.get('transform') in _TRANSFORMS:
-                    edge['params'][sp['target']] = _TRANSFORMS[sp['transform']](val, flow)
-                cond = sp.get('conditional_set')
-                if cond and val == cond['when_value']:
-                    edge['params'].update(cond['also_set'])
-            elif 'default' in sp:
-                edge['params'][sp['target']] = sp['default']
-        edges.append(edge)
-    return {
-        'name': name,
-        'nodes': nodes,
-        'edges': edges,
-        'pool_meta': {'type': 'tdx', 'ver': '1.0', 'mode': '1', 'nextid': tdx_pool.nextid, 'backcolor': tdx_pool.backcolor},
-    }
+    """向后兼容包装：委托到 TdxPoolConverter._to_frontend（G2 归入类内）。"""
+    return _TDX_CONVERTER._to_frontend(tdx_pool, name)
 
 
 def _load_tdx_pool_config(xml_path):
-    try:
-        _HR = getattr(_load_tdx_pool_config, '_HR', None)
-        if _HR is None:
-            _HR = {"fn": parse_tdx_xml}
-            setattr(_load_tdx_pool_config, '_HR', _HR)
-        return _tdx_pool_to_frontend(_HR["fn"](xml_path), os.path.basename(xml_path).replace('.xml', ''))
-    except Exception as ex:
-        # fail-fast 标记：返回带 error 字段的结构，禁止静默回退空字典
-        logger.warning("加载TDX池配置失败: %s（已标记 error 字段）", ex, exc_info=True)
-        return {"error": f"加载TDX池配置失败: {ex}", "xml_path": str(xml_path)}
+    """向后兼容包装：委托到 TdxPoolConverter.load_tdx_pool_config（G2 归入类内）。"""
+    return TdxPoolConverter.load_tdx_pool_config(xml_path)
 

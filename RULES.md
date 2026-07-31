@@ -297,6 +297,8 @@
 
 119. **模板方法差异钩子必须 @abstractmethod 早失败**：`BasePoolConverter` 的 10 个差异钩子（`_decode_source` / `_extract_pool_meta` / `_parse_cells` / `_parse_flows` / `_build_result` / `_create_root` / `_serialize_pool_attrs` / `_serialize_cells` / `_serialize_flows` / `_finalize_xml`）必须使用 `@abstractmethod` 装饰（非 `raise NotImplementedError`），实现 construction-time 早失败契约执行——子类未覆盖任一钩子时实例化即报 `TypeError`，优于 invocation-time 晚失败（`raise NotImplementedError` 在钩子被调用时才报错，系统可能静默运行至深层流程才暴露缺口）。这是「极致本质的运行时」的第九层洞察：类型系统级契约执行优于运行时异常契约执行。同时，元模式同构收敛已达上限时须文档化「知止」——v8 已达 DZH/TDX 同构收敛上限，10 钩子方法体是结构同构但数据/派发异构，禁止强行合并（抽象税 > 收益，引入表条目爆炸 + roundtrip 回归风险）。
 
+120. **所有事件 handler 必须 @_event_handler 装饰 + 全局收敛上限知止**：所有通过 `self._bus.subscribe()` 注册的事件 handler 必须使用 `@_event_handler` 装饰器（禁止裸 handler），防止 handler 异常中断 EventBus.publish 同步扇出链——一个 handler 抛未捕获异常会导致后续订阅者不执行，事件链断裂。`@_event_handler`（event_bus.py:15-26）将异常处理从 handler 体内部上提到装饰器层（AOP 横切），统一"handler 不应中断事件链"的运行时契约（捕获→logger.warning→返回 None）。这是「极致本质的运行时」的第十层洞察：异常处理覆盖完整性是运行时安全本质。同时，元模式同构收敛已达全局上限——converters（v8/v9 模板方法 + @abstractmethod）/订阅（`_BaseModule`+`_SUBSCRIPTIONS` 覆盖 7 主模块 + `_event_handler` 覆盖全部 handler）/adapter（v6/v7 四表四通用器）/MetaDispatcher（v5 EventBus/ConfigStore 统一）/轮询（v4 EventDriver heapq 消除 while+sleep）五维均已达标，禁止强行合并结构同构但数据/派发异构的代码（全局知止纪律，抽象税 > 收益）。
+
 ---
 
 ## 附：文件路径映射（文档 vs 实际代码）

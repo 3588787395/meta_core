@@ -50,6 +50,8 @@ _PERIOD_ALIASES = {
     "1day": "1d",
     "1week": "1wk",
     "1month": "1mon",
+    "day": "1d",
+    "d": "1d",
 }
 
 

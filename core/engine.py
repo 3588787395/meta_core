@@ -36,10 +36,6 @@ except ImportError:
 # 循环依赖，故在 __init__ 内使用处懒加载（与 trade_module/monitoring_module 一致）。
 from .execution_module import (
     Compiler, CompiledSchedule,
-    _extract_edge_endpoint as _ce_extract_edge_endpoint,
-    _resolve_node_type as _ce_resolve_node_type,
-    _resolve_edge_type as _ce_resolve_edge_type,
-    _normalize_nodes as _ce_normalize_nodes,
     build_timed_event_specs,
     EdgeExecutor, _lookup_edge_cond, TTLHelper, EventDriver,
 )
@@ -298,21 +294,21 @@ class PoolEngineMixin:
                         if ec.tid == nid:
                             edge_ttl = schedule.edge_ttl_spec.get(eid)
                             if edge_ttl is not None and edge_ttl.bdel == 1 and edge_ttl.check_type == "interval" and edge_ttl.ttl_sec > 0:
-                                for stock in stocks:
-                                    if isinstance(stock, dict):
-                                        code = stock.get("code", "")
-                                        if code:
-                                            entry_ts = _stock_entry_time(stock) or now_val
-                                            register_ttl_spec(driver, self.state, ec.tid, eid, code, edge_ttl.ttl_sec, entry_ts, bus)
-                                break
+                                self._register_ttl_batch(driver, self.state, stocks, ec.tid, eid, edge_ttl.ttl_sec, now_val, bus)
+                            break
                     node_ttl = schedule.node_ttl_spec.get(nid)
                     if node_ttl is not None and node_ttl.bdel == 1 and node_ttl.check_type == "interval" and node_ttl.ttl_sec > 0:
-                        for stock in stocks:
-                            if isinstance(stock, dict):
-                                code = stock.get("code", "")
-                                if code:
-                                    entry_ts = _stock_entry_time(stock) or now_val
-                                    register_ttl_spec(driver, self.state, nid, f"node_ttl:{nid}", code, node_ttl.ttl_sec, entry_ts, bus)
+                        self._register_ttl_batch(driver, self.state, stocks, nid, f"node_ttl:{nid}", node_ttl.ttl_sec, now_val, bus)
+
+    def _register_ttl_batch(self, driver, state, stocks, owner_id, ttl_key, ttl_sec, now_val, bus):
+        """对 ``stocks`` 批量注册 TTL 规约（边 TTL 与节点 TTL 共享循环体）。"""
+        from .execution_module import register_ttl_spec, _stock_entry_time
+        for stock in stocks:
+            if isinstance(stock, dict):
+                code = stock.get("code", "")
+                if code:
+                    entry_ts = _stock_entry_time(stock) or now_val
+                    register_ttl_spec(driver, state, owner_id, ttl_key, code, ttl_sec, entry_ts, bus)
 
     def _mark_source_nodes_dirty(self) -> None:
         """首次运行时将源节点（modules.json 中 type=source）与带初始股票的状态池标脏，驱动初始边执行。"""

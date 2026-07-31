@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 
 from core.event_bus import (
     _BaseModule,
+    _event_handler,
     DataChanged,
     EventBus,
     ModeChanged,
@@ -121,12 +122,6 @@ def _parse_bar_dt(s: str) -> Optional[datetime]:
 
 
 # 仿真器辅助函数与数据类（原 core/simulator.py）
-def _scode(s):
-    if isinstance(s, dict):
-        return s.get("code", s.get("label", ""))
-    return str(s)
-
-
 class _SimTick(NamedTuple):
     """仿真层轻量 Tick 数据结构（Task 4.4：解耦 services.minute_aggregator）。
 
@@ -322,6 +317,7 @@ class KLineReplayEngine:
             except Exception as ex:
                 logger.warning("KLineReplayEngine 订阅 ReplayStarted 失败: %s", ex)
 
+    @_event_handler("_on_replay_started")
     def _on_replay_started(self, event: ReplayStarted) -> None:
         """Task 24+（Item 3）：ReplayStarted 事件订阅者。
 
@@ -1254,7 +1250,7 @@ class RuntimeSimulator:
         if self._mode_state:
             for stocks in self._mode_state.get("node_stocks", {}).values():
                 for s in stocks:
-                    codes.add(_scode(s))
+                    codes.add(_stock_code(s))
         if not codes:
             for i in range(1, self._SIM_FZ_CODE_COUNT + 1):
                 codes.add(f"fz{i:06d}")
@@ -1386,7 +1382,7 @@ class RuntimeSimulator:
         if self._mode_state:
             for stocks in self._mode_state.get("node_stocks", {}).values():
                 for s in stocks:
-                    code = _scode(s)
+                    code = _stock_code(s)
                     if code:
                         codes.add(_normalize_to_fz(code))
         return sorted(codes)
@@ -1734,7 +1730,7 @@ class RuntimeSimulator:
         ns = self._mode_state.get("node_stocks", {}) if self._mode_state else {}
         for nid, stocks in ns.items():
             if isinstance(stocks, list) and stocks:
-                codes = [_scode(s) for s in stocks[:5]]
+                codes = [_stock_code(s) for s in stocks[:5]]
                 logger.info("tick=%d node_id=%s stock_count=%d sample=%s",
                              tick_seq, nid, len(stocks), codes)
 
@@ -2405,13 +2401,6 @@ class DirtyState:
         return self.data
 
 
-def _extract_code(s: Any) -> str:
-    """从股票对象提取代码：dict 取 code（fallback label），其余 str()。"""
-    if isinstance(s, dict):
-        return str(s.get('code', s.get('label', '')))
-    return str(s)
-
-
 class StatePoolView:
     """状态池视图：脏股票在 tick 表变更列（state.dirty.changed_codes），本类是访问接口。"""
 
@@ -2423,20 +2412,20 @@ class StatePoolView:
         return list(self._state.node_stocks.get(self._nid, []))
 
     def get_stock_codes(self) -> Set[str]:
-        return {_extract_code(s) for s in self._state.node_stocks.get(self._nid, [])}
+        return {_stock_code(s) for s in self._state.node_stocks.get(self._nid, [])}
 
     def get_dirty_codes(self) -> Set[str]:
         return set(self._state.get_changed_codes()) & self.get_stock_codes()
 
     def add_stocks(self, stocks: List[Any]) -> None:
         self._state.node_stocks.setdefault(self._nid, []).extend(stocks)
-        self._state.add_changed_codes({_extract_code(s) for s in stocks})
+        self._state.add_changed_codes({_stock_code(s) for s in stocks})
 
     def remove_stocks(self, codes: List[Any]) -> None:
-        code_set = {_extract_code(c) for c in codes}
+        code_set = {_stock_code(c) for c in codes}
         self._state.node_stocks[self._nid] = [
             s for s in self._state.node_stocks.get(self._nid, [])
-            if _extract_code(s) not in code_set
+            if _stock_code(s) not in code_set
         ]
         self._state.add_changed_codes(code_set)
 

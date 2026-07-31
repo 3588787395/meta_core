@@ -1,9 +1,11 @@
-"""metatest v6 21 维量化评分引擎（MetaDispatcher 统一 + 运行时验证 + 跨模块 import + adapter 转发同构）。
+"""metatest v10 21 维量化评分引擎（MetaDispatcher 统一 + 运行时验证 + 跨模块 import + adapter 转发同构 + handler 异常保护覆盖）。
 
-按「converge-meta-essence-v6-adapter-forwarding」spec 实现 21 维加权评分，
+按「converge-meta-essence-v10-handler-exception-coverage」spec 实现 21 维加权评分，
 所有评分完全由 ``test_results`` 字段计算，禁止硬编码信用分。v6 在 v5 20 维基础上
 新增第 21 维 adapter_isomorphism（TqProvider/TqSdkBridge 转发表驱动覆盖率），
 v5 20 维权重等比降权 4%（每维 × 0.96），新增 1 维占 4%，权重总和 = 1.0。
+v10 不新增维度（避免权重重分配），在 isomorphism_elimination 维度（40 项）中新增
+1 项 handler_exception_coverage 检查（41 项），0 违规满分。
 
   维度                         权重    评分逻辑
   ─────────────────────────── ────── ──────────────────────────────────────
@@ -14,7 +16,7 @@ v5 20 维权重等比降权 4%（每维 × 0.96），新增 1 维占 4%，权重
   performance_benchmark        4.0%   1000 tick 耗时 ≤10s 满分，线性衰减
   frontend_e2e_pass_rate       5.6%   前端 E2E 真实通过数 / 总数 * 100（环境缺失给最低达标线 80）
   logic_coverage               4.0%   5 项底层逻辑验证通过数 / 5 * 100
-  isomorphism_elimination      7.2%   40 项同构代码 Grep 检查，0 违规满分
+  isomorphism_elimination      7.2%   41 项同构代码 Grep/AST 检查（v10 含 handler_exception_coverage），0 违规满分
   line_convergence             4.0%   核心模块总行数 ≤ 22500 满分，线性衰减
   rule_compliance              2.4%   RULES 91-100 Grep 违规数 / 10，0 违规满分
   negative_test_coverage       1.6%   4 类反测试用例数 / 目标数（每类 ≥ 8）均值 * 100
@@ -106,8 +108,8 @@ REDO_THRESHOLD: float = 80.0
 #: 底层逻辑验证项总数（5 项：水位线/编译-运行分离/三要素/角色表/正交化）
 LOGIC_COVERAGE_TOTAL: int = 5
 
-#: 同构代码检查项总数（v4 从 v3 的 15 扩展到 40：v3 15 + 阶段 1 DZH/TDX 25 + 阶段 3 core 25，取核心 40 项）
-ISOMORPHISM_CHECKS_TOTAL: int = 40
+#: 同构代码检查项总数（v10：41 项 = v4 40 项 + v10 handler_exception_coverage 1 项）
+ISOMORPHISM_CHECKS_TOTAL: int = 41
 
 #: 核心模块行数收敛目标（v4 从 v3 的 23000 调整为 22500，Data + Dispatcher 净减后行数）
 CORE_LINES_TARGET: int = 22500
@@ -164,7 +166,7 @@ class ScoringEngine:
             "logic_coverage_passed": 5,
             "logic_coverage_total": 5,
             "isomorphism_violations": 0,
-            "isomorphism_total_checks": 40,
+            "isomorphism_total_checks": 41,
             "core_total_lines": 22000,
             "core_lines_target": 22500,
             "rule_violations": 0,
@@ -217,7 +219,7 @@ class ScoringEngine:
         ("performance_benchmark", 0.0384),    # 性能基准（v5 4%→3.84%）
         ("frontend_e2e_pass_rate", 0.05376),  # 前端 E2E 真实通过率（v5 5.6%→5.376%）
         ("logic_coverage", 0.0384),           # 底层逻辑覆盖度（v5 4%→3.84%）
-        ("isomorphism_elimination", 0.06912), # 同构代码消除度（v5 7.2%→6.912%，40 项）
+        ("isomorphism_elimination", 0.06912), # 同构代码消除度（v5 7.2%→6.912%，v10 41 项含 handler_exception_coverage）
         ("line_convergence", 0.0384),         # 核心模块行数收敛（v5 4%→3.84%，目标 22500）
         ("rule_compliance", 0.02304),         # RULES 91-100 合规（v5 2.4%→2.304%）
         ("negative_test_coverage", 0.01536),  # 4 类反测试覆盖度（v5 1.6%→1.536%）
@@ -257,8 +259,8 @@ class ScoringEngine:
                 - frontend_e2e_env_missing: bool (环境未就绪)
                 - logic_coverage_passed: int (5 项底层逻辑通过数)
                 - logic_coverage_total: int (5)
-                - isomorphism_violations: int (40 项 Grep 违规数)
-                - isomorphism_total_checks: int (40)
+                - isomorphism_violations: int (41 项 Grep/AST 违规数)
+                - isomorphism_total_checks: int (41)
                 - core_total_lines: int (核心模块总行数，wc -l core/*.py 实测)
                 - core_lines_target: int (目标行数 22500)
                 - rule_violations: int (RULES 91-100 Grep 违规数)
@@ -440,10 +442,12 @@ class ScoringEngine:
         return score, detail
 
     def _score_isomorphism_elimination(self, results: Dict[str, Any]) -> Tuple[float, str]:
-        """同构代码消除度：40 项 Grep 验证，0 违规满分。
+        """同构代码消除度：41 项 Grep/AST 验证，0 违规满分。
 
         v4 检查项从 v3 的 15 扩展到 40（v3 15 + 阶段 1 DZH/TDX 25 + 阶段 3 core 25，
-        取核心 40 项）。每项违规扣 100/40 分，最低 0 分。
+        取核心 40 项）。v10 新增第 41 项 handler_exception_coverage 检查（手动 subscribe
+        的 handler 必须使用 ``@_event_handler`` 装饰，防止异常中断 EventBus.publish
+        同步扇出链）。每项违规扣 100/41 分，最低 0 分。
         """
         violations = int(results.get("isomorphism_violations", 0) or 0)
         total_checks = int(results.get("isomorphism_total_checks", ISOMORPHISM_CHECKS_TOTAL) or ISOMORPHISM_CHECKS_TOTAL)

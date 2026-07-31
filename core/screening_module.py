@@ -46,6 +46,7 @@ from .domain import (
     _TDX_NPERIOD_TO_PERIOD, _nperiod_to_period,
     # intersection evaluator（已迁移至 domain，re-export 保持向后兼容）
     evaluate_intersection,
+    _stock_code,
 )
 
 
@@ -150,10 +151,6 @@ def _compute_derived_field(tq_field: str, snap: dict) -> float | None:
     return _eval_derived_expr(cfg["expr"], snap, cfg.get("guard"))
 
 
-def _extract_code(stock) -> str:
-    if isinstance(stock, str): return stock
-    if isinstance(stock, dict): return stock.get("code", stock.get("Code", ""))
-    return str(stock)
 def _get_float(data, *fields) -> float | None:
     if data is None: return None
     for f in fields:
@@ -242,7 +239,7 @@ def eval_formula_nset(action_inputs: dict, nset_cfg: dict) -> list[str]:
             "nset=%d 排名模式(noperate=%d)需要线数据，"
             "FormulaRouter.eval_batch 无法支持", nset, noperate)
         return []
-    symbols = [_extract_code(s) for s in stock_list if _extract_code(s)]
+    symbols = [_stock_code(s) for s in stock_list if _stock_code(s)]
     if not symbols:
         return []
     # 透传前端配置的公式参数（如 MACD 的 SHORT/LONG/MID）与动态分析周期
@@ -363,7 +360,7 @@ def eval_scalar_nset(action_inputs: dict, nset_cfg: dict, prev_lookup: Callable[
         actual_tq_field = tq_field
     market_data_port = action_inputs.get("market_data_port")
     stock_list = action_inputs.get("stock_list", [])
-    symbols = [_extract_code(s) for s in stock_list if _extract_code(s)]
+    symbols = [_stock_code(s) for s in stock_list if _stock_code(s)]
     if not symbols:
         return []
     data_method_name = nset_cfg.get("data_method")
@@ -444,7 +441,7 @@ def eval_nset5_set_operation(action_inputs: dict) -> list[str]:
     node_stocks = action_inputs.get("node_stocks", {})
     sid, tid = action_inputs.get("sid", ""), action_inputs.get("tid", "")
     edges = action_inputs.get("edges", [])
-    source_stocks = {_extract_code(s) for s in action_inputs.get("stock_list", []) if _extract_code(s)}
+    source_stocks = {_stock_code(s) for s in action_inputs.get("stock_list", []) if _stock_code(s)}
     target_in_edges = [e for e in edges if (e.get("to", "") or e.get("target", {}).get("node_id", "")) == tid]
     if len(target_in_edges) <= 1:
         if ntjindexno == 2:  # intersection with nothing = empty
@@ -455,7 +452,7 @@ def eval_nset5_set_operation(action_inputs: dict) -> list[str]:
         edge_from = edge.get("from", "") or edge.get("source", {}).get("node_id", "")
         if edge_from and edge_from != sid:
             other_raw = node_stocks.get(edge_from, [])
-            other_stocks |= {_extract_code(s) for s in other_raw if _extract_code(s)}
+            other_stocks |= {_stock_code(s) for s in other_raw if _stock_code(s)}
     op = _NSET5_OPS.get(ntjindexno)
     return list(op(source_stocks, other_stocks) if op else source_stocks)
 
@@ -814,7 +811,6 @@ __all__ = [
     "_apply_noperate",
     "_build_formula_arg",
     "_compute_derived_field",
-    "_extract_code",
     "_get_float",
     "_eval_derived_expr",
     "_NOPERATE_RULES",

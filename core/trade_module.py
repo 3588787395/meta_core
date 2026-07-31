@@ -1038,6 +1038,7 @@ class SignalDeriver:
         self._roles = node_roles_config
         self._bus.subscribe(StockChanged, self._on_stock_changed)
 
+    @_event_handler("_on_stock_changed")
     def _on_stock_changed(self, event: StockChanged):
         """Derive signal from stock change based on node role."""
         node_id = event.node_id
@@ -1070,6 +1071,7 @@ class ActionDispatcher:
         self._action_table = action_table
         self._bus.subscribe(Signal, self._on_signal)
 
+    @_event_handler("_on_signal")
     def _on_signal(self, signal: Signal):
         """Execute actions for signal."""
         actions = self._action_table.get(signal.signal_type, [])
