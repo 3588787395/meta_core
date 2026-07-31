@@ -32,6 +32,7 @@ from core.event_bus import (
 )
 from core.domain import ActionSpec
 from core.domain import get_global_config_store
+from core.domain import _classify_market_by_code
 
 logger = logging.getLogger(__name__)
 
@@ -70,12 +71,11 @@ def _get_stock_name(market, code):
 
 
 def _code_to_market(code):
-    if not code:
-        return 0
-    c = code.strip()
-    if c.startswith(('6', '9')) and len(c) == 6:
-        return 2 if c.startswith('920') or c.startswith('8') else 1
-    return 0
+    """股票代码 → 市场 setcode（委托 core.domain._classify_market_by_code，Task 19 V4）。
+
+    修复历史遗漏的 ``4`` 前缀（北交所旧代码 430xxx）：现归 2(BJ)。
+    """
+    return _classify_market_by_code(code)
 
 
 def _normalize_code(code):

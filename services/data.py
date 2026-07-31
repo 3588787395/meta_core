@@ -29,6 +29,8 @@ import pandas as pd
 from .storage import Storage, IStorageQuery
 from .providers import AkShareProvider, DataSourceError
 from .providers import TqDllProvider
+from converters_common import safe_cast
+from core.domain import SETCODE_MARKET_MAP, _classify_market_by_code
 
 try:
     from ..core.event_bus import EventBus, ModeChanged, PoolLoaded, TickReceived
@@ -37,6 +39,29 @@ except ImportError:  # services 作为顶层包导入时回退到绝对导入
 
 # === DataQuery ===
 logger = logging.getLogger(__name__)
+
+
+def _build_member_entries(members, default_market: str = 'SZ') -> list:
+    """构建成分股 entries：从 members 提取 code/setcode，用 SETCODE_MARKET_MAP 映射市场前缀，
+    生成 ``{'stock_code': stock_code, 'weight': weight}`` 列表（Task 18 V3）。
+
+    members 元素为 dict，取 ``code`` / ``setcode`` / ``weight``（缺失 weight 默认 1.0）；
+    空 code 跳过；setcode 缺失时回退 default_market。
+    """
+    member_entries = []
+    for m in members:
+        code = m.get('code', '')
+        if not code:
+            continue
+        setcode = m.get('setcode')
+        if setcode is not None:
+            market_prefix = SETCODE_MARKET_MAP.get(setcode, default_market)
+        else:
+            market_prefix = default_market
+        stock_code = f"{market_prefix}{code}"
+        member_entries.append({'stock_code': stock_code, 'weight': m.get('weight', 1.0)})
+    return member_entries
+
 
 _MINUTE_PERIODS = ("1m", "5m", "15m", "30m", "60m")
 _DAILY_PERIODS = ("1d", "1wk", "1mon")
@@ -1490,19 +1515,12 @@ class DataSyncService:
                 if market and not code.startswith(market):
                     stock_code = f"{market}{code}"
                 elif setcode is not None:
-                    market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-                    market_prefix = market_map.get(setcode, '')
+                    market_prefix = SETCODE_MARKET_MAP.get(setcode, '')
                     stock_code = f"{market_prefix}{code}" if market_prefix else code
                 else:
-                    # 根据代码前缀推断市场
-                    if code.startswith('6'):
-                        stock_code = f"SH{code}"
-                    elif code.startswith(('0', '3')):
-                        stock_code = f"SZ{code}"
-                    elif code.startswith(('4', '8')):
-                        stock_code = f"BJ{code}"
-                    else:
-                        stock_code = f"SZ{code}"
+                    # 根据代码前缀推断市场（表驱动，Task 19 V4）
+                    market_prefix = SETCODE_MARKET_MAP.get(_classify_market_by_code(code), 'SZ')
+                    stock_code = f"{market_prefix}{code}"
 
                 stocks_data.append({
                     'stock_code': stock_code,
@@ -1617,26 +1635,12 @@ class DataSyncService:
             hs300_members = []
             cs500_members = []
 
-            for stock in all_stocks:
-                code = stock.get('code', '')
-                name = stock.get('name', '')
-
-                # 构建标准 stock_code
-                setcode = stock.get('setcode', 0)
-                market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-                market_prefix = market_map.get(setcode, 'SZ')
-                stock_code = f"{market_prefix}{code}"
-
-                member_entry = {
-                    'stock_code': stock_code,
-                    'weight': stock.get('weight', 1.0),
-                }
-
-                # 简单分类逻辑：实际应通过API分别获取两个指数的成分股
-                # 这里使用简化逻辑：先获取的为HS300，后获取的为CS500
-                # 实际应用中建议分别调用 index_stock_cons_hs300 和 index_stock_cons_cs500
-                hs300_members.append(member_entry)
-                cs500_members.append(member_entry)
+            # 构建标准 stock_code（_build_member_entries 内部统一映射，Task 18 V3）
+            # 简单分类逻辑：实际应通过API分别获取两个指数的成分股；
+            # 这里使用简化逻辑：同一批成分股同时写入 HS300 与 CS500。
+            entries = _build_member_entries(all_stocks)
+            hs300_members.extend(entries)
+            cs500_members.extend(entries)
 
             # 4. 写入 sector_members 表
             hs300_count = self._storage.upsert_sector_members('index_hs300', hs300_members)
@@ -1738,18 +1742,7 @@ class DataSyncService:
                 members = sec.get('members', [])
 
                 if members:
-                    member_entries = []
-                    for m in members:
-                        code = m.get('code', '')
-                        setcode = m.get('setcode', 0)
-                        market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-                        market_prefix = market_map.get(setcode, 'SZ')
-                        stock_code = f"{market_prefix}{code}"
-
-                        member_entries.append({
-                            'stock_code': stock_code,
-                            'weight': m.get('weight', 1.0),
-                        })
+                    member_entries = _build_member_entries(members)
 
                     count = self._storage.upsert_sector_members(sector_id, member_entries)
                     total_members += count
@@ -2004,21 +1997,7 @@ class DataSyncService:
                 try:
                     members_raw = await provider.get_stock_list_in_sector(sector_code)
 
-                    member_entries = []
-                    for m in members_raw:
-                        code = m.get('code', '')
-                        if not code:
-                            continue
-
-                        setcode = m.get('setcode', 0)
-                        market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-                        market_prefix = market_map.get(setcode, 'SZ')
-                        stock_code = f"{market_prefix}{code}"
-
-                        member_entries.append({
-                            'stock_code': stock_code,
-                            'weight': 1.0,
-                        })
+                    member_entries = _build_member_entries(members_raw)
 
                     if member_entries:
                         count = self._storage.upsert_sector_members(sector_id, member_entries)
@@ -2115,21 +2094,7 @@ class DataSyncService:
                 try:
                     members = await provider.get_ths_concept_stocks(symbol)
 
-                    member_entries = []
-                    for m in members:
-                        code = m.get('code', '')
-                        if not code:
-                            continue
-
-                        setcode = m.get('setcode', 0)
-                        market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-                        market_prefix = market_map.get(setcode, 'SZ')
-                        stock_code = f"{market_prefix}{code}"
-
-                        member_entries.append({
-                            'stock_code': stock_code,
-                            'weight': 1.0,
-                        })
+                    member_entries = _build_member_entries(members)
 
                     if member_entries:
                         count = self._storage.upsert_sector_members(sector_id, member_entries)
@@ -2222,16 +2187,7 @@ class DataSyncService:
                     try:
                         members = await provider.get_em_industry_stocks(symbol)
 
-                        member_entries = []
-                        for m in members:
-                            code = m.get('code', '')
-                            if not code:
-                                continue
-                            setcode = m.get('setcode', 0)
-                            market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-                            market_prefix = market_map.get(setcode, 'SZ')
-                            stock_code = f"{market_prefix}{code}"
-                            member_entries.append({'stock_code': stock_code, 'weight': 1.0})
+                        member_entries = _build_member_entries(members)
 
                         if member_entries:
                             cnt = self._storage.upsert_sector_members(sector_id, member_entries)
@@ -2270,16 +2226,7 @@ class DataSyncService:
                     try:
                         members = await provider.get_em_concept_stocks(symbol)
 
-                        member_entries = []
-                        for m in members:
-                            code = m.get('code', '')
-                            if not code:
-                                continue
-                            setcode = m.get('setcode', 0)
-                            market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-                            market_prefix = market_map.get(setcode, 'SZ')
-                            stock_code = f"{market_prefix}{code}"
-                            member_entries.append({'stock_code': stock_code, 'weight': 1.0})
+                        member_entries = _build_member_entries(members)
 
                         if member_entries:
                             cnt = self._storage.upsert_sector_members(sector_id, member_entries)
@@ -2730,16 +2677,6 @@ class MarketDataPort(ABC):
         pass
 
 
-def _to_float(value: Any) -> Optional[float]:
-    """安全转换为 float，失败返回 None。"""
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
 class TqAdapterMarketDataPort(MarketDataPort):
     """MarketDataPort 的 TqAdapter 适配器实现。
 
@@ -2762,8 +2699,8 @@ class TqAdapterMarketDataPort(MarketDataPort):
             if record is None:
                 return None
             if isinstance(record, dict):
-                return _to_float(record.get(field))
-            return _to_float(record)
+                return safe_cast(record.get(field), float, None)
+            return safe_cast(record, float, None)
         except Exception:
             return None
 
@@ -2778,8 +2715,8 @@ class TqAdapterMarketDataPort(MarketDataPort):
             if record is None:
                 return None
             if isinstance(record, dict):
-                return _to_float(record.get(field))
-            return _to_float(record)
+                return safe_cast(record.get(field), float, None)
+            return safe_cast(record, float, None)
         except Exception:
             return None
 
@@ -2801,9 +2738,9 @@ class TqAdapterMarketDataPort(MarketDataPort):
                 result[s] = None
                 continue
             if isinstance(record, dict):
-                result[s] = _to_float(record.get(field))
+                result[s] = safe_cast(record.get(field), float, None)
             else:
-                result[s] = _to_float(record)
+                result[s] = safe_cast(record, float, None)
         return result
 
     async def get_market_scalars_batch(
@@ -2824,9 +2761,9 @@ class TqAdapterMarketDataPort(MarketDataPort):
                 result[s] = None
                 continue
             if isinstance(record, dict):
-                result[s] = _to_float(record.get(field))
+                result[s] = safe_cast(record.get(field), float, None)
             else:
-                result[s] = _to_float(record)
+                result[s] = safe_cast(record, float, None)
         return result
 
 # === 备选池解析层（自 services/candidate_pool.py 合并）===
@@ -4627,8 +4564,7 @@ class CandidatePoolResolver:
             股票名称字符串，获取失败返回空字符串
         """
         # 构造标准 stock_code
-        market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-        market = market_map.get(setcode, 'SZ')
+        market = SETCODE_MARKET_MAP.get(setcode, 'SZ')
         stock_code = f"{market}{code}"
 
         # 尝试从数据库查询（如果有相关接口）
@@ -5903,14 +5839,13 @@ class CandidatePoolRefreshManager:
         Returns:
             [{'stock_code': 'SH600000'}, ...]
         """
-        market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
         members = []
         for s in stocks:
             code = s.get('code', '')
             if not code:
                 continue
             setcode = s.get('setcode', 0)
-            market = market_map.get(setcode, 'SZ')
+            market = SETCODE_MARKET_MAP.get(setcode, 'SZ')
             members.append({'stock_code': f"{market}{code}"})
         return members
 

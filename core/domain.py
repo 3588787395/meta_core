@@ -1100,6 +1100,28 @@ def _load_market_cfg() -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
 _MARKET_PREFIXES, _MARKET_SUFFIXES = _load_market_cfg()
 
 
+#: cell.setcode → 市场简称映射（市场映射单一真相源，Task 17 V2 / Task 19 V4）。
+SETCODE_MARKET_MAP: Dict[int, str] = {0: "SZ", 1: "SH", 2: "BJ"}
+
+
+def _classify_market_by_code(code: Any) -> int:
+    """根据股票代码前缀推断市场 setcode：``0/3→0``(SZ)、``6→1``(SH)、``4/8/9→2``(BJ)。
+
+    修复 ``core/trade_module._code_to_market`` 遗漏 ``4`` 前缀（北交所旧代码 430xxx）
+    的缺口；``920xxx`` 等 ``9`` 前缀归北交所。未知前缀回退 0(SZ)。
+    """
+    if not code:
+        return 0
+    c = str(code).strip()
+    if c.startswith("6"):
+        return 1
+    if c.startswith(("0", "3")):
+        return 0
+    if c.startswith(("4", "8", "9")):
+        return 2
+    return 0
+
+
 def _stock_code(s: Any) -> str:
     """从股票对象提取代码：dict 取 code（fallback label），其余 str()。
 
@@ -1664,6 +1686,8 @@ __all__ = [
     "_lookup_builtin_script", "_lookup_builtin_formula_info",
     # tick_source
     "TickSource", "RealTickSource", "MockDataSource", "_normalize_to_fz", "is_fz_code",
+    # market code classification (Task 17 V2 / Task 19 V4)
+    "SETCODE_MARKET_MAP", "_classify_market_by_code",
     # utilities
     "_hash_tick",
     # time utilities

@@ -59,6 +59,7 @@ from core.domain import (
     _resolve_rank,
     _NOPERATE_RULES,
     _RANK_MODES,
+    SETCODE_MARKET_MAP,
 )
 from core.table_engine import get_global_config_store
 
@@ -69,101 +70,6 @@ logger = logging.getLogger(__name__)
 # BasePoolConverter / DzhPoolConverter / TdxPoolConverter
 # 合并 DZH/TDX 同构解析与序列化逻辑（Task 1: 变更 P1 — meta-pattern convergence）
 # ======================================================================
-
-class _StkIO:
-    """股票子元素解析混入：合并 _parse_stk_children(DZH) 与 _parse_stk_elements(TDX)。"""
-
-    @staticmethod
-    def parse_stks(cell_elem, *, fmt="dzh"):
-        stks = []
-        for stk_elem in cell_elem.findall("stk"):
-            if fmt == "tdx":
-                d = {}
-                for k, v in stk_elem.attrib.items():
-                    d[k] = safe_int(v, 0) if k == "setcode" else v
-                stks.append(d)
-            else:
-                s = {"label": stk_elem.get("label", ""),
-                     "t": stk_elem.get("t", ""),
-                     "p": stk_elem.get("p", "")}
-                tid = stk_elem.get("tid")
-                if tid:
-                    s["tid"] = tid
-                hist = stk_elem.find("hist")
-                if hist is not None:
-                    s["hist"] = {"t": hist.get("t", ""), "p": hist.get("p", "")}
-                ana = stk_elem.find("ana")
-                if ana is not None:
-                    s["ana"] = {"label": ana.get("label", ""),
-                                "t": ana.get("t", ""),
-                                "p": ana.get("p", "")}
-                stks.append(s)
-        return stks
-
-
-class _StkWriter:
-    """股票子元素写入混入：合并 _export_field_stocks(DZH) 与 _add_stks(TDX)。"""
-
-    _TDX_STK_RUNTIME_FIELDS = ("indate", "intime", "inprice", "income", "now",
-                               "rise", "volume", "maxrate", "maxperiod",
-                               "maxtime", "maxprice", "idaynum")
-
-    @classmethod
-    def write_stks(cls, cell_elem, source, *, fmt="dzh"):
-        if fmt == "tdx":
-            stocks = (getattr(source, "tdx_stocks", None)
-                      or getattr(source, "stocks", None)
-                      or getattr(source, "stk_list", None))
-            if not stocks or not isinstance(stocks, list):
-                return
-            for s in stocks:
-                el = ET.SubElement(cell_elem, "stk")
-                setcode_val = getattr(s, "setcode", None)
-                code_val = getattr(s, "code", None)
-                if setcode_val is not None and code_val is not None:
-                    el.set("setcode", str(setcode_val))
-                    el.set("code", str(code_val))
-                    for f in cls._TDX_STK_RUNTIME_FIELDS:
-                        fv = getattr(s, f, None)
-                        if fv is not None and str(fv) not in ("", "0", "0.00"):
-                            el.set(f, str(fv))
-                else:
-                    code = getattr(s, "tid", None) or getattr(s, "label", None) or ""
-                    el.set("setcode", str(_stock_setcode(code)))
-                    el.set("code", code)
-        else:
-            _orig = source.get("_orig_stks")
-            stocks = _orig if _orig is not None else source.get("stocks")
-            if not stocks or not isinstance(stocks, list):
-                return
-            for s in stocks:
-                stk = ET.SubElement(cell_elem, "stk")
-                stk.text = None
-                stk.tail = None
-                stk.set("label", s.get("label", ""))
-                stk.set("t", s.get("t", ""))
-                stk.set("p", s.get("p", ""))
-                tid = s.get("tid")
-                if tid is not None:
-                    stk.set("tid", str(tid))
-                hists = s.get("hist")
-                if hists and isinstance(hists, list):
-                    for h in hists:
-                        he = ET.SubElement(stk, "hist")
-                        he.text = None
-                        he.tail = None
-                        for hk, hv in h.items():
-                            if hv is not None:
-                                he.set(hk, str(hv))
-                ana_data = s.get("ana")
-                if ana_data and isinstance(ana_data, dict):
-                    ae = ET.SubElement(stk, "ana")
-                    ae.text = None
-                    ae.tail = None
-                    for ak, av in ana_data.items():
-                        if av is not None:
-                            ae.set(ak, str(av))
-
 
 class BasePoolConverter(ABC):
     """DZH/TDX 股票池转换器基类：合并 4 组同构逻辑。
@@ -279,6 +185,62 @@ class BasePoolConverter(ABC):
         """将 parse 结果转为前端可用结构。默认透传，由子类按需覆盖。"""
         return result
 
+    # ---- 8. 股票子元素解析/写入钩子（G2：默认 DZH 分支；TDX 子类覆盖）----
+    def _parse_stks(self, cell_elem) -> list:
+        """解析 <cell> 内所有 <stk> 子元素为 dict 列表。默认 DZH 分支。"""
+        stks = []
+        for stk_elem in cell_elem.findall("stk"):
+            s = {"label": stk_elem.get("label", ""),
+                 "t": stk_elem.get("t", ""),
+                 "p": stk_elem.get("p", "")}
+            tid = stk_elem.get("tid")
+            if tid:
+                s["tid"] = tid
+            hist = stk_elem.find("hist")
+            if hist is not None:
+                s["hist"] = {"t": hist.get("t", ""), "p": hist.get("p", "")}
+            ana = stk_elem.find("ana")
+            if ana is not None:
+                s["ana"] = {"label": ana.get("label", ""),
+                            "t": ana.get("t", ""),
+                            "p": ana.get("p", "")}
+            stks.append(s)
+        return stks
+
+    def _write_stks(self, cell_elem, source) -> None:
+        """写入 stk 子元素（含 hist/ana）。默认 DZH 分支。"""
+        _orig = source.get("_orig_stks")
+        stocks = _orig if _orig is not None else source.get("stocks")
+        if not stocks or not isinstance(stocks, list):
+            return
+        for s in stocks:
+            stk = ET.SubElement(cell_elem, "stk")
+            stk.text = None
+            stk.tail = None
+            stk.set("label", s.get("label", ""))
+            stk.set("t", s.get("t", ""))
+            stk.set("p", s.get("p", ""))
+            tid = s.get("tid")
+            if tid is not None:
+                stk.set("tid", str(tid))
+            hists = s.get("hist")
+            if hists and isinstance(hists, list):
+                for h in hists:
+                    he = ET.SubElement(stk, "hist")
+                    he.text = None
+                    he.tail = None
+                    for hk, hv in h.items():
+                        if hv is not None:
+                            he.set(hk, str(hv))
+            ana_data = s.get("ana")
+            if ana_data and isinstance(ana_data, dict):
+                ae = ET.SubElement(stk, "ana")
+                ae.text = None
+                ae.tail = None
+                for ak, av in ana_data.items():
+                    if av is not None:
+                        ae.set(ak, str(av))
+
 
 class DzhPoolConverter(BasePoolConverter):
     """DZH 股票池转换器：GB18030 优先解码 + DZH pos(dict) + 编码声明清洗。"""
@@ -389,7 +351,7 @@ class DzhPoolConverter(BasePoolConverter):
             }
             ct_val = safe_int(cell_elem.get("type"), 0)
             if ct_val in (102, 103, 104, 200, 203):
-                raw_cells[cid]["stocks"] = _parse_stk_children(cell_elem)
+                raw_cells[cid]["stocks"] = self._parse_stks(cell_elem)
                 raw_cells[cid]["anas"] = _parse_ana_children(cell_elem)
                 raw_cells[cid]["tradeattr"] = _parse_tradeattr(cell_elem)
 
@@ -787,8 +749,45 @@ class TdxPoolConverter(BasePoolConverter):
     def add_spinfo(self, cell_elem, cell):
         self._add_element(cell_elem, cell, "tdx_spinfo", TdxSpinfoModel, "spinfo")
 
+    _TDX_STK_RUNTIME_FIELDS = ("indate", "intime", "inprice", "income", "now",
+                               "rise", "volume", "maxrate", "maxperiod",
+                               "maxtime", "maxprice", "idaynum")
+
+    def _parse_stks(self, cell_elem) -> list:
+        """TDX 分支：<stk> 以属性承载 setcode/code + 运行时字段。"""
+        stks = []
+        for stk_elem in cell_elem.findall("stk"):
+            d = {}
+            for k, v in stk_elem.attrib.items():
+                d[k] = safe_int(v, 0) if k == "setcode" else v
+            stks.append(d)
+        return stks
+
+    def _write_stks(self, cell_elem, source) -> None:
+        """TDX 分支：从 source 取 tdx_stocks/stocks/stk_list 写 setcode/code + 运行时字段。"""
+        stocks = (getattr(source, "tdx_stocks", None)
+                  or getattr(source, "stocks", None)
+                  or getattr(source, "stk_list", None))
+        if not stocks or not isinstance(stocks, list):
+            return
+        for s in stocks:
+            el = ET.SubElement(cell_elem, "stk")
+            setcode_val = getattr(s, "setcode", None)
+            code_val = getattr(s, "code", None)
+            if setcode_val is not None and code_val is not None:
+                el.set("setcode", str(setcode_val))
+                el.set("code", str(code_val))
+                for f in self._TDX_STK_RUNTIME_FIELDS:
+                    fv = getattr(s, f, None)
+                    if fv is not None and str(fv) not in ("", "0", "0.00"):
+                        el.set(f, str(fv))
+            else:
+                code = getattr(s, "tid", None) or getattr(s, "label", None) or ""
+                el.set("setcode", str(_stock_setcode(code)))
+                el.set("code", code)
+
     def add_stks(self, cell_elem, cell):
-        _StkWriter.write_stks(cell_elem, cell, fmt="tdx")
+        self._write_stks(cell_elem, cell)
 
     def decode_tdx_xml(self, raw_bytes):
         return self._decode_xml_bytes(raw_bytes, self.encoding_priority)
@@ -898,7 +897,7 @@ class TdxPoolConverter(BasePoolConverter):
                     cell_data["spinfo"] = _parse_spinfo_element(spinfo_elem)
 
                 # 子元素：stk（股票列表）
-                stks = _parse_stk_elements(cell_elem)
+                stks = self._parse_stks(cell_elem)
                 if stks:
                     cell_data["stks"] = stks
 
@@ -1315,7 +1314,7 @@ _TDX_CONVERTER = TdxPoolConverter()
 # _parse_stk_elements(cell_elem) 全部保留可调用。
 _decode_xml_content = _DZH_CONVERTER.decode_xml_content
 _parse_pos = _DZH_CONVERTER.parse_pos
-_parse_stk_children = _StkIO.parse_stks
+_parse_stk_children = _DZH_CONVERTER._parse_stks
 _decode_tdx_xml = _TDX_CONVERTER.decode_tdx_xml
 _parse_tdx_pos = _TDX_CONVERTER.parse_tdx_pos
 _parse_func_element = _TDX_CONVERTER.parse_func_element
@@ -1325,7 +1324,7 @@ _parse_spinfo_element = _TDX_CONVERTER.parse_spinfo_element
 
 def _parse_stk_elements(cell_elem: ET.Element) -> List[Dict[str, Any]]:
     """解析 <cell> 内的所有 <stk> 子元素（TDX 格式）。"""
-    return _StkIO.parse_stks(cell_elem, fmt="tdx")
+    return _TDX_CONVERTER._parse_stks(cell_elem)
 
 
 # ======================================================================
@@ -2883,117 +2882,6 @@ def _apply_condition_fallback(stock_list: List[Dict],
     return handler(stock_list, policy)
 
 
-class NodeStateMachine:
-    """节点状态机：维护每个状态池节点的股票集合与进出历史"""
-
-    def __init__(self):
-        self._stocks: Dict[str, Dict[str, Dict]] = {}
-        self._history: Dict[str, List[Dict]] = {}
-        self._lock = threading.RLock()
-
-    def ensure_node(self, node_id: str):
-        with self._lock:
-            if node_id not in self._stocks:
-                self._stocks[node_id] = {}
-                self._history[node_id] = []
-
-    def add_stock(self, node_id: str, code: str, data: Optional[Dict] = None,
-                  entry_time: Optional[float] = None):
-        self.ensure_node(node_id)
-        with self._lock:
-            et = entry_time if entry_time is not None else time.time()
-            old = self._stocks[node_id].get(code)
-            if old is not None:
-                old['data'] = data or old.get('data', {})
-                old['entry_time'] = et
-                return
-            self._stocks[node_id][code] = {
-                'code': code,
-                'entry_time': et,
-                'exit_time': None,
-                'data': data or {},
-            }
-            self._history[node_id].append({
-                'code': code,
-                'event': 'enter',
-                'timestamp': et,
-            })
-
-    def remove_stock(self, node_id: str, code: str,
-                     exit_time: Optional[float] = None) -> bool:
-        with self._lock:
-            if node_id not in self._stocks:
-                return False
-            xt = exit_time if exit_time is not None else time.time()
-            stock = self._stocks[node_id].pop(code, None)
-            if stock is not None:
-                self._history[node_id].append({
-                    'code': code,
-                    'event': 'exit',
-                    'timestamp': xt,
-                })
-                return True
-            return False
-
-    def get_stocks(self, node_id: str) -> Dict[str, Dict]:
-        with self._lock:
-            return dict(self._stocks.get(node_id, {}))
-
-    def get_stock_codes(self, node_id: str) -> List[str]:
-        with self._lock:
-            return list(self._stocks.get(node_id, {}).keys())
-
-    def get_history(self, node_id: str, limit: int = 0) -> List[Dict]:
-        with self._lock:
-            h = self._history.get(node_id, [])
-            if limit > 0:
-                return list(h[-limit:])
-            return list(h)
-
-    def clear_node(self, node_id: str):
-        with self._lock:
-            if node_id not in self._stocks:
-                return
-            xt = time.time()
-            for code in list(self._stocks[node_id].keys()):
-                self._stocks[node_id].pop(code, None)
-                self._history[node_id].append({
-                    'code': code,
-                    'event': 'exit',
-                    'timestamp': xt,
-                    'reason': 'clear',
-                })
-
-    def check_hold_expiry(self, node_id: str, hold_sec: int,
-                          current_time: Optional[float] = None) -> List[str]:
-        if hold_sec <= 0 or hold_sec >= 43200000:
-            return []
-        ct = current_time if current_time is not None else time.time()
-        removed = []
-        with self._lock:
-            for code, info in list(self._stocks.get(node_id, {}).items()):
-                entry_t = info.get('entry_time', 0)
-                if entry_t > 0 and (ct - entry_t) > hold_sec:
-                    self._stocks[node_id].pop(code, None)
-                    self._history[node_id].append({
-                        'code': code,
-                        'event': 'exit',
-                        'timestamp': ct,
-                        'reason': 'hold_expired',
-                        'hold_sec': hold_sec,
-                    })
-                    removed.append(code)
-        return removed
-
-    def get_all_node_codes(self) -> Dict[str, List[str]]:
-        with self._lock:
-            return {nid: list(s.keys()) for nid, s in self._stocks.items()}
-
-    def get_all_counts(self) -> Dict[str, int]:
-        with self._lock:
-            return {nid: len(s) for nid, s in self._stocks.items()}
-
-
 def should_trigger(flow: dict, current_time: Optional[datetime] = None) -> bool:
     """判断Flow是否应在当前时间触发（向后兼容封装）。"""
     if current_time is None:
@@ -3169,321 +3057,6 @@ def evaluate_condition(condition: dict, stocks: List[Dict],
         'attr': attr,
     }
 
-
-class DZHPoolExecutor:
-    """DZH股票池运行时执行器（增强版）
-
-    核心功能：
-    - 节点状态机：维护每个状态池的股票集合与进出历史
-    - Flow触发评估：时间窗口 + 定时器 + 自定义周期
-    - 4种转移模式：copy / move / overwrite / constituent
-    - 条件评估：基本/指标/排序/反向/板块/横向统计
-    """
-
-    def __init__(self, config: dict, tq_adapter=None, formula_router=None):
-        self.config = config
-        self.tq_adapter = tq_adapter
-        self.formula_router = formula_router
-        self.state = NodeStateMachine()
-        self._nodes: Dict[str, dict] = {}
-        self._edges: List[dict] = []
-        self._init_nodes_edges()
-
-    def _init_nodes_edges(self):
-        self._nodes = {}
-        for node in self.config.get('nodes', []):
-            nid = node.get('id')
-            if nid:
-                self._nodes[nid] = node
-                self.state.ensure_node(nid)
-        self._edges = self.config.get('edges', [])
-
-    def _get_node_hold_sec(self, node_id: str) -> int:
-        node = self._nodes.get(node_id)
-        if not node:
-            return DEFAULT_HOLD_SEC
-        return safe_int(node.get('params', {}).get('hold_sec'), DEFAULT_HOLD_SEC)
-
-    def _init_mock_stocks(self):
-        """初始化备选池的模拟股票数据（兼容旧版行为）"""
-        for node in self.config.get('nodes', []):
-            node_id = node.get('id')
-            if not node_id:
-                continue
-            node_type = node.get('type')
-            if node_type == 'market_source':
-                markets = node.get('params', {}).get('markets', [])
-                for market in markets[:3]:
-                    prefix = 'SH' if market.startswith('sh') else 'SZ'
-                    base_code = 600000 if prefix == 'SH' else 1
-                    for i in range(5):
-                        code = f"{prefix}{base_code + i:06d}"
-                        self.state.add_stock(
-                            node_id, code,
-                            {'name': f'模拟股{code}',
-                             'price': round(10.0 + i * 0.5, 2),
-                             'change_pct': round(random.uniform(-5, 5), 2)}
-                        )
-            elif node_type in ('dzh_condition_pool', 'discard_pool',
-                               'stock_state_pool', 'result_pool'):
-                # 从XML解析的初始股票加载
-                for s in node.get('params', {}).get('stocks', []):
-                    label = s.get('label', '')
-                    if label:
-                        self.state.add_stock(
-                            node_id, label,
-                            {'t': s.get('t', ''), 'p': s.get('p', '')}
-                        )
-
-    def _check_all_hold_expiry(self, current_time: Optional[float] = None):
-        ct = current_time if current_time is not None else time.time()
-        total_removed = 0
-        for node_id in list(self.state._stocks.keys()):
-            hold_sec = self._get_node_hold_sec(node_id)
-            removed = self.state.check_hold_expiry(node_id, hold_sec, ct)
-            if removed:
-                total_removed += len(removed)
-        return total_removed
-
-    def _resolve_transfer_condition(self, edge: dict) -> Optional[dict]:
-        """从edge的via_201或mid解析条件节点"""
-        params = edge.get('params', {})
-        via_201 = params.get('via_201')
-        if via_201:
-            return via_201
-        mid = params.get('mid')
-        if mid:
-            return self._nodes.get(mid)
-        return None
-
-    def _execute_edge(self, edge: dict) -> dict:
-        source = edge.get('source', {})
-        target = edge.get('target', {})
-        params = edge.get('params', {})
-
-        src_node_id = source.get('node_id')
-        tgt_node_id = target.get('node_id')
-        edge_id = edge.get('id', '?')
-
-        now_ts = time.time()
-        result = {
-            'edge_id': edge_id,
-            'source_node': src_node_id,
-            'target_node': tgt_node_id,
-            'passed': 0,
-            'rejected': 0,
-            'transferred': 0,
-            'mode': 'copy',
-            'flags_applied': [],
-            'enter_actions': [],
-            'exit_actions': [],
-            'error': None,
-        }
-
-        if not src_node_id or not tgt_node_id:
-            result['error'] = '源或目标节点ID缺失'
-            return result
-
-        src_node = self._nodes.get(src_node_id)
-        tgt_node = self._nodes.get(tgt_node_id)
-
-        if src_node_id not in self.state._stocks:
-            result['error'] = f'源节点不存在或为空: {src_node_id}'
-            return result
-
-        source_stocks = list(self.state.get_stocks(src_node_id).values())
-        source_codes = [s.get('code', '') for s in source_stocks]
-
-        # 板块展开：output_constituent
-        if params.get('output_constituent'):
-            expanded = []
-            for stock in source_stocks:
-                code = stock.get('code', '')
-                # 模拟板块展开：如果是板块代码则展开
-                if code.startswith('88') or 'sector' in code.lower() or 'concept' in code.lower():
-                    if self.tq_adapter and hasattr(self.tq_adapter, 'get_block_members'):
-                        try:
-                            members = self.tq_adapter.get_block_members(code)
-                            for m in members:
-                                expanded.append({'code': m, '_from_sector': code})
-                        except Exception:
-                            prefix = 'SH' if random.random() > 0.5 else 'SZ'
-                            base = random.choice([600, 1, 300])
-                            count = random.randint(3, 8)
-                            for i in range(count):
-                                expanded.append({
-                                    'code': f"{prefix}{base + i:06d}",
-                                    '_from_sector': code,
-                                })
-                    else:
-                        prefix = 'SH' if random.random() > 0.5 else 'SZ'
-                        base = random.choice([600, 1, 300])
-                        count = random.randint(3, 8)
-                        for i in range(count):
-                            expanded.append({
-                                'code': f"{prefix}{base + i:06d}",
-                                '_from_sector': code,
-                            })
-                else:
-                    expanded.append(dict(stock))
-            source_stocks = expanded
-            source_codes = [s.get('code', '') for s in source_stocks]
-            result['flags_applied'].append('output_constituent')
-
-        # 条件评估
-        condition = self._resolve_transfer_condition(edge)
-        is_discard = params.get('is_discard_path', False)
-        is_pass = params.get('is_pass_path', True)
-
-        if is_discard:
-            passed, rejected = [], list(source_stocks)
-        elif condition and not is_pass:
-            passed, rejected = [], list(source_stocks)
-        elif condition:
-            eval_result = evaluate_condition(
-                condition, source_stocks,
-                tq_adapter=self.tq_adapter,
-                all_codes=None,
-                formula_router=self.formula_router,
-            )
-            passed = eval_result.get('passed', [])
-            rejected = eval_result.get('rejected', [])
-        else:
-            passed = list(source_stocks)
-            rejected = []
-
-        # 排序筛选（sort_type）
-        sorttype = params.get('sorttype')
-        if sorttype and passed:
-            try:
-                top_n = int(sorttype)
-                if 0 < top_n < len(passed):
-                    passed = passed[:top_n]
-                    result['flags_applied'].append(f'sort_top_{top_n}')
-            except (ValueError, TypeError):
-                pass
-
-        # 执行转移
-        transfer_result = execute_transfer(
-            src_node or {}, tgt_node or {}, edge, passed
-        )
-        mode = transfer_result['mode']
-        result['mode'] = mode
-        transferred_stocks = transfer_result['transferred']
-
-        # 处理源节点
-        if mode == 'move' or transfer_result.get('delete_source'):
-            for s in transferred_stocks:
-                code = s.get('code', '')
-                if code:
-                    self.state.remove_stock(src_node_id, code, now_ts)
-            result['flags_applied'].append('delete_source')
-            exit_action = src_node.get('params', {}).get('exit_action') if src_node else None
-            if exit_action:
-                result['exit_actions'].append({'node': src_node_id, 'action': exit_action})
-
-        # 处理目标节点
-        self.state.ensure_node(tgt_node_id)
-        if mode == 'overwrite' or transfer_result.get('clear_dest'):
-            self.state.clear_node(tgt_node_id)
-            result['flags_applied'].append('clear_dest')
-
-        # 写入目标
-        stocks_to_write = rejected if is_discard else transferred_stocks
-        for s in stocks_to_write:
-            code = s.get('code', '')
-            if code:
-                self.state.add_stock(tgt_node_id, code, dict(s), now_ts)
-
-        # enter动作
-        if stocks_to_write and not is_discard:
-            enter_action = tgt_node.get('params', {}).get('enter_action') if tgt_node else None
-            if enter_action:
-                result['enter_actions'].append({
-                    'node': tgt_node_id,
-                    'action': enter_action,
-                    'count': len(stocks_to_write),
-                })
-
-        result['passed'] = len(passed)
-        result['rejected'] = len(rejected)
-        result['transferred'] = len(stocks_to_write)
-
-        return result
-
-    def execute_once(self) -> Dict[str, Any]:
-        """单次执行所有边（兼容旧版API）"""
-        self._init_mock_stocks()
-        self._check_all_hold_expiry()
-
-        events = []
-        for edge in self._edges:
-            event_result = self._execute_edge(edge)
-            events.append({
-                'event': 'edge_execute',
-                'data': event_result,
-                'edge_id': edge.get('id'),
-                'source': edge.get('source', {}),
-                'target': edge.get('target', {}),
-            })
-
-        output_stocks = self.get_output_stocks(20)
-        return {
-            'output_count': len(output_stocks),
-            'output_stocks': output_stocks,
-            'events': events,
-            'node_states': self.get_node_states(),
-        }
-
-    def get_node_states(self) -> Dict[str, int]:
-        return self.state.get_all_counts()
-
-    def get_node_stocks(self, node_id: str) -> List[str]:
-        """获取节点当前股票代码列表"""
-        return self.state.get_stock_codes(node_id)
-
-    def get_node_history(self, node_id: str, limit: int = 0) -> List[Dict]:
-        """获取节点股票进出历史"""
-        return self.state.get_history(node_id, limit)
-
-    def get_output_stocks(self, limit: int = 20) -> List[str]:
-        output_stocks = []
-        for node in self.config.get('nodes', []):
-            node_id = node.get('id')
-            if not node_id:
-                continue
-            node_type = node.get('type')
-            if node_type in ('market_source', 'discard_pool', 'text_label',
-                             'flow_arrow', 'container', 'state_column',
-                             'drawing_tool'):
-                continue
-            codes = self.state.get_stock_codes(node_id)
-            output_stocks.extend(codes)
-        seen = []
-        seen_set = set()
-        for s in output_stocks:
-            if s not in seen_set:
-                seen_set.add(s)
-                seen.append(s)
-        return seen[:limit]
-
-    def get_node_full_state(self, node_id: str) -> Dict[str, Any]:
-        """获取节点完整状态（含股票详情和历史）"""
-        stocks = self.state.get_stocks(node_id)
-        history = self.state.get_history(node_id)
-        return {
-            'node_id': node_id,
-            'stock_count': len(stocks),
-            'stocks': list(stocks.values()),
-            'history_count': len(history),
-            'history': history,
-        }
-
-    def get_all_node_states(self) -> Dict[str, Dict[str, Any]]:
-        result = {}
-        for node_id in self._nodes:
-            result[node_id] = self.get_node_full_state(node_id)
-        return result
 
 # ================================================================
 # 导出器（原 dzh_exporter.py）
@@ -3934,8 +3507,8 @@ def _export_field_action(cell_elem, params, field, cell_type=None):
 
 
 def _export_field_stocks(cell_elem, params, field, cell_type=None):
-    """200 stocks: 导出 stk 子元素（含 hist/ana 子元素）—— 委托到 _StkWriter。"""
-    _StkWriter.write_stks(cell_elem, params, fmt="dzh")
+    """200 stocks: 导出 stk 子元素（含 hist/ana 子元素）—— 委托到 DZH 单例。"""
+    _DZH_CONVERTER._write_stks(cell_elem, params)
 
 
 def _export_field_anas(cell_elem, params, field, cell_type=None):
@@ -4225,13 +3798,6 @@ SPINFO_TYPE_MAP = {
     7: {"label": "可转债", "market": "SZ,SH"},
 }
 
-# cell.setcode 市场映射
-SETCODE_MARKET_MAP = {
-    0: "SZ",   # 深圳
-    1: "SH",   # 上海
-    2: "BJ",   # 北交所
-}
-
 # V7.x func 元素最小属性数量阈值（V6.x 约11个，V7.x 16个）
 V7_FUNC_ATTR_THRESHOLD = 12
 
@@ -4343,7 +3909,7 @@ def _get_element_sector_type_map(element: str) -> Dict[str, int]:
 
 # _parse_func_element / _parse_psatt_element / _parse_spinfo_element /
 # _parse_stk_elements 已合并到 TdxPoolConverter._parse_element + post_hooks
-# 与 _StkIO.parse_stks；模块级名称在文件顶部委托到 _TDX_CONVERTER / _StkIO。
+# 与 BasePoolConverter._parse_stks 钩子；模块级名称在文件顶部委托到 _TDX_CONVERTER / _DZH_CONVERTER。
 
 
 def parse_tdx_xml(filepath: str) -> TdxPoolMetaModel:
@@ -4705,7 +4271,7 @@ def _stock_setcode(code: str) -> int:
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Child-element builders (func / psatt / spinfo / stk)
-# 已合并到 TdxPoolConverter._add_element + _StkWriter.write_stks；
+# 已合并到 TdxPoolConverter._add_element + TdxPoolConverter._write_stks；
 # _add_func/_add_psatt/_add_spinfo/_add_stks 模块级名称委托到 _TDX_CONVERTER。
 # ═══════════════════════════════════════════════════════════════════════════════
 

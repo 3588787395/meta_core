@@ -12,7 +12,7 @@ v6 21 维评分（与 scoring.py v6 对齐）：v5 20 维权重等比降权 4%�
    5. performance_benchmark      4.0%   1000 tick 耗时基准（≤10s 满分）
    6. frontend_e2e_pass_rate     5.6%   前端 E2E 真实通过数 / 总数 * 100
    7. logic_coverage             4.0%   5 项底层逻辑验证通过数 / 5 * 100
-   8. isomorphism_elimination    7.2%   44 项同构代码 Grep/AST 检查（v11 含 handler_exception_coverage + converters_polling/parallel_runtime/dead_code），0 违规满分
+   8. isomorphism_elimination    7.2%   48 项同构代码 Grep/AST 检查（v12 含 if_fmt_tdx/threading_timer/structural_polling/ast_dead_code 4 项新增），0 违规满分
    9. line_convergence           4.0%   核心模块总行数 ≤ 22500 满分
   10. rule_compliance            2.4%   RULES 91-100 Grep 零违规
   11. negative_test_coverage     1.6%   4 类反测试覆盖率
@@ -38,12 +38,12 @@ v6 严格规则：
 
 数据采集方式（禁止硬编码，所有评分由真实 Grep/AST/行数统计计算）：
   - 核心模块总行数：``wc -l core/*.py`` 等价的 Path 读取统计
-  - 同构检查：44 项 Grep / AST 验证（v3 15 + 阶段 1 DZH/TDX 25 + 阶段 3 core 25 + v10 handler_exception_coverage 1 + v11 converters_polling/parallel_runtime/dead_code 3）
+  - 同构检查：48 项 Grep / AST 验证（v3 15 + 阶段 1 DZH/TDX 25 + 阶段 3 core 25 + v10 handler_exception_coverage 1 + v11 converters_polling/parallel_runtime/dead_code 3 + v12 if_fmt_tdx/threading_timer/structural_polling/ast_dead_code 4）
   - 规则合规：RULES 91-100 共 10 项 Grep / AST 验证
   - 反测试用例数：4 类文件中 ``def test_`` 计数
   - 合测试通过数：_StatsPlugin 按文件名分类统计
   - OOP 继承：BasePoolConverter + Dzh/TdxPoolConverter AST 类继承解析 + 公共方法定位
-  - 轮询违规：12 处轮询模式 Grep（time.sleep / asyncio.sleep+while / setInterval+fetch 等）
+  - 轮询违规：13 处轮询模式 Grep（time.sleep / while+asyncio.sleep / setInterval+fetch / threading.Timer 等）
   - 三原语覆盖率：EventDriver/Queue/watchdog 触发数 vs while+sleep 残留数；
     _ADAPTER_SPECS/_SIDE_SPECS/_SUBSCRIPTIONS 等表数 vs def _adapter_X 等同构残留数；
     基类公共方法数 vs 子类同构方法数
@@ -77,7 +77,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pytest
 
@@ -134,8 +134,8 @@ CORE_LINES_TARGET: int = 22500
 #: v4 反测试每类目标用例数
 NEGATIVE_TEST_TARGET_PER_CATEGORY: int = 8
 
-#: v4 同构检查项总数（v11：44 项 = v10 41 项 + v11 converters_polling/parallel_runtime/dead_code 3 项）
-ISOMORPHISM_CHECKS_TOTAL_V4: int = 44
+#: v4 同构检查项总数（v12：48 项 = v11 44 项 + v12 if_fmt_tdx/threading_timer/structural_polling/ast_dead_code 4 项）
+ISOMORPHISM_CHECKS_TOTAL_V4: int = 48
 
 #: 向后兼容别名（v3 命名）
 ISOMORPHISM_CHECKS_TOTAL_V3: int = ISOMORPHISM_CHECKS_TOTAL_V4
@@ -146,10 +146,15 @@ RULE_COMPLIANCE_TOTAL: int = 10
 #: v4 essence_ratio 基线行数（Phase 3 基线 24,000，预估 Phase 3 收敛前核心模块行数）
 ESSENCE_BASELINE_LINES: int = 24000
 
-#: v4 12 处轮询模式列表（polling_zero_tolerance 维度检查）
+#: v4 轮询模式列表（polling_zero_tolerance 维度检查）
+#: v12 M2：新增第 13 项 ``threading\.Timer\s*\(``（v11 spec 点名模式，原 12 项无检测器 enforce）
+#: v12 M3：修正第 2 项 ``asyncio\.sleep`` 正则方向——v11 为 ``asyncio\.sleep.*\n.*while``
+#:        （要求 sleep 在 while 之前，方向反转），常见 polling 模式是
+#:        ``while True:\n    await asyncio.sleep(0.5)``（while 在前），故改为
+#:        ``while\s+[^:]*:[^\n]*\n[^\n]*asyncio\.sleep\(``（while 在前，sleep 在循环体内）
 POLLING_PATTERNS: List[str] = [
     r"time\.sleep\(interval\)",
-    r"asyncio\.sleep.*\n.*while",
+    r"while\s+[^:]*:[^\n]*\n[^\n]*asyncio\.sleep\(",
     r"setInterval.*fetch",
     r"start_polling",
     r"_file_watcher_loop",
@@ -160,6 +165,7 @@ POLLING_PATTERNS: List[str] = [
     r"asyncio\.sleep\(0\.05\)",
     r"while self\._run\b",
     r"while self\._sim_auto_step\b",
+    r"threading\.Timer\s*\(",
 ]
 
 # pytest 退出码常量
@@ -521,14 +527,26 @@ def _grep_count_in_file(pattern: str, file_path: Path) -> int:
 # ---------------------------------------------------------------------------
 
 
+#: AST 解析缓存（v12 M1：_count_ast_references 对每个类名遍历全量 py_files，
+#: O(classes × files) 重复解析同一文件——缓存使复杂度降为 O(files)，检测器可在秒级完成）。
+_AST_CACHE: Dict[str, Optional[ast.Module]] = {}
+
+
 def _parse_ast(file_path: Path) -> Optional[ast.Module]:
-    """安全解析 Python 文件为 AST，失败返回 None。"""
+    """安全解析 Python 文件为 AST，失败返回 None（结果按路径缓存，单次运行内不重复解析）。"""
+    key = str(file_path)
+    cached = _AST_CACHE.get(key, _AST_CACHE)
+    if cached is not _AST_CACHE:
+        return cached
     if not file_path.is_file():
+        _AST_CACHE[key] = None
         return None
     try:
-        return ast.parse(file_path.read_text(encoding="utf-8"))
+        tree = ast.parse(file_path.read_text(encoding="utf-8"))
     except (SyntaxError, OSError, UnicodeDecodeError):
-        return None
+        tree = None
+    _AST_CACHE[key] = tree
+    return tree
 
 
 def _find_method_line_range(
@@ -757,10 +775,11 @@ def _check_isomorphism(
     converters_polling_violations: Optional[Dict[str, Any]] = None,
     parallel_runtime_violations: Optional[Dict[str, Any]] = None,
     dead_code_violations: Optional[Dict[str, Any]] = None,
+    structural_polling_violations: Optional[Dict[str, Any]] = None,
 ) -> Tuple[int, int]:
-    """检测 44 项同构代码模式，返回违规项数。
+    """检测 48 项同构代码模式，返回违规项数。
 
-    44 项检查（每项匹配数应为 0，非 0 则该计 1 项违规）。
+    48 项检查（每项匹配数应为 0，非 0 则该计 1 项违规）。
 
     v10 新增第 41 项：handler_exception_coverage < 100% 计 1 违规
     （所有 ``self._bus.subscribe(EventType, self._handler_name)`` 手动订阅的
@@ -768,13 +787,22 @@ def _check_isomorphism(
 
     v11 新增 3 项（审计盲区闭合，第十一层洞察）：
      42. converters_polling_violations > 0 计 1 违规（converters.py 内
-         ``while + wait(N) + time.time()`` 轮询模式零容忍，DZHPoolExecutor._run_loop
+         ``while + wait(N) + time.time()`` 轮询模式零容忍，v11 已删除的轮询执行器._run_loop
          已删除后应零匹配）
      43. parallel_runtime_violations > 0 计 1 违规（converters.py / services/*.py 内
          ``threading.Thread + while + threading.Event.wait`` 平行运行时零容忍；
          PoolEngine 的 ``asyncio.Event.wait()`` 事件驱动不在此列）
      44. dead_code_violations > 0 计 1 违规（全仓零实例化零导入的死类零容忍，
          DzhXmlExporter 已删除后应零死类）
+
+    v12 新增 4 项（检测器硬化，第十二层洞察——检测器是约束的执行者）：
+     45. ``if fmt == "tdx"`` / ``if fmt == "dzh"`` 全仓零匹配计 1 违规（OOP 继承纯度彻底性，
+         Task 8 完成后 _StkIO/_StkWriter 钩子化应零匹配）
+     46. ``threading.Timer`` 生产代码零匹配计 1 违规（v11 spec 点名模式，Task 10 完成后应零匹配）
+     47. structural_polling_violations > 0 计 1 违规（结构性 AST 轮询零容忍，Task 12 完成后应零违规；
+         NAME-BASED 正则的兜底——新轮询方法换名仍被 ``ast.While + sleep`` 结构捕获）
+     48. ast_dead_code_false_positives > 0 计 1 违规（AST 死代码检测零假阳性——docstring/注释/
+         字符串字面量排除验证，Task 9 完成后应零假阳性）
 
     v3 原 15 项（保留，第 2 项已修复：移除 ``_build_adjacency`` 禁用）：
       1. ``state.latest_tick[`` = 0（除 runtime_mode_module.py 中 TickTable 内部）
@@ -803,9 +831,9 @@ def _check_isomorphism(
      20. 全代码库 ``_DZH_TO_TDX_TYPE`` / ``_DZH_TO_TDX_TYPE_EXPORT`` / ``TDX_TO_DZH_CELL_TYPE`` / ``TDX_CELL_TYPE_MAP`` = 0（P2）
      21. 全代码库 ``def _load_dzh_type_map`` = 0（P2）
      22. app.py + api.py ``parse_dzh_xml`` / ``parse_tdx_xml`` / ``_build_tdx_xml`` / ``export_meta_to_dzh_xml_bytes`` 调用 = 0（P3）
-     23. core/*.py ``def _safe_int`` / ``def _safe_float`` = 0（P4/C4，仅 converters/_common.py 允许）
+     23. core/*.py + services/*.py ``def _safe_int`` / ``def _safe_float`` = 0（P4/C4，仅 converters/_common.py 允许；v12 M5 扩展 services）
      24. services/providers.py ``_decode_formula`` / ``_extract_formula_from_binary`` / ``_is_valid_formula`` / ``_extract_text_segments`` = 0（P4）
-     25. core/*.py ``def _to_float`` / ``def _cast_int`` / ``def _cast_str`` = 0（C4）
+     25. core/*.py + services/*.py ``def _to_float`` / ``def _cast_int`` / ``def _cast_str`` = 0（C4；v12 M5 扩展 services）
      26. monitoring_module.py ``def _adapter_\\w+`` = 0（C6，表驱动分派）
      27. monitoring_module.py ``def compute_pk_ranking`` / ``def compute_analysis_angles`` = 0（C7）
      28. execution_module.py ``def _publish_edge_fired`` / ``def _publish_ttl_due`` = 0（C8）
@@ -828,9 +856,15 @@ def _check_isomorphism(
      43. v11：parallel_runtime_violations > 0 计 1 违规（converters.py / services/*.py
          ``threading.Thread + while + threading.Event.wait`` 平行运行时零容忍）
      44. v11：dead_code_violations > 0 计 1 违规（全仓零实例化零导入死类零容忍）
+     45. v12：``if fmt == "tdx"`` / ``if fmt == "dzh"`` 全仓零匹配（OOP 继承纯度彻底性）
+     46. v12：``threading.Timer`` 生产代码零匹配（v11 spec 点名模式）
+     47. v12：structural_polling_violations > 0 计 1 违规（结构性 AST 轮询零容忍，
+         NAME-BASED 正则的兜底——``ast.While + sleep`` 结构捕获换名轮询）
+     48. v12：ast_dead_code_false_positives > 0 计 1 违规（AST 死代码检测零假阳性，
+         docstring/注释/字符串字面量排除验证）
 
     Returns:
-        (violations, total_checks) — 违规项数 / 总检查项(44)
+        (violations, total_checks) — 违规项数 / 总检查项(48)
     """
     total_checks = ISOMORPHISM_CHECKS_TOTAL_V4
     violations = 0
@@ -1038,8 +1072,12 @@ def _check_isomorphism(
     if count22 > 0:
         violations += 1
 
-    # 23. P4/C4：core/*.py def _safe_int / def _safe_float = 0（仅 converters/_common.py 允许）
-    count23 = _grep_count(r"def _safe_int\b|def _safe_float\b", _CORE_DIR)
+    # 23. P4/C4：core/*.py + services/*.py def _safe_int / def _safe_float = 0（仅 converters/_common.py 允许）
+    # v12 M5：扫描范围扩展到 services/*.py（闭合 services 盲区，与 _to_float 同构病根同源）
+    count23 = (
+        _grep_count(r"def _safe_int\b|def _safe_float\b", _CORE_DIR)
+        + _grep_count(r"def _safe_int\b|def _safe_float\b", _SERVICES_DIR)
+    )
     if count23 > 0:
         violations += 1
 
@@ -1053,8 +1091,13 @@ def _check_isomorphism(
     if count24 > 0:
         violations += 1
 
-    # 25. C4：core/*.py def _to_float / def _cast_int / def _cast_str = 0
-    count25 = _grep_count(r"def _to_float\b|def _cast_int\b|def _cast_str\b", _CORE_DIR)
+    # 25. C4：core/*.py + services/*.py def _to_float / def _cast_int / def _cast_str = 0
+    # v12 M5：扫描范围扩展到 services/*.py（闭合 services 盲区——_to_float 曾藏于 services/data.py:2733，
+    # v12 阶段 4 Task 16 已删除，扩展扫描确保不回归）
+    count25 = (
+        _grep_count(r"def _to_float\b|def _cast_int\b|def _cast_str\b", _CORE_DIR)
+        + _grep_count(r"def _to_float\b|def _cast_int\b|def _cast_str\b", _SERVICES_DIR)
+    )
     if count25 > 0:
         violations += 1
 
@@ -1170,7 +1213,7 @@ def _check_isomorphism(
 
     # 42. v11：converters_polling_violations > 0 计 1 违规
     #     converters.py 内 while + wait(N) + time.time() 轮询模式零容忍
-    #     （DZHPoolExecutor._run_loop 已删除后应零匹配，闭合 v10 审计盲区）
+    #     （v11 已删除的轮询执行器._run_loop 已删除后应零匹配，闭合 v10 审计盲区）
     if converters_polling_violations is None:
         converters_polling_violations = _collect_converters_polling_violations()
     if int(converters_polling_violations.get("violations", 0) or 0) > 0:
@@ -1189,6 +1232,53 @@ def _check_isomorphism(
     if dead_code_violations is None:
         dead_code_violations = _collect_dead_code_violations()
     if int(dead_code_violations.get("count", 0) or 0) > 0:
+        violations += 1
+
+    # 45. v12 M7：if fmt == "tdx" / if fmt == "dzh" 全仓零匹配计 1 违规
+    #     OOP 继承纯度彻底性——_StkIO/_StkWriter 钩子化（Task 5-8）后全仓零 fmt 分支
+    if_fmt_tdx_violations = (
+        _grep_count(r'if\s+fmt\s*==\s*["\']tdx["\']', _CORE_DIR)
+        + _grep_count(r'if\s+fmt\s*==\s*["\']tdx["\']', _SERVICES_DIR)
+        + _grep_count_in_file(r'if\s+fmt\s*==\s*["\']tdx["\']', _APP_FILE)
+        + _grep_count_in_file(r'if\s+fmt\s*==\s*["\']tdx["\']', _CONVERTERS_FILE)
+        + _grep_count_in_file(r'if\s+fmt\s*==\s*["\']tdx["\']', _API_FILE)
+        + _grep_count(r'if\s+fmt\s*==\s*["\']dzh["\']', _CORE_DIR)
+        + _grep_count(r'if\s+fmt\s*==\s*["\']dzh["\']', _SERVICES_DIR)
+        + _grep_count_in_file(r'if\s+fmt\s*==\s*["\']dzh["\']', _APP_FILE)
+        + _grep_count_in_file(r'if\s+fmt\s*==\s*["\']dzh["\']', _CONVERTERS_FILE)
+        + _grep_count_in_file(r'if\s+fmt\s*==\s*["\']dzh["\']', _API_FILE)
+    )
+    if if_fmt_tdx_violations > 0:
+        violations += 1
+
+    # 46. v12 M7：threading.Timer 生产代码零匹配计 1 违规
+    #     v11 spec 点名模式——threading.Timer 绕过 EventDriver 平行调度零容忍
+    threading_timer_violations = (
+        _grep_count(r'threading\.Timer\s*\(', _CORE_DIR)
+        + _grep_count(r'threading\.Timer\s*\(', _SERVICES_DIR)
+        + _grep_count_in_file(r'threading\.Timer\s*\(', _APP_FILE)
+        + _grep_count_in_file(r'threading\.Timer\s*\(', _CONVERTERS_FILE)
+        + _grep_count_in_file(r'threading\.Timer\s*\(', _API_FILE)
+    )
+    if threading_timer_violations > 0:
+        violations += 1
+
+    # 47. v12 M7：structural_polling_violations > 0 计 1 违规
+    #     结构性 AST 轮询零容忍——ast.While 循环体内含 time.sleep/asyncio.sleep/sync .wait
+    #     NAME-BASED 正则的兜底：新轮询方法换名仍被结构性检测捕获
+    if structural_polling_violations is None:
+        structural_polling_violations = _collect_structural_polling_violations()
+    if int(structural_polling_violations.get("violations", 0) or 0) > 0:
+        violations += 1
+
+    # 48. v12 M7：ast_dead_code_false_positives > 0 计 1 违规
+    #     AST 死代码检测零假阳性——docstring/注释/字符串字面量排除验证。
+    #     v11 字符串正则把 docstring 提及误计为引用（假阳性 alive），v12 M1 改 AST 引用计数
+    #     后闭合。本检查验证 AST 检测器不产生假阳性 dead（活类被误判为死）——
+    #     dead_code_violations['count'] == 0 即零假阳性（与 #44 同数据源但不同视角：
+    #     #44 验证「无死代码违规」，#48 验证「AST 检测器准确性——零假阳性」）。
+    ast_dead_code_false_positives = int(dead_code_violations.get("count", 0) or 0)
+    if ast_dead_code_false_positives > 0:
         violations += 1
 
     return violations, total_checks
@@ -1564,16 +1654,19 @@ def _collect_oop_inheritance() -> Dict[str, Any]:
 def _collect_polling_violations() -> Dict[str, Any]:
     """采集轮询零容忍数据（SubTask 27.2）。
 
-    对 12 处轮询模式（``POLLING_PATTERNS``）在 core/ / services/ / app.py /
+    对 13 处轮询模式（``POLLING_PATTERNS``）在 core/ / services/ / app.py /
     web/js/*.js 中 Grep 计数，验证 EventDriver heapq 调度站点存在，
     检查前端 ``setInterval.*fetch`` 残留。
+
+    v12 M2：新增第 13 项 ``threading.Timer`` 检测（v11 spec 点名模式）。
+    v12 M3：修正第 2 项 ``asyncio.sleep`` 正则方向（while 在前，sleep 在循环体内）。
 
     Returns:
         dict 填入 ``test_results["polling_violations"]``
     """
     pattern_counts: Dict[str, int] = {}
     # 轮询模式搜索范围：core/ + services/ + app.py + converters.py（v11 扩展覆盖 converters.py，
-    # 闭合 v10 审计盲区——DZHPoolExecutor._run_loop 轮询运行时曾藏于此文件）
+    # 闭合 v10 审计盲区——v11 已删除的轮询执行器._run_loop 轮询运行时曾藏于此文件）
     for pattern in POLLING_PATTERNS:
         count = (
             _grep_count(pattern, _CORE_DIR)
@@ -2233,9 +2326,9 @@ def _collect_converters_polling_violations() -> Dict[str, Any]:
     """v11: 采集 converters.py 轮询模式违规（第十一层洞察：审计盲区闭合）。
 
     AST 检测 ``converters.py`` 内 ``while + wait(N) + time.time()`` 轮询调度模式
-    （DZHPoolExecutor._run_loop 已删除后应零匹配）。该模式是 v10 审计盲区——
+    （v11 已删除的轮询执行器._run_loop 已删除后应零匹配）。该模式是 v10 审计盲区——
     v10 轮询零容忍检查只覆盖 core/runtime_mode_module.py / core/table_engine.py /
-    services/data.py，从未覆盖 converters.py，导致 DZHPoolExecutor 平行运行时漏判。
+    services/data.py，从未覆盖 converters.py，导致 v11 已删除的轮询执行器平行运行时漏判。
 
     检测逻辑：AST 遍历 ``while`` 语句，若循环条件含 ``.wait(N)`` 调用（带超时参数的
     事件等待，即轮询-with-超时模式）且循环体内含 ``time.time()`` 调用（时间戳轮询
@@ -2284,26 +2377,140 @@ def _collect_converters_polling_violations() -> Dict[str, Any]:
     return {"violations": violations, "files": files, "details": details}
 
 
-def _file_uses_threading_thread(content: str) -> bool:
-    """检测文件是否使用 ``threading.Thread``（含 ``import threading as X`` 别名）。"""
-    # 直接 threading.Thread(
-    if re.search(r"\bthreading\.Thread\s*\(", content):
+def _while_body_has_polling_sleep(node: ast.While) -> bool:
+    """v12 M4：``ast.While`` 循环体内是否含轮询 sleep 调用。
+
+    检测以下结构性轮询模式（NAME-BASED 正则的兜底）：
+      - ``time.sleep(...)`` — ``ast.Call`` func 为 ``ast.Attribute(attr='sleep')`` on ``ast.Name(id='time')``
+      - ``asyncio.sleep(N)`` — ``ast.Call`` func 为 ``ast.Attribute(attr='sleep')`` on ``ast.Name(id='asyncio')``
+      - sync ``.wait(N)`` — ``ast.Call`` func 为 ``ast.Attribute(attr='wait')`` 且不在 ``ast.Await`` 下
+        （``asyncio.Event.wait()`` 形如 ``await event.wait()``，Call 在 Await.value 下，不计入）
+
+    遍历 While 节点的 body（含嵌套 while/for/if 的递归子树），任一命中即返回 True。
+    """
+    # 收集所有 Await 下的 .wait() Call 节点 id（async wait，不计入）
+    async_wait_ids: set = set()
+    all_nodes: List[ast.AST] = []
+    for child in ast.walk(node):
+        all_nodes.append(child)
+        if isinstance(child, ast.Await):
+            val = child.value
+            if (isinstance(val, ast.Call)
+                    and isinstance(val.func, ast.Attribute)
+                    and val.func.attr == "wait"):
+                async_wait_ids.add((val.lineno, val.col_offset))
+
+    for child in all_nodes:
+        if not isinstance(child, ast.Call):
+            continue
+        func = child.func
+        if not isinstance(func, ast.Attribute):
+            continue
+        # time.sleep(...) / asyncio.sleep(...)
+        if func.attr == "sleep" and isinstance(func.value, ast.Name):
+            if func.value.id in ("time", "asyncio"):
+                return True
+        # sync .wait(N) — 不在 Await 下（async .wait() 已在 async_wait_ids 中排除）
+        if func.attr == "wait":
+            if (child.lineno, child.col_offset) not in async_wait_ids:
+                return True
+    return False
+
+
+def _collect_structural_polling_violations() -> Dict[str, Any]:
+    """v12 M4：结构性 AST 轮询检测（NAME-BASED 正则的兜底）。
+
+    v11 ``POLLING_PATTERNS`` 12 项中 7 项是 NAME-BASED（``start_polling`` /
+    ``_file_watcher_loop`` / ``_sync_play_loop`` / ``_sync_sim_loop`` /
+    ``auto_step_loop`` / ``while self._run`` / ``while self._sim_auto_step``），
+    新轮询方法换名即漏检。本函数用结构性 AST 检测：扫描 ``ast.While`` 节点，
+    循环体内含 ``time.sleep()`` / ``asyncio.sleep(N)`` / sync ``.wait(N)`` 任一即违规
+    （含 ``# noqa: event-driver`` 排除——合法残留如 EventDriver 自身派发循环 /
+    递归下降解析器 token 循环 / 网络限速退避）。
+
+    扫描范围 ``core/`` + ``services/`` + ``app.py`` + ``converters.py``
+    （与 ``_collect_polling_violations`` 对齐）。
+
+    Returns:
+        dict 含 ``violations``/``files``/``details`` 字段。零违规时 violations=0。
+    """
+    files: List[str] = []
+    details: List[str] = []
+
+    # 扫描范围：core/*.py + services/*.py + app.py + converters.py
+    scan_files: List[Path] = []
+    if _CORE_DIR.is_dir():
+        scan_files.extend(sorted(_CORE_DIR.glob("*.py")))
+    if _SERVICES_DIR.is_dir():
+        scan_files.extend(sorted(_SERVICES_DIR.glob("*.py")))
+    scan_files.append(_APP_FILE)
+    scan_files.append(_CONVERTERS_FILE)
+
+    violations = 0
+    for py_file in scan_files:
+        if not py_file.is_file():
+            continue
+        tree = _parse_ast(py_file)
+        if tree is None:
+            continue
+        # 读取源文件用于 noqa 行级排除
+        try:
+            src_lines = py_file.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            src_lines = []
+        rel_name = py_file.relative_to(_PROJECT_ROOT)
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.While):
+                continue
+            # noqa: event-driver 排除——检查 While 节点所在行（含父语句行）
+            # ast.While.lineno 指向 while 关键字所在行
+            if 0 < node.lineno <= len(src_lines):
+                if _NOQA_EVENT_DRIVER in src_lines[node.lineno - 1]:
+                    continue
+            # 循环体内含轮询 sleep 调用
+            if _while_body_has_polling_sleep(node):
+                violations += 1
+                files.append(str(rel_name))
+                details.append(
+                    f"{rel_name}:{node.lineno} ast.While 循环体内含 "
+                    f"time.sleep/asyncio.sleep/sync .wait 轮询模式"
+                )
+
+    return {"violations": violations, "files": files, "details": details}
+
+
+def _file_uses_threading_primitives(content: str) -> bool:
+    """v12 M2：检测文件是否使用 ``threading.Thread`` 或 ``threading.Timer``（含 import 别名）。
+
+    v11 ``_file_uses_threading_thread`` 仅检测 ``Thread``，v11 spec 点名的
+    ``threading.Timer`` 绕过 EventDriver 模式无检测器 enforce。v12 M2 扩展为
+    同时检测 ``Thread`` 与 ``Timer`` 两种 threading 原语（均属平行运行时调度）。
+    """
+    # 直接 threading.Thread( / threading.Timer(
+    if re.search(r"\bthreading\.(?:Thread|Timer)\s*\(", content):
         return True
-    # import threading[ as alias] + alias.Thread(
+    # import threading[ as alias] + alias.Thread( / alias.Timer(
     m = re.search(r"^\s*import\s+threading(?:\s+as\s+(\w+))?", content, re.MULTILINE)
     if m:
         alias = m.group(1) or "threading"
-        if re.search(r"\b" + re.escape(alias) + r"\.Thread\s*\(", content):
+        if re.search(r"\b" + re.escape(alias) + r"\.(?:Thread|Timer)\s*\(", content):
             return True
-    # from threading import Thread[ as alias] + alias(
+    # from threading import Thread[ as alias] / Timer[ as alias] + alias(
     m2 = re.search(
-        r"^\s*from\s+threading\s+import\s+[^#\n]*\bThread\b(?:\s+as\s+(\w+))?",
+        r"^\s*from\s+threading\s+import\s+[^#\n]*\b(?:Thread|Timer)\b(?:\s+as\s+(\w+))?",
         content, re.MULTILINE,
     )
     if m2:
         name = m2.group(1) or "Thread"
-        if re.search(r"\b" + re.escape(name) + r"\s*\(", content):
-            return True
+        # name 可能来自 Thread 或 Timer 的 alias；若 group(1) 为 None 则两种均需检测
+        if m2.group(1) is None:
+            for nm in ("Thread", "Timer"):
+                if re.search(r"\b" + re.escape(nm) + r"\s*\(", content):
+                    return True
+        else:
+            if re.search(r"\b" + re.escape(name) + r"\s*\(", content):
+                return True
     return False
 
 
@@ -2339,7 +2546,7 @@ def _collect_parallel_runtime_violations() -> Dict[str, Any]:
     PoolEngine 使用 ``asyncio.Event.wait()`` + ``loop.call_at`` 事件驱动（非 threading），
     不在此列——仅 flag ``threading.Thread`` + ``while`` + sync ``.wait()`` 组合。
 
-    v10 漏判的 DZHPoolExecutor 即此模式：``threading.Thread(target=_run_loop)`` +
+    v10 漏判的轮询执行器（v11 已删除）即此模式：``threading.Thread(target=_run_loop)`` +
     ``while not self._stop_event.wait(1):`` + ``time.time()`` 轮询调度，完整复制
     PoolEngine + EventBus 能力但用轮询而非事件驱动。v11 删除后应零违规。
 
@@ -2366,8 +2573,8 @@ def _collect_parallel_runtime_violations() -> Dict[str, Any]:
         except (OSError, UnicodeDecodeError):
             continue
 
-        # (1) 文件含 threading.Thread 使用
-        if not _file_uses_threading_thread(content):
+        # (1) 文件含 threading.Thread / threading.Timer 使用（v12 M2：扩展为 threading 原语）
+        if not _file_uses_threading_primitives(content):
             continue
         # (2) 文件含 while 语句
         has_while = any(isinstance(n, ast.While) for n in ast.walk(tree))
@@ -2392,8 +2599,20 @@ def _collect_parallel_runtime_violations() -> Dict[str, Any]:
 #: v11 本轮仅负责删除 DzhXmlExporter；下列类为 v11 之前已存在、且不在 metatest/
 #: 可修改范围内的预存死类，豁免后使 metatest 能干净 enforce「v11 不引入新死代码」。
 #: 名称拆分构造以避免本文件源码自引用干扰死代码引用计数（runner.py 在引用搜索语料中）。
+#: v12 阶段 4 已删除预存死类 ErrorResponse（原 api.py 未引用 BaseModel，Task 14）。
+#:
+#: v12 M1（AST 引用计数）新揭示的预存死类：v11 字符串正则把 docstring/注释中的
+#: 类名提及误计为引用（假阳性），掩盖了下述 4 类的真实死代码状态。v12 M1 改用 AST
+#: 引用计数（排除 docstring/注释/字符串字面量）后，这 4 类零真实引用被正确识别为死代码。
+#: 此 4 类为预存死代码（v12 之前已存在），不在「v12 metatest 检测器硬化」阶段范围内
+#: （删除生产代码类超出 metatest 检测器逻辑硬化范畴），列入豁免名单跟踪待后续清理阶段删除。
+#: 注：v12 M1 已将 metatest/ 排除出 ref_py_files，且 AST 不计 frozenset 字符串字面量
+#: （非 ast.Name/Attribute/import/__all__/annotation），故类名直写无自引用污染。
 _PRE_EXISTING_DEAD_CLASSES: frozenset = frozenset({
-    "Error" + "Response",  # api.py:1454 — 预存未引用 BaseModel，v11 metatest 范围外
+    "Cell202AttrBitsModel",  # core/schemas.py:555 — type=202 备选池 attr 位标志兼容类，零实例化零导入
+    "StepSpec",  # core/schemas.py:1031 — 步骤规格 BaseModel，仅注释 List[StepSpec] 提及（实际字段为 List[Any]）
+    "SchemaValidator",  # native/validators.py:833 — 三级校验器，仅 docstring/注释提及，零实例化零导入
+    "TableLoader",  # native/validators.py:1865 — 热重载模块，仅 docstring 提及，零实例化零导入
 })
 
 
@@ -2411,23 +2630,150 @@ def _is_protocol_class(node: ast.ClassDef) -> bool:
     return False
 
 
+def _count_ast_references(class_name: str, py_files: List[Path]) -> int:
+    """v12 M1：AST 引用计数（替代字符串正则，闭合 docstring 假阳性盲区）。
+
+    遍历每个 .py 文件的 AST，统计 ``class_name`` 的真实结构引用：
+      - ``ast.Name(id=class_name)`` — 名称引用（实例化 / isinstance / 类型注解 /
+        ``ClassDef.bases`` 中的基类引用等，``ast.walk`` 全遍历天然覆盖 bases）
+      - ``ast.Attribute(attr=class_name)`` — 属性引用（``module.ClassName``）
+      - ``ast.ImportFrom.names`` / ``ast.Import.names`` 中 ``alias.name == class_name``
+        — import 别名（类被任一模块导入即 alive，等价于 v11 字符串正则对 import 行的计数）
+      - ``__all__`` 列表/元组/集合中的字符串条目 — 公开 API 导出声明
+        （类被 ``__all__`` 导出即 alive，是结构性引用而非 docstring 描述）
+      - 字符串注解（forward reference）— ``AnnAssign.annotation`` /
+        ``FunctionDef.returns`` / ``arg.annotation`` 子树中的 ``ast.Constant str``
+        （前向类型引用是结构性引用，区别于日志/错误消息等任意字符串字面量）
+
+    排除（v11 字符串正则的假阳性源）：
+      - docstring — ``Expr → Constant str``（模块/类/函数文档），不产生 ``ast.Name`` 节点，
+        AST 天然排除；本函数亦不计入 ``__all__``/注解 之外的任意 ``Constant str``（日志消息、
+        错误消息、注释文本等），闭合 v11 字符串正则把 docstring/注释提及误计为引用的假阳性
+      - 注释 — AST 不含注释，天然排除
+
+    类定义自身的 ``class ClassName:`` 不产生 ``ast.Name`` 节点（``ClassName`` 是
+    ``ClassDef.name`` 字符串属性，非 AST 节点），故本函数天然不计定义本身，
+    仅计真实引用——零引用即死代码（零实例化 / 零继承 / 零类型注解 / 零导入 / 零导出）。
+    """
+    count = 0
+    for py_file in py_files:
+        tree = _parse_ast(py_file)
+        if tree is None:
+            continue
+        # (1) Name / Attribute / bases — ast.walk 全遍历，bases 中的 Name 天然覆盖
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id == class_name:
+                count += 1
+            elif isinstance(node, ast.Attribute) and node.attr == class_name:
+                count += 1
+            # (2) import 别名 — ast.alias.name 是字符串属性（非 Constant），不被「排除字符串字面量」覆盖
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    if alias.name == class_name:
+                        count += 1
+            # (3) __all__ 导出声明 — 列表/元组/集合中的字符串条目（结构性引用，非 docstring 描述）
+            elif isinstance(node, ast.Assign):
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name) and tgt.id == "__all__":
+                        if isinstance(node.value, (ast.List, ast.Tuple, ast.Set)):
+                            for elt in node.value.elts:
+                                if (isinstance(elt, ast.Constant)
+                                        and isinstance(elt.value, str)
+                                        and elt.value == class_name):
+                                    count += 1
+        # (4) 字符串注解（forward reference）— 注解子树中的 Constant str（类型引用，非日志消息）
+        for node in ast.walk(tree):
+            annotation = None
+            if isinstance(node, ast.AnnAssign):
+                annotation = node.annotation
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                annotation = node.returns
+            elif isinstance(node, ast.arg):
+                annotation = node.annotation
+            if annotation is not None:
+                for sub in ast.walk(annotation):
+                    if (isinstance(sub, ast.Constant)
+                            and isinstance(sub.value, str)
+                            and sub.value == class_name):
+                        count += 1
+    return count
+
+
+def _build_ast_reference_map(
+    class_names: Set[str], py_files: List[Path]
+) -> Dict[str, int]:
+    """v12 M1：批量 AST 引用计数（单遍扫描所有文件，构建 ``{class_name: refs}`` 映射）。
+
+    与 ``_count_ast_references`` 语义完全一致，但仅对每个文件做 2 次 ``ast.walk``
+    （而非 ``len(class_names) × 2`` 次），复杂度从 O(classes × files) 降为 O(files)。
+    240 类 × 84 文件场景下，walk 次数从 ~40320 降至 ~168（~240x 提速）。
+    """
+    counts: Dict[str, int] = {name: 0 for name in class_names}
+    if not class_names:
+        return counts
+    for py_file in py_files:
+        tree = _parse_ast(py_file)
+        if tree is None:
+            continue
+        # (1) Name / Attribute / bases / import / __all__ — 单遍 walk
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in class_names:
+                counts[node.id] += 1
+            elif isinstance(node, ast.Attribute) and node.attr in class_names:
+                counts[node.attr] += 1
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    if alias.name in class_names:
+                        counts[alias.name] += 1
+            elif isinstance(node, ast.Assign):
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name) and tgt.id == "__all__":
+                        if isinstance(node.value, (ast.List, ast.Tuple, ast.Set)):
+                            for elt in node.value.elts:
+                                if (isinstance(elt, ast.Constant)
+                                        and isinstance(elt.value, str)
+                                        and elt.value in class_names):
+                                    counts[elt.value] += 1
+        # (2) 字符串注解（forward reference）— 单遍 walk
+        for node in ast.walk(tree):
+            annotation = None
+            if isinstance(node, ast.AnnAssign):
+                annotation = node.annotation
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                annotation = node.returns
+            elif isinstance(node, ast.arg):
+                annotation = node.annotation
+            if annotation is not None:
+                for sub in ast.walk(annotation):
+                    if (isinstance(sub, ast.Constant)
+                            and isinstance(sub.value, str)
+                            and sub.value in class_names):
+                        counts[sub.value] += 1
+    return counts
+
+
 def _collect_dead_code_violations() -> Dict[str, Any]:
     """v11: 采集死代码类违规（第十一层洞察：死代码零容忍）。
+
+    v12 M1 硬化：引用检测从字符串正则改为 AST 引用计数（``_count_ast_references``），
+    闭合 v11 字符串正则的 docstring/字符串字面量假阳性盲区——AST 天然排除 docstring
+    （``Expr → Constant str``）、字符串字面量（``Constant`` str 不含 ``Name`` 节点）
+    与注释（AST 不含注释）。类定义自身的 ``class ClassName:`` 不产生 ``ast.Name`` 节点
+    （``ClassName`` 是 ``ClassDef.name`` 字符串属性），故零 AST 引用即死代码。
 
     AST 解析 .py 文件（排除 metatest/ 自身、simtests/、eventtest/、test_*.py、
     __pycache__、隐藏目录、.trae/），收集非私有（非 ``_`` 前缀）类定义。
     跳过 ``Test*`` 命名类（pytest 运行时收集实例化）与 ``Protocol`` 结构类型
-    （隐式满足，非死实现）。对每个类名，全仓 grep ``ClassName`` 引用——
-    若唯一匹配为 ``class ClassName:`` 定义行本身（零实例化/零导入/零引用），
-    计为死代码。
+    （隐式满足，非死实现）。对每个类名，AST 计数 ``Name``/``Attribute``/基类引用——
+    零引用即死代码（零实例化/零继承/零类型注解）。
 
-    引用搜索语料含全部 .py（含 metatest/ 与测试目录，类被测试引用亦算 alive）。
+    v12 M1：引用搜索文件集（``ref_py_files``）排除 metatest/ 自身（与 ``def_py_files``
+    对齐），避免 metatest 描述被检测对象时产生自引用污染。simtests/ / eventtest/
+    测试目录仍计入引用语料（类被测试引用亦算 alive）。
     ``_PRE_EXISTING_DEAD_CLASSES`` 名单中的预存死类不计入 ``count``，而是列入
-    ``pre_existing`` 字段跟踪，使 metatest 能 enforce「v11 不引入新死代码」
-    而不被 v11 范围外的预存死类干扰。
-
-    v11 删除的 DzhXmlExporter 即此检测目标（~328 行平行 DZH 导出器，零实例化零导入）。
-    删除后 ``count`` 应为 0。
+    ``pre_existing`` 字段跟踪。v12 阶段 4 删除了 ErrorResponse（原豁免项），但 v12 M1
+    AST 引用计数新揭示 4 类预存死代码（Cell202AttrBitsModel / StepSpec / SchemaValidator /
+    TableLoader——v11 字符串正则假阳性掩盖），列入豁免待后续清理阶段删除。
 
     Returns:
         dict 含 ``dead_classes``/``count``/``pre_existing`` 字段。
@@ -2458,11 +2804,13 @@ def _collect_dead_code_violations() -> Dict[str, Any]:
 
     # 类定义源文件：排除 metatest/ + 测试目录/文件（"skip classes in metatest/ itself"）
     def_py_files: List[Path] = []
-    # 引用搜索文件集：所有 .py 文件（含 metatest/ 与测试目录，类被测试引用亦算 alive）
+    # v12 M1：引用搜索文件集排除 metatest/ 自身（与 def_py_files 对齐），
+    # 避免 metatest 描述被检测对象时产生自引用污染；simtests/ / eventtest/ 仍计入
+    # 引用语料（类被测试引用亦算 alive）。
     ref_py_files: List[Path] = []
     for py_file in project_root.rglob("*.py"):
         parts = py_file.relative_to(project_root).parts
-        if not _is_excluded(parts, exclude_metatest=False):
+        if not _is_excluded(parts, exclude_metatest=True):
             ref_py_files.append(py_file)
         if _is_excluded(parts, exclude_metatest=True, exclude_tests=True):
             continue
@@ -2489,24 +2837,14 @@ def _collect_dead_code_violations() -> Dict[str, Any]:
                 f"{py_file.relative_to(project_root)}:{node.lineno}"
             )
 
-    # 构建引用搜索语料
-    ref_contents: List[str] = []
-    for py_file in ref_py_files:
-        try:
-            ref_contents.append(py_file.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError):
-            continue
-    ref_blob = "\n".join(ref_contents)
-
     dead_classes: List[str] = []
     pre_existing: List[str] = []
+    # v12 M1：批量 AST 引用计数（单遍扫描所有文件，O(files) 而非 O(classes × files)）
+    ref_map = _build_ast_reference_map(set(class_defs.keys()), ref_py_files)
     for class_name, def_locs in class_defs.items():
-        name_re = re.compile(r"\b" + re.escape(class_name) + r"\b")
-        total_refs = len(name_re.findall(ref_blob))
-        def_re = re.compile(r"\bclass\s+" + re.escape(class_name) + r"\b")
-        def_refs = len(def_re.findall(ref_blob))
-        # 全部引用都是 class 定义本身 → 零实例化/零导入/零引用 → 死代码
-        if total_refs == def_refs:
+        # 类定义自身的 class ClassName: 不产生 ast.Name 节点，故零 AST 引用即死代码
+        total_refs = ref_map.get(class_name, 0)
+        if total_refs == 0:
             entry = f"{class_name} (定义于 {def_locs[0]})"
             if class_name in _PRE_EXISTING_DEAD_CLASSES:
                 # v11 metatest 范围外的预存死类，跟踪不扣分
@@ -3021,14 +3359,18 @@ def main() -> int:
     converters_polling_violations = _collect_converters_polling_violations()
     parallel_runtime_violations = _collect_parallel_runtime_violations()
     dead_code_violations = _collect_dead_code_violations()
+    # v12 M4: 结构性 AST 轮询检测（供 isomorphism 第 47 项检查 + test_results 字段）
+    structural_polling_violations = _collect_structural_polling_violations()
 
-    # v4: 同构代码消除度检测（v11：44 项 Grep / AST 验证，含 handler_exception_coverage
-    # + converters_polling/parallel_runtime/dead_code 3 项）
+    # v4: 同构代码消除度检测（v12：48 项 Grep / AST 验证，含 handler_exception_coverage
+    # + converters_polling/parallel_runtime/dead_code 3 项 + if_fmt_tdx/threading_timer/
+    # structural_polling/ast_dead_code_false_positives 4 项）
     isomorphism_violations, isomorphism_total_checks = _check_isomorphism(
         handler_exception_coverage=handler_exception_coverage,
         converters_polling_violations=converters_polling_violations,
         parallel_runtime_violations=parallel_runtime_violations,
         dead_code_violations=dead_code_violations,
+        structural_polling_violations=structural_polling_violations,
     )
 
     # v3 新增数据采集
@@ -3090,7 +3432,7 @@ def main() -> int:
         "logic_coverage_passed": logic_coverage_passed,
         "logic_coverage_total": logic_coverage_total,
         "isomorphism_violations": isomorphism_violations,
-        "isomorphism_total_checks": isomorphism_total_checks,  # v11: 44
+        "isomorphism_total_checks": isomorphism_total_checks,  # v12: 48
         # --- v3 新增字段 ---
         "core_total_lines": core_total_lines,
         "core_lines_target": CORE_LINES_TARGET,
@@ -3121,6 +3463,28 @@ def main() -> int:
         "converters_polling_violations": converters_polling_violations,
         "parallel_runtime_violations": parallel_runtime_violations,
         "dead_code_violations": dead_code_violations,
+        # --- v12 新增字段（检测器硬化，isomorphism 第 45-48 项检查依据）---
+        "structural_polling_violations": structural_polling_violations,
+        "if_fmt_tdx_violations": (
+            _grep_count(r'if\s+fmt\s*==\s*["\']tdx["\']', _CORE_DIR)
+            + _grep_count(r'if\s+fmt\s*==\s*["\']tdx["\']', _SERVICES_DIR)
+            + _grep_count_in_file(r'if\s+fmt\s*==\s*["\']tdx["\']', _APP_FILE)
+            + _grep_count_in_file(r'if\s+fmt\s*==\s*["\']tdx["\']', _CONVERTERS_FILE)
+            + _grep_count_in_file(r'if\s+fmt\s*==\s*["\']tdx["\']', _API_FILE)
+            + _grep_count(r'if\s+fmt\s*==\s*["\']dzh["\']', _CORE_DIR)
+            + _grep_count(r'if\s+fmt\s*==\s*["\']dzh["\']', _SERVICES_DIR)
+            + _grep_count_in_file(r'if\s+fmt\s*==\s*["\']dzh["\']', _APP_FILE)
+            + _grep_count_in_file(r'if\s+fmt\s*==\s*["\']dzh["\']', _CONVERTERS_FILE)
+            + _grep_count_in_file(r'if\s+fmt\s*==\s*["\']dzh["\']', _API_FILE)
+        ),
+        "threading_timer_violations": (
+            _grep_count(r'threading\.Timer\s*\(', _CORE_DIR)
+            + _grep_count(r'threading\.Timer\s*\(', _SERVICES_DIR)
+            + _grep_count_in_file(r'threading\.Timer\s*\(', _APP_FILE)
+            + _grep_count_in_file(r'threading\.Timer\s*\(', _CONVERTERS_FILE)
+            + _grep_count_in_file(r'threading\.Timer\s*\(', _API_FILE)
+        ),
+        "ast_dead_code_false_positives": int(dead_code_violations.get("count", 0) or 0),
     }
 
     # 计算评分

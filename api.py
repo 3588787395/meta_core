@@ -49,6 +49,8 @@ from fastapi import (
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from core.domain import SETCODE_MARKET_MAP, _classify_market_by_code
+
 logger = logging.getLogger(__name__)
 
 
@@ -1451,12 +1453,6 @@ class RemoveMembersRequest(BaseModel):
     stock_codes: List[str] = Field(..., description="要删除的股票代码列表")
 
 
-class ErrorResponse(BaseModel):
-    """统一错误响应"""
-    success: bool = False
-    error: Dict[str, Any] = Field(..., description="错误详情")
-
-
 def create_error_response(code: str, message: str, status_code: int = 400,
                           details: Any = None) -> Dict:
     """构建统一错误响应"""
@@ -1962,8 +1958,7 @@ def create_meta_router() -> APIRouter:
 
             for stk in body.stocks:
                 try:
-                    market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-                    market = market_map.get(stk.setcode, 'SZ')
+                    market = SETCODE_MARKET_MAP.get(stk.setcode, 'SZ')
                     stock_code = f"{market}{stk.code}"
 
                     if hasattr(tq, 'add_favorite'):
@@ -2101,8 +2096,7 @@ def create_meta_router() -> APIRouter:
             members = []
             if body.members:
                 for idx, stk in enumerate(body.members):
-                    market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-                    market = market_map.get(stk.setcode, 'SZ')
+                    market = SETCODE_MARKET_MAP.get(stk.setcode, 'SZ')
                     members.append({
                         'stock_code': f"{market}{stk.code}",
                         'name': stk.name or '',
@@ -2184,8 +2178,7 @@ def create_meta_router() -> APIRouter:
             if body.members is not None:
                 members_data = []
                 for stk in body.members:
-                    market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-                    market = market_map.get(stk.setcode, 'SZ')
+                    market = SETCODE_MARKET_MAP.get(stk.setcode, 'SZ')
                     members_data.append({
                         'stock_code': f"{market}{stk.code}",
                     })
@@ -2261,8 +2254,7 @@ def create_meta_router() -> APIRouter:
             # 追加成员（不清除已有成员）
             members_data = []
             for stk in body.stocks:
-                market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-                market = market_map.get(stk.setcode, 'SZ')
+                market = SETCODE_MARKET_MAP.get(stk.setcode, 'SZ')
                 members_data.append({
                     'stock_code': f"{market}{stk.code}",
                 })
@@ -3301,14 +3293,7 @@ def _enrich_tdx_node_data(graph_data: dict) -> None:
                 for stk in stocks:
                     if isinstance(stk, dict):
                         code = stk.get("code", stk.get("label", ""))
-                        setcode = 0
-                        if code:
-                            if code.startswith(('0', '3')):
-                                setcode = 0
-                            elif code.startswith('6'):
-                                setcode = 1
-                            elif code.startswith(('4', '8')):
-                                setcode = 2
+                        setcode = _classify_market_by_code(code)
                         new_tdx.append({"setcode": setcode, "code": code})
                 params["tdx_stocks"] = new_tdx
 

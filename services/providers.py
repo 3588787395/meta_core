@@ -47,6 +47,11 @@ try:
 except ImportError:  # services 作为顶层包导入时回退到绝对导入
     from core.table_engine import get_global_config_store
 
+try:
+    from ..core.domain import SETCODE_MARKET_MAP, _classify_market_by_code
+except ImportError:  # services 作为顶层包导入时回退到绝对导入
+    from core.domain import SETCODE_MARKET_MAP, _classify_market_by_code
+
 # 变更 P4：DZH 公式解码（decode_formula / extract_formula_from_binary /
 # is_valid_formula / extract_text_segments）单一来源为 converters_common，
 # 本模块仅 re-export decode_formula 以保持向后兼容。
@@ -3061,8 +3066,7 @@ class LocalFileProvider(DataSourceProvider):
     @staticmethod
     def _to_tq_code(code: str, setcode: int) -> str:
         """将纯数字代码 + setcode 转换为 XXXXXX.SH 格式。"""
-        market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-        market = market_map.get(setcode, 'SZ')
+        market = SETCODE_MARKET_MAP.get(setcode, 'SZ')
         return f"{code}.{market}"
 
     # 文件解析器
@@ -5398,8 +5402,7 @@ class LocalFileProvider(DataSourceProvider):
             setcode = m.get('setcode', 0)
             name = m.get('name', '')
             if not name and code:
-                market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-                market = market_map.get(setcode, 'SZ')
+                market = SETCODE_MARKET_MAP.get(setcode, 'SZ')
                 full_code = f"{market}{code}"
                 name = name_map.get(full_code, '')
                 if not name:
@@ -5445,8 +5448,7 @@ class LocalFileProvider(DataSourceProvider):
         def _lookup_name(code: str, setcode: int) -> str:
             if not name_map or not code:
                 return ''
-            market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-            market = market_map.get(setcode, 'SZ')
+            market = SETCODE_MARKET_MAP.get(setcode, 'SZ')
             full_code = f"{market}{code}"
             if full_code in name_map:
                 return name_map[full_code]
@@ -5535,8 +5537,7 @@ class LocalFileProvider(DataSourceProvider):
         def _lookup_name(code: str, setcode: int) -> str:
             if not name_map or not code:
                 return ''
-            market_map = {0: 'SZ', 1: 'SH', 2: 'BJ'}
-            market = market_map.get(setcode, 'SZ')
+            market = SETCODE_MARKET_MAP.get(setcode, 'SZ')
             full_code = f"{market}{code}"
             if full_code in name_map:
                 return name_map[full_code]
@@ -7442,14 +7443,7 @@ class TqDllProvider(DataSourceProvider):
                 market = parts[1].upper() if len(parts) > 1 else ''
             else:
                 code = tq_code
-                if code.startswith('6'):
-                    market = 'SH'
-                elif code.startswith(('0', '3')):
-                    market = 'SZ'
-                elif code.startswith(('4', '8')):
-                    market = 'BJ'
-                else:
-                    market = 'SZ'
+                market = SETCODE_MARKET_MAP.get(_classify_market_by_code(code), 'SZ')
             setcode = SHORT_NAME_TO_MARKET_ID.get(
                 {'SZ': 'sz_a', 'SH': 'sh_a', 'BJ': 'bj_a'}.get(market, 'sz_a'),
                 0,
@@ -7940,14 +7934,7 @@ class TqSdkProvider(DataSourceProvider):
                 market = parts[1].upper() if len(parts) > 1 else ''
             else:
                 code = tq_code
-                if code.startswith('6'):
-                    market = 'SH'
-                elif code.startswith(('0', '3')):
-                    market = 'SZ'
-                elif code.startswith(('4', '8')):
-                    market = 'BJ'
-                else:
-                    market = 'SZ'
+                market = SETCODE_MARKET_MAP.get(_classify_market_by_code(code), 'SZ')
             setcode = SHORT_NAME_TO_MARKET_ID.get(
                 {'SZ': 'sz_a', 'SH': 'sh_a', 'BJ': 'bj_a'}.get(market, 'sz_a'),
                 0,
