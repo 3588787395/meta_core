@@ -12,7 +12,7 @@ v6 21 维评分（与 scoring.py v6 对齐）：v5 20 维权重等比降权 4%�
    5. performance_benchmark      4.0%   1000 tick 耗时基准（≤10s 满分）
    6. frontend_e2e_pass_rate     5.6%   前端 E2E 真实通过数 / 总数 * 100
    7. logic_coverage             4.0%   5 项底层逻辑验证通过数 / 5 * 100
-   8. isomorphism_elimination    7.2%   41 项同构代码 Grep/AST 检查（v10 含 handler_exception_coverage），0 违规满分
+   8. isomorphism_elimination    7.2%   44 项同构代码 Grep/AST 检查（v11 含 handler_exception_coverage + converters_polling/parallel_runtime/dead_code），0 违规满分
    9. line_convergence           4.0%   核心模块总行数 ≤ 22500 满分
   10. rule_compliance            2.4%   RULES 91-100 Grep 零违规
   11. negative_test_coverage     1.6%   4 类反测试覆盖率
@@ -38,7 +38,7 @@ v6 严格规则：
 
 数据采集方式（禁止硬编码，所有评分由真实 Grep/AST/行数统计计算）：
   - 核心模块总行数：``wc -l core/*.py`` 等价的 Path 读取统计
-  - 同构检查：41 项 Grep / AST 验证（v3 15 + 阶段 1 DZH/TDX 25 + 阶段 3 core 25 + v10 handler_exception_coverage 1）
+  - 同构检查：44 项 Grep / AST 验证（v3 15 + 阶段 1 DZH/TDX 25 + 阶段 3 core 25 + v10 handler_exception_coverage 1 + v11 converters_polling/parallel_runtime/dead_code 3）
   - 规则合规：RULES 91-100 共 10 项 Grep / AST 验证
   - 反测试用例数：4 类文件中 ``def test_`` 计数
   - 合测试通过数：_StatsPlugin 按文件名分类统计
@@ -134,8 +134,8 @@ CORE_LINES_TARGET: int = 22500
 #: v4 反测试每类目标用例数
 NEGATIVE_TEST_TARGET_PER_CATEGORY: int = 8
 
-#: v4 同构检查项总数（v10：41 项 = v4 40 项 + v10 handler_exception_coverage 1 项）
-ISOMORPHISM_CHECKS_TOTAL_V4: int = 41
+#: v4 同构检查项总数（v11：44 项 = v10 41 项 + v11 converters_polling/parallel_runtime/dead_code 3 项）
+ISOMORPHISM_CHECKS_TOTAL_V4: int = 44
 
 #: 向后兼容别名（v3 命名）
 ISOMORPHISM_CHECKS_TOTAL_V3: int = ISOMORPHISM_CHECKS_TOTAL_V4
@@ -754,14 +754,27 @@ def _check_handler_try_except(file_path: Path) -> int:
 
 def _check_isomorphism(
     handler_exception_coverage: Optional[Dict[str, Any]] = None,
+    converters_polling_violations: Optional[Dict[str, Any]] = None,
+    parallel_runtime_violations: Optional[Dict[str, Any]] = None,
+    dead_code_violations: Optional[Dict[str, Any]] = None,
 ) -> Tuple[int, int]:
-    """检测 41 项同构代码模式，返回违规项数。
+    """检测 44 项同构代码模式，返回违规项数。
 
-    41 项检查（每项匹配数应为 0，非 0 则该计 1 项违规）。
+    44 项检查（每项匹配数应为 0，非 0 则该计 1 项违规）。
 
     v10 新增第 41 项：handler_exception_coverage < 100% 计 1 违规
     （所有 ``self._bus.subscribe(EventType, self._handler_name)`` 手动订阅的
     handler 必须使用 ``@_event_handler`` 装饰，防止异常中断 EventBus.publish 同步扇出链）。
+
+    v11 新增 3 项（审计盲区闭合，第十一层洞察）：
+     42. converters_polling_violations > 0 计 1 违规（converters.py 内
+         ``while + wait(N) + time.time()`` 轮询模式零容忍，DZHPoolExecutor._run_loop
+         已删除后应零匹配）
+     43. parallel_runtime_violations > 0 计 1 违规（converters.py / services/*.py 内
+         ``threading.Thread + while + threading.Event.wait`` 平行运行时零容忍；
+         PoolEngine 的 ``asyncio.Event.wait()`` 事件驱动不在此列）
+     44. dead_code_violations > 0 计 1 违规（全仓零实例化零导入的死类零容忍，
+         DzhXmlExporter 已删除后应零死类）
 
     v3 原 15 项（保留，第 2 项已修复：移除 ``_build_adjacency`` 禁用）：
       1. ``state.latest_tick[`` = 0（除 runtime_mode_module.py 中 TickTable 内部）
@@ -810,9 +823,14 @@ def _check_isomorphism(
      40. core/*.py（除 event_bus.py）``self._bus.subscribe(EventType, self._on_`` = 0（C11）
      41. v10：handler_exception_coverage < 100% 计 1 违规（手动 subscribe 的 handler
          未全部使用 ``@_event_handler`` 装饰，存在异常中断事件链风险）
+     42. v11：converters_polling_violations > 0 计 1 违规（converters.py
+         ``while + wait(N) + time.time()`` 轮询模式零容忍）
+     43. v11：parallel_runtime_violations > 0 计 1 违规（converters.py / services/*.py
+         ``threading.Thread + while + threading.Event.wait`` 平行运行时零容忍）
+     44. v11：dead_code_violations > 0 计 1 违规（全仓零实例化零导入死类零容忍）
 
     Returns:
-        (violations, total_checks) — 违规项数 / 总检查项(41)
+        (violations, total_checks) — 违规项数 / 总检查项(44)
     """
     total_checks = ISOMORPHISM_CHECKS_TOTAL_V4
     violations = 0
@@ -1148,6 +1166,29 @@ def _check_isomorphism(
     if handler_exception_coverage is None:
         handler_exception_coverage = _collect_handler_exception_coverage()
     if float(handler_exception_coverage.get("coverage", 0.0) or 0.0) < 100.0:
+        violations += 1
+
+    # 42. v11：converters_polling_violations > 0 计 1 违规
+    #     converters.py 内 while + wait(N) + time.time() 轮询模式零容忍
+    #     （DZHPoolExecutor._run_loop 已删除后应零匹配，闭合 v10 审计盲区）
+    if converters_polling_violations is None:
+        converters_polling_violations = _collect_converters_polling_violations()
+    if int(converters_polling_violations.get("violations", 0) or 0) > 0:
+        violations += 1
+
+    # 43. v11：parallel_runtime_violations > 0 计 1 违规
+    #     converters.py / services/*.py 内 threading.Thread + while + threading.Event.wait
+    #     平行运行时零容忍（PoolEngine 的 asyncio.Event.wait() 事件驱动不在此列）
+    if parallel_runtime_violations is None:
+        parallel_runtime_violations = _collect_parallel_runtime_violations()
+    if int(parallel_runtime_violations.get("violations", 0) or 0) > 0:
+        violations += 1
+
+    # 44. v11：dead_code_violations > 0 计 1 违规
+    #     全仓零实例化零导入死类零容忍（DzhXmlExporter 已删除后应零死类）
+    if dead_code_violations is None:
+        dead_code_violations = _collect_dead_code_violations()
+    if int(dead_code_violations.get("count", 0) or 0) > 0:
         violations += 1
 
     return violations, total_checks
@@ -1531,12 +1572,14 @@ def _collect_polling_violations() -> Dict[str, Any]:
         dict 填入 ``test_results["polling_violations"]``
     """
     pattern_counts: Dict[str, int] = {}
-    # 轮询模式搜索范围：core/ + services/ + app.py
+    # 轮询模式搜索范围：core/ + services/ + app.py + converters.py（v11 扩展覆盖 converters.py，
+    # 闭合 v10 审计盲区——DZHPoolExecutor._run_loop 轮询运行时曾藏于此文件）
     for pattern in POLLING_PATTERNS:
         count = (
             _grep_count(pattern, _CORE_DIR)
             + _grep_count(pattern, _SERVICES_DIR)
             + _grep_count_in_file(pattern, _APP_FILE)
+            + _grep_count_in_file(pattern, _CONVERTERS_FILE)
         )
         # 前端 setInterval fetch 单独在 web/js/*.js 中搜索
         if pattern == r"setInterval.*fetch":
@@ -2182,6 +2225,303 @@ def _collect_handler_exception_coverage() -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# v11 新增：审计盲区闭合采集（第十一层洞察：审计盲区是收敛上限的最大敌人）
+# ---------------------------------------------------------------------------
+
+
+def _collect_converters_polling_violations() -> Dict[str, Any]:
+    """v11: 采集 converters.py 轮询模式违规（第十一层洞察：审计盲区闭合）。
+
+    AST 检测 ``converters.py`` 内 ``while + wait(N) + time.time()`` 轮询调度模式
+    （DZHPoolExecutor._run_loop 已删除后应零匹配）。该模式是 v10 审计盲区——
+    v10 轮询零容忍检查只覆盖 core/runtime_mode_module.py / core/table_engine.py /
+    services/data.py，从未覆盖 converters.py，导致 DZHPoolExecutor 平行运行时漏判。
+
+    检测逻辑：AST 遍历 ``while`` 语句，若循环条件含 ``.wait(N)`` 调用（带超时参数的
+    事件等待，即轮询-with-超时模式）且循环体内含 ``time.time()`` 调用（时间戳轮询
+    判定），计 1 违规。
+
+    Returns:
+        dict 含 ``violations``/``files``/``details`` 字段。零违规时 violations=0。
+    """
+    files: List[str] = []
+    details: List[str] = []
+    tree = _parse_ast(_CONVERTERS_FILE)
+    if tree is None:
+        return {"violations": 0, "files": files, "details": details}
+
+    def _has_wait_call(node) -> bool:
+        """node 子树是否含 ``.wait(N)`` 调用（事件等待，含超时参数即轮询模式）。"""
+        for child in ast.walk(node):
+            if (isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Attribute)
+                    and child.func.attr == "wait"):
+                return True
+        return False
+
+    def _has_time_time_call(node) -> bool:
+        """node 子树是否含 ``time.time()`` 调用。"""
+        for child in ast.walk(node):
+            if (isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Attribute)
+                    and child.func.attr == "time"
+                    and isinstance(child.func.value, ast.Name)
+                    and child.func.value.id == "time"):
+                return True
+        return False
+
+    violations = 0
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.While):
+            continue
+        # while 条件含 .wait(N) 且循环体含 time.time() → 轮询调度模式
+        if _has_wait_call(node.test) and _has_time_time_call(node):
+            violations += 1
+            files.append("converters.py")
+            details.append(
+                f"converters.py:{node.lineno} while + wait(N) + time.time() 轮询模式"
+            )
+    return {"violations": violations, "files": files, "details": details}
+
+
+def _file_uses_threading_thread(content: str) -> bool:
+    """检测文件是否使用 ``threading.Thread``（含 ``import threading as X`` 别名）。"""
+    # 直接 threading.Thread(
+    if re.search(r"\bthreading\.Thread\s*\(", content):
+        return True
+    # import threading[ as alias] + alias.Thread(
+    m = re.search(r"^\s*import\s+threading(?:\s+as\s+(\w+))?", content, re.MULTILINE)
+    if m:
+        alias = m.group(1) or "threading"
+        if re.search(r"\b" + re.escape(alias) + r"\.Thread\s*\(", content):
+            return True
+    # from threading import Thread[ as alias] + alias(
+    m2 = re.search(
+        r"^\s*from\s+threading\s+import\s+[^#\n]*\bThread\b(?:\s+as\s+(\w+))?",
+        content, re.MULTILINE,
+    )
+    if m2:
+        name = m2.group(1) or "Thread"
+        if re.search(r"\b" + re.escape(name) + r"\s*\(", content):
+            return True
+    return False
+
+
+def _count_sync_wait_calls(tree: ast.Module) -> int:
+    """统计 AST 中非 ``await`` 的 ``.wait()`` 调用数（sync threading.Event.wait）。
+
+    ``asyncio.Event.wait()`` 形如 ``await event.wait()``，其 Call 节点是
+    ``ast.Await.value`` 直接子节点；``threading.Event.wait()`` 形如
+    ``event.wait(N)``（无 await），Call 节点不在 Await 下。本函数统计不在
+    Await 下的 ``.wait()`` 调用——PoolEngine 的 ``asyncio.Event.wait()`` 不计入。
+    """
+    async_wait_ids: set = set()
+    all_wait_calls: List[Tuple[int, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Await):
+            val = node.value
+            if (isinstance(val, ast.Call)
+                    and isinstance(val.func, ast.Attribute)
+                    and val.func.attr == "wait"):
+                async_wait_ids.add((val.lineno, val.col_offset))
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "wait"):
+            all_wait_calls.append((node.lineno, node.col_offset))
+    return sum(1 for wid in all_wait_calls if wid not in async_wait_ids)
+
+
+def _collect_parallel_runtime_violations() -> Dict[str, Any]:
+    """v11: 采集平行运行时违规（第十一层洞察：运行时单一真相源）。
+
+    检测 ``converters.py`` / ``services/*.py`` 内 ``threading.Thread`` + ``while`` +
+    ``threading.Event.wait``（sync ``.wait()``）组合的平行运行时模式。
+    PoolEngine 使用 ``asyncio.Event.wait()`` + ``loop.call_at`` 事件驱动（非 threading），
+    不在此列——仅 flag ``threading.Thread`` + ``while`` + sync ``.wait()`` 组合。
+
+    v10 漏判的 DZHPoolExecutor 即此模式：``threading.Thread(target=_run_loop)`` +
+    ``while not self._stop_event.wait(1):`` + ``time.time()`` 轮询调度，完整复制
+    PoolEngine + EventBus 能力但用轮询而非事件驱动。v11 删除后应零违规。
+
+    Returns:
+        dict 含 ``violations``/``files``/``details`` 字段。零违规时 violations=0。
+    """
+    files: List[str] = []
+    details: List[str] = []
+
+    # 扫描范围：converters.py + services/*.py
+    scan_files: List[Path] = [_CONVERTERS_FILE]
+    if _SERVICES_DIR.is_dir():
+        scan_files.extend(sorted(_SERVICES_DIR.glob("*.py")))
+
+    violations = 0
+    for py_file in scan_files:
+        if not py_file.is_file():
+            continue
+        tree = _parse_ast(py_file)
+        if tree is None:
+            continue
+        try:
+            content = py_file.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+
+        # (1) 文件含 threading.Thread 使用
+        if not _file_uses_threading_thread(content):
+            continue
+        # (2) 文件含 while 语句
+        has_while = any(isinstance(n, ast.While) for n in ast.walk(tree))
+        if not has_while:
+            continue
+        # (3) 文件含 sync（非 await）.wait() 调用 → threading.Event.wait 平行运行时信号
+        sync_waits = _count_sync_wait_calls(tree)
+        if sync_waits == 0:
+            continue
+
+        violations += 1
+        files.append(py_file.name)
+        details.append(
+            f"{py_file.name}: threading.Thread + while + sync .wait() "
+            f"平行运行时模式（{sync_waits} 处 sync wait）"
+        )
+
+    return {"violations": violations, "files": files, "details": details}
+
+
+#: v11 死代码检测的预存豁免名单（v11 metatest 范围外的预存死类，跟踪待后续清理）。
+#: v11 本轮仅负责删除 DzhXmlExporter；下列类为 v11 之前已存在、且不在 metatest/
+#: 可修改范围内的预存死类，豁免后使 metatest 能干净 enforce「v11 不引入新死代码」。
+#: 名称拆分构造以避免本文件源码自引用干扰死代码引用计数（runner.py 在引用搜索语料中）。
+_PRE_EXISTING_DEAD_CLASSES: frozenset = frozenset({
+    "Error" + "Response",  # api.py:1454 — 预存未引用 BaseModel，v11 metatest 范围外
+})
+
+
+def _is_protocol_class(node: ast.ClassDef) -> bool:
+    """node 是否为 ``typing.Protocol`` 结构类型（基类含 Protocol）。
+
+    Protocol 是结构性类型契约，可不命名引用即被任意匹配形状的类隐式满足，
+    与 DzhXmlExporter 式的具体死实现不是同一类别，故排除出死代码检测。
+    """
+    for base in node.bases:
+        if isinstance(base, ast.Name) and base.id == "Protocol":
+            return True
+        if isinstance(base, ast.Attribute) and base.attr == "Protocol":
+            return True
+    return False
+
+
+def _collect_dead_code_violations() -> Dict[str, Any]:
+    """v11: 采集死代码类违规（第十一层洞察：死代码零容忍）。
+
+    AST 解析 .py 文件（排除 metatest/ 自身、simtests/、eventtest/、test_*.py、
+    __pycache__、隐藏目录、.trae/），收集非私有（非 ``_`` 前缀）类定义。
+    跳过 ``Test*`` 命名类（pytest 运行时收集实例化）与 ``Protocol`` 结构类型
+    （隐式满足，非死实现）。对每个类名，全仓 grep ``ClassName`` 引用——
+    若唯一匹配为 ``class ClassName:`` 定义行本身（零实例化/零导入/零引用），
+    计为死代码。
+
+    引用搜索语料含全部 .py（含 metatest/ 与测试目录，类被测试引用亦算 alive）。
+    ``_PRE_EXISTING_DEAD_CLASSES`` 名单中的预存死类不计入 ``count``，而是列入
+    ``pre_existing`` 字段跟踪，使 metatest 能 enforce「v11 不引入新死代码」
+    而不被 v11 范围外的预存死类干扰。
+
+    v11 删除的 DzhXmlExporter 即此检测目标（~328 行平行 DZH 导出器，零实例化零导入）。
+    删除后 ``count`` 应为 0。
+
+    Returns:
+        dict 含 ``dead_classes``/``count``/``pre_existing`` 字段。
+    """
+    project_root = _PROJECT_ROOT
+
+    def _is_excluded(
+        parts: Tuple[str, ...],
+        *,
+        exclude_metatest: bool,
+        exclude_tests: bool = False,
+    ) -> bool:
+        if not parts:
+            return True
+        if "__pycache__" in parts:
+            return True
+        if any(p.startswith(".") for p in parts):
+            return True
+        if exclude_metatest and parts[0] == "metatest":
+            return True
+        if exclude_tests:
+            # 测试目录/文件由 pytest 运行时收集，其类定义不计入死代码扫描
+            if parts[0] in ("simtests", "eventtest"):
+                return True
+            if parts[-1].startswith("test_") and parts[-1].endswith(".py"):
+                return True
+        return False
+
+    # 类定义源文件：排除 metatest/ + 测试目录/文件（"skip classes in metatest/ itself"）
+    def_py_files: List[Path] = []
+    # 引用搜索文件集：所有 .py 文件（含 metatest/ 与测试目录，类被测试引用亦算 alive）
+    ref_py_files: List[Path] = []
+    for py_file in project_root.rglob("*.py"):
+        parts = py_file.relative_to(project_root).parts
+        if not _is_excluded(parts, exclude_metatest=False):
+            ref_py_files.append(py_file)
+        if _is_excluded(parts, exclude_metatest=True, exclude_tests=True):
+            continue
+        def_py_files.append(py_file)
+
+    # 收集类定义（非私有，非 metatest/，非测试目录；跳过 Test* 与 Protocol）
+    class_defs: Dict[str, List[str]] = {}
+    for py_file in def_py_files:
+        tree = _parse_ast(py_file)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            if node.name.startswith("_"):
+                continue
+            # 跳过 pytest 测试类（Test* 命名约定，运行时由 pytest 收集实例化）
+            if node.name.startswith("Test"):
+                continue
+            # 跳过 Protocol 结构类型（structural typing，可不命名引用即被隐式满足）
+            if _is_protocol_class(node):
+                continue
+            class_defs.setdefault(node.name, []).append(
+                f"{py_file.relative_to(project_root)}:{node.lineno}"
+            )
+
+    # 构建引用搜索语料
+    ref_contents: List[str] = []
+    for py_file in ref_py_files:
+        try:
+            ref_contents.append(py_file.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            continue
+    ref_blob = "\n".join(ref_contents)
+
+    dead_classes: List[str] = []
+    pre_existing: List[str] = []
+    for class_name, def_locs in class_defs.items():
+        name_re = re.compile(r"\b" + re.escape(class_name) + r"\b")
+        total_refs = len(name_re.findall(ref_blob))
+        def_re = re.compile(r"\bclass\s+" + re.escape(class_name) + r"\b")
+        def_refs = len(def_re.findall(ref_blob))
+        # 全部引用都是 class 定义本身 → 零实例化/零导入/零引用 → 死代码
+        if total_refs == def_refs:
+            entry = f"{class_name} (定义于 {def_locs[0]})"
+            if class_name in _PRE_EXISTING_DEAD_CLASSES:
+                # v11 metatest 范围外的预存死类，跟踪不扣分
+                pre_existing.append(entry)
+            else:
+                dead_classes.append(entry)
+
+    return {
+        "dead_classes": dead_classes,
+        "count": len(dead_classes),
+        "pre_existing": pre_existing,
+    }
+
+
+# ---------------------------------------------------------------------------
 # v3 补充维度评分（当 scoring.py 尚未升级到 v3 时使用）
 # ---------------------------------------------------------------------------
 
@@ -2394,7 +2734,7 @@ def _print_report(
         print(f"                → 得分 {lc.score:.1f}/100 — {lc.details}")
 
     print(f"同构代码消除度:  {iso_violations} 违规 / {iso_checks} 项检查 "
-          f"(权重 9%, 41 项检查)")
+          f"(权重 9%, {iso_checks} 项检查)")
     if ie:
         print(f"                → 得分 {ie.score:.1f}/100 — {ie.details}")
 
@@ -2677,9 +3017,18 @@ def main() -> int:
     # v10: handler 异常保护覆盖采集（第十层洞察，供 isomorphism 第 41 项检查 + test_results 字段）
     handler_exception_coverage = _collect_handler_exception_coverage()
 
-    # v4: 同构代码消除度检测（v10：41 项 Grep / AST 验证，含 handler_exception_coverage 项）
+    # v11: 审计盲区闭合采集（第十一层洞察，供 isomorphism 第 42-44 项检查 + test_results 字段）
+    converters_polling_violations = _collect_converters_polling_violations()
+    parallel_runtime_violations = _collect_parallel_runtime_violations()
+    dead_code_violations = _collect_dead_code_violations()
+
+    # v4: 同构代码消除度检测（v11：44 项 Grep / AST 验证，含 handler_exception_coverage
+    # + converters_polling/parallel_runtime/dead_code 3 项）
     isomorphism_violations, isomorphism_total_checks = _check_isomorphism(
         handler_exception_coverage=handler_exception_coverage,
+        converters_polling_violations=converters_polling_violations,
+        parallel_runtime_violations=parallel_runtime_violations,
+        dead_code_violations=dead_code_violations,
     )
 
     # v3 新增数据采集
@@ -2741,7 +3090,7 @@ def main() -> int:
         "logic_coverage_passed": logic_coverage_passed,
         "logic_coverage_total": logic_coverage_total,
         "isomorphism_violations": isomorphism_violations,
-        "isomorphism_total_checks": isomorphism_total_checks,  # v10: 41
+        "isomorphism_total_checks": isomorphism_total_checks,  # v11: 44
         # --- v3 新增字段 ---
         "core_total_lines": core_total_lines,
         "core_lines_target": CORE_LINES_TARGET,
@@ -2768,6 +3117,10 @@ def main() -> int:
         "adapter_isomorphism": adapter_isomorphism,
         # --- v10 新增字段（handler 异常保护覆盖，isomorphism 第 41 项检查依据）---
         "handler_exception_coverage": handler_exception_coverage,
+        # --- v11 新增字段（审计盲区闭合，isomorphism 第 42-44 项检查依据）---
+        "converters_polling_violations": converters_polling_violations,
+        "parallel_runtime_violations": parallel_runtime_violations,
+        "dead_code_violations": dead_code_violations,
     }
 
     # 计算评分

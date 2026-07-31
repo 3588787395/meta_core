@@ -1,8 +1,8 @@
-# metatest v10 严格正反合量化测试套件
+# metatest v11 严格正反合量化测试套件
 
 ## 概述
 
-metatest v10 是股票池平台的严格正反合量化测试套件，覆盖前端与后端所有模块。
+metatest v11 是股票池平台的严格正反合量化测试套件，覆盖前端与后端所有模块。
 v6 在 v5 20 维基础上扩展为 **21 维**加权评分：v5 20 维等比降权 4%（每维 × 0.96），
 新增第 21 维 adapter_isomorphism 占 4%（TqProvider/TqSdkBridge 转发方法表驱动覆盖率），
 权重重新分配至总和 = 100%。v7 在 v6 21 维结构基础上，新增 per-code 循环表
@@ -45,6 +45,22 @@ v9 文档化此上限（「知止」纪律），防止后续过度抽象。
 （v5）/轮询（v4）五维均已达标，v10 文档化此「全局知止」结论，禁止强行合并结构同构但数据/派发异构
 的代码。
 
+**第十一层洞察（审计盲区是收敛上限的最大敌人）**：v10 文档化「全局元模式收敛已达上限」
+（RULES 120「知止」纪律），但 v11 跨域深度审计发现 **v10 的「上限」是审计盲区制造的假象**——
+v10 的 metatest 轮询零容忍检查只 grep `core/runtime_mode_module.py` / `core/table_engine.py` /
+`services/data.py` 三个文件，**从未覆盖 `converters.py`**，导致 `DZHPoolExecutor`（~400 行活体
+平行运行时，`threading.Thread + while + _stop_event.wait(1) + time.time()` 轮询调度）漏网。
+该平行运行时完整复制了 PoolEngine + EventBus + EventDriver 的能力，但用轮询而非事件驱动，
+直接违反「彻底事件驱动，禁止轮询」硬约束。v11 闭合此盲区：删除 DZHPoolExecutor 轮询基础设施、
+删除 DzhXmlExporter 死代码（~328 行，零实例化零导入），并新增 3 项同构检查（converters 轮询 /
+平行运行时 / 死代码）使评分体系能驱动审计盲区闭合。**运行时只有一个真相源（PoolEngine）**，
+所有长时执行委托 `run_loop()`（`asyncio.Event.wait()` + `loop.call_at` 事件驱动），所有一次性
+执行委托 `execute_pool()`。
+
+**v10 上限范围修正**：v11 不是对 v10 的否定——v10 在 `core/` 焦点目录内的收敛是真实的。
+v11 是对 v10「全局上限」声明的**范围修正**：上限仅适用于 `core/` 内部，`converters.py` 与
+跨域审计盲区仍有真同构合并机会。v11 闭合这些盲区后，全局收敛上限声明才真正成立。
+
 门槛：总分 ≥ 95 且 21 维均 ≥ 80 判定 PASS。
 
 ## 21 维评分规则与权重
@@ -62,7 +78,7 @@ v9 文档化此上限（「知止」纪律），防止后续过度抽象。
 | 5 | performance_benchmark | 3.84% | 1000 tick 耗时 ≤ 10s 满分，线性衰减 |
 | 6 | frontend_e2e_pass_rate | 5.376% | 前端 E2E 真实通过数 / 总数 × 100（环境缺失给最低达标线 80） |
 | 7 | logic_coverage | 3.84% | 5 项底层逻辑验证通过数 / 5 × 100 |
-| 8 | isomorphism_elimination | 6.912% | 41 项同构代码 Grep/AST 检查（v10 含 handler_exception_coverage），0 违规满分 |
+| 8 | isomorphism_elimination | 6.912% | 44 项同构代码 Grep/AST 检查（v10 含 handler_exception_coverage，v11 新增 converters 轮询 / 平行运行时 / 死代码 3 项），0 违规满分 |
 | 9 | line_convergence | 3.84% | 核心模块总行数 ≤ 22500 满分，线性衰减 |
 | 10 | rule_compliance | 2.304% | RULES 91-100 Grep 违规数 / 10，0 违规满分 |
 | 11 | negative_test_coverage | 1.536% | 4 类反测试用例数 / 目标数（每类 ≥ 8）均值 × 100 |
@@ -249,14 +265,17 @@ python -m metatest.runner
 ```
 metatest/
 ├── conftest.py                              # 共享 pytest 夹具
-├── scoring.py                               # 21 维量化评分引擎（v10）
-├── runner.py                                # 测试运行器 + 21 维数据采集（v10，含 handler_exception_coverage 等字段）
+├── scoring.py                               # 21 维量化评分引擎（v11，ISOMORPHISM_CHECKS_TOTAL=44）
+├── runner.py                                # 测试运行器 + 21 维数据采集（v11，含 handler_exception_coverage / converters_polling / parallel_runtime / dead_code 等字段）
 ├── test_positive_dispatcher_isomorphism.py  # v5 MetaDispatcher 继承断言
 ├── test_positive_runtime_verification.py     # v5 3 个 in-process 测试全绿
 ├── test_negative_cross_module_import.py     # v5 8 处违规模式零匹配
 ├── test_positive_adapter_isomorphism.py     # v6 adapter 转发表驱动覆盖率断言
 ├── test_positive_oop_inheritance.py         # v9 主流程模板方法 + 10 钩子 @abstractmethod + 薄包装断言
 ├── test_positive_handler_exception.py       # v10 handler 异常保护全覆盖 + _event_handler 异常隔离断言
+├── test_negative_polling.py                 # v11 converters.py 轮询零容忍（while + wait(N) + time.time() 零匹配）
+├── test_positive_no_parallel_runtime.py     # v11 平行运行时零容忍（threading.Thread + while + sync wait 零匹配）
+├── test_positive_no_dead_code.py            # v11 死代码零容忍（零实例化零导入死类零匹配）
 ├── test_runtime_replay_heapq.py             # v5 harness（replay）
 ├── test_runtime_simulation_heapq.py         # v5 harness（simulation）
 ├── test_runtime_mode_switch.py              # v5 harness（mode-switch）
@@ -264,7 +283,7 @@ metatest/
 └── report.json                              # 21 维 + meta_unification 结构化报告
 ```
 
-## v10 严格规则总结
+## v11 严格规则总结
 
 - 跳过测试计为失败（不在 passed 分子）
 - 前端 E2E 环境缺失计 `frontend_e2e_passed=0`，给最低达标线 80（非信用分）
@@ -280,3 +299,6 @@ metatest/
 - Converter 主流程必须模板方法化（v8 新增）：`parse_pool` / `export_pool` 在 `BasePoolConverter` 编排骨架，子类仅覆盖 10 个差异钩子，模块级函数仅作薄包装委托，禁止重新引入模块级并行主流程函数
 - 模板方法差异钩子必须使用 @abstractmethod 装饰（v9 新增）：禁止 raise NotImplementedError 占位，实现 construction-time 早失败契约执行
 - 所有事件 handler 必须使用 @_event_handler 装饰（v10 新增）：禁止裸 handler，所有通过 `self._bus.subscribe()` 注册的 handler 必须经 `@_event_handler` 装饰（异常保护全覆盖），防止 handler 异常中断 EventBus.publish 同步扇出链；handler_exception_coverage < 100% 计为 isomorphism_elimination 第 41 项违规
+- converters.py 轮询零容忍（v11 新增）：converters.py 内不得出现 `while + wait(N) + time.time()` 轮询调度模式（闭合 v10 metatest 未覆盖 converters.py 的审计盲区，DZHPoolExecutor._run_loop 已删除）；非零匹配计为 isomorphism_elimination 第 42 项违规
+- 禁止平行运行时（v11 新增）：converters.py / services/*.py 内不得实现 `threading.Thread + while + sync .wait()` 轮询调度平行运行时；所有长时执行必须委托 `PoolEngine.run_loop()`（`asyncio.Event.wait()` + `loop.call_at` 事件驱动），所有一次性执行必须委托 `PoolEngine.execute_pool()`——运行时只有一个真相源；非零匹配计为 isomorphism_elimination 第 43 项违规
+- 死代码零容忍（v11 新增）：全仓不得积累零实例化 + 零导入的死代码类（如已删除的 DzhXmlExporter）；metatest 新增 `_collect_dead_code_violations` AST 检测（排除 Test* 类 / Protocol 结构类型 / 测试目录，预存死类列入 `pre_existing` 跟踪字段不计 count）；count > 0 计为 isomorphism_elimination 第 44 项违规

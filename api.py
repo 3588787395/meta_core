@@ -108,7 +108,6 @@ except ImportError:
 # === Import ===
 try:
     from converters import (
-        DZHPoolExecutor,
         build_attrtext_from_selections,
         decode_action,
         decode_reload_mode,
@@ -129,7 +128,6 @@ try:
     from services.storage import DatabaseSyncService, safe_path_join
 except ImportError:
     from ..converters import (
-        DZHPoolExecutor,
         build_attrtext_from_selections,
         decode_action,
         decode_reload_mode,
@@ -6391,14 +6389,9 @@ def create_dzh_router() -> APIRouter:
         config = body.get('config') or body
         if not config or 'nodes' not in config:
             return {"code": 1, "msg": "配置无效，缺少nodes", "data": None}
-        from converters import DZHPoolExecutor
-        executor = DZHPoolExecutor(config)
-        executor._init_mock_stocks()
-        executor.start()
-        pool_id = body.get('pool_id', f"pool_{id(executor)}")
-        if not hasattr(request.app.state, '_dzh_executors'):
-            request.app.state._dzh_executors = {}
-        request.app.state._dzh_executors[pool_id] = executor
+        engine = request.app.state.engine
+        engine.start_loop(config)
+        pool_id = body.get('pool_id', f"pool_{id(engine)}")
         return {
             "code": 0,
             "msg": "执行器已启动",
@@ -6416,36 +6409,58 @@ def create_dzh_router() -> APIRouter:
             body = await request.json()
         except Exception as e:
             return {"code": 1, "msg": f"请求解析失败: {e}", "data": None}
-        pool_id = body.get('pool_id')
-        executors = getattr(request.app.state, '_dzh_executors', {})
-        executor = executors.get(pool_id)
-        if not executor:
-            return {"code": 1, "msg": f"执行器不存在: {pool_id}", "data": None}
-        executor.stop()
+        engine = request.app.state.engine
+        await engine.stop_loop()
+        node_states = {}
+        try:
+            for nid, ss in engine.state.node_stocks.items():
+                node_info = engine.nodes.get(nid, {})
+                node_states[nid] = {
+                    'stocks': ss,
+                    'type': node_info.get('type', ''),
+                    'name': node_info.get('name', '') or node_info.get('label', ''),
+                }
+        except Exception:
+            pass
+        try:
+            events = engine.get_events()
+        except Exception:
+            events = []
         result = {
-            "output_stocks": executor.get_output_stocks(50),
-            "node_states": executor.get_node_states(),
-            "events": executor.get_events(100),
-            "total_events": len(executor._events)
+            "output_stocks": [],
+            "node_states": node_states,
+            "events": events,
+            "total_events": len(events),
         }
-        del executors[pool_id]
         return {"code": 0, "msg": "执行器已停止", "data": result}
 
     @router.get("/pool/status/{pool_id}")
     async def get_pool_status(pool_id: str, request: Request):
-        executors = getattr(request.app.state, '_dzh_executors', {})
-        executor = executors.get(pool_id)
-        if not executor:
-            return {"code": 1, "msg": f"执行器不存在: {pool_id}", "data": None}
+        engine = request.app.state.engine
+        node_states = {}
+        try:
+            for nid, ss in engine.state.node_stocks.items():
+                node_info = engine.nodes.get(nid, {})
+                node_states[nid] = {
+                    'stocks': ss,
+                    'type': node_info.get('type', ''),
+                    'name': node_info.get('name', '') or node_info.get('label', ''),
+                }
+        except Exception:
+            pass
+        try:
+            events = engine.get_events()
+        except Exception:
+            events = []
         return {
             "code": 0,
             "msg": "ok",
             "data": {
                 "pool_id": pool_id,
-                "running": executor.running,
-                "node_states": executor.get_node_states(),
-                "recent_events": executor.get_events(10),
-                "total_events": len(executor._events)
+                "running": getattr(engine, '_loop_running', False),
+                "node_states": node_states,
+                "recent_events": events[:10],
+                "total_events": len(events),
             }
         }
 

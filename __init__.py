@@ -25,11 +25,6 @@ except ImportError:
     KLineReplayEngine = None
 
 try:
-    from .converters import DZHPoolExecutor
-except ImportError:
-    DZHPoolExecutor = None
-
-try:
     from .core.runtime_mode_module import RuntimeSimulator
 except ImportError:
     RuntimeSimulator = None
@@ -44,7 +39,6 @@ __all__ = [
     "Storage",
     "TqAdapter",
     "KLineReplayEngine",
-    "DZHPoolExecutor",
     "RuntimeSimulator",
     "parse_dzh_xml",
     "export_dzh_xml",
