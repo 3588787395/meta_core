@@ -776,10 +776,11 @@ def _check_isomorphism(
     parallel_runtime_violations: Optional[Dict[str, Any]] = None,
     dead_code_violations: Optional[Dict[str, Any]] = None,
     structural_polling_violations: Optional[Dict[str, Any]] = None,
+    runtime_verification: Optional[Dict[str, Any]] = None,
 ) -> Tuple[int, int]:
-    """检测 48 项同构代码模式，返回违规项数。
+    """检测 49 项同构代码模式，返回违规项数。
 
-    48 项检查（每项匹配数应为 0，非 0 则该计 1 项违规）。
+    49 项检查（每项匹配数应为 0，非 0 则该计 1 项违规）。
 
     v10 新增第 41 项：handler_exception_coverage < 100% 计 1 违规
     （所有 ``self._bus.subscribe(EventType, self._handler_name)`` 手动订阅的
@@ -2036,17 +2037,30 @@ def _collect_runtime_verification(stats: "_StatsPlugin") -> Dict[str, Any]:
     这些测试已在主 pytest 运行中执行（非阻塞文件），故直接复用 file_stats 真实
     结果，避免 subprocess 重复运行。每个文件 passed > 0 且 failed/errors == 0
     计为通过。
+
+    v13 fail-loud 硬化（第十三层洞察——检测器引用不存在目标是检测器自身缺陷）：
+    当 ``_RUNTIME_TEST_FILES`` 中任一文件不在 ``stats.file_stats`` 中时（检测器
+    引用的目标文件缺失），将其加入 ``missing_files`` 字段返回，而非静默 ``continue``
+    跳过制造「已检测」假象。下游 ``_check_isomorphism`` 第 49 项检查据此计 1 违规，
+    使检测器引用完整性成为可执行约束。
     """
     passed = 0
     total = len(_RUNTIME_TEST_FILES)
+    missing_files: List[str] = []
     for fname in _RUNTIME_TEST_FILES:
         fstats = stats.file_stats.get(fname)
         if fstats is None:
+            missing_files.append(fname)
             continue
         if fstats.get("passed", 0) > 0 and fstats.get("failed", 0) == 0 \
                 and fstats.get("errors", 0) == 0:
             passed += 1
-    return {"passed": passed, "total": total, "files": list(_RUNTIME_TEST_FILES)}
+    return {
+        "passed": passed,
+        "total": total,
+        "files": list(_RUNTIME_TEST_FILES),
+        "missing_files": missing_files,
+    }
 
 
 def _collect_eventtest_regression() -> Dict[str, Any]:
