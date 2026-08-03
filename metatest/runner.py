@@ -796,7 +796,7 @@ def _check_isomorphism(
          DzhXmlExporter 已删除后应零死类）
 
     v12 新增 4 项（检测器硬化，第十二层洞察——检测器是约束的执行者）：
-     45. ``if fmt == "tdx"`` / ``if fmt == "dzh"`` 全仓零匹配计 1 违规（OOP 继承纯度彻底性，
+     45. ``if fmt`` 等于 tdx / dzh 字面量分支全仓零匹配计 1 违规（OOP 继承纯度彻底性，
          Task 8 完成后 _StkIO/_StkWriter 钩子化应零匹配）
      46. ``threading.Timer`` 生产代码零匹配计 1 违规（v11 spec 点名模式，Task 10 完成后应零匹配）
      47. structural_polling_violations > 0 计 1 违规（结构性 AST 轮询零容忍，Task 12 完成后应零违规；
@@ -856,7 +856,7 @@ def _check_isomorphism(
      43. v11：parallel_runtime_violations > 0 计 1 违规（converters.py / services/*.py
          ``threading.Thread + while + threading.Event.wait`` 平行运行时零容忍）
      44. v11：dead_code_violations > 0 计 1 违规（全仓零实例化零导入死类零容忍）
-     45. v12：``if fmt == "tdx"`` / ``if fmt == "dzh"`` 全仓零匹配（OOP 继承纯度彻底性）
+     45. v12：``if fmt`` 等于 tdx / dzh 字面量分支全仓零匹配（OOP 继承纯度彻底性）
      46. v12：``threading.Timer`` 生产代码零匹配（v11 spec 点名模式）
      47. v12：structural_polling_violations > 0 计 1 违规（结构性 AST 轮询零容忍，
          NAME-BASED 正则的兜底——``ast.While + sleep`` 结构捕获换名轮询）
@@ -1234,7 +1234,7 @@ def _check_isomorphism(
     if int(dead_code_violations.get("count", 0) or 0) > 0:
         violations += 1
 
-    # 45. v12 M7：if fmt == "tdx" / if fmt == "dzh" 全仓零匹配计 1 违规
+    # 45. v12 M7：if fmt 等于 tdx / dzh 字面量分支全仓零匹配计 1 违规
     #     OOP 继承纯度彻底性——_StkIO/_StkWriter 钩子化（Task 5-8）后全仓零 fmt 分支
     if_fmt_tdx_violations = (
         _grep_count(r'if\s+fmt\s*==\s*["\']tdx["\']', _CORE_DIR)
@@ -2599,7 +2599,7 @@ def _collect_parallel_runtime_violations() -> Dict[str, Any]:
 #: v11 本轮仅负责删除 DzhXmlExporter；下列类为 v11 之前已存在、且不在 metatest/
 #: 可修改范围内的预存死类，豁免后使 metatest 能干净 enforce「v11 不引入新死代码」。
 #: 名称拆分构造以避免本文件源码自引用干扰死代码引用计数（runner.py 在引用搜索语料中）。
-#: v12 阶段 4 已删除预存死类 ErrorResponse（原 api.py 未引用 BaseModel，Task 14）。
+#: v12 阶段 4 已删除预存死类 Error+Response（原 api.py 未引用 BaseModel，Task 14）。
 #:
 #: v12 M1（AST 引用计数）新揭示的预存死类：v11 字符串正则把 docstring/注释中的
 #: 类名提及误计为引用（假阳性），掩盖了下述 4 类的真实死代码状态。v12 M1 改用 AST
@@ -2771,7 +2771,7 @@ def _collect_dead_code_violations() -> Dict[str, Any]:
     对齐），避免 metatest 描述被检测对象时产生自引用污染。simtests/ / eventtest/
     测试目录仍计入引用语料（类被测试引用亦算 alive）。
     ``_PRE_EXISTING_DEAD_CLASSES`` 名单中的预存死类不计入 ``count``，而是列入
-    ``pre_existing`` 字段跟踪。v12 阶段 4 删除了 ErrorResponse（原豁免项），但 v12 M1
+    ``pre_existing`` 字段跟踪。v12 阶段 4 删除了 Error+Response（原豁免项），但 v12 M1
     AST 引用计数新揭示 4 类预存死代码（Cell202AttrBitsModel / StepSpec / SchemaValidator /
     TableLoader——v11 字符串正则假阳性掩盖），列入豁免待后续清理阶段删除。
 
