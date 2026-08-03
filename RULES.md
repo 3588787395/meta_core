@@ -305,6 +305,8 @@
 
 123. **检测器是约束的执行者**：spec 中点名的违规模式（如 `threading.Timer`）必须有对应检测器 enforce；轮询检测必须含结构性 AST 检测（`ast.While` + `time.sleep`/`asyncio.sleep`/sync `.wait`），不得仅靠 NAME-BASED 正则；检测器扫描范围必须覆盖所有声明约束的目录（如 RULES 104 覆盖 services/*.py，不得只扫 core/）；死代码检测必须用 AST 引用计数，排除 docstring/注释/字符串字面量。这是「极致本质的运行时」的第十二层洞察的执行闭环：v11 spec 点名 threading.Timer 绕过 EventDriver 但 POLLING_PATTERNS 12 项无一项检测；asyncio.sleep 正则要求 sleep 在 while 之前但常见模式是 while 在前；NAME-BASED 检测换名即漏检；字符串匹配 docstring 假阳性。v12 闭合 4 处缺陷：POLLING_PATTERNS 新增 threading.Timer 检测 + _file_uses_threading_primitives 扩展 / asyncio.sleep 正则方向修正 / 新增 _collect_structural_polling_violations 结构性 AST 检测 / _collect_dead_code_violations 改 AST 引用计数 + ref_py_files 排除 metatest/ 自身。使「零容忍」声明变为「零执行」。
 
+124. **检测器引用完整性 fail-loud**：检测器引用的目标（文件/类/函数/模式）必须实际存在；目标缺失时检测器必须 fail-loud（返回 `missing_files` / `missing_targets` 字段 + 计违规），禁止静默输出零分制造「已检测」假象。这是「极致本质的运行时」的第十三层洞察：检测器引用不存在目标是检测器自身缺陷——一个指向不存在目标的检测器等于没有检测器，甚至更糟（制造假象）。v5 声明创建 3 个 in-process 运行时验证测试文件（`test_runtime_replay_heapq.py` / `test_runtime_simulation_heapq.py` / `test_runtime_mode_switch.py`）但从未创建，`_collect_runtime_verification` 静默输出 0/3 达 8 个迭代（v5→v12），是此反模式的直接实例：检测器引用了不存在的目标，但 `fstats=None → continue` 静默跳过，使「runtime_verification = 0/100」预存缺口在 8 个迭代中未触发注意。v13 闭合此缺口：3 个测试文件真正创建 + `_collect_runtime_verification` 新增 `missing_files` 字段（任一文件不在 `stats.file_stats` 即加入列表，而非 `continue`）+ `_check_isomorphism` 新增第 49 项检查（`missing_files` 非空计 1 违规）+ `ISOMORPHISM_CHECKS_TOTAL` 48→49。使「检测器引用完整性」从声明变为可执行约束：检测器不仅要检测违规，还要检测自身引用完整性——指向不存在目标的检测器必须 fail-loud。
+
 ---
 
 ## 附：文件路径映射（文档 vs 实际代码）

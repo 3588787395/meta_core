@@ -134,8 +134,8 @@ CORE_LINES_TARGET: int = 22500
 #: v4 反测试每类目标用例数
 NEGATIVE_TEST_TARGET_PER_CATEGORY: int = 8
 
-#: v4 同构检查项总数（v12：48 项 = v11 44 项 + v12 if_fmt_tdx/threading_timer/structural_polling/ast_dead_code 4 项）
-ISOMORPHISM_CHECKS_TOTAL_V4: int = 48
+#: v4 同构检查项总数（v13：49 项 = v12 48 项 + v13 runtime_verification_missing_files 1 项）
+ISOMORPHISM_CHECKS_TOTAL_V4: int = 49
 
 #: 向后兼容别名（v3 命名）
 ISOMORPHISM_CHECKS_TOTAL_V3: int = ISOMORPHISM_CHECKS_TOTAL_V4
@@ -805,6 +805,12 @@ def _check_isomorphism(
      48. ast_dead_code_false_positives > 0 计 1 违规（AST 死代码检测零假阳性——docstring/注释/
          字符串字面量排除验证，Task 9 完成后应零假阳性）
 
+    v13 新增 1 项（检测器引用完整性 fail-loud，第十三层洞察——检测器引用不存在目标
+    是检测器自身缺陷）：
+     49. runtime_verification.missing_files 非空计 1 违规（v5 声明创建的 3 个 in-process
+         运行时验证测试文件全部齐备；任一文件缺失即检测器引用不存在目标，fail-loud
+         返回 missing_files 列表，禁止静默输出 0/3 制造「已检测」假象）
+
     v3 原 15 项（保留，第 2 项已修复：移除 ``_build_adjacency`` 禁用）：
       1. ``state.latest_tick[`` = 0（除 runtime_mode_module.py 中 TickTable 内部）
       2. 运行时 ``json.loads`` / ``_parse_edge`` = 0（移除 ``_build_adjacency``，
@@ -863,9 +869,11 @@ def _check_isomorphism(
          NAME-BASED 正则的兜底——``ast.While + sleep`` 结构捕获换名轮询）
      48. v12：ast_dead_code_false_positives > 0 计 1 违规（AST 死代码检测零假阳性，
          docstring/注释/字符串字面量排除验证）
+     49. v13：runtime_verification.missing_files 非空计 1 违规（检测器引用完整性
+         fail-loud——3 个 in-process 运行时验证测试文件缺失即检测器引用不存在目标）
 
     Returns:
-        (violations, total_checks) — 违规项数 / 总检查项(48)
+        (violations, total_checks) — 违规项数 / 总检查项(49)
     """
     total_checks = ISOMORPHISM_CHECKS_TOTAL_V4
     violations = 0
@@ -1281,6 +1289,19 @@ def _check_isomorphism(
     ast_dead_code_false_positives = int(dead_code_violations.get("count", 0) or 0)
     if ast_dead_code_false_positives > 0:
         violations += 1
+
+    # 49. v13：runtime_verification.missing_files 非空计 1 违规
+    #     检测器引用完整性 fail-loud（第十三层洞察——检测器引用不存在目标是检测器自身缺陷）：
+    #     v5 声明创建的 3 个 in-process 运行时验证测试文件全部齐备后 missing_files 为空；
+    #     任一文件缺失即检测器引用不存在目标，fail-loud 返回 missing_files 列表，
+    #     禁止静默输出 0/3 制造「已检测」假象（v5→v12 8 个迭代的预存缺口根因）。
+    if runtime_verification is None:
+        # 防御性：未注入数据时计 1 违规（检测器无数据即等同于引用不完整）
+        violations += 1
+    else:
+        missing_files = runtime_verification.get("missing_files", []) or []
+        if len(missing_files) > 0:
+            violations += 1
 
     return violations, total_checks
 
@@ -3375,16 +3396,20 @@ def main() -> int:
     dead_code_violations = _collect_dead_code_violations()
     # v12 M4: 结构性 AST 轮询检测（供 isomorphism 第 47 项检查 + test_results 字段）
     structural_polling_violations = _collect_structural_polling_violations()
+    # v13: runtime_verification fail-loud 采集（第十三层洞察，供 isomorphism 第 49 项检查 + test_results 字段）
+    # 必须在 _check_isomorphism 之前采集，以驱动第 49 项「检测器引用完整性」检查
+    runtime_verification = _collect_runtime_verification(stats)
 
-    # v4: 同构代码消除度检测（v12：48 项 Grep / AST 验证，含 handler_exception_coverage
+    # v4: 同构代码消除度检测（v13：49 项 Grep / AST 验证，含 handler_exception_coverage
     # + converters_polling/parallel_runtime/dead_code 3 项 + if_fmt_tdx/threading_timer/
-    # structural_polling/ast_dead_code_false_positives 4 项）
+    # structural_polling/ast_dead_code_false_positives 4 项 + runtime_verification_missing_files 1 项）
     isomorphism_violations, isomorphism_total_checks = _check_isomorphism(
         handler_exception_coverage=handler_exception_coverage,
         converters_polling_violations=converters_polling_violations,
         parallel_runtime_violations=parallel_runtime_violations,
         dead_code_violations=dead_code_violations,
         structural_polling_violations=structural_polling_violations,
+        runtime_verification=runtime_verification,
     )
 
     # v3 新增数据采集
@@ -3410,8 +3435,8 @@ def main() -> int:
     meta_unification = _collect_meta_unification()
 
     # v5 新增 4 维数据采集（MetaDispatcher 统一 + 运行时验证 + eventtest 回归 + 跨模块 import）
+    # 注：runtime_verification 已在 _check_isomorphism 之前采集（v13 第 49 项检查依赖）
     dispatcher_isomorphism = _collect_dispatcher_isomorphism()
-    runtime_verification = _collect_runtime_verification(stats)
     eventtest_regression = _collect_eventtest_regression()
     cross_module_import_discipline = _collect_cross_module_import_discipline()
 
@@ -3499,6 +3524,8 @@ def main() -> int:
             + _grep_count_in_file(r'threading\.Timer\s*\(', _API_FILE)
         ),
         "ast_dead_code_false_positives": int(dead_code_violations.get("count", 0) or 0),
+        # --- v13 新增字段（检测器引用完整性 fail-loud，isomorphism 第 49 项检查依据）---
+        "runtime_verification_missing_files": list(runtime_verification.get("missing_files", []) or []),
     }
 
     # 计算评分

@@ -110,8 +110,8 @@ REDO_THRESHOLD: float = 80.0
 #: 底层逻辑验证项总数（5 项：水位线/编译-运行分离/三要素/角色表/正交化）
 LOGIC_COVERAGE_TOTAL: int = 5
 
-#: 同构代码检查项总数（v12：48 项 = v11 44 项 + v12 if_fmt_tdx/threading_timer/structural_polling/ast_dead_code 4 项）
-ISOMORPHISM_CHECKS_TOTAL: int = 48
+#: 同构代码检查项总数（v13：49 项 = v12 48 项 + v13 runtime_verification_missing_files 1 项）
+ISOMORPHISM_CHECKS_TOTAL: int = 49
 
 #: 核心模块行数收敛目标（v4 从 v3 的 23000 调整为 22500，Data + Dispatcher 净减后行数）
 CORE_LINES_TARGET: int = 22500
